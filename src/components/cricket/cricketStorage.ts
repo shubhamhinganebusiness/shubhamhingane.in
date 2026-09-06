@@ -302,35 +302,23 @@ export function deleteLocalMatch(id: string): void {
 }
 
 /**
- * Prunes matches from local storage that no longer exist in the authoritative remote database.
- * Protects newly created local drafts within a brief grace period (10 seconds) from premature deletion.
+ * Prunes matches from local storage that are explicitly marked deleted or invalid.
+ * Preserves local and offline matches so user scoreboards are never unexpectedly purged.
  */
 export function pruneDeletedMatchesFromStorage(validRemoteIds: Set<string>): void {
-  if (typeof window === 'undefined' || !validRemoteIds) return;
+  if (typeof window === 'undefined') return;
   try {
     const raw = localStorage.getItem(LOCAL_REGISTRY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        const now = Date.now();
         const kept = parsed.filter(item => {
           if (!item || !item.id) return false;
-          // If match has been deleted by the user or marked deleted, purge it immediately
-          if (isMatchDeleted(item.id) || item.status === 'deleted' || (item as any).isDeleted) {
+          // Only purge matches that are explicitly flagged as deleted
+          if (item.status === 'deleted' || (item as any).isDeleted === true) {
             return false;
           }
-          // If Firestore has this match, keep it
-          if (validRemoteIds.has(item.id)) return true;
-
-          // If it is in-flight local creation within 10 seconds (e.g. initial setup offline before first sync)
-          const age = now - (item.updatedAt || 0);
-          if (item.status === 'draft' && age < 10000) {
-            return true;
-          }
-
-          // Otherwise it was deleted from the remote database, tombstone and purge it
-          markMatchDeleted(item.id);
-          return false;
+          return true;
         });
         localStorage.setItem(LOCAL_REGISTRY_KEY, JSON.stringify(kept));
       }
@@ -341,16 +329,8 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds: Set<string>): voi
     if (activeRaw) {
       const active = JSON.parse(activeRaw);
       if (active && active.id) {
-        if (isMatchDeleted(active.id) || active.status === 'deleted' || (active as any).isDeleted) {
+        if (active.status === 'deleted' || (active as any).isDeleted === true) {
           localStorage.removeItem(ACTIVE_MATCH_KEY);
-        } else if (!validRemoteIds.has(active.id)) {
-          const now = Date.now();
-          const age = now - (active.updatedAt || 0);
-          // If it was not created in the last 10 seconds, it was deleted remotely
-          if (age >= 10000) {
-            markMatchDeleted(active.id);
-            localStorage.removeItem(ACTIVE_MATCH_KEY);
-          }
         }
       }
     }

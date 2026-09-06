@@ -917,12 +917,13 @@ export const SpectatorScoreboardSection = ({
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
         if (!m || !m.id) return;
 
-        // Permanently filter out matches that have been deleted locally or marked deleted
-        if (isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted') {
+        // Permanently filter out matches that have been explicitly deleted
+        if ((m as any).isDeleted === true || m.status === 'deleted') {
           markMatchDeleted(m.id);
           return;
         }
 
+        unmarkMatchDeleted(m.id);
         remoteMatches.push(m);
         remoteIds.add(m.id);
       });
@@ -930,8 +931,25 @@ export const SpectatorScoreboardSection = ({
       // Prune any deleted matches from local storage on this spectator device
       pruneDeletedMatchesFromStorage(remoteIds);
 
+      // Merge with any active or local matches stored in localStorage
+      const localMatches = getLocalMatches().filter(lm => lm.status !== 'deleted' && !(lm as any).isDeleted);
+      const activeLocal = getActiveMatch();
+      if (activeLocal && activeLocal.status !== 'deleted' && !(activeLocal as any).isDeleted && !localMatches.some(l => l.id === activeLocal.id)) {
+        localMatches.push(activeLocal);
+      }
+
+      const matchMap = new Map<string, MatchState>();
+      remoteMatches.forEach(rm => matchMap.set(rm.id, rm));
+      localMatches.forEach(lm => {
+        if (!matchMap.has(lm.id)) {
+          matchMap.set(lm.id, lm);
+        }
+      });
+
+      const combined = Array.from(matchMap.values());
+
       // Sort matches: live matches first, ordered by latest update / date
-      remoteMatches.sort((a, b) => {
+      combined.sort((a, b) => {
         if (a.status === 'live' && b.status !== 'live') return -1;
         if (b.status === 'live' && a.status !== 'live') return 1;
         const timeA = a.updatedAt || (a.date ? new Date(a.date).getTime() : 0) || 0;
@@ -940,7 +958,7 @@ export const SpectatorScoreboardSection = ({
         return timeB - timeA;
       });
 
-      setAllMatches(remoteMatches);
+      setAllMatches(combined);
       setHasInitialMatchesLoaded(true);
     }, (error) => {
       console.warn('Warning fetching cricket_matches collection:', error);
@@ -1003,33 +1021,32 @@ export const SpectatorScoreboardSection = ({
   useEffect(() => {
     const targetMatchId = homepageMode ? localSelectedMatchId : (matchIdParam || localSelectedMatchId);
 
-    if (!targetMatchId || isMatchDeleted(targetMatchId)) {
+    if (!targetMatchId) {
       setSelectedMatch(null);
       return;
     }
 
-    // Immediately check local storage for instant responsiveness
-    const localMatch = getLocalMatchById(targetMatchId);
-    if (localMatch && !isMatchDeleted(localMatch.id)) {
-      setSelectedMatch(localMatch);
+    unmarkMatchDeleted(targetMatchId);
+
+    // Immediately check local storage or existing matches for instant responsiveness
+    const initialMatch = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch();
+    if (initialMatch && (initialMatch.id === targetMatchId || !targetMatchId) && initialMatch.status !== 'deleted' && !(initialMatch as any).isDeleted) {
+      setSelectedMatch(initialMatch);
     }
 
     setConnectionStatus('reconnecting');
     const unsub = onSnapshot(doc(db, 'cricket_matches', targetMatchId), (docSnap) => {
       setConnectionStatus('online');
       setLastRefreshed(new Date());
-      if (isMatchDeleted(targetMatchId)) {
-        setSelectedMatch(null);
-        return;
-      }
       if (docSnap.exists()) {
         const data = docSnap.data();
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
-        if (isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted') {
+        if ((m as any).isDeleted === true || m.status === 'deleted') {
           markMatchDeleted(m.id);
           setSelectedMatch(null);
           return;
         }
+        unmarkMatchDeleted(m.id);
         // Enrich with tournament Graphics and Logos
         if (m.tournamentId) {
           const t = tournaments?.find(x => x.id === m.tournamentId);
@@ -1043,14 +1060,21 @@ export const SpectatorScoreboardSection = ({
         }
         setSelectedMatch(m);
       } else {
-        // Document does not exist in Firestore snapshot, mark deleted and clear
-        markMatchDeleted(targetMatchId);
-        setSelectedMatch(null);
+        // Document does not exist in Firestore snapshot (e.g. offline match or local storage match).
+        // Check local storage or existing matches before clearing - DO NOT call markMatchDeleted!
+        const fallback = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch();
+        if (fallback && fallback.id === targetMatchId && fallback.status !== 'deleted' && !(fallback as any).isDeleted) {
+          unmarkMatchDeleted(fallback.id);
+          setSelectedMatch(fallback);
+        } else {
+          setSelectedMatch(null);
+        }
       }
     }, (error) => {
       console.warn('Error subscribing to target match:', error);
-      const localFallback = getLocalMatchById(targetMatchId);
-      if (localFallback && !isMatchDeleted(localFallback.id) && !(localFallback as any).isDeleted && localFallback.status !== 'deleted') {
+      const localFallback = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch();
+      if (localFallback && localFallback.id === targetMatchId && !(localFallback as any).isDeleted && localFallback.status !== 'deleted') {
+        unmarkMatchDeleted(localFallback.id);
         setSelectedMatch(localFallback);
       } else {
         setSelectedMatch(null);
@@ -1236,10 +1260,14 @@ export const SpectatorScoreboardSection = ({
 
   // Auto-select latest live match on dedicated live spectator page and homepage if no specific match
   useEffect(() => {
-    // Wait until Firestore has loaded initial matches so we never prematurely delete or overwrite matchId
-    if (!hasInitialMatchesLoaded) return;
+    const currentParam = searchParams.get('matchId') || getMatchIdFromHashOrSearch();
 
-    const currentParam = searchParams.get('matchId');
+    if (currentParam) {
+      if (!localSelectedMatchId || localSelectedMatchId !== currentParam) {
+        setLocalSelectedMatchId(currentParam);
+      }
+      return;
+    }
 
     if (liveMatches.length > 0) {
       if (homepageMode) {
@@ -1248,12 +1276,10 @@ export const SpectatorScoreboardSection = ({
         }
       } else {
         // If there is no param in URL, auto-select first live match
-        if (!currentParam) {
-          const firstLive = liveMatches[0];
-          if (firstLive && firstLive.id) {
-            setLocalSelectedMatchId(firstLive.id);
-            setSearchParams({ matchId: firstLive.id }, { replace: true });
-          }
+        const firstLive = liveMatches[0];
+        if (firstLive && firstLive.id) {
+          setLocalSelectedMatchId(firstLive.id);
+          setSearchParams({ matchId: firstLive.id }, { replace: true });
         }
       }
     } else {
@@ -1262,16 +1288,24 @@ export const SpectatorScoreboardSection = ({
           setLocalSelectedMatchId('');
           setSelectedMatch(null);
         }
-      } else if (!currentParam && allMatches.length > 0 && !localSelectedMatchId) {
+      } else if (allMatches.length > 0 && !localSelectedMatchId) {
         // Auto-select most recent match if none selected
         const mostRecent = allMatches[0];
         if (mostRecent && mostRecent.id) {
           setLocalSelectedMatchId(mostRecent.id);
           setSearchParams({ matchId: mostRecent.id }, { replace: true });
         }
+      } else if (!localSelectedMatchId) {
+        const activeLocal = getActiveMatch();
+        if (activeLocal && activeLocal.id && activeLocal.status !== 'deleted') {
+          setLocalSelectedMatchId(activeLocal.id);
+          if (!homepageMode) {
+            setSearchParams({ matchId: activeLocal.id }, { replace: true });
+          }
+        }
       }
     }
-  }, [hasInitialMatchesLoaded, homepageMode, searchParams, allMatches, liveMatches, setSearchParams, localSelectedMatchId]);
+  }, [homepageMode, searchParams, allMatches, liveMatches, setSearchParams, localSelectedMatchId]);
 
   const upcomingMatches = useMemo(() => {
     return allMatches.filter(m => {

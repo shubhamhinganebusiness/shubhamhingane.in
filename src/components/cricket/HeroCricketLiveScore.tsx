@@ -14,7 +14,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { MatchState } from './CricketScoreboard';
-import { getActiveMatch, getLocalMatches, isMatchDeleted, markMatchDeleted, pruneDeletedMatchesFromStorage } from './cricketStorage';
+import { getActiveMatch, getLocalMatches, isMatchDeleted, markMatchDeleted, unmarkMatchDeleted, pruneDeletedMatchesFromStorage } from './cricketStorage';
 import { db, rtdb } from '../../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { ref as rtdbRef, onValue as rtdbOnValue } from 'firebase/database';
@@ -26,6 +26,17 @@ export const HeroCricketLiveScore: React.FC = () => {
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const [isHovered, setIsHovered] = useState<boolean>(false);
 
+  // Safely navigate to detailed scoreboard
+  const handleOpenDetailScoreboard = (matchId?: string) => {
+    const targetId = matchId || activeMatch?.id;
+    if (targetId) {
+      unmarkMatchDeleted(targetId);
+      navigate(`/live/cricket-details?matchId=${targetId}`);
+    } else {
+      navigate('/live/cricket-details');
+    }
+  };
+
   // Synchronize live matches from LocalStorage, Firestore, and Realtime Database
   useEffect(() => {
     // 1. Initial local match check
@@ -35,12 +46,14 @@ export const HeroCricketLiveScore: React.FC = () => {
         const registry = getLocalMatches();
         const activeList: MatchState[] = [];
 
-        if (activeLocal && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id)) {
+        if (activeLocal && activeLocal.status === 'live' && !(activeLocal as any).isDeleted) {
+          unmarkMatchDeleted(activeLocal.id);
           activeList.push(activeLocal);
         }
 
         registry.forEach(m => {
-          if (m.status === 'live' && !isMatchDeleted(m.id) && !activeList.some(a => a.id === m.id)) {
+          if (m.status === 'live' && !(m as any).isDeleted && !activeList.some(a => a.id === m.id)) {
+            unmarkMatchDeleted(m.id);
             activeList.push(m);
           }
         });
@@ -66,10 +79,12 @@ export const HeroCricketLiveScore: React.FC = () => {
           const data = docSnap.data() as MatchState;
           const m = { ...data, id: data.id || docSnap.id };
 
-          if (m.status === 'deleted' || (m as any).isDeleted === true || isMatchDeleted(m.id)) {
+          if (m.status === 'deleted' || (m as any).isDeleted === true) {
             markMatchDeleted(m.id);
             return;
           }
+
+          unmarkMatchDeleted(m.id);
 
           if (m.status === 'live' && !(m as any).isHidden && !(m as any).isBlocked) {
             active.push(m);
@@ -78,20 +93,33 @@ export const HeroCricketLiveScore: React.FC = () => {
         });
 
         pruneDeletedMatchesFromStorage(remoteIds);
-        active.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
-        if (active.length > 0) {
-          setLiveMatches(active);
-          setLastUpdated(Date.now());
-        } else {
-          // Fallback to local active match if Firestore returned empty but local has live
-          const local = getActiveMatch();
-          if (local && local.status === 'live' && !isMatchDeleted(local.id)) {
-            setLiveMatches([local]);
-          } else {
-            setLiveMatches([]);
-          }
+        // Include any active local matches that might be in progress locally
+        const activeLocal = getActiveMatch();
+        const registry = getLocalMatches();
+        const localLive: MatchState[] = [];
+        if (activeLocal && activeLocal.status === 'live' && !(activeLocal as any).isDeleted) {
+          localLive.push(activeLocal);
         }
+        registry.forEach(lm => {
+          if (lm.status === 'live' && !(lm as any).isDeleted && !localLive.some(a => a.id === lm.id)) {
+            localLive.push(lm);
+          }
+        });
+
+        const combinedMap = new Map<string, MatchState>();
+        active.forEach(m => combinedMap.set(m.id, m));
+        localLive.forEach(lm => {
+          if (!combinedMap.has(lm.id)) {
+            combinedMap.set(lm.id, lm);
+          }
+        });
+
+        const combined = Array.from(combinedMap.values());
+        combined.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+        setLiveMatches(combined);
+        setLastUpdated(Date.now());
       }, (err) => {
         console.warn('[HeroCricketLiveScore] Firestore snapshot error:', err);
       });
@@ -306,11 +334,11 @@ export const HeroCricketLiveScore: React.FC = () => {
               </span>
             )}
             <button
-              onClick={() => navigate(`/live/cricket-details?matchId=${activeMatch.id}`)}
+              onClick={() => handleOpenDetailScoreboard(activeMatch.id)}
               className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors cursor-pointer group"
-              title="Open Live Match Center"
+              title="Open View Detail Scoreboard"
             >
-              <span>Watch Full</span>
+              <span>View Detail Scoreboard</span>
               <ExternalLink size={12} className="group-hover:translate-x-0.5 transition-transform" />
             </button>
           </div>
@@ -456,10 +484,12 @@ export const HeroCricketLiveScore: React.FC = () => {
           {/* Action Row */}
           <div className="pt-2 flex flex-wrap items-center gap-2.5">
             <button
-              onClick={() => navigate(`/live/cricket-details?matchId=${activeMatch.id}`)}
+              id="hero-view-detail-scoreboard-btn"
+              onClick={() => handleOpenDetailScoreboard(activeMatch.id)}
               className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
+              title="Open Full Detailed Cricket Scoreboard"
             >
-              <span>Watch Live Scorecard</span>
+              <span>View Detail Scoreboard</span>
               <ArrowRight size={14} />
             </button>
 
@@ -468,7 +498,7 @@ export const HeroCricketLiveScore: React.FC = () => {
               className="py-2.5 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
               title="Open GullyScore Full Scoring Suite"
             >
-              <span>Scoreboard</span>
+              <span>Scorer Suite</span>
               <ChevronRight size={14} />
             </button>
           </div>
@@ -478,13 +508,13 @@ export const HeroCricketLiveScore: React.FC = () => {
   }
 
   // If NO match is live right now:
-  // Provide a sleek, compact trigger badge in Hero section so visitors know GullyScore is ready and can launch it
+  // Provide a sleek, compact trigger badge in Hero section so visitors can open View Detail Scoreboard or Scorer Suite
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="w-full max-w-xl mb-6 p-3 rounded-2xl bg-zinc-100/90 dark:bg-zinc-900/90 border border-gray-200/80 dark:border-zinc-800/80 backdrop-blur-sm shadow-sm flex items-center justify-between gap-3 group hover:border-emerald-500/40 transition-all select-none"
+      className="w-full max-w-xl mb-6 p-3 rounded-2xl bg-zinc-100/90 dark:bg-zinc-900/90 border border-gray-200/80 dark:border-zinc-800/80 backdrop-blur-sm shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 group hover:border-emerald-500/40 transition-all select-none"
     >
       <div className="flex items-center gap-2.5 min-w-0">
         <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-500 shrink-0">
@@ -505,14 +535,26 @@ export const HeroCricketLiveScore: React.FC = () => {
         </div>
       </div>
 
-      <button
-        onClick={() => navigate('/live/cricket-scoreboard')}
-        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] tracking-wide shrink-0 flex items-center gap-1.5 transition-all shadow-sm shadow-emerald-600/20 cursor-pointer"
-        title="Open GullyScore Cricket Match Scoreboard"
-      >
-        <span>Open Suite</span>
-        <ChevronRight size={12} />
-      </button>
+      <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+        <button
+          id="hero-view-detail-scoreboard-btn-empty"
+          onClick={() => handleOpenDetailScoreboard()}
+          className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] tracking-wide flex items-center justify-center gap-1.5 transition-all shadow-sm shadow-emerald-600/20 cursor-pointer"
+          title="Open Spectator Detail Scoreboard Hub"
+        >
+          <span>View Detail Scoreboard</span>
+          <ArrowRight size={12} />
+        </button>
+
+        <button
+          onClick={() => navigate('/live/cricket-scoreboard')}
+          className="px-3 py-2 rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-bold text-[11px] tracking-wide flex items-center justify-center gap-1 transition-all cursor-pointer"
+          title="Open GullyScore Cricket Scorer Console"
+        >
+          <span>Scorer Suite</span>
+          <ChevronRight size={12} />
+        </button>
+      </div>
     </motion.div>
   );
 };
