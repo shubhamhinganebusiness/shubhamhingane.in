@@ -5,6 +5,7 @@ import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSiteSettings } from '../hooks/useCMS';
 import { useNavigate } from 'react-router-dom';
+import { HeroCricketLiveScore } from './cricket/HeroCricketLiveScore';
 
 export const Hero = () => {
   const { t, language } = useLanguage();
@@ -193,6 +194,9 @@ export const Hero = () => {
               ))}
             </div>
           )}
+
+          {/* GullyScore: Local Cricket Match Scoreboard Live Score Widget */}
+          <HeroCricketLiveScore />
 
           {/* Action Buttons Hub with primary visual guides */}
           <div className="flex flex-wrap gap-4 mb-6 w-full sm:w-auto">
