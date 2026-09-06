@@ -1,0 +1,326 @@
+{
+  "entities": {
+    "SiteSettings": {
+      "title": "Site Settings",
+      "description": "Global CMS settings for the portfolio/landing page",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "email": { "type": "string" }
+      }
+    },
+    "CMSItem": {
+      "title": "CMS Item",
+      "description": "Generic structure for services, projects, blogs etc.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "User": {
+      "title": "User",
+      "description": "Represents a user in the system (SuperAdmin, Doctor, or Pharmacy)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["SuperAdmin", "Doctor", "Pharmacy"] },
+        "photo": { "type": "string" },
+        "birthdate": { "type": "string" },
+        "mobile": { "type": "string" },
+        "username": { "type": "string" },
+        "subscriptionStart": { "type": "string", "format": "date" },
+        "subscriptionEnd": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Active", "Blocked"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "clinicName": { "type": "string" },
+        "pharmacyName": { "type": "string" }
+      },
+      "required": ["uid", "role", "name", "status"]
+    },
+    "Pharmacy": {
+      "title": "Pharmacy",
+      "description": "Master list of pharmacies",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "mobile": { "type": "string" },
+        "licenseNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] }
+      },
+      "required": ["name", "address"]
+    },
+    "Prescription": {
+      "title": "Prescription",
+      "description": "Digital prescription",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "doctorId": { "type": "string" },
+        "doctorName": { "type": "string" },
+        "pharmacyId": { "type": "string" },
+        "pharmacyName": { "type": "string" },
+        "patientName": { "type": "string" },
+        "patientPhone": { "type": "string" },
+        "medications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "dosage": { "type": "string" },
+              "instructions": { "type": "string" },
+              "duration": { "type": "string" }
+            }
+          }
+        },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["Pending", "Dispensed", "Cancelled"] },
+        "notes": { "type": "string" },
+        "signature": { "type": "string" },
+        "isHandwritten": { "type": "boolean" },
+        "patientSignature": { "type": "string" }
+      },
+      "required": ["doctorId", "pharmacyId", "patientName", "status", "date"]
+    },
+    "MessOwner": {
+      "title": "Mess Owner Profile",
+      "description": "Settings for a specific mess tenant",
+      "type": "object",
+      "properties": {
+        "messName": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "mobile": { "type": "string" },
+        "address": { "type": "string" },
+        "tenantId": { "type": "string" }
+      }
+    },
+    "MessMember": {
+      "title": "Mess Member",
+      "description": "Student or worker enrolled in the mess",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "roomNo": { "type": "string" },
+        "mobile": { "type": "string" },
+        "joinDate": { "type": "string", "format": "date" },
+        "monthlyFee": { "type": "number" },
+        "active": { "type": "boolean" }
+      }
+    },
+    "FurnitureProduct": {
+      "title": "Furniture/Electronics Product",
+      "description": "Individual product record with variants and stock info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["Furniture", "Electronics"] },
+        "model": { "type": "string" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sku": { "type": "string" },
+              "size": { "type": "string" },
+              "material": { "type": "string" },
+              "color": { "type": "string" },
+              "price": { "type": "number" },
+              "showroomStock": { "type": "number" },
+              "warehouseStock": { "type": "number" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "FurnitureBill": {
+      "title": "Furniture/Electronics Bill",
+      "description": "Sales invoice record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "items": { "type": "array" },
+        "subTotal": { "type": "number" },
+        "gst": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CricketTeam": {
+      "title": "Cricket Team",
+      "description": "Pre-saved team rosters for matches",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "players": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "players"]
+    },
+    "CricketPlayer": {
+      "title": "Cricket Player",
+      "description": "Registered cricket player profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "dob": { "type": "string" },
+        "gender": { "type": "string" },
+        "photo": { "type": "string" },
+        "email": { "type": "string" },
+        "mobile": { "type": "string" },
+        "emergencyContact": { "type": "string" },
+        "idDocument": { "type": "string" },
+        "role": { "type": "string" },
+        "battingStyle": { "type": "string" },
+        "bowlingStyle": { "type": "string" },
+        "matchesPlayed": { "type": "number" },
+        "totalRuns": { "type": "number" },
+        "highestScore": { "type": "number" },
+        "wicketsTaken": { "type": "number" },
+        "economyRate": { "type": "number" },
+        "bestBowling": { "type": "string" },
+        "peakAuctionPrice": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "dob", "gender", "email", "mobile", "role"]
+    },
+    "CricketMatch": {
+      "title": "Cricket Match State",
+      "description": "Cross-device persistent cricket match scoreboard state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teamA": { "type": "string" },
+        "teamB": { "type": "string" },
+        "oversLimit": { "type": "number" },
+        "tossWinner": { "type": "string" },
+        "tossChoice": { "type": "string" },
+        "currentInningsNum": { "type": "number" },
+        "innings1": { "type": "object" },
+        "innings2": { "type": "object" },
+        "status": { "type": "string" },
+        "winner": { "type": "string" },
+        "winReason": { "type": "string" },
+        "date": { "type": "string" },
+        "targetRuns": { "type": "number" },
+        "freeHitNext": { "type": "boolean" },
+        "lastBallResult": { "type": "string" }
+      },
+      "required": ["id", "teamA", "teamB", "oversLimit", "status"]
+    },
+    "CricketTournament": {
+      "title": "Cricket Tournament",
+      "description": "Registered and scheduled cricket tournament with teams and matches",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "teamCount": { "type": "number" },
+        "format": { "type": "string" },
+        "type": { "type": "string" },
+        "startDate": { "type": "string" },
+        "status": { "type": "string" },
+        "teams": { "type": "array" },
+        "matches": { "type": "array" },
+        "winnerTeamName": { "type": "string" }
+      },
+      "required": ["id", "name", "status"]
+    }
+  },
+  "firestore": {
+    "/cricket_tournaments/{tournamentId}": {
+      "schema": "CricketTournament",
+      "description": "Full details, rosters, fixtures, and standing information of cricket tournaments"
+    },
+    "/cricket_matches/{matchId}": {
+      "schema": "CricketMatch",
+      "description": "Matches tracking on the scoreboard"
+    },
+    "/cricket_teams/{teamId}": {
+      "schema": "CricketTeam",
+      "description": "Saved team squad lists"
+    },
+    "/cricket_players/{playerId}": {
+      "schema": "CricketPlayer",
+      "description": "Registered cricket player profiles"
+    },
+    "/furniture_stores/{storeId}/products/{productId}": {
+      "schema": "FurnitureProduct",
+      "description": "Product catalog for a store"
+    },
+    "/furniture_stores/{storeId}/bills/{billId}": {
+      "schema": "FurnitureBill",
+      "description": "Billing history for a store"
+    },
+    "/furniture_stores/{storeId}/stock_moves/{moveId}": {
+      "schema": "object",
+      "description": "Log of warehouse to showroom transfers"
+    },
+    "/furniture_stores/{storeId}/suppliers/{supplierId}": {
+      "schema": "object",
+      "description": "Supplier database"
+    },
+    "/furniture_stores/{storeId}/raw_materials/{materialId}": {
+      "schema": "object",
+      "description": "Raw material tracking"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles including roles and subscription info"
+    },
+    "/site/settings": {
+      "schema": "SiteSettings",
+      "description": "Global landing page configuration"
+    },
+    "/services/{serviceId}": { "schema": "CMSItem", "description": "Offered services" },
+    "/blogs/{blogId}": { "schema": "CMSItem", "description": "Articles and news" },
+    "/projects/{projectId}": { "schema": "CMSItem", "description": "Portfolio projects" },
+    "/messages/{messageId}": { "schema": "CMSItem", "description": "Contact form submissions" },
+    "/dairies/{userId}/farmers/{farmerId}": {
+      "schema": "CMSItem",
+      "description": "Farmers registered by a dairy owner"
+    },
+    "/pharmacies/{pharmacyId}": {
+      "schema": "Pharmacy",
+      "description": "Master list of pharmacies for doctors to select from"
+    },
+    "/prescriptions/{prescriptionId}": {
+      "schema": "Prescription",
+      "description": "Prescriptions created by doctors and assigned to pharmacies"
+    },
+    "/messes/{tenantId}/config": {
+      "schema": "MessOwner",
+      "description": "Tenant specific configuration"
+    },
+    "/messes/{tenantId}/members/{memberId}": {
+      "schema": "MessMember",
+      "description": "Members of a specific mess"
+    },
+    "/messes/{tenantId}/attendance/{recordId}": {
+      "schema": "object",
+      "description": "Daily meal logs for mess members"
+    },
+    "/messes/{tenantId}/bills/{billId}": {
+      "schema": "object",
+      "description": "Generated invoices"
+    }
+  }
+}

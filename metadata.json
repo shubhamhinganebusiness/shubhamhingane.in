@@ -1,0 +1,11 @@
+{
+  "name": "Remix shubhamhingane.in (MAin Website)",
+  "description": "Comprehensive multi-tenant platform for Dairy milk collection and Agro Shop inventory \u0026 billing management.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

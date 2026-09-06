@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Montserrat", sans-serif;
+  --color-primary: #ff014f;
+  
+  /* Bind CSS variables to Tailwind theme */
+  --color-main-bg: var(--bg-base);
+  --color-main-text: var(--text-main);
+  --color-surface: var(--card-bg);
+
+  --animate-cursor-blink: cursor-blink 1s step-end infinite;
+  --animate-gradient-slow: gradient-shift 6s linear infinite;
+  --animate-float: float 3s ease-in-out infinite;
+  
+  @keyframes cursor-blink {
+    from, to { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+}
+
+@layer base {
+  :root {
+    --bg-base: #f4f5f6;
+    --text-main: #3c3e41;
+    --card-shadow: 10px 10px 19px #d1d9e6, -10px -10px 19px #ffffff;
+    --card-bg: #ffffff;
+    --nav-bg: rgba(244, 245, 246, 0.8);
+  }
+
+  :root.dark {
+    --bg-base: #121212;
+    --text-main: #c4cfde;
+    --card-shadow: 10px 10px 19px #0a0a0a, -10px -10px 19px #1e1e1e;
+    --card-bg: #1e1e1e;
+    --nav-bg: rgba(18, 18, 18, 0.82);
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    color: var(--text-main);
+  }
+}
+
+@layer utilities {
+  .card-shadow {
+    box-shadow: var(--card-shadow);
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    height: 4px;
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #ff014f;
+    border-radius: 20px;
+    opacity: 0.3;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #d90042;
+  }
+}
+
+/* Custom 3D tilt effect base */
+.tilt-card {
+  transition: transform 0.1s ease;
+  transform-style: preserve-3d;
+}
+
+.tilt-inner {
+  transform: translateZ(20px);
+}
+
+/* Dedicated CSS Print Media Queries for Receipts & Documents */
+@media print {
+  html, body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Prevent page breaks inside cards, tables and key sections */
+  .no-break,
+  .receipt-frame-box,
+  #digital-receipt-printable {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Force background graphic retention for badges, borders and gradients */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

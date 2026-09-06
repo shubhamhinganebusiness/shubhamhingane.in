@@ -1,0 +1,284 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // -------------------------------------------------------------------------
+    // Helper Functions
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function userExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email.lower() in ['jamkhednewsnetwork@gmail.com', 'shubhamhingane7719@gmail.com', 'shubhamingane7719@gmail.com', '771999595@admin.com', '7719959593@admin.com', 'shubhamhinganebusiness@gmail.com'] ||
+        (userExists(request.auth.uid) && getUserData(request.auth.uid).role == 'super_admin')
+      );
+    }
+
+    function isDoctor() {
+      return isSignedIn() && userExists(request.auth.uid) && 
+             getUserData(request.auth.uid).role == 'Doctor' && 
+             getUserData(request.auth.uid).status == 'Active';
+    }
+
+    function isPharmacy() {
+      return isSignedIn() && userExists(request.auth.uid) && 
+             getUserData(request.auth.uid).role == 'Pharmacy' && 
+             getUserData(request.auth.uid).status == 'Active';
+    }
+
+    function isDairyAdmin() {
+      return isSignedIn() && userExists(request.auth.uid) && 
+             (getUserData(request.auth.uid).role == 'dairy_admin' || getUserData(request.auth.uid).role == 'super_admin');
+    }
+
+    function isValidSiteStats(data) {
+      return data.keys().hasAll(['date', 'visits', 'updatedAt']) &&
+             data.date is string &&
+             data.visits is int &&
+             data.updatedAt == request.time;
+    }
+
+    function isMessOwner(tenant) {
+      return isSignedIn() && (
+        request.auth.token.email == tenant + '@mess.os' ||
+        (userExists(request.auth.uid) && getUserData(request.auth.uid).role == 'mess_owner') ||
+        isSuperAdmin()
+      );
+    }
+
+    function isFurnitureAdmin(storeId) {
+      return isSignedIn() && (
+        (userExists(request.auth.uid) && getUserData(request.auth.uid).role == 'furniture_admin') ||
+        isSuperAdmin()
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // CMS & Global Data
+    // -------------------------------------------------------------------------
+    match /site/{id} {
+      allow get, list: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /blogs/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /services/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /courses/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /projects/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /experience/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /education/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /testimonials/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /clients/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /site_stats/{id} {
+      allow get, list: if true;
+      allow create, update: if isValidSiteStats(request.resource.data) || isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /messages/{id} {
+      allow create: if true;
+      allow get, list, delete: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Dairy Multi-Tenant Data
+    // -------------------------------------------------------------------------
+    match /dairies/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      
+      match /farmers/{farmerId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      }
+      
+      match /collections/{colId} {
+        allow read, write: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      }
+    }
+
+    match /shop_owners/{id} {
+      allow read, get, list: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    match /authorized_accounts/{id} {
+      allow get, list: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Users Collection
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || userId == request.auth.token.email || isSuperAdmin());
+      allow list: if isSignedIn() && (isSuperAdmin() || resource.data.uid == request.auth.uid || resource.data.email == request.auth.token.email);
+      allow create: if isSignedIn() && (request.auth.uid == userId || userId == request.auth.token.email);
+      allow update: if isSignedIn() && (request.auth.uid == userId || userId == request.auth.token.email || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Pharmacies Collection
+    // -------------------------------------------------------------------------
+    match /pharmacies/{pharmacyId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Prescriptions Collection
+    // -------------------------------------------------------------------------
+    match /prescriptions/{prescriptionId} {
+      function isValidPrescription(data) {
+        return data.patientName is string && data.patientName.size() > 0 
+               && data.doctorId == request.auth.uid 
+               && data.status in ['Pending', 'Dispensed', 'Cancelled'];
+      }
+
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || 
+        (isDoctor() && resource.data.doctorId == request.auth.uid) ||
+        (isPharmacy() && resource.data.pharmacyId == getUserData(request.auth.uid).pharmacyId)
+      );
+
+      allow create: if isDoctor() && isValidPrescription(request.resource.data);
+      
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isDoctor() && resource.data.doctorId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'notes'])) ||
+        (isPharmacy() && resource.data.pharmacyId == getUserData(request.auth.uid).pharmacyId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'dispensedAt', 'dispensedByPharmacyId']))
+      );
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Mess Management Multi-Tenant Data
+    // -------------------------------------------------------------------------
+    match /mess_owners/{id} {
+      allow get: if true; // Needed for login check
+      allow list, write: if isSuperAdmin();
+    }
+
+    match /messes/{tenantId} {
+      // Main mess document
+      allow read, write: if isMessOwner(tenantId);
+
+      // All subcollections (members, attendance, bills, payments, inventory, expenses, staff, etc.)
+      match /{allSub=**} {
+        allow read, write: if isMessOwner(tenantId);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Furniture & Electronics Multi-Tenant Data
+    // -------------------------------------------------------------------------
+    match /furniture_stores/{storeId} {
+      allow read, write: if isFurnitureAdmin(storeId);
+
+      match /{allSub=**} {
+        allow read, write: if isFurnitureAdmin(storeId);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Agro Shop Multi-Tenant Data
+    // -------------------------------------------------------------------------
+    match /agro_shops/{shopId} {
+      function isAgroUser(shopId) {
+        return isSignedIn() && (
+          isSuperAdmin() ||
+          request.auth.token.email.lower() == (shopId + '@agroshop.com').lower() ||
+          request.auth.token.email.lower().split('@')[0] == shopId ||
+          exists(/databases/$(database)/documents/agro_shops/$(shopId)/users/$(request.auth.uid))
+        );
+      }
+
+      allow read, write: if isAgroUser(shopId);
+
+      match /{allSub=**} {
+        allow read, write: if isAgroUser(shopId);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Cricket Scoreboard (Matches and Teams)
+    // -------------------------------------------------------------------------
+    match /score_managers/{username} {
+      allow read, get, list: if true;
+      allow write: if isSuperAdmin() || username == 'demoscorer';
+    }
+
+    match /cricket_matches/{matchId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /cricket_tournaments/{tournamentId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /cricket_teams/{teamId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /cricket_players/{playerId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Ganpati Mandal: Digital Pavati & ERP Multi-Tenant Data
+    // -------------------------------------------------------------------------
+    function isMandalMember(mandalId) {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        request.auth.token.email.lower() == (mandalId + '@mandal.app').lower() ||
+        request.auth.token.email.lower().split('@')[0] == mandalId ||
+        (userExists(request.auth.uid) && (getUserData(request.auth.uid).mandalId == mandalId || getUserData(request.auth.uid).role == 'mandal_admin'))
+      );
+    }
+
+    match /ganpati_mandal_accounts/{id} {
+      allow get, list: if true; // Needed for Mandal discovery & login verification
+      allow write: if isSuperAdmin() || (isSignedIn() && request.auth.uid == id);
+    }
+
+    match /ganpati_mandals/{mandalId} {
+      // Main mandal profile document (publicly readable for devotees and receipt verification)
+      allow read: if true;
+      allow write: if isMandalMember(mandalId) || isSuperAdmin();
+
+      // All subcollections (pavatis, expenses, volunteers, members, duties, inventory, events, mannats)
+      match /{allSub=**} {
+        allow read: if isMandalMember(mandalId) || isSuperAdmin() || resource.data.isPublic == true;
+        allow write: if isMandalMember(mandalId) || isSuperAdmin();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Global Safety Net
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
