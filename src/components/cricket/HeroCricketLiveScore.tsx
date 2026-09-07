@@ -14,7 +14,16 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { MatchState } from './CricketScoreboard';
-import { getActiveMatch, getLocalMatches, isMatchDeleted, markMatchDeleted, unmarkMatchDeleted, pruneDeletedMatchesFromStorage } from './cricketStorage';
+import { 
+  getActiveMatch, 
+  getLocalMatches, 
+  isMatchDeleted, 
+  markMatchDeleted, 
+  unmarkMatchDeleted, 
+  pruneDeletedMatchesFromStorage,
+  saveMatchToRegistry,
+  getAnyActiveOrRecentMatch
+} from './cricketStorage';
 import { db, rtdb } from '../../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { ref as rtdbRef, onValue as rtdbOnValue } from 'firebase/database';
@@ -26,15 +35,33 @@ export const HeroCricketLiveScore: React.FC = () => {
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const [isHovered, setIsHovered] = useState<boolean>(false);
 
-  // Safely navigate to detailed scoreboard
+  // Safely navigate to detailed scoreboard - guaranteed to open the detailed scoreboard
   const handleOpenDetailScoreboard = (matchId?: string) => {
-    const targetId = matchId || activeMatch?.id;
-    if (targetId) {
-      unmarkMatchDeleted(targetId);
-      navigate(`/live/cricket-details?matchId=${targetId}`);
-    } else {
-      navigate('/live/cricket-details');
+    let targetMatch = (matchId ? liveMatches.find(m => m.id === matchId) : null) 
+      || activeMatch 
+      || (liveMatches.length > 0 ? liveMatches[0] : null) 
+      || getActiveMatch();
+
+    if (!targetMatch) {
+      targetMatch = getAnyActiveOrRecentMatch();
     }
+
+    const targetId = matchId || targetMatch?.id || 'match-premier-live-exhibition';
+
+    if (targetMatch && targetMatch.id) {
+      unmarkMatchDeleted(targetMatch.id);
+      saveMatchToRegistry(targetMatch);
+      try {
+        localStorage.setItem('cricket_active_match', JSON.stringify(targetMatch));
+        sessionStorage.setItem('last_selected_match_id', targetMatch.id);
+      } catch (_) {}
+    }
+
+    unmarkMatchDeleted(targetId);
+    navigate(`/live/cricket-details?matchId=${encodeURIComponent(targetId)}`);
+    
+    // Ensure smooth, immediate transition to top of detail scoreboard page
+    window.scrollTo({ top: 0, behavior: 'instant' });
   };
 
   // Synchronize live matches from LocalStorage, Firestore, and Realtime Database
@@ -334,7 +361,11 @@ export const HeroCricketLiveScore: React.FC = () => {
               </span>
             )}
             <button
-              onClick={() => handleOpenDetailScoreboard(activeMatch.id)}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDetailScoreboard(activeMatch?.id);
+              }}
               className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors cursor-pointer group"
               title="Open View Detail Scoreboard"
             >
@@ -485,7 +516,11 @@ export const HeroCricketLiveScore: React.FC = () => {
           <div className="pt-2 flex flex-wrap items-center gap-2.5">
             <button
               id="hero-view-detail-scoreboard-btn"
-              onClick={() => handleOpenDetailScoreboard(activeMatch.id)}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDetailScoreboard(activeMatch?.id);
+              }}
               className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/20 cursor-pointer"
               title="Open Full Detailed Cricket Scoreboard"
             >
@@ -494,7 +529,11 @@ export const HeroCricketLiveScore: React.FC = () => {
             </button>
 
             <button
-              onClick={() => navigate('/live/cricket-scoreboard')}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate('/live/cricket-scoreboard');
+              }}
               className="py-2.5 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
               title="Open GullyScore Full Scoring Suite"
             >
@@ -538,7 +577,11 @@ export const HeroCricketLiveScore: React.FC = () => {
       <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
         <button
           id="hero-view-detail-scoreboard-btn-empty"
-          onClick={() => handleOpenDetailScoreboard()}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleOpenDetailScoreboard();
+          }}
           className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[11px] tracking-wide flex items-center justify-center gap-1.5 transition-all shadow-sm shadow-emerald-600/20 cursor-pointer"
           title="Open Spectator Detail Scoreboard Hub"
         >
@@ -547,7 +590,11 @@ export const HeroCricketLiveScore: React.FC = () => {
         </button>
 
         <button
-          onClick={() => navigate('/live/cricket-scoreboard')}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate('/live/cricket-scoreboard');
+          }}
           className="px-3 py-2 rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 font-bold text-[11px] tracking-wide flex items-center justify-center gap-1 transition-all cursor-pointer"
           title="Open GullyScore Cricket Scorer Console"
         >

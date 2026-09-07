@@ -2534,8 +2534,9 @@ export const CricketScoreboard: React.FC = () => {
   const handleAddNewBowler = (name: string) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
-    const updatedBowlers = [...currentInnings.bowlers.map(b => ({ ...b, isCurrent: false })), {
-      name: name.trim() || `Bowler ${currentInnings.bowlers.length + 1}`,
+    const existingBowlers = currentInnings.bowlers || [];
+    const updatedBowlers = [...existingBowlers.map(b => ({ ...b, isCurrent: false })), {
+      name: name.trim() || `Bowler ${existingBowlers.length + 1}`,
       ballsBowled: 0,
       maidens: 0,
       runsConceded: 0,
@@ -2569,7 +2570,7 @@ export const CricketScoreboard: React.FC = () => {
         description: `📢 [NEWS BULLETIN] ${newsText}`,
         type: 'milestone'
       },
-      ...inn.commentaryList
+      ...(inn.commentaryList || [])
     ];
 
     syncMatch(prev => ({
@@ -2584,8 +2585,9 @@ export const CricketScoreboard: React.FC = () => {
   const handleAddNewBatsman = (name: string) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
-    const updatedBatsmen = [...currentInnings.batsmen, {
-      name: name.trim() || `Batsman ${currentInnings.batsmen.length + 1}`,
+    const existingBatsmen = currentInnings.batsmen || [];
+    const updatedBatsmen = [...existingBatsmen, {
+      name: name.trim() || `Batsman ${existingBatsmen.length + 1}`,
       runs: 0,
       balls: 0,
       fours: 0,
@@ -7248,7 +7250,7 @@ export const CricketScoreboard: React.FC = () => {
                       type="text"
                       value={newBatsmanName}
                       onChange={(e) => setNewBatsmanName(e.target.value)}
-                      placeholder={`Default: Batsman ${currentInnings.batsmen.length + 1}`}
+                      placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-white"
                     />
                     {(() => {
@@ -11779,13 +11781,13 @@ export const CricketScoreboard: React.FC = () => {
                 </button>
               </div>
 
-              {currentInnings.fallOfWickets.length === 0 ? (
+              {(!currentInnings.fallOfWickets || currentInnings.fallOfWickets.length === 0) ? (
                 <p className="text-center py-8 text-xs font-black uppercase tracking-widest text-slate-400">
                   No wickets fallen yet
                 </p>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {currentInnings.fallOfWickets.map((fw, idx) => (
+                  {(currentInnings.fallOfWickets || []).map((fw, idx) => (
                     <div 
                       key={idx}
                       className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl space-y-1 text-xs font-bold border border-slate-100 dark:border-slate-800"
@@ -12052,10 +12054,10 @@ export const CricketScoreboard: React.FC = () => {
                     placeholder="Enter bowler name for wicket credit"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-800 rounded-xl p-3.5 text-xs font-bold outline-none text-slate-800 dark:text-white"
                   />
-                  {currentInnings && currentInnings.bowlers.length > 0 && (
+                  {currentInnings && currentInnings.bowlers && currentInnings.bowlers.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-2 items-center">
                       <span className="text-[9px] text-slate-400 font-extrabold uppercase py-1 select-none">Quick Select:</span>
-                      {currentInnings.bowlers.map((bw, idx) => (
+                      {(currentInnings.bowlers || []).map((bw, idx) => (
                         <button
                           key={idx}
                           type="button"
@@ -12111,7 +12113,7 @@ export const CricketScoreboard: React.FC = () => {
                     type="text"
                     value={newBatsmanName}
                     onChange={(e) => setNewBatsmanName(e.target.value)}
-                    placeholder={`Default: Batsman ${currentInnings.batsmen.length + 1}`}
+                    placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-800 rounded-xl p-3.5 text-xs font-bold outline-none text-slate-800 dark:text-white"
                   />
                   {(() => {

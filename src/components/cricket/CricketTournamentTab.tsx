@@ -536,7 +536,7 @@ export const CricketTournamentTab: React.FC<{
         );
       } else {
         // Add new team
-        if (t.teams.length >= t.teamCount) {
+        if ((t.teams?.length || 0) >= t.teamCount) {
           alert(`This tournament configuration only allows up to ${t.teamCount} teams. Update tournament settings or create a new one.`);
           return t;
         }
@@ -1253,7 +1253,7 @@ export const CricketTournamentTab: React.FC<{
                         <span>•</span>
                         <span>{t.type}</span>
                         <span>•</span>
-                        <span>{t.teams.length} teams</span>
+                        <span>{t.teams?.length || 0} teams</span>
                       </p>
                     </div>
                     <div className="flex gap-1">
@@ -1349,7 +1349,7 @@ export const CricketTournamentTab: React.FC<{
                   <span>•</span>
                   <span>Type: <strong className="text-slate-200 font-black">{activeTournament.type}</strong></span>
                   <span>•</span>
-                  <span>Teams Count Limit: <strong className="text-emerald-400 font-black">{activeTournament.teams.length}/{activeTournament.teamCount} registered</strong></span>
+                  <span>Teams Count Limit: <strong className="text-emerald-400 font-black">{activeTournament.teams?.length || 0}/{activeTournament.teamCount} registered</strong></span>
                 </p>
                 
                 <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wide mt-1">
@@ -1462,7 +1462,7 @@ export const CricketTournamentTab: React.FC<{
               }`}
             >
               <Users size={13} />
-              <span>Teams ({activeTournament.teams.length}/{activeTournament.teamCount})</span>
+              <span>Teams ({activeTournament.teams?.length || 0}/{activeTournament.teamCount})</span>
             </button>
 
             <button
@@ -1474,7 +1474,7 @@ export const CricketTournamentTab: React.FC<{
               }`}
             >
               <Calendar size={13} />
-              <span>Fixtures ({activeTournament.matches.length})</span>
+              <span>Fixtures ({activeTournament.matches?.length || 0})</span>
             </button>
 
             {activeTournament.type === 'league' && (
@@ -1553,7 +1553,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
 
                 <div className="flex gap-2 w-full sm:w-auto">
-                  {activeTournament.status === 'setup' && activeTournament.teams.length === 0 && (
+                  {activeTournament.status === 'setup' && (!activeTournament.teams || activeTournament.teams.length === 0) && (
                     <button
                       onClick={() => {
                         const demoTeams: TournamentTeam[] = [
@@ -1616,7 +1616,7 @@ export const CricketTournamentTab: React.FC<{
                     </button>
                   )}
 
-                  {activeTournament.teams.length < activeTournament.teamCount && (
+                  {(activeTournament.teams?.length || 0) < activeTournament.teamCount && (
                     <button
                       onClick={() => {
                         setEditTeamId(null);
@@ -1631,7 +1631,7 @@ export const CricketTournamentTab: React.FC<{
                     </button>
                   )}
 
-                  {activeTournament.teams.length >= 2 && activeTournament.status === 'setup' && (
+                  {(activeTournament.teams?.length || 0) >= 2 && activeTournament.status === 'setup' && (
                     <button
                       onClick={generateSchedule}
                       className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl border-none font-black uppercase text-[10px] tracking-widest cursor-pointer shadow-md flex items-center gap-1.5"
@@ -1642,7 +1642,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
               </div>
 
-              {activeTournament.teams.length === 0 ? (
+              {(!activeTournament.teams || activeTournament.teams.length === 0) ? (
                 <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center text-slate-400 space-y-3">
                   <Users size={32} className="mx-auto text-slate-300" />
                   <p className="text-xs font-bold uppercase">No teams registered yet.</p>
@@ -1650,7 +1650,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {activeTournament.teams.map(team => (
+                  {(activeTournament.teams || []).map(team => (
                     <div 
                       key={team.id}
                       className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-md hover:shadow-xl rounded-[2rem] p-6 text-left flex flex-col justify-between hover:border-emerald-500/30 transition-all"
@@ -1742,7 +1742,7 @@ export const CricketTournamentTab: React.FC<{
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => {
-                      if (activeTournament.teams.length < 2) {
+                      if (!activeTournament.teams || activeTournament.teams.length < 2) {
                         alert("Please register at least 2 teams before scheduling matches!");
                         return;
                       }
@@ -1759,7 +1759,7 @@ export const CricketTournamentTab: React.FC<{
                     <Plus size={12} /> Schedule Manually
                   </button>
 
-                  {activeTournament.matches.length > 0 && (
+                  {(activeTournament.matches?.length || 0) > 0 && (
                     <button
                       onClick={() => setShowResetScheduleModal(true)}
                       className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-500 rounded-xl border border-rose-500/20 font-black uppercase text-[10px] cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
@@ -1770,7 +1770,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
               </div>
 
-              {activeTournament.matches.length === 0 ? (
+              {(!activeTournament.matches || activeTournament.matches.length === 0) ? (
                 <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center text-slate-400 space-y-3">
                   <Calendar size={32} className="mx-auto text-slate-300" />
                   <p className="text-xs font-bold uppercase">No matches configured.</p>
@@ -1778,7 +1778,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {activeTournament.matches.map(m => {
+                  {(activeTournament.matches || []).map(m => {
                     const isUpcoming = m.status === 'scheduled';
                     const isLive = m.status === 'live';
                     const isCompleted = m.status === 'completed';
@@ -2260,7 +2260,7 @@ export const CricketTournamentTab: React.FC<{
                 <p className="text-2xs text-slate-400 font-bold uppercase mt-1">Select any matching fixture to forecast outcomes & generate Dream11 fantasy teams.</p>
               </div>
 
-              {activeTournament.matches.length === 0 ? (
+              {(!activeTournament.matches || activeTournament.matches.length === 0) ? (
                 <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center text-slate-400">
                   Configure and generate fixtures first to enable analytics.
                 </div>
@@ -2271,7 +2271,7 @@ export const CricketTournamentTab: React.FC<{
                   <div className="lg:col-span-5 space-y-4">
                     <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Choose Upcoming Matchup</span>
                     <div className="space-y-2.5 max-h-[480px] overflow-y-auto custom-scrollbar pr-2">
-                      {activeTournament.matches.map(m => (
+                      {(activeTournament.matches || []).map(m => (
                         <div 
                           key={m.id}
                           onClick={() => {

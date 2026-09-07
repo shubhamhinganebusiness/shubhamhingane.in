@@ -96,6 +96,9 @@ const hideOnRoutes = [
   '/live/school-erp',
   '/live/cricket-scoreboard',
   '/live/cricket-details',
+  '/cricket-details',
+  '/live/cricket-detail',
+  '/cricket-spectator',
   '/live/cricket-auction',
   '/live/cricket-overlay',
   '/cricket-login',
@@ -325,6 +328,9 @@ function AppContent() {
           <Route path="/live/cricket-toss" element={<CricketDigitalToss />} />
           <Route path="/cricket-toss" element={<CricketDigitalToss />} />
           <Route path="/live/cricket-details" element={<SpectatorScoreboardSection />} />
+          <Route path="/cricket-details" element={<SpectatorScoreboardSection />} />
+          <Route path="/live/cricket-detail" element={<SpectatorScoreboardSection />} />
+          <Route path="/cricket-spectator" element={<SpectatorScoreboardSection />} />
           <Route path="/live/cricket-auction" element={<CricketAuction />} />
           <Route path="/live/cricket-overlay" element={<CricketOverlay />} />
           <Route path="/cricket-login" element={<GullyScoreLogin />} />

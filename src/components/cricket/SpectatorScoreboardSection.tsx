@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, Clock, Activity, Users, Radio, ArrowRight, Share2, Download, FileText,
@@ -17,7 +17,19 @@ import { db, handleFirestoreError, OperationType, subscribeToRealtimeDBMatch } f
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 
 // Local storage & real-time sync across scoreboard components
-import { getLocalMatches, getActiveMatch, subscribeToMatchSync, getLocalMatchById, isMatchDeleted, markMatchDeleted, unmarkMatchDeleted, deleteLocalMatch, pruneDeletedMatchesFromStorage } from './cricketStorage';
+import { 
+  getLocalMatches, 
+  getActiveMatch, 
+  subscribeToMatchSync, 
+  getLocalMatchById, 
+  isMatchDeleted, 
+  markMatchDeleted, 
+  unmarkMatchDeleted, 
+  deleteLocalMatch, 
+  pruneDeletedMatchesFromStorage,
+  getAnyActiveOrRecentMatch,
+  getOrCreateDefaultMatch
+} from './cricketStorage';
 
 // Recharts imports
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
@@ -698,16 +710,8 @@ export const SpectatorScoreboardSection = ({
     const fromSearch = searchParams.get('matchId');
     if (fromSearch) return fromSearch;
 
-    // 2. Try parsing from window.location.search
-    const searchPart = window.location.search;
-    if (searchPart) {
-      const urlParams = new URLSearchParams(searchPart);
-      const matchId = urlParams.get('matchId');
-      if (matchId) return matchId;
-    }
-
-    // 3. Try parsing from window.location.hash
-    const hashPart = window.location.hash;
+    // 2. Try parsing from window.location.hash
+    const hashPart = window.location.hash || '';
     const qIndex = hashPart.indexOf('?');
     if (qIndex !== -1) {
       const queryStr = hashPart.substring(qIndex + 1);
@@ -715,15 +719,69 @@ export const SpectatorScoreboardSection = ({
       const matchId = urlParams.get('matchId');
       if (matchId) return matchId;
     }
+
+    // 3. Try parsing from window.location.search
+    const searchPart = window.location.search;
+    if (searchPart) {
+      const urlParams = new URLSearchParams(searchPart);
+      const matchId = urlParams.get('matchId');
+      if (matchId) return matchId;
+    }
+
+    // 4. If not homepageMode, check session storage or active local match
+    if (!homepageMode && typeof window !== 'undefined') {
+      try {
+        const lastSessionId = sessionStorage.getItem('last_selected_match_id');
+        if (lastSessionId && !isMatchDeleted(lastSessionId)) return lastSessionId;
+        const activeLocal = getActiveMatch();
+        if (activeLocal && activeLocal.id && !isMatchDeleted(activeLocal.id)) return activeLocal.id;
+      } catch (_) {}
+    }
+
     return '';
   };
 
   const matchIdParam = homepageMode ? '' : (getMatchIdFromHashOrSearch() || '');
   
-  const [allMatches, setAllMatches] = useState<MatchState[]>([]);
+  const [allMatches, setAllMatches] = useState<MatchState[]>(() => {
+    try {
+      return getLocalMatches();
+    } catch (_) {
+      return [];
+    }
+  });
   const [hasInitialMatchesLoaded, setHasInitialMatchesLoaded] = useState(false);
-  const [localSelectedMatchId, setLocalSelectedMatchId] = useState<string>('');
-  const [selectedMatch, setSelectedMatch] = useState<MatchState | null>(null);
+  const [localSelectedMatchId, setLocalSelectedMatchId] = useState<string>(() => {
+    if (homepageMode) return '';
+    const resolvedId = getMatchIdFromHashOrSearch();
+    if (resolvedId) return resolvedId;
+    const active = getActiveMatch();
+    if (active && !isMatchDeleted(active.id)) return active.id;
+    const all = getLocalMatches();
+    if (all.length > 0) return all[0].id;
+    return getAnyActiveOrRecentMatch().id;
+  });
+  const [selectedMatch, setSelectedMatch] = useState<MatchState | null>(() => {
+    if (homepageMode) return null;
+    const resolvedId = getMatchIdFromHashOrSearch();
+    if (resolvedId) {
+      const found = getLocalMatchById(resolvedId);
+      if (found && !isMatchDeleted(found.id) && found.status !== 'deleted' && !(found as any).isDeleted) {
+        return found;
+      }
+    }
+    const active = getActiveMatch();
+    if (active && !isMatchDeleted(active.id) && active.status !== 'deleted' && !(active as any).isDeleted) {
+      return active;
+    }
+    const all = getLocalMatches();
+    if (all.length > 0) {
+      const firstValid = all.find(m => !isMatchDeleted(m.id) && m.status !== 'deleted');
+      if (firstValid) return firstValid;
+    }
+    return getAnyActiveOrRecentMatch();
+  });
+  const [showMatchSelectionHub, setShowMatchSelectionHub] = useState(false);
   const [dismissedAutoSelect, setDismissedAutoSelect] = useState(false);
   const [typedMatchId, setTypedMatchId] = useState('');
   const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'standing' | 'media'>('arena');
@@ -1017,11 +1075,26 @@ export const SpectatorScoreboardSection = ({
   // Auto-select the first live match if none selected
   // Disposed to show only Live Matches cards by default on page load/refresh, requiring a click to view full scorecard.
 
+  // Keep tournaments in ref for instant enrichment without triggering subscription re-runs
+  const tournamentsRef = useRef<any[]>([]);
+  useEffect(() => {
+    tournamentsRef.current = tournaments || [];
+  }, [tournaments]);
+
   // Listen in real-time to the currently selected Match ID document
   useEffect(() => {
     const targetMatchId = homepageMode ? localSelectedMatchId : (matchIdParam || localSelectedMatchId);
 
     if (!targetMatchId) {
+      if (!homepageMode) {
+        const fallbackActive = getActiveMatch() || (liveMatches && liveMatches.length > 0 ? liveMatches[0] : null) || (allMatches && allMatches.length > 0 ? allMatches[0] : null) || getAnyActiveOrRecentMatch();
+        if (fallbackActive && !isMatchDeleted(fallbackActive.id) && fallbackActive.status !== 'deleted' && !(fallbackActive as any).isDeleted) {
+          unmarkMatchDeleted(fallbackActive.id);
+          setSelectedMatch(fallbackActive);
+          setLocalSelectedMatchId(fallbackActive.id);
+          return;
+        }
+      }
       setSelectedMatch(null);
       return;
     }
@@ -1029,8 +1102,8 @@ export const SpectatorScoreboardSection = ({
     unmarkMatchDeleted(targetMatchId);
 
     // Immediately check local storage or existing matches for instant responsiveness
-    const initialMatch = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch();
-    if (initialMatch && (initialMatch.id === targetMatchId || !targetMatchId) && initialMatch.status !== 'deleted' && !(initialMatch as any).isDeleted) {
+    const initialMatch = getLocalMatchById(targetMatchId) || (allMatches || []).find(m => m.id === targetMatchId) || getActiveMatch() || (!homepageMode ? getAnyActiveOrRecentMatch() : null);
+    if (initialMatch && !isMatchDeleted(initialMatch.id) && initialMatch.status !== 'deleted' && !(initialMatch as any).isDeleted) {
       setSelectedMatch(initialMatch);
     }
 
@@ -1049,7 +1122,8 @@ export const SpectatorScoreboardSection = ({
         unmarkMatchDeleted(m.id);
         // Enrich with tournament Graphics and Logos
         if (m.tournamentId) {
-          const t = tournaments?.find(x => x.id === m.tournamentId);
+          const tList = (tournamentsRef.current && tournamentsRef.current.length > 0) ? tournamentsRef.current : (tournaments || []);
+          const t = tList.find((x: any) => x.id === m.tournamentId);
           if (t) {
             m.tournamentName = t.name;
             const tAObj = t.teams?.find((st: any) => st.id === m.teamAId || st.name === m.teamA);
@@ -1062,22 +1136,18 @@ export const SpectatorScoreboardSection = ({
       } else {
         // Document does not exist in Firestore snapshot (e.g. offline match or local storage match).
         // Check local storage or existing matches before clearing - DO NOT call markMatchDeleted!
-        const fallback = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch();
-        if (fallback && fallback.id === targetMatchId && fallback.status !== 'deleted' && !(fallback as any).isDeleted) {
+        const fallback = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch() || (!homepageMode ? getAnyActiveOrRecentMatch() : null);
+        if (fallback && !isMatchDeleted(fallback.id) && fallback.status !== 'deleted' && !(fallback as any).isDeleted) {
           unmarkMatchDeleted(fallback.id);
           setSelectedMatch(fallback);
-        } else {
-          setSelectedMatch(null);
         }
       }
     }, (error) => {
       console.warn('Error subscribing to target match:', error);
-      const localFallback = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch();
-      if (localFallback && localFallback.id === targetMatchId && !(localFallback as any).isDeleted && localFallback.status !== 'deleted') {
+      const localFallback = getLocalMatchById(targetMatchId) || allMatches.find(m => m.id === targetMatchId) || getActiveMatch() || (!homepageMode ? getAnyActiveOrRecentMatch() : null);
+      if (localFallback && !isMatchDeleted(localFallback.id) && !(localFallback as any).isDeleted && localFallback.status !== 'deleted') {
         unmarkMatchDeleted(localFallback.id);
         setSelectedMatch(localFallback);
-      } else {
-        setSelectedMatch(null);
       }
     });
 
@@ -1102,15 +1172,13 @@ export const SpectatorScoreboardSection = ({
         return;
       }
       const updatedLocal = getLocalMatchById(targetMatchId);
-      if (updatedLocal && !isMatchDeleted(updatedLocal.id)) {
+      if (updatedLocal && !isMatchDeleted(updatedLocal.id) && updatedLocal.status !== 'deleted' && !(updatedLocal as any).isDeleted) {
         setSelectedMatch(prev => {
           if (!prev || (updatedLocal.updatedAt || 0) >= (prev.updatedAt || 0)) {
             return updatedLocal;
           }
           return prev;
         });
-      } else {
-        setSelectedMatch(null);
       }
     });
 
@@ -1119,7 +1187,7 @@ export const SpectatorScoreboardSection = ({
       unsubRtdb();
       unsubSync();
     };
-  }, [matchIdParam, homepageMode, localSelectedMatchId, tournaments]);
+  }, [matchIdParam, homepageMode, localSelectedMatchId]);
 
   useEffect(() => {
     const currentId = homepageMode ? '' : (getMatchIdFromHashOrSearch() || '');
@@ -1278,7 +1346,9 @@ export const SpectatorScoreboardSection = ({
         // If there is no param in URL, auto-select first live match
         const firstLive = liveMatches[0];
         if (firstLive && firstLive.id) {
+          unmarkMatchDeleted(firstLive.id);
           setLocalSelectedMatchId(firstLive.id);
+          setSelectedMatch(firstLive);
           setSearchParams({ matchId: firstLive.id }, { replace: true });
         }
       }
@@ -1292,13 +1362,17 @@ export const SpectatorScoreboardSection = ({
         // Auto-select most recent match if none selected
         const mostRecent = allMatches[0];
         if (mostRecent && mostRecent.id) {
+          unmarkMatchDeleted(mostRecent.id);
           setLocalSelectedMatchId(mostRecent.id);
+          setSelectedMatch(mostRecent);
           setSearchParams({ matchId: mostRecent.id }, { replace: true });
         }
       } else if (!localSelectedMatchId) {
         const activeLocal = getActiveMatch();
         if (activeLocal && activeLocal.id && activeLocal.status !== 'deleted') {
+          unmarkMatchDeleted(activeLocal.id);
           setLocalSelectedMatchId(activeLocal.id);
+          setSelectedMatch(activeLocal);
           if (!homepageMode) {
             setSearchParams({ matchId: activeLocal.id }, { replace: true });
           }
@@ -1525,7 +1599,8 @@ export const SpectatorScoreboardSection = ({
   const selectMatch = (id: string) => {
     if (homepageMode) {
       if (id) {
-        navigate(`/live/cricket-details?matchId=${id}`);
+        unmarkMatchDeleted(id);
+        navigate(`/live/cricket-details?matchId=${encodeURIComponent(id)}`);
       } else {
         setDismissedAutoSelect(true);
       }
@@ -1533,26 +1608,20 @@ export const SpectatorScoreboardSection = ({
     }
     
     if (!id) {
-      // Go back to homepage Spectator Scoreboard section
-      navigate('/');
-      setTimeout(() => {
-        const el = document.getElementById('spectator-hub');
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth' });
-        }
-      }, 150);
+      // Toggle match selection hub on details page so user can choose any match
+      setShowMatchSelectionHub(true);
       return;
     }
 
+    unmarkMatchDeleted(id);
+    setShowMatchSelectionHub(false);
     setLocalSelectedMatchId(id);
-    const updated = new URLSearchParams(searchParams);
-    if (id) {
-      updated.set('matchId', id);
-    } else {
-      updated.delete('matchId');
-      setDismissedAutoSelect(true);
-      setSelectedMatch(null);
+    const immediate = allMatches.find(m => m.id === id) || getLocalMatchById(id) || getAnyActiveOrRecentMatch();
+    if (immediate) {
+      setSelectedMatch(immediate);
     }
+    const updated = new URLSearchParams(searchParams);
+    updated.set('matchId', id);
     setSearchParams(updated);
   };
 
@@ -2071,8 +2140,25 @@ export const SpectatorScoreboardSection = ({
         </div>
 
         {/* ===================== MATCH SELECTION SCREEN (NO MATCH ID IN URL) ===================== */}
-        {(!selectedMatch || homepageMode) ? (
+        {(!selectedMatch || homepageMode || showMatchSelectionHub) ? (
           <div className="space-y-12">
+            {!homepageMode && selectedMatch && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                  <span className="text-xs sm:text-sm font-bold text-slate-800 dark:text-emerald-200">
+                    Active Scoreboard: <strong className="text-emerald-600 dark:text-emerald-400">{selectedMatch.teamA} vs {selectedMatch.teamB}</strong>
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowMatchSelectionHub(false)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm shrink-0"
+                >
+                  Return to Scoreboard →
+                </button>
+              </div>
+            )}
 
             {/* Landing Hub Sub-navigation Tabs */}
             <div className="flex border border-slate-200/50 dark:border-slate-800 p-1 mb-6 gap-2 w-full max-w-sm bg-slate-100 dark:bg-slate-905 rounded-[1.3rem] shadow-inner">
@@ -2767,11 +2853,11 @@ export const SpectatorScoreboardSection = ({
                         <h4 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Tournament Match Registry ({selectedTournament.matches?.length || 0})</h4>
                       </div>
 
-                      {selectedTournament.matches.length === 0 ? (
+                      {(!selectedTournament.matches || selectedTournament.matches.length === 0) ? (
                         <p className="text-xs text-slate-450 font-bold uppercase">No matches have been scheduled for this tournament yet.</p>
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {selectedTournament.matches.map((m: any) => {
+                          {(selectedTournament.matches || []).map((m: any) => {
                             const isScheduled = m.status === 'scheduled';
                             const isLive = m.status === 'live';
                             const isCompleted = m.status === 'completed';
@@ -2874,8 +2960,8 @@ export const SpectatorScoreboardSection = ({
                                   </div>
 
                                   <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                                    <span>🗓️ {m.date} | {m.time}</span>
-                                    <span>📍 {m.venue.length > 15 ? `${m.venue.substring(0, 15)}...` : m.venue}</span>
+                                    <span>🗓️ {m.date || 'TBD'} | {m.time || 'TBD'}</span>
+                                    <span>📍 {m.venue ? (m.venue.length > 15 ? `${m.venue.substring(0, 15)}...` : m.venue) : 'Ground'}</span>
                                   </div>
 
                                   {isCompleted && m.winReason && (
@@ -2909,14 +2995,36 @@ export const SpectatorScoreboardSection = ({
           /* ===================== ACTIVE SCOREBOARD DETAILED SPECTATOR CARD ===================== */
           <div className="space-y-8 animate-fade-in">
             
-            {/* Back Button Action */}
-            <div className="flex items-center justify-start gap-2">
-              <button
-                onClick={() => selectMatch('')}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-200 text-slate-800 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border-none shadow-sm active:scale-95 hover:scale-[1.02]"
-              >
-                ← Back to Match Hub
-              </button>
+            {/* Back Button & Navigation Action */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowMatchSelectionHub(true)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-200 text-slate-800 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border-none shadow-sm active:scale-95 hover:scale-[1.02]"
+                >
+                  ← Browse All Matches & Fixtures
+                </button>
+                <button
+                  onClick={() => navigate('/')}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-400 text-slate-600 rounded-2xl text-[11px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm active:scale-95"
+                >
+                  🏠 Home
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const refreshed = getLocalMatchById(selectedMatch.id) || getActiveMatch() || getAnyActiveOrRecentMatch();
+                    if (refreshed) setSelectedMatch(refreshed);
+                    setLastRefreshed(new Date());
+                  }}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-[11px] font-bold tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm"
+                  title="Reload match state"
+                >
+                  <RefreshCw size={13} />
+                  <span>Sync</span>
+                </button>
+              </div>
             </div>
 
             {/* Prominent Match Result Banner for Completed Matches */}
@@ -3510,13 +3618,14 @@ export const SpectatorScoreboardSection = ({
                         <div>
                           <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest block mb-3">Live Active Partnership</span>
                           {(() => {
-                            const lastFow = currentInnings.fallOfWickets.length > 0 
-                              ? currentInnings.fallOfWickets[currentInnings.fallOfWickets.length - 1].score 
+                            const fows = currentInnings.fallOfWickets || [];
+                            const lastFow = fows.length > 0 
+                              ? fows[fows.length - 1].score 
                               : 0;
                             const runs = Math.max(0, currentInnings.runs - lastFow);
                             
-                            const b1Balls = currentInnings.batsmen[currentInnings.strikerIndex]?.balls || 0;
-                            const b2Balls = currentInnings.batsmen[currentInnings.nonStrikerIndex]?.balls || 0;
+                            const b1Balls = currentInnings.batsmen?.[currentInnings.strikerIndex]?.balls || 0;
+                            const b2Balls = currentInnings.batsmen?.[currentInnings.nonStrikerIndex]?.balls || 0;
                             const balls = b1Balls + b2Balls;
                             const rate = balls > 0 ? ((runs / balls) * 6).toFixed(2) : '0.00';
                             
@@ -3535,7 +3644,7 @@ export const SpectatorScoreboardSection = ({
                           })()}
                         </div>
                         <div className="pt-3 border-t border-slate-50 dark:border-slate-800 text-[9px] font-black text-emerald-500 tracking-wide uppercase mt-4">
-                          Current Wicket Stand: #{currentInnings.fallOfWickets.length + 1}
+                          Current Wicket Stand: #{(currentInnings.fallOfWickets?.length || 0) + 1}
                         </div>
                       </div>
 
@@ -3939,11 +4048,11 @@ export const SpectatorScoreboardSection = ({
                                   Fall of Wickets sequence timeline
                                 </span>
                               </div>
-                              {inn.fallOfWickets.length === 0 ? (
+                              {(!inn.fallOfWickets || inn.fallOfWickets.length === 0) ? (
                                 <p className="text-xs text-slate-400 dark:text-slate-605 italic">No wickets have fallen in this innings yet.</p>
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                  {inn.fallOfWickets.map((fw) => (
+                                  {(inn.fallOfWickets || []).map((fw) => (
                                     <div 
                                       key={fw.wicketNo}
                                       className="bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 p-3.5 rounded-2xl text-[11px] font-bold text-slate-705 dark:text-slate-350 shadow-sm flex flex-col justify-between"

@@ -556,12 +556,13 @@ export const CricketOverlay: React.FC = () => {
       }, 5000);
 
       const latestWicketNum = currentInnings.wickets;
-      const fowEntry = currentInnings.fallOfWickets?.find(f => f.wicketNo === latestWicketNum) || 
-                       currentInnings.fallOfWickets?.[currentInnings.fallOfWickets.length - 1];
+      const fowList = currentInnings.fallOfWickets || [];
+      const fowEntry = fowList.find(f => f.wicketNo === latestWicketNum) || 
+                       (fowList.length > 0 ? fowList[fowList.length - 1] : undefined);
 
       if (fowEntry) {
         const dismissedBatterName = fowEntry.batsmanName;
-        const matchingBatter = currentInnings.batsmen.find(b => b.name === dismissedBatterName);
+        const matchingBatter = (currentInnings.batsmen || []).find(b => b.name === dismissedBatterName);
         const dismissalMode = matchingBatter?.outMode || 'Dismissed';
         
         setWicketPopup({

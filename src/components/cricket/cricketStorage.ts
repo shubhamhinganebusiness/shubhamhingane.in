@@ -378,3 +378,145 @@ export function subscribeToMatchSync(callback: () => void): () => void {
     clearInterval(intervalId);
   };
 }
+
+/**
+ * Generates a realistic, complete exhibition live match.
+ * Ensures the detailed scoreboard always has rich, engaging data to display
+ * even if no user matches have been scored yet.
+ */
+export function getOrCreateDefaultMatch(): MatchState {
+  const matchId = 'match-premier-live-exhibition';
+  unmarkMatchDeleted(matchId);
+
+  const defaultMatch: MatchState = {
+    id: matchId,
+    teamA: 'Mumbai Champions',
+    teamB: 'Pune Super Warriors',
+    oversLimit: 20,
+    tossWinner: 'Pune Super Warriors',
+    tossChoice: 'bowl',
+    currentInningsNum: 2,
+    status: 'live',
+    date: new Date().toISOString().split('T')[0],
+    targetRuns: 178,
+    freeHitNext: false,
+    lastBallResult: '4',
+    updatedAt: Date.now(),
+    version: 1,
+    tournamentName: 'Gully Premier T20 Cup 2026',
+    seriesName: 'Championship Final',
+    groundName: 'Wankhede Cricket Ground, Mumbai',
+    innings1: {
+      battingTeam: 'Mumbai Champions',
+      bowlingTeam: 'Pune Super Warriors',
+      runs: 177,
+      wickets: 5,
+      ballsBowled: 120,
+      extras: { wides: 5, noBalls: 1, byes: 2, legByes: 3, penalty: 0 },
+      batsmen: [
+        { name: 'Rohit Sharma (c)', runs: 58, balls: 38, fours: 6, sixes: 3, isOut: true, outMode: 'Caught', dismissedBy: 'Shardul T.', fielderName: 'Ruturaj G.' },
+        { name: 'Ishan Kishan (wk)', runs: 34, balls: 22, fours: 4, sixes: 1, isOut: true, outMode: 'Bowled', dismissedBy: 'Deepak C.' },
+        { name: 'Suryakumar Yadav', runs: 45, balls: 24, fours: 4, sixes: 3, isOut: true, outMode: 'Caught', dismissedBy: 'Ravindra J.' },
+        { name: 'Hardik Pandya', runs: 22, balls: 14, fours: 2, sixes: 1, isOut: true, outMode: 'Run Out' },
+        { name: 'Tilak Varma', runs: 12, balls: 12, fours: 1, sixes: 0, isOut: false },
+        { name: 'Tim David', runs: 6, balls: 10, fours: 0, sixes: 0, isOut: false }
+      ],
+      bowlers: [
+        { name: 'Deepak Chahar', ballsBowled: 24, maidens: 0, runsConceded: 32, wickets: 1, isCurrent: false },
+        { name: 'Shardul Thakur', ballsBowled: 24, maidens: 0, runsConceded: 38, wickets: 1, isCurrent: false },
+        { name: 'Ravindra Jadeja', ballsBowled: 24, maidens: 0, runsConceded: 28, wickets: 1, isCurrent: false },
+        { name: 'Matheesha Pathirana', ballsBowled: 24, maidens: 0, runsConceded: 42, wickets: 1, isCurrent: false },
+        { name: 'Mitchell Santner', ballsBowled: 24, maidens: 0, runsConceded: 31, wickets: 0, isCurrent: false }
+      ],
+      strikerIndex: 4,
+      nonStrikerIndex: 5,
+      currentBowlerIndex: 3,
+      fallOfWickets: [
+        { wicketNo: 1, score: 62, batsmanName: 'Ishan Kishan', oversList: '6.4' },
+        { wicketNo: 2, score: 118, batsmanName: 'Rohit Sharma', oversList: '12.3' },
+        { wicketNo: 3, score: 145, batsmanName: 'Hardik Pandya', oversList: '15.5' },
+        { wicketNo: 4, score: 168, batsmanName: 'Suryakumar Yadav', oversList: '18.2' }
+      ],
+      commentaryList: [
+        { id: 'c1-1', overBall: '19.6', description: 'Pathirana yorker dug out to deep midwicket for a single to end innings.', type: 'normal' },
+        { id: 'c1-2', overBall: '19.4', description: 'FOUR! Tim David slashes through point with power and precision!', type: 'boundary' },
+        { id: 'c1-3', overBall: '18.2', description: 'WICKET! Suryakumar caught at deep backward square trying to scoop!', type: 'wicket' }
+      ],
+      history: [
+        { over: 5, overStr: '5.0', cumulativeRuns: 48, cumulativeWickets: 0 },
+        { over: 10, overStr: '10.0', cumulativeRuns: 92, cumulativeWickets: 1 },
+        { over: 15, overStr: '15.0', cumulativeRuns: 138, cumulativeWickets: 2 },
+        { over: 20, overStr: '20.0', cumulativeRuns: 177, cumulativeWickets: 5 }
+      ]
+    },
+    innings2: {
+      battingTeam: 'Pune Super Warriors',
+      bowlingTeam: 'Mumbai Champions',
+      runs: 146,
+      wickets: 3,
+      ballsBowled: 94,
+      extras: { wides: 4, noBalls: 1, byes: 1, legByes: 2, penalty: 0 },
+      batsmen: [
+        { name: 'Ruturaj Gaikwad (c)', runs: 64, balls: 42, fours: 7, sixes: 2, isOut: false },
+        { name: 'Devon Conway', runs: 28, balls: 20, fours: 3, sixes: 1, isOut: true, outMode: 'Caught', dismissedBy: 'Jasprit Bumrah' },
+        { name: 'Shivam Dube', runs: 38, balls: 21, fours: 2, sixes: 3, isOut: true, outMode: 'Bowled', dismissedBy: 'Piyush Chawla' },
+        { name: 'Ajinkya Rahane', runs: 10, balls: 7, fours: 1, sixes: 0, isOut: true, outMode: 'LBW', dismissedBy: 'Jasprit Bumrah' },
+        { name: 'MS Dhoni (wk)', runs: 6, balls: 4, fours: 1, sixes: 0, isOut: false }
+      ],
+      bowlers: [
+        { name: 'Jasprit Bumrah', ballsBowled: 22, maidens: 0, runsConceded: 22, wickets: 2, isCurrent: true },
+        { name: 'Trent Boult', ballsBowled: 24, maidens: 0, runsConceded: 34, wickets: 0, isCurrent: false },
+        { name: 'Piyush Chawla', ballsBowled: 24, maidens: 0, runsConceded: 42, wickets: 1, isCurrent: false },
+        { name: 'Hardik Pandya', ballsBowled: 24, maidens: 0, runsConceded: 45, wickets: 0, isCurrent: false }
+      ],
+      strikerIndex: 0,
+      nonStrikerIndex: 4,
+      currentBowlerIndex: 0,
+      fallOfWickets: [
+        { wicketNo: 1, score: 48, batsmanName: 'Devon Conway', oversList: '5.2' },
+        { wicketNo: 2, score: 112, batsmanName: 'Ajinkya Rahane', oversList: '11.4' },
+        { wicketNo: 3, score: 138, batsmanName: 'Shivam Dube', oversList: '14.5' }
+      ],
+      commentaryList: [
+        { id: 'c2-1', overBall: '15.4', description: 'FOUR! Ruturaj steps out and lofts over mid-off with sublime timing!', type: 'boundary' },
+        { id: 'c2-2', overBall: '15.3', description: 'Dhoni takes a quick single into the covers to rotate strike.', type: 'normal' },
+        { id: 'c2-3', overBall: '15.2', description: 'DOT BALL! Searing yorker from Bumrah on the toes.', type: 'normal' },
+        { id: 'c2-4', overBall: '15.1', description: 'FOUR! Driven straight down the ground past mid-on for boundary.', type: 'boundary' }
+      ],
+      history: [
+        { over: 5, overStr: '5.0', cumulativeRuns: 46, cumulativeWickets: 0 },
+        { over: 10, overStr: '10.0', cumulativeRuns: 95, cumulativeWickets: 1 },
+        { over: 15, overStr: '15.0', cumulativeRuns: 139, cumulativeWickets: 3 }
+      ]
+    }
+  };
+
+  return defaultMatch;
+}
+
+/**
+ * Resolves any active match, latest completed match, or defaults to exhibition match
+ */
+export function getAnyActiveOrRecentMatch(): MatchState {
+  const active = getActiveMatch();
+  if (active && !isMatchDeleted(active.id)) {
+    return active;
+  }
+
+  const all = getLocalMatches();
+  const liveMatch = all.find(m => m.status === 'live' && !isMatchDeleted(m.id));
+  if (liveMatch) {
+    return liveMatch;
+  }
+
+  const recent = all.find(m => !isMatchDeleted(m.id) && m.status !== 'deleted');
+  if (recent) {
+    return recent;
+  }
+
+  const defaultMatch = getOrCreateDefaultMatch();
+  saveMatchToRegistry(defaultMatch);
+  setActiveMatch(defaultMatch);
+  return defaultMatch;
+}
+
