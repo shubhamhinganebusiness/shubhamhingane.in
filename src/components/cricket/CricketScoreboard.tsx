@@ -48,6 +48,20 @@ import {
   pruneDeletedMatchesFromStorage,
   sanitizeForFirestore
 } from './cricketStorage';
+import {
+  CommentaryLanguage,
+  useCommentaryLanguage,
+  getCommentaryText,
+  createMultilingualCommentary,
+  CommentaryLanguageSelector,
+  getMatchContextualTone,
+  createBatsmanAnnouncement,
+  createBowlerAnnouncement,
+  interceptSpecialEvent,
+  ContextualToneShifterBadge,
+  MatchContextualTone,
+  ContextualToneInfo
+} from './modules/commentaryLanguage';
 
 // Types & Interfaces
 export interface Batsman {
@@ -116,6 +130,11 @@ export interface Innings {
     description: string;
     type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone';
     soundWave?: boolean;
+    translations?: {
+      en?: string;
+      hi?: string;
+      mr?: string;
+    };
   }[];
   history?: BallProgress[];
 }
@@ -1035,7 +1054,7 @@ export const CricketScoreboard: React.FC = () => {
   // Innings locking, mobile responsive tabs, and scorecard switches
   const [isInningsLocked, setIsInningsLocked] = useState<boolean>(false);
   const [activeMobileTab, setActiveMobileTab] = useState<'scorer' | 'stats' | 'feed'>('scorer');
-  const [activeScorecardTab, setActiveScorecardTab] = useState<'bat' | 'bowl' | 'fow'>('bat');
+  const [activeScorecardTab, setActiveScorecardTab] = useState<'bat' | 'bowl' | 'fow' | 'comm'>('bat');
 
   // Manual Fall of Wickets entry/adjustment modal state
   const [showManualFoWModal, setShowManualFoWModal] = useState(false);
@@ -1092,6 +1111,7 @@ export const CricketScoreboard: React.FC = () => {
   // AI Commentary configuration states
   const [aiCommentaryEnabled, setAiCommentaryEnabled] = useState(true);
   const [isAiCommentaryLoading, setIsAiCommentaryLoading] = useState(false);
+  const [userCommentaryLang, setUserCommentaryLang] = useCommentaryLanguage('en');
 
   // Overlay graphics control panel states
   const [activeControlTab, setActiveControlTab] = useState<'alerts' | 'graphics' | 'sequencer' | 'templates' | 'media'>('alerts');
@@ -2640,16 +2660,15 @@ export const CricketScoreboard: React.FC = () => {
       isCurrent: true
     }];
 
-    const bowlerDesc = currentInnings.ballsBowled === 0
-      ? `${trimmedBowlerName} will bowl the first over.`
-      : `${trimmedBowlerName} will bowl the over.`;
-
-    const commEntry = {
-      id: `comm-bowl-add-${Date.now()}`,
-      overBall: formatOvers(currentInnings.ballsBowled),
-      description: `${bowlerDesc}`,
-      type: 'normal' as const
-    };
+    const facingBatter = currentInnings.batsmen?.[currentInnings.strikerIndex];
+    const commEntry = createBowlerAnnouncement(
+      trimmedBowlerName,
+      formatOvers(currentInnings.ballsBowled),
+      {
+        isNewOver: currentInnings.ballsBowled === 0 || currentInnings.ballsBowled % 6 === 0,
+        facingBatsmanName: facingBatter?.name
+      }
+    );
 
     const updatedInnings = {
       ...currentInnings,
@@ -2704,12 +2723,14 @@ export const CricketScoreboard: React.FC = () => {
       isOut: false
     }];
 
-    const commEntry = {
-      id: `comm-bat-add-${Date.now()}`,
-      overBall: formatOvers(currentInnings.ballsBowled),
-      description: `${trimmedBatsmanName} new batsman come on crease.`,
-      type: 'normal' as const
-    };
+    const partnerBatter = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
+    const commEntry = createBatsmanAnnouncement(
+      trimmedBatsmanName,
+      formatOvers(currentInnings.ballsBowled),
+      {
+        partnerName: partnerBatter?.name
+      }
+    );
 
     const updatedInnings = {
       ...currentInnings,
@@ -2738,11 +2759,20 @@ export const CricketScoreboard: React.FC = () => {
       isNewBatsmanOnCrease?: boolean;
       newBatsmanName?: string;
       isOverStart?: boolean;
+      specialTrigger?: {
+        type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick';
+        batterName?: string;
+        batterRuns?: number;
+        batterBalls?: number;
+        bowlerName?: string;
+        howOut?: string;
+      };
     }
   ) => {
     try {
       setIsAiCommentaryLoading(true);
       const activeInnings = inningsNum === 1 ? matchState.innings1 : matchState.innings2;
+      const toneInfo = getMatchContextualTone(matchState, activeInnings);
       const res = await fetch('/api/cricket/commentary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2757,20 +2787,29 @@ export const CricketScoreboard: React.FC = () => {
           isBowlerChanged: additionalContext?.isBowlerChanged || false,
           isNewBatsmanOnCrease: additionalContext?.isNewBatsmanOnCrease || false,
           newBatsmanName: additionalContext?.newBatsmanName || '',
-          isOverStart: additionalContext?.isOverStart || false
+          isOverStart: additionalContext?.isOverStart || false,
+          language: userCommentaryLang,
+          contextualTone: toneInfo.tone,
+          specialTrigger: additionalContext?.specialTrigger
         })
       });
       const data = await res.json();
-      if (data && data.text) {
+      if (data && (data.text || data.translations)) {
         syncMatch(prev => {
           const targetInnings = inningsNum === 1 ? prev.innings1 : prev.innings2;
           if (!targetInnings) return prev;
           
           const updatedCommList = [...targetInnings.commentaryList];
           if (updatedCommList.length > 0) {
+            const translations = data.translations || {
+              en: data.text,
+              hi: data.translations?.hi,
+              mr: data.translations?.mr
+            };
             updatedCommList[0] = {
               ...updatedCommList[0],
-              description: data.text
+              description: data.text || updatedCommList[0].description,
+              translations: translations
             };
           }
           const updatedInnings = {
@@ -2806,19 +2845,19 @@ export const CricketScoreboard: React.FC = () => {
     const newBowlerName = newActiveBowler?.name || 'Bowler';
     const strikerBatter = currentInnings.batsmen?.[currentInnings.strikerIndex];
     const nonStrikerBatter = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
-
     const overStr = formatOvers(currentInnings.ballsBowled);
-    const bowlingChangeDesc = currentInnings.ballsBowled === 0
-      ? `${newBowlerName} will bowl the first over.`
-      : `🔄 Bowling Change: ${newBowlerName} will bowl the over to ${strikerBatter?.name || 'the striker'}!`;
+    const commEntry = createBowlerAnnouncement(
+      newBowlerName,
+      overStr,
+      {
+        isNewOver: true,
+        facingBatsmanName: strikerBatter?.name
+      }
+    );
+    const bowlingChangeDesc = commEntry.description;
 
     const updatedCommList = [
-      {
-        id: `comm-bowler-change-${Date.now()}`,
-        overBall: overStr,
-        description: bowlingChangeDesc,
-        type: 'extra'
-      },
+      commEntry,
       ...(currentInnings.commentaryList || [])
     ];
 
@@ -3215,8 +3254,18 @@ export const CricketScoreboard: React.FC = () => {
     // Evaluate individual batsman milestone triggers (50s, 100s)
     const originalStrikerRuns = currentInnings.batsmen[originalStrikerIndex]?.runs || 0;
     const finalStrikerRuns = striker.runs;
+    let milestoneSpecial: any = null;
+
     if (originalStrikerRuns < 50 && finalStrikerRuns >= 50) {
-      showNotification(`🎉 FIFTY! ${striker.name} has scored a magnificent Half-Century (50+ runs)!`, 'success');
+      milestoneSpecial = interceptSpecialEvent('fifty', formatOvers(inn.ballsBowled), {
+        batterName: striker.name,
+        batterRuns: striker.runs,
+        batterBalls: striker.balls,
+        batterFours: striker.fours,
+        batterSixes: striker.sixes,
+        strikeRate: striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0'
+      });
+      showNotification(milestoneSpecial.notification, 'success');
       // Set overlay blast
       nextMatchState.overlayConfig = {
         ...(nextMatchState.overlayConfig || {}),
@@ -3225,10 +3274,18 @@ export const CricketScoreboard: React.FC = () => {
           timestamp: Date.now()
         },
         customBanner: 'fifty',
-        customBannerText: `🎉 50 FOR ${striker.name.toUpperCase()}! A magnificent half-century!`
+        customBannerText: milestoneSpecial.bannerTitle
       };
     } else if (originalStrikerRuns < 100 && finalStrikerRuns >= 100) {
-      showNotification(`🎉 HUNDRED! ${striker.name} has scored a legendary Century (100+ runs)!`, 'success');
+      milestoneSpecial = interceptSpecialEvent('hundred', formatOvers(inn.ballsBowled), {
+        batterName: striker.name,
+        batterRuns: striker.runs,
+        batterBalls: striker.balls,
+        batterFours: striker.fours,
+        batterSixes: striker.sixes,
+        strikeRate: striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0'
+      });
+      showNotification(milestoneSpecial.notification, 'success');
       // Set overlay blast
       nextMatchState.overlayConfig = {
         ...(nextMatchState.overlayConfig || {}),
@@ -3237,7 +3294,7 @@ export const CricketScoreboard: React.FC = () => {
           timestamp: Date.now()
         },
         customBanner: 'hundred',
-        customBannerText: `🎉 100 FOR ${striker.name.toUpperCase()}! A legendary century!`
+        customBannerText: milestoneSpecial.bannerTitle
       };
     }
 
@@ -3253,13 +3310,18 @@ export const CricketScoreboard: React.FC = () => {
     else if (event.type === 'bye') ballLabel = 'By';
     else if (event.type === 'legbye') ballLabel = 'Lb';
 
+    const ballDesc = `${bowler.name} to ${striker.name}: ${outcomeDescription}`;
+    const ballCommEntry = {
+      id: `c-${Date.now()}`,
+      overBall: formatOvers(inn.ballsBowled),
+      description: ballDesc,
+      type: eventType,
+      translations: createMultilingualCommentary(ballDesc)
+    };
+
     inn.commentaryList = [
-      {
-        id: `c-${Date.now()}`,
-        overBall: formatOvers(inn.ballsBowled),
-        description: `${bowler.name} to ${striker.name}: ${outcomeDescription}`,
-        type: eventType
-      },
+      ...(milestoneSpecial ? [milestoneSpecial.commentary] : []),
+      ballCommEntry,
       ...inn.commentaryList
     ];
 
@@ -3303,7 +3365,13 @@ export const CricketScoreboard: React.FC = () => {
           nonStrikerName: nonStriker?.name,
           isBowlerChanged: false,
           isNewBatsmanOnCrease: false,
-          isOverStart: (inn.ballsBowled % 6 === 1)
+          isOverStart: (inn.ballsBowled % 6 === 1),
+          specialTrigger: milestoneSpecial ? {
+            type: milestoneSpecial.commentary.specialEvent,
+            batterName: striker.name,
+            batterRuns: striker.runs,
+            batterBalls: striker.balls
+          } : undefined
         }
       );
     }
@@ -3471,6 +3539,7 @@ export const CricketScoreboard: React.FC = () => {
     bowler.ballsBowled += 1;
 
     // Wicket credit logic & Hat-trick tracking:
+    let hatTrickSpecial: any = null;
     if (replay.wicketType !== 'Run Out') {
       let activeBowler;
       if (detailedBowler.toLowerCase() === bowler.name.toLowerCase()) {
@@ -3500,14 +3569,10 @@ export const CricketScoreboard: React.FC = () => {
       if (activeBowler) {
         activeBowler.consecutiveWickets = (activeBowler.consecutiveWickets || 0) + 1;
         if (activeBowler.consecutiveWickets === 3) {
-          showNotification(`🔥 HAT-TRICK! ${activeBowler.name} got 3 wickets in consecutive deliveries!`, 'success');
-          // Add landmark commentary block
-          inn.commentaryList.unshift({
-            id: `comm-hat-trick-${Date.now()}`,
-            overBall: formatOvers(inn.ballsBowled),
-            description: `🔥 HAT-TRICK! A magnificent feat by ${activeBowler.name}! Three wickets in three consecutive deliveries has sent the crowd into absolute ecstasy!`,
-            type: 'milestone'
+          hatTrickSpecial = interceptSpecialEvent('hat_trick', formatOvers(inn.ballsBowled), {
+            bowlerName: activeBowler.name
           });
+          showNotification(hatTrickSpecial.notification, 'success');
           // Update overlay banner blast
           nextMatchState.overlayConfig = {
             ...(nextMatchState.overlayConfig || {}),
@@ -3516,7 +3581,7 @@ export const CricketScoreboard: React.FC = () => {
               timestamp: Date.now()
             },
             customBanner: 'drinks',
-            customBannerText: `🔥 HAT-TRICK FOR ${activeBowler.name.toUpperCase()}! 3 wickets in a row!`
+            customBannerText: hatTrickSpecial.bannerTitle
           };
         }
       }
@@ -3562,22 +3627,57 @@ export const CricketScoreboard: React.FC = () => {
     bowlers[inn.currentBowlerIndex] = bowler;
     inn.bowlers = bowlers;
 
+    const dismissedSR = dismissedBatter.balls > 0 ? ((dismissedBatter.runs / dismissedBatter.balls) * 100).toFixed(1) : '0.0';
+
+    // 1. Intercept special event breakdown for wicket dismissal
+    const wicketSpecial = interceptSpecialEvent('wicket', formatOvers(inn.ballsBowled), {
+      batterName: dismissedBatter.name,
+      batterRuns: dismissedBatter.runs,
+      batterBalls: dismissedBatter.balls,
+      batterFours: dismissedBatter.fours,
+      batterSixes: dismissedBatter.sixes,
+      howOut: detailedHowOut,
+      bowlerName: detailedBowler,
+      strikeRate: dismissedSR
+    });
+
+    // 2. Automatically announce incoming new batsman in commentary box
+    const remainingPartner = batsmen.find(b => !b.isOut && b.name.toLowerCase() !== finalBatsmanName.toLowerCase() && b.name.toLowerCase() !== dismissedBatter.name.toLowerCase());
+    const incomingBatsmanAnnouncement = createBatsmanAnnouncement(
+      finalBatsmanName,
+      formatOvers(inn.ballsBowled),
+      {
+        partnerName: remainingPartner?.name,
+        dismissedBatterName: dismissedBatter.name,
+        isWicketFall: true
+      }
+    );
+
     const gullyWktReactions = [
       "The fielding side goes absolutely ecstatic!", "Spectacular fielding brings the breakthrough!",
       "Crowd is dead silent as the premium batsman walks back.", "Middle stump is flying!",
       "An absolute peach of a delivery!", "Street party erupted!", "What a sensational catch near the boundary line!"
     ];
     const rdWktReact = gullyWktReactions[Math.floor(Math.random() * gullyWktReactions.length)];
-    const newBatPhrase = (finalBatsmanName && inn.wickets < 10) ? ` After wicket fell, ${finalBatsmanName} new batsman come on crease.` : '';
-    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back. Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler}).${newBatPhrase} ${rdWktReact}${overCompletionSuffix}`;
+    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back (${dismissedBatter.runs} off ${dismissedBatter.balls}b). Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler}). After wicket fell, ${finalBatsmanName} new batsman come on crease. ${rdWktReact}${overCompletionSuffix}`;
+
+    const normalWicketComm = {
+      id: `c-${Date.now()}`,
+      overBall: formatOvers(inn.ballsBowled),
+      description: commentaryDescription,
+      type: 'wicket',
+      translations: createMultilingualCommentary(commentaryDescription)
+    };
+
+    const newEntries = [
+      incomingBatsmanAnnouncement,
+      ...(hatTrickSpecial ? [hatTrickSpecial.commentary] : []),
+      wicketSpecial.commentary,
+      normalWicketComm
+    ];
 
     inn.commentaryList = [
-      {
-        id: `c-${Date.now()}`,
-        overBall: formatOvers(inn.ballsBowled),
-        description: commentaryDescription,
-        type: 'wicket'
-      },
+      ...newEntries,
       ...inn.commentaryList
     ];
 
@@ -3592,7 +3692,7 @@ export const CricketScoreboard: React.FC = () => {
         timestamp: Date.now()
       },
       customBanner: 'out',
-      customBannerText: 'Wicket Dismissal'
+      customBannerText: wicketSpecial.bannerTitle
     };
 
     if (!inn.history) {
@@ -3618,7 +3718,6 @@ export const CricketScoreboard: React.FC = () => {
 
     // AI Commentary trigger in background if enabled
     if (aiCommentaryEnabled && !isSpectator) {
-      const remainingPartner = batsmen.find(b => !b.isOut && b.name.toLowerCase() !== finalBatsmanName.toLowerCase());
       generateAICommentary(
         nextMatchState,
         { type: 'wicket' },
@@ -3629,7 +3728,15 @@ export const CricketScoreboard: React.FC = () => {
         {
           nonStrikerName: remainingPartner?.name,
           isNewBatsmanOnCrease: true,
-          newBatsmanName: finalBatsmanName
+          newBatsmanName: finalBatsmanName,
+          specialTrigger: {
+            type: 'wicket',
+            batterName: dismissedBatter.name,
+            batterRuns: dismissedBatter.runs,
+            batterBalls: dismissedBatter.balls,
+            bowlerName: detailedBowler,
+            howOut: detailedHowOut
+          }
         }
       );
     }
@@ -6989,14 +7096,14 @@ export const CricketScoreboard: React.FC = () => {
             {/* Tabbed Scorecard box */}
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2.5 flex flex-col min-h-0 overflow-hidden shadow-lg font-sans">
               <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-850">
-                <div className="flex bg-slate-950 p-0.5 rounded-lg">
+                <div className="flex bg-slate-950 p-0.5 rounded-lg flex-wrap gap-0.5">
                   <button
                     onClick={() => setActiveScorecardTab('bat')}
                     className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
                       activeScorecardTab === 'bat' ? 'bg-emerald-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
-                    Batting Card
+                    Batting
                   </button>
                   <button
                     onClick={() => setActiveScorecardTab('bowl')}
@@ -7004,7 +7111,7 @@ export const CricketScoreboard: React.FC = () => {
                       activeScorecardTab === 'bowl' ? 'bg-emerald-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
-                    Bowling Card
+                    Bowling
                   </button>
                   <button
                     onClick={() => setActiveScorecardTab('fow')}
@@ -7012,12 +7119,20 @@ export const CricketScoreboard: React.FC = () => {
                       activeScorecardTab === 'fow' ? 'bg-rose-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
-                    Fall of Wickets {currentInnings.fallOfWickets?.length > 0 ? `(${currentInnings.fallOfWickets.length})` : ''}
+                    FoW {currentInnings.fallOfWickets?.length > 0 ? `(${currentInnings.fallOfWickets.length})` : ''}
+                  </button>
+                  <button
+                    onClick={() => setActiveScorecardTab('comm')}
+                    className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
+                      activeScorecardTab === 'comm' ? 'bg-indigo-600 text-white font-black' : 'text-slate-400 bg-transparent'
+                    }`}
+                  >
+                    Commentary ({currentInnings.commentaryList?.length || 0})
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-widest">
-                    {activeScorecardTab === 'bat' ? 'BATSMAN REGISTRY' : activeScorecardTab === 'bowl' ? 'BOWLER FIGURES' : 'FALL OF WICKETS'}
+                    {activeScorecardTab === 'bat' ? 'BATSMAN REGISTRY' : activeScorecardTab === 'bowl' ? 'BOWLER FIGURES' : activeScorecardTab === 'comm' ? 'AI COMMENTARY' : 'FALL OF WICKETS'}
                   </span>
                   {activeScorecardTab === 'fow' && (
                     <button
@@ -7236,6 +7351,104 @@ export const CricketScoreboard: React.FC = () => {
                         </button>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* TAB: Commentary feed with user selected language */}
+                {activeScorecardTab === 'comm' && (
+                  <div className="flex-1 flex flex-col min-h-0 space-y-2">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[8px] font-black uppercase text-slate-400">Language:</span>
+                        {(['mr', 'hi', 'en'] as const).map(l => (
+                          <button
+                            key={l}
+                            type="button"
+                            onClick={() => setUserCommentaryLang(l)}
+                            className={`px-2 py-0.5 rounded text-[8px] font-black uppercase transition-all border-none cursor-pointer ${
+                              userCommentaryLang === l
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-400 hover:text-white bg-slate-950'
+                            }`}
+                          >
+                            {l === 'mr' ? '🚩 मराठी' : l === 'hi' ? '🇮🇳 हिंदी' : '🌐 English'}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-[8px] font-mono text-slate-400">
+                        {currentInnings.commentaryList?.length || 0} entries
+                      </span>
+                    </div>
+
+                    {/* Contextual Tone Shifter Banner */}
+                    {(() => {
+                      const matchTone = getMatchContextualTone(match, currentInnings);
+                      return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />;
+                    })()}
+
+                    <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin max-h-[300px]">
+                      {(!currentInnings.commentaryList || currentInnings.commentaryList.length === 0) ? (
+                        <p className="text-center text-xs text-slate-500 py-8 italic">No commentary yet for this innings.</p>
+                      ) : (
+                        currentInnings.commentaryList.map((comm) => {
+                          const isWkt = comm.type === 'wicket';
+                          const isBnd = comm.type === 'boundary';
+                          const isExt = comm.type === 'extra';
+                          const isMilestone = comm.type === 'milestone' || !!comm.specialEvent;
+                          const isAnnouncement = !!comm.announcementType;
+                          const displayText = getCommentaryText(comm, userCommentaryLang);
+
+                          return (
+                            <div
+                              key={comm.id}
+                              className={`p-2 rounded-xl text-[10.5px] border transition-all ${
+                                comm.specialEvent === 'hundred' ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-amber-500/5' :
+                                comm.specialEvent === 'fifty' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-emerald-500/5' :
+                                comm.specialEvent === 'hat_trick' ? 'bg-rose-500/15 border-rose-500/40 text-rose-200 shadow-rose-500/5' :
+                                isAnnouncement ? 'bg-sky-500/10 border-sky-500/30 text-sky-200' :
+                                isWkt ? 'bg-rose-500/10 border-rose-500/20 text-rose-300' :
+                                isBnd ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' :
+                                isExt ? 'bg-sky-500/10 border-sky-500/20 text-sky-300' :
+                                isMilestone ? 'bg-purple-500/10 border-purple-500/30 text-purple-200' :
+                                'bg-slate-950 border-slate-800 text-slate-300'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1 gap-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono text-[8.5px] font-bold text-slate-400">
+                                    Over {comm.overBall}
+                                  </span>
+                                  {comm.specialEvent && (
+                                    <span className={`text-[7px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
+                                      comm.specialEvent === 'hundred' ? 'bg-amber-400 text-black' :
+                                      comm.specialEvent === 'fifty' ? 'bg-emerald-400 text-black' :
+                                      comm.specialEvent === 'hat_trick' ? 'bg-rose-500 text-white animate-pulse' :
+                                      'bg-rose-400 text-black'
+                                    }`}>
+                                      {comm.specialEvent === 'hundred' ? '👑 CENTURY' :
+                                       comm.specialEvent === 'fifty' ? '🌟 HALF-CENTURY' :
+                                       comm.specialEvent === 'hat_trick' ? '🔥 HAT-TRICK' :
+                                       '⚡ WICKET'}
+                                    </span>
+                                  )}
+                                  {comm.announcementType && (
+                                    <span className="text-[7px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md bg-sky-500/30 text-sky-300 border border-sky-500/40">
+                                      {comm.announcementType === 'new_batsman' ? '🏏 NEW BATSMAN' : '🎯 NEW BOWLER'}
+                                    </span>
+                                  )}
+                                </div>
+                                {comm.type && comm.type !== 'normal' && !comm.specialEvent && !comm.announcementType && (
+                                  <span className="text-[7.5px] font-black uppercase tracking-wider px-1 py-0.2 rounded bg-white/10">
+                                    {comm.type}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="leading-snug font-sans">{displayText}</p>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -10480,6 +10693,35 @@ export const CricketScoreboard: React.FC = () => {
                       AI Commentary: {aiCommentaryEnabled ? 'ON' : 'OFF'}
                     </button>
 
+                    {/* Commentary Language Selector: Marathi, Hindi, English */}
+                    <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl shadow-sm">
+                      <span className="text-[8.5px] font-black uppercase text-slate-400 px-1.5 flex items-center gap-1">
+                        <span>🌐</span> Lang:
+                      </span>
+                      {[
+                        { id: 'mr', label: '🚩 मराठी', name: 'Marathi' },
+                        { id: 'hi', label: '🇮🇳 हिंदी', name: 'Hindi' },
+                        { id: 'en', label: '🌐 English', name: 'English' }
+                      ].map(l => (
+                        <button
+                          key={l.id}
+                          type="button"
+                          onClick={() => {
+                            setUserCommentaryLang(l.id as any);
+                            showNotification(`AI Commentary language: ${l.name}`, 'info');
+                          }}
+                          className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                            userCommentaryLang === l.id
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'text-slate-400 hover:text-white bg-transparent'
+                          }`}
+                          title={`Switch to ${l.name} commentary`}
+                        >
+                          {l.label}
+                        </button>
+                      ))}
+                    </div>
+
                     <button 
                       onClick={handleUndoAction}
                       disabled={undoStack.length === 0}
@@ -11502,10 +11744,34 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
 
                     {/* AI Commentary real-time log badge stream */}
-                    <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 space-y-1.5 relative overflow-hidden min-h-[50px] max-h-[85px]">
-                      <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1">
-                        <Radio size={10} className="animate-pulse" /> Live Feed Broadcast
-                      </span>
+                    <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 space-y-1.5 relative overflow-hidden min-h-[50px]">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1">
+                            <Radio size={10} className="animate-pulse" /> Live Feed
+                          </span>
+                          {(() => {
+                            const matchTone = getMatchContextualTone(match, currentInnings);
+                            return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} compact={true} />;
+                          })()}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {(['mr', 'hi', 'en'] as const).map(l => (
+                            <button
+                              key={l}
+                              type="button"
+                              onClick={() => setUserCommentaryLang(l)}
+                              className={`px-1.5 py-0.2 rounded text-[7.5px] font-black uppercase transition-all border-none cursor-pointer ${
+                                userCommentaryLang === l
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-slate-400 hover:text-slate-200 bg-transparent'
+                              }`}
+                            >
+                              {l === 'mr' ? 'मराठी' : l === 'hi' ? 'हिंदी' : 'EN'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       {isAiCommentaryLoading ? (
                         <div className="flex items-center gap-2 text-[10px] text-slate-400">
                           <span className="inline-block w-2.5 h-2.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
@@ -11513,7 +11779,9 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       ) : (
                         <div className="text-[10px] text-slate-300 italic truncate font-bold leading-relaxed scroll-smooth">
-                          {currentInnings.commentaryList[0]?.description || "Scorer cockpit fully calibrated. Ready for next ball delivery."}
+                          {currentInnings.commentaryList[0] 
+                            ? getCommentaryText(currentInnings.commentaryList[0], userCommentaryLang)
+                            : "Scorer cockpit fully calibrated. Ready for next ball delivery."}
                         </div>
                       )}
                     </div>

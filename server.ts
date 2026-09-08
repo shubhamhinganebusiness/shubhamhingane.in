@@ -299,111 +299,342 @@ async function startServer() {
     }
   });
 
-  // Dynamic street/gully style local commentary fallback generator
-  function getGullyCommentaryFallback(
+  // Dynamic street/gully style local commentary multilingual generator (English, Hindi, Marathi)
+  function getGullyCommentaryMultilingual(
     event: any,
     batsmanName: string,
     bowlerName: string,
     originalDesc: string,
-    newBatsmanName?: string
-  ): string {
+    newBatsmanName?: string,
+    contextualTone?: string,
+    specialTrigger?: any
+  ): { en: string; hi: string; mr: string } {
     const bats = batsmanName || 'The batsman';
     const bowl = bowlerName || 'The bowler';
     const type = event?.type || 'unknown';
     const val = event?.val ?? 0;
     const extraType = event?.extraType || '';
 
+    // If a special milestone/wicket trigger is present, deliver an enthusiastic breakdown
+    if (specialTrigger) {
+      if (specialTrigger.type === 'fifty') {
+        const b = specialTrigger.batterName || bats;
+        const r = specialTrigger.batterRuns || 50;
+        const balls = specialTrigger.batterBalls || 25;
+        const sr = specialTrigger.strikeRate || ((r / Math.max(1, balls)) * 100).toFixed(1);
+        return {
+          en: `🌟 FIFTY BREAKDOWN: Sensational Half-Century for ${b}! 50 runs completed in ${balls} balls with ferocious hitting (Strike Rate: ${sr})! The entire street crowd is on their feet applauding this masterclass!`,
+          hi: `🌟 अर्धशतक विश्लेषण: ${b} का धमाकेदार अर्धशतक! मात्र ${balls} गेंदों में ५० रन पूरे (स्ट्राइक रेट: ${sr})! मैदान तालियों की गड़गड़ाहट से गूंज उठा!`,
+          mr: `🌟 अर्धशतक विश्लेषण: ${b} चे तुफानी अर्धशतक! अवघ्या ${balls} चेंडूत ५० धावा पूर्ण (स्ट्राईक रेट: ${sr})! संपूर्ण गल्लीतील प्रेक्षकांकडून उभे राहून टाळ्यांचा कडकडाट!`
+        };
+      }
+      if (specialTrigger.type === 'hundred') {
+        const b = specialTrigger.batterName || bats;
+        const r = specialTrigger.batterRuns || 100;
+        const balls = specialTrigger.batterBalls || 45;
+        const sr = specialTrigger.strikeRate || ((r / Math.max(1, balls)) * 100).toFixed(1);
+        return {
+          en: `👑 CENTURY BREAKDOWN: Take a bow, ${b}! A monumental 100 runs in just ${balls} balls (Strike Rate: ${sr})! Pure street masterclass etched in tournament memory forever!`,
+          hi: `👑 ऐतिहासिक शतक: सलाम ठोकिए ${b} को! मात्र ${balls} गेंदों में १०० रन ठोक दिए (स्ट्राइक रेट: ${sr})! गली क्रिकेट का जादुई और ऐतिहासिक शतक!`,
+          mr: `👑 ऐतिहासिक शतक: मानाचा मुजरा ${b} ला! अवघ्या ${balls} चेंडूत १०० धावांचा महापराक्रम (स्ट्राईक रेट: ${sr})! गल्ली क्रिकेटच्या इतिहासातील सुवर्ण अक्षरांनी कोरलेली खेळी!`
+        };
+      }
+      if (specialTrigger.type === 'hat_trick') {
+        const bw = specialTrigger.bowlerName || bowl;
+        return {
+          en: `🔥 HAT-TRICK BREAKDOWN: A historic moment! ${bw} claims 3 wickets in 3 consecutive deliveries! Absolute pandemonium in the street, fireworks and non-stop cheering!`,
+          hi: `🔥 हैट्रिक विश्लेषण: ऐतिहासिक पल! ${bw} ने लगातार ३ गेंदों पर ३ विकेट चटकाकर रचा इतिहास! मैदान में गूंज उठी तालियां, अद्भुत गेंदबाजी का मुजाहिरा!`,
+          mr: `🔥 हॅटट्रिक विश्लेषण: ऐतिहासिक पराक्रम! ${bw} ने सलग ३ चेंडूत ३ बळी घेत रचला महाइतिहास! मैदानात एकच जल्लोष, तुफानी गोलंदाजी!`
+        };
+      }
+      if (specialTrigger.type === 'wicket' && specialTrigger.batterName) {
+        const b = specialTrigger.batterName;
+        const r = specialTrigger.batterRuns ?? 0;
+        const balls = specialTrigger.batterBalls ?? 0;
+        const bw = specialTrigger.bowlerName || bowl;
+        const how = specialTrigger.howOut || 'Out';
+        const sr = specialTrigger.strikeRate || (balls > 0 ? ((r / balls) * 100).toFixed(1) : '0.0');
+        const nextPhrase = newBatsmanName ? ` After wicket fell, ${newBatsmanName} new batsman come on crease.` : '';
+        const nextPhraseHi = newBatsmanName ? ` विकेट गिरने के बाद, ${newBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.` : '';
+        const nextPhraseMr = newBatsmanName ? ` विकेट पडल्यानंतर, ${newBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.` : '';
+
+        return {
+          en: `🚨 WICKET BREAKDOWN: ${b} departs after scoring ${r} runs off ${balls} balls (SR: ${sr})! Dismissal: ${how} by ${bw}!${nextPhrase}`,
+          hi: `🚨 विकेट विश्लेषण: ${b} पवेलियन लौटते हुए! ${balls} गेंदों में ${r} रन बनाए (स्ट्राइक रेट: ${sr})! गेंदबाज: ${bw}, प्रकार: ${how}.${nextPhraseHi}`,
+          mr: `🚨 विकेट विश्लेषण: ${b} ची खेळी संपुष्टात! ${balls} चेंडूत ${r} धावा (स्ट्राईक रेट: ${sr})! गोलंदाज: ${bw}, बाद प्रकार: ${how}.${nextPhraseMr}`
+        };
+      }
+    }
+
+    // Contextual tone specific generators:
+    // HIGH THRILLER: Fast-paced, exclamation-heavy, tense
+    if (contextualTone === 'HIGH_THRILLER') {
+      const thrillers = [
+        {
+          en: `EDGE-OF-THE-SEAT THRILLER! ${bats} connects under monstrous pressure off ${bowl}! Hearts are pounding, every ball is life-or-death now!`,
+          hi: `सांसें थाम देने वाला रोमांच! भारी दबाव में ${bats} का शॉट! हर एक गेंद पर धड़कनें तेज, गली क्रिकेट का असली रोमांच!`,
+          mr: `अंगावर काटा आणणारा थरार! प्रचंड दबावात ${bats} चा फटका! प्रत्येक चेंडूवर छातीचे ठोके वाढलेत, सामन्यात महानाट्य!`
+        },
+        {
+          en: `UNBELIEVABLE DRAMA! ${bowl} charges in with everything on the line, and ${bats} responds! Spectators screaming from rooftops!`,
+          hi: `अविश्वसनीय ड्रामा! ${bowl} ने पूरी ताकत झोंक दी और ${bats} का कड़ा प्रहार! दर्शकों का शोर आसमान छू रहा है!`,
+          mr: `अविश्वसनीय नाट्य! ${bowl} चा जीवतोड मारा आणि ${bats} चा आक्रमक पवित्रा! आजूबाजूच्या घरांच्या गॅलरीतून लोकांचा प्रचंड जल्लोष!`
+        },
+        {
+          en: `PULSE-POUNDING ACTION! Down to the wire! ${bats} battles ${bowl} in the dying moments of this classic!`,
+          hi: `अंतिम ओवरों का महामुकाबला! ${bats} और ${bowl} के बीच आर-पार की जंग! एक-एक रन के लिए महासंग्राम!`,
+          mr: `शेवटच्या क्षणांचा थरार! ${bats} आणि ${bowl} यांच्यात चुरशीची लढत! विजयासाठी दोन्ही बाजूने शर्थीचे प्रयत्न!`
+        }
+      ];
+      const pickT = thrillers[Math.floor(Math.random() * thrillers.length)];
+      if (newBatsmanName) {
+        return {
+          en: `${pickT.en} After wicket fell, ${newBatsmanName} new batsman come on crease.`,
+          hi: `${pickT.hi} विकेट गिरने के बाद, ${newBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`,
+          mr: `${pickT.mr} विकेट पडल्यानंतर, ${newBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
+        };
+      }
+      return pickT;
+    }
+
+    // ANALYTICAL / DRY: Explaining field placements, tactical shifts, spin choke, strike rotation
+    if (contextualTone === 'ANALYTICAL_DRY') {
+      const analytics = [
+        {
+          en: `Astute tactical field placement by the captain! Deep cover and a ring field set up by ${bowl} to choke the singles. ${bats} carefully assessing the gap.`,
+          hi: `कमाल की रणनीतिक फील्डिंग सजावट! ${bowl} ने डीप कवर और रिंग फील्ड लगाकर सिंगल पर लगाम कसी है. ${bats} संभलकर गैप ढूंढ रहे हैं.`,
+          mr: `कर्णधाराचे सुरेख रणनीतिक डावपेच! ${bowl} ने डीप कव्हर आणि रिंग फिल्डिंग लावून धावा रोखल्या आहेत. ${bats} सावधपणे फटका खेळत आहेत.`
+        },
+        {
+          en: `Disciplined channel bowling outside the off-stump from ${bowl}. The fielders are tucked in tightly; maiden pressure is steadily mounting on ${bats}.`,
+          hi: `ऑफ स्टंप के बाहर नपी-तुली लाइन पर ${bowl} की गेंदबाजी. फील्डर पास खड़े हैं और ${bats} पर डॉट बॉल का दबाव बढ़ रहा है.`,
+          mr: `ऑफ स्टंपच्या बाहेर अचूक टप्प्यावर ${bowl} चा मारा. जवळ क्षेत्ररक्षक तैनात असून ${bats} वर निर्धाव चेंडूंचा दबाव वाढत आहे.`
+        },
+        {
+          en: `Tactical shift in progress during this middle-overs consolidation. ${bats} focusing on working the ball into vacant pockets for smart strike rotation.`,
+          hi: `मध्यम ओवरों की समझदारी भरी रणनीति जारी. ${bats} खाली जगहों में गेंद धकेलकर चतुराई से स्ट्राइक रोटेट करने पर ध्यान दे रहे हैं.`,
+          mr: `मधल्या षटकांची संयमी रणनीती. ${bats} मोकळ्या जागेत चेंडू टोलवून चपळाईने स्ट्राईक रोटेट करण्यावर भर देत आहेत.`
+        }
+      ];
+      const pickA = analytics[Math.floor(Math.random() * analytics.length)];
+      if (newBatsmanName) {
+        return {
+          en: `${pickA.en} After wicket fell, ${newBatsmanName} new batsman come on crease.`,
+          hi: `${pickA.hi} विकेट गिरने के बाद, ${newBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`,
+          mr: `${pickA.mr} विकेट पडल्यानंतर, ${newBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
+        };
+      }
+      return pickA;
+    }
+
+    // Multi-language dot ball templates
     const dots = [
-      `Unbelievable line from ${bowl}! ${bats} is completely clueless, searching for answers!`,
-      `A solid defensive stroke. ${bats} playing with soft hands, showing respect to ${bowl}.`,
-      `Straight through to the keeper! ${bowl} is steaming in, expressing some serious pace!`,
-      `Swing and a miss! ${bats} tried to execute a wild heave but only met the cool gully breeze!`,
-      `Dot ball! Good field placement there, no room given whatsoever!`,
-      `Superb delivery, pitching exactly on the spot. ${bats} plays it carefully.`,
-      `Well played but straight to the fielder. No run! Great pressure here!`,
-      `Absolute beauty! Just beats the outside edge. ${bowl} looks fired up!`
+      {
+        en: `Unbelievable line from ${bowl}! ${bats} is completely clueless, searching for answers!`,
+        hi: `शानदार लाइन और लेंथ ${bowl} द्वारा! ${bats} पूरी तरह से बीट हुए, कोई रन नहीं!`,
+        mr: `सुरेख मारा ${bowl} चा! ${bats} ला चेंडूचा टप्पा अजिबात समजला नाही, अप्रतिम निर्धाव चेंडू!`
+      },
+      {
+        en: `A solid defensive stroke. ${bats} playing with soft hands, showing respect to ${bowl}.`,
+        hi: `मजबूत रक्षात्मक शॉट. ${bats} ने सीधे बल्ले से खेला और सम्मान दिया.`,
+        mr: `सुरेख डिफेन्स! ${bats} ने चेंडू जमिनीलगत अडवला, कोणतीही धाव नाही.`
+      },
+      {
+        en: `Straight through to the keeper! ${bowl} is steaming in, expressing some serious pace!`,
+        hi: `सीधे विकेटकीपर के दस्तानों में! ${bowl} शानदार रफ्तार से गेंदबाजी कर रहे हैं!`,
+        mr: `थेट यष्टिरक्षकाच्या हातात चेंडू! ${bowl} चा वेगवान आणि भेदक मारा!`
+      },
+      {
+        en: `Dot ball! Good field placement there, no room given whatsoever!`,
+        hi: `डॉट बॉल! बेहतरीन फील्डिंग सजावट, बल्लेबाज को हाथ खोलने का कोई मौका नहीं मिला!`,
+        mr: `निर्धाव चेंडू! उत्कृष्ट क्षेत्ररक्षण, फलंदाजाला धाव घेण्याची अजिबात जागा दिली नाही!`
+      }
     ];
 
+    // Singles
     const singles = [
-      `${bats} tucks it off the hips, stealing a quick single! Great understanding between the runners.`,
-      `Just a little push into the gap for one. Excellent rotation of strike!`,
-      `Gently nudged to long-on. They easily stroll through for a single.`,
-      `Driven down the ground. Well fielded, keeping it down to just a single!`,
-      `A quick tap-and-run! That's brilliant street-smart gully running from ${bats}!`
+      {
+        en: `${bats} tucks it off the hips, stealing a quick single! Great understanding between the runners.`,
+        hi: `${bats} ने हल्के हाथों से मोड़कर तेजी से एक रन चुरा लिया! दोनों बल्लेबाजों में कमाल का तालमेल.`,
+        mr: `${bats} ने हलक्या हाताने चेंडू ढकलून चपळाईने १ धाव घेतली! दोन्ही फलंदाजांमध्ये सुरेख समन्वय.`
+      },
+      {
+        en: `Just a little push into the gap for one. Excellent rotation of strike!`,
+        hi: `गैप में हल्के से धकेला और १ रन पूरा किया. स्ट्राइक रोटेशन जारी!`,
+        mr: `गॅपमध्ये चेंडू हळूच ढकलून १ धाव पूर्ण केली. स्ट्राईक सुरेख पद्धतीने बदलली!`
+      },
+      {
+        en: `A quick tap-and-run! That's brilliant street-smart gully running from ${bats}!`,
+        hi: `तेज दौड़ लगाकर एक रन पूरा किया! चतुर और सूझबूझ भरी बल्लेबाजी!`,
+        mr: `चपळाईने धाव पूर्ण केली! चतुर आणि समयसूचक गल्ली क्रिकेट स्टाइल धाव!`
+      }
     ];
 
+    // Doubles
     const doubles = [
-      `Driven beautifully through the covers! They push hard for the second and achieve it comfortably!`,
-      `Flicked off the pads towards mid-wicket. Superb running between the wickets, that's two!`,
-      `Slashed past point. Excellent athletic fielding keeps it to a brace.`,
-      `In the air... but lands safely in the vacant deep region! They scamper back for two runs.`
+      {
+        en: `Driven beautifully through the covers! They push hard for the second and achieve it comfortably!`,
+        hi: `कवर की तरफ खूबसूरत ड्राइव! तेजी से दौड़कर आसानी से दो रन पूरे किए!`,
+        mr: `कव्हरच्या दिशेने सुरेख ड्राईव्ह! वेगाने धावून २ धावा सहज पूर्ण केल्या!`
+      },
+      {
+        en: `Flicked off the pads towards mid-wicket. Superb running between the wickets, that's two!`,
+        hi: `मिड-विकेट की दिशा में फ्लिक किया. दोनों विकेटों के बीच शानदार दौड़, दो रन!`,
+        mr: `पॅडवरून मिड-विकेटकडे चेंडू वळवला. दोन्ही फलंदाजांची उत्कृष्ट धावपळ, २ धावा!`
+      }
     ];
 
+    // Boundaries (4s)
     const boundaries = [
-      `CRACK! That's an absolute missile from ${bats}! Sent racing through the covers for FOUR!`,
-      `Shot of the day! A magnificent straight drive that scorches the gully turf for FOUR!`,
-      `A delicate late cut! Guided perfectly between third man and slip for a majestic boundary!`,
-      `Over the infielder's head and bouncing into the fence! Pure elegance from ${bats} for FOUR!`
+      {
+        en: `CRACK! That's an absolute missile from ${bats}! Sent racing through the covers for FOUR!`,
+        hi: `शानदार चौका! ${bats} के बल्ले से निकला करारा शॉट, गेंद गोली की रफ्तार से बाउंड्री पार! चार रन!`,
+        mr: `खणखणीत चौकार! ${bats} चा तुफानी कव्हर ड्राईव्ह, चेंडू सुसाट सीमारेषेबाहेर ४ धावांसाठी!`
+      },
+      {
+        en: `Shot of the day! A magnificent straight drive that scorches the gully turf for FOUR!`,
+        hi: `दिन का सबसे खूबसूरत शॉट! सीधा स्ट्रेट ड्राइव और गेंद बाउंड्री लाइन के बाहर, चौका!`,
+        mr: `दिवसातील सर्वोत्तम फटका! सुरेख स्ट्रेट ड्राईव्ह आणि सीमारेषेपलीकडे चौकार!`
+      },
+      {
+        en: `Over the infielder's head and bouncing into the fence! Pure elegance from ${bats} for FOUR!`,
+        hi: `फील्डर्स के ऊपर से हवा में और टप्पा खाकर बाउंड्री पार! ${bats} का नजाकत भरा चौका!`,
+        mr: `क्षेत्ररक्षकाच्या डोक्यावरून चेंडू थेट सीमारेषेला धडकला! ${bats} चा देखणा चौकार!`
+      }
     ];
 
+    // Sixes (6s)
     const sixes = [
-      `BOOM! That is massive! ${bats} launches ${bowl} deep over mid-wicket into the nearby street! SIX!`,
-      `Out of the stadium, out of the park! What a phenomenal hit! Absolute power for SIX!`,
-      `A towering sixer! High, deep, and handsome! ${bats} is at his absolute devastating best!`,
-      `CRUNCHED! Clean as a whistle, sailed over the fence with yards to spare! That's a gully classic!`
+      {
+        en: `BOOM! That is massive! ${bats} launches ${bowl} deep over mid-wicket into the nearby street! SIX!`,
+        hi: `गगनचुंबी छक्का! ${bats} ने ${bowl} की गेंद को सीधे मैदान के बाहर दर्शकों के बीच भेजा! ६ रन!`,
+        mr: `उत्तुंग षटकार! ${bats} ने ${bowl} च्या चेंडूवर तुफानी प्रहार करत चेंडू थेट मैदानाबाहेर भिरकावला! ६ धावा!`
+      },
+      {
+        en: `Out of the park! What a phenomenal hit! Absolute power for SIX!`,
+        hi: `मैदान के बाहर! क्या लाजवाब शॉट है! ताकत और टाइमिंग का बेहतरीन संगम, छक्का!`,
+        mr: `मैदानाबाहेर थेट चेंडू! प्रचंड शक्तीशाली प्रहार आणि दिमाखदार षटकार!`
+      },
+      {
+        en: `A towering sixer! High, deep, and handsome! ${bats} is at his absolute devastating best!`,
+        hi: `आसमान छूता हुआ छक्का! गेंद हवा में तैरती हुई दर्शकों में गिरी! कमाल का सिक्सर!`,
+        mr: `आकाशाला गवसणी घालणारा षटकार! प्रेक्षकांमध्ये प्रचंड जल्लोष, ${bats} चा अविश्वसनीय सिक्सर!`
+      }
     ];
 
+    // Wickets
     const wickets = [
-      `OUT! ABSOLUTE DRAMA! ${bats} is clean bowled! ${bowl} spins a web and breaks the timber!`,
-      `GOT 'EM! A thick edge taken safely by the keeper! ${bats} has to make the long walk back!`,
-      `GONE! In the air and a magnificent, diving catch in the deep! What a stellar breakthrough!`,
-      `OUT! A direct hit at the bowler's end and ${bats} is caught well short of the crease! Brilliant run out!`,
-      `TRAPPED! Loud appeal for LBW and the umpire matches it with a raised finger! Absolutely plumb!`
+      {
+        en: `OUT! ABSOLUTE DRAMA! ${bats} is clean bowled! ${bowl} spins a web and breaks the timber!`,
+        hi: `आउट! बड़ा ड्रामा! ${bowl} की जादुई गेंद पर ${bats} क्लीन बोल्ड! डंडे बिखर गए!`,
+        mr: `आऊट! मोठा धक्का! ${bowl} च्या भेदक चेंडूवर ${bats} चा त्रिफळा उडाला! तंबूत परतावे लागेल!`
+      },
+      {
+        en: `GOT 'EM! A thick edge taken safely by the keeper! ${bats} has to make the long walk back!`,
+        hi: `विकेट! बल्ले का किनारा लगा और विकेटकीपर ने आसान कैच लपका! ${bats} पवेलियन लौटते हुए!`,
+        mr: `बाद! चेंडू बॅटची कड घेऊन थेट यष्टिरक्षकाच्या हातात! ${bats} बाद होऊन तंबूकडे रवाना!`
+      },
+      {
+        en: `GONE! In the air and a magnificent, diving catch in the deep! What a stellar breakthrough!`,
+        hi: `गया बल्लेबाज! हवा में गेंद और बाउंड्री पर गोता लगाकर शानदार कैच! बहुत बड़ी सफलता!`,
+        mr: `बाद! हवेत उडालेला चेंडू आणि सीमारेषेवर जबरदस्त झेल! क्षेत्ररक्षकाची अप्रतिम कामगिरी!`
+      },
+      {
+        en: `TRAPPED! Loud appeal for LBW and the umpire matches it with a raised finger! Plumb!`,
+        hi: `एलबीडब्ल्यू आउट! जोरदार अपील और अंपायर की उंगली हवा में! बल्लेबाज पूरी तरह से आउट!`,
+        mr: `पायचीत बाद! जोरदार अपील आणि पंचांची बोटे वर! फलंदाजाला माघारी परतावेच लागेल!`
+      }
     ];
 
+    // Extras
     const extras = [
-      `Wide ball! ${bowl} trying to bowl too fast and loses control down the leg side.`,
-      `Over-the-line! No-ball declared! Free-hit loading for ${bats}!`,
-      `Wide ball! A bit too wide outside off-stump, standard extra conceded.`,
-      `Bye runs conceded! Slipped past both the batsman and the keeper for an extra.`
+      {
+        en: `Wide ball! ${bowl} loses control down the leg side, extra conceded.`,
+        hi: `वाइड गेंद! ${bowl} लेग स्टंप की दिशा से भटके, अंपायर का इशारा अतिरिक्त रन का!`,
+        mr: `वाईड चेंडू! ${bowl} ची दिशा भरकटली, पंचांनी हात पसरवून अतिरिक्त धावेचा इशारा केला!`
+      },
+      {
+        en: `Over-the-line! No-ball declared! Free-hit loading for ${bats}!`,
+        hi: `कदम सीमा रेखा से बाहर! नो-बॉल करार! अब अगली गेंद पर फ्री-हिट!`,
+        mr: `रेषेबाहेर पाय! नो बॉल घोषित! आता फलंदाजाला पुढच्या चेंडूवर फ्री हिट मिळणार!`
+      }
     ];
 
-    // Priority logic matching
+    const pick = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
+
     const oLower = (originalDesc || '').toLowerCase();
     if (type === 'wicket' || oLower.includes('out') || oLower.includes('wkt') || oLower.includes('gone') || oLower.includes('bowled')) {
-      const baseWkt = wickets[Math.floor(Math.random() * wickets.length)];
+      const base = pick(wickets);
       if (newBatsmanName) {
-        return `${baseWkt} After wicket fell, ${newBatsmanName} new batsman come on crease.`;
+        return {
+          en: `${base.en} After wicket fell, ${newBatsmanName} new batsman come on crease.`,
+          hi: `${base.hi} विकेट गिरने के बाद, ${newBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`,
+          mr: `${base.mr} विकेट पडल्यानंतर, ${newBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
+        };
       }
-      return baseWkt;
+      return base;
     }
     if (type === 'boundary' || val === 4 || oLower.includes('four') || oLower.includes('boundary')) {
-      return boundaries[Math.floor(Math.random() * boundaries.length)];
+      return pick(boundaries);
     }
     if (val === 6 || oLower.includes('six')) {
-      return sixes[Math.floor(Math.random() * sixes.length)];
+      return pick(sixes);
     }
     if (val === 1) {
-      return singles[Math.floor(Math.random() * singles.length)];
+      return pick(singles);
     }
     if (val === 2) {
-      return doubles[Math.floor(Math.random() * doubles.length)];
+      return pick(doubles);
     }
     if (type === 'extra' || extraType || oLower.includes('wide') || oLower.includes('no ball') || oLower.includes('free hit')) {
-      return extras[Math.floor(Math.random() * extras.length)];
+      return pick(extras);
     }
     if (val === 0) {
-      return dots[Math.floor(Math.random() * dots.length)];
+      return pick(dots);
     }
 
-    return originalDesc || "A beautiful ball delivered, keeping the tension sky-high!";
+    const defaultEn = originalDesc || "A beautiful ball delivered, keeping the tension sky-high!";
+    return {
+      en: defaultEn,
+      hi: `${bowl} ने ${bats} को गेंद फेंकी, रोमांच अपने चरम पर!`,
+      mr: `${bowl} ने ${bats} ला सुरेख चेंडू टाकला, मैदानात सामना रंगतदार स्थितीत!`
+    };
+  }
+
+  function getGullyCommentaryFallback(
+    event: any,
+    batsmanName: string,
+    bowlerName: string,
+    originalDesc: string,
+    newBatsmanName?: string,
+    contextualTone?: string,
+    specialTrigger?: any
+  ): string {
+    return getGullyCommentaryMultilingual(event, batsmanName, bowlerName, originalDesc, newBatsmanName, contextualTone, specialTrigger).en;
   }
 
   // AI Cricket Commentary Generator Endpoint (supports both ball-by-ball match deliveries & auction updates)
   app.post("/api/cricket/commentary", async (req, res) => {
     console.log("AI Cricket Commentary request received");
-    const { matchState, event, batsman, bowler, originalDescription, eventType, eventData, voiceStyle, additionalContext, newBatsmanName: reqNewBat } = req.body;
+    const { 
+      matchState, 
+      event, 
+      batsman, 
+      bowler, 
+      originalDescription, 
+      eventType, 
+      eventData, 
+      voiceStyle, 
+      additionalContext, 
+      newBatsmanName: reqNewBat, 
+      language,
+      contextualTone,
+      specialTrigger 
+    } = req.body;
+
     const incomingNewBatsman = reqNewBat || additionalContext?.newBatsmanName || '';
+    const userPreferredLang = (language === 'mr' || language === 'hi' || language === 'en') ? language : 'en';
+    const activeTone = contextualTone || additionalContext?.contextualTone || 'BALANCED_CRICKET';
 
     // Auction event commentary handling
     if (eventType) {
@@ -418,17 +649,30 @@ async function startServer() {
             apiKey,
             httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
           });
-          const prompt = `You are a charismatic cricket auctioneer and sports commentator. Generate a single energetic, punchy sentence of commentary for this auction event:
+          const prompt = `You are a charismatic cricket auctioneer and sports commentator. Generate punchy commentary for this auction event in three languages: English, Hindi (Devanagari), and Marathi (Devanagari).
 Event Type: ${eventType}
 Details: ${JSON.stringify(eventData || {})}
 Style: ${voiceStyle || 'Energetic and witty'}
-Output only the plain commentary sentence without extra labels.`;
+Return ONLY a raw JSON object with keys "en", "hi", "mr":
+{"en":"English sentence","hi":"Hindi sentence","mr":"Marathi sentence"}`;
 
           const response = await generateContentWithFallback(ai, { contents: prompt });
-          const text = (response.text || "").trim();
-          if (text) {
-            setCachedAIResponse(cacheKey, { text });
-            return res.json({ text });
+          const rawText = (response.text || "").trim();
+          const matchJson = rawText.match(/\{[\s\S]*\}/);
+          if (matchJson) {
+            const parsed = JSON.parse(matchJson[0]);
+            if (parsed.en && parsed.hi && parsed.mr) {
+              const result = {
+                text: parsed[userPreferredLang] || parsed.en,
+                translations: {
+                  en: parsed.en,
+                  hi: parsed.hi,
+                  mr: parsed.mr
+                }
+              };
+              setCachedAIResponse(cacheKey, result);
+              return res.json(result);
+            }
           }
         }
       } catch (err: any) {
@@ -436,24 +680,43 @@ Output only the plain commentary sentence without extra labels.`;
       }
 
       // Fallback for auction
-      let fallbackAuctionText = "The auction room is buzzing with anticipation as franchises evaluate their squad balance!";
+      let fallbackAuctionEn = "The auction room is buzzing with anticipation as franchises evaluate their squad balance!";
+      let fallbackAuctionHi = "नीलामी कक्ष में जबरदस्त उत्साह है क्योंकि फ्रेंचाइजी अपनी टीम की रणनीति बना रही हैं!";
+      let fallbackAuctionMr = "लिलावाच्या हॉलमध्ये प्रचंड उत्सुकता आहे, सर्व संघ आपल्या रणनीतीनुसार बोली लावत आहेत!";
+
       if (eventType === 'BID_PLACED') {
-        fallbackAuctionText = `Aggressive bidding war ignited for ${eventData?.playerName || 'the player'}! The price soars to ₹${(eventData?.amount || 0).toLocaleString('en-IN')}!`;
+        fallbackAuctionEn = `Aggressive bidding war ignited for ${eventData?.playerName || 'the player'}! The price soars to ₹${(eventData?.amount || 0).toLocaleString('en-IN')}!`;
+        fallbackAuctionHi = `${eventData?.playerName || 'खिलाड़ी'} के लिए जबरदस्त बोली का मुकाबला! कीमत ₹${(eventData?.amount || 0).toLocaleString('en-IN')} तक पहुंची!`;
+        fallbackAuctionMr = `${eventData?.playerName || 'खेळाडू'} साठी चुरशीची बोली सुरू! किंमत ₹${(eventData?.amount || 0).toLocaleString('en-IN')} वर पोहोचली!`;
       } else if (eventType === 'PLAYER_SOLD') {
-        fallbackAuctionText = `SOLD! ${eventData?.playerName || 'The player'} joins ${eventData?.teamName || 'the franchise'} for a sensational ₹${(eventData?.amount || 0).toLocaleString('en-IN')}!`;
+        fallbackAuctionEn = `SOLD! ${eventData?.playerName || 'The player'} joins ${eventData?.teamName || 'the franchise'} for a sensational ₹${(eventData?.amount || 0).toLocaleString('en-IN')}!`;
+        fallbackAuctionHi = `बिक गए! ${eventData?.playerName || 'खिलाड़ी'} ₹${(eventData?.amount || 0).toLocaleString('en-IN')} में ${eventData?.teamName || 'टीम'} में शामिल हुए!`;
+        fallbackAuctionMr = `विक्री झाली! ${eventData?.playerName || 'खेळाडू'} ₹${(eventData?.amount || 0).toLocaleString('en-IN')} मध्ये ${eventData?.teamName || 'संघात'} सामील!`;
       } else if (eventType === 'PLAYER_UNSOLD') {
-        fallbackAuctionText = `Unsold for now! ${eventData?.playerName || 'The player'} goes into the accelerated round pool.`;
+        fallbackAuctionEn = `Unsold for now! ${eventData?.playerName || 'The player'} goes into the accelerated round pool.`;
+        fallbackAuctionHi = `फिलहाल अनसोल्ड! ${eventData?.playerName || 'खिलाड़ी'} अगले त्वरित राउंड में जाएंगे.`;
+        fallbackAuctionMr = `सध्या अनसोल्ड! ${eventData?.playerName || 'खेळाडू'} पुढील फेरीमध्ये जातील.`;
       }
-      return res.json({ text: fallbackAuctionText });
+      return res.json({
+        text: userPreferredLang === 'mr' ? fallbackAuctionMr : userPreferredLang === 'hi' ? fallbackAuctionHi : fallbackAuctionEn,
+        translations: {
+          en: fallbackAuctionEn,
+          hi: fallbackAuctionHi,
+          mr: fallbackAuctionMr
+        }
+      });
     }
 
     // Match ball-by-ball commentary
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        console.warn("GEMINI_API_KEY missing. Handing over to local gully commentator.");
-        const fallbackText = getGullyCommentaryFallback(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman);
-        return res.json({ text: fallbackText });
+        console.warn("GEMINI_API_KEY missing. Handing over to local multilingual gully commentator.");
+        const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger);
+        return res.json({
+          text: fallback[userPreferredLang] || fallback.en,
+          translations: fallback
+        });
       }
 
       const ai = new GoogleGenAI({ 
@@ -474,9 +737,41 @@ Output only the plain commentary sentence without extra labels.`;
         ? recentCommentariesList.map((desc: string) => `- "${desc}"`).join("\n")
         : "None";
 
+      // Contextual Tone Directive for the AI Commentator
+      let toneDirective = "";
+      if (activeTone === 'HIGH_THRILLER') {
+        toneDirective = `CONTEXTUAL TONE: HIGH THRILLER!
+- Match Situation: Final overs with high required run rate or razor-thin winning margin!
+- STYLE DIRECTIVE: Fast-paced, breathless, exclamation-heavy text! Emphasize the run rate pressure, the crowd tension, edge-of-seat drama, heartbeats in the street, and life-or-death gully cricket intensity!`;
+      } else if (activeTone === 'ANALYTICAL_DRY') {
+        toneDirective = `CONTEXTUAL TONE: ANALYTICAL & TACTICAL!
+- Match Situation: Middle overs consolidation phase.
+- STYLE DIRECTIVE: Astute, tactical, and analytical. Explain field placements (e.g. deep covers, ring field, mid-wicket, fine leg), line-and-length discipline, bowler traps, strike rotation, and run containment strategies in depth!`;
+      } else if (activeTone === 'CARNAGE_EXPLOSIVE') {
+        toneDirective = `CONTEXTUAL TONE: EXPLOSIVE CARNAGE!
+- STYLE DIRECTIVE: Electrifying, thunderous, and awe-struck at the brutal power-hitting and boundaries raining down onto rooftops!`;
+      } else if (activeTone === 'TENSE_COLLAPSE') {
+        toneDirective = `CONTEXTUAL TONE: TENSE PRESSURE / REBUILDING!
+- STYLE DIRECTIVE: Solemn, cautious, and focused on survival, close-in catchers, and the high tension of a batting collapse.`;
+      } else {
+        toneDirective = `CONTEXTUAL TONE: BALANCED & VIBRANT gully cricket commentary.`;
+      }
+
+      // Special Trigger Directive (Wicket, 50, 100, Hat-trick)
+      let specialDirective = "";
+      if (specialTrigger) {
+        specialDirective = `MAJOR ACHIEVEMENT SPECIAL TRIGGER:
+- Type: ${specialTrigger.type}
+- Details: ${JSON.stringify(specialTrigger)}
+- CRITICAL: Provide a highly enthusiastic, detailed breakdown of the achievement, explicitly including the batter's total runs, balls faced, boundaries, strike rate, or bowler's hat-trick feat!`;
+      }
+
       const prompt = `
-        You are an exceptionally humorous, creative, and energetic cricket commentator (such as Harsha Bhogle, Ravi Shastri, or a passionate local street/gully cricket organizer).
-        Your mission is to write a unique, descriptive, and fun entry for the ongoing ball.
+        You are an exceptionally humorous, creative, and energetic cricket commentator for local gully & tournament matches.
+        Generate live commentary for the ongoing ball delivery in THREE languages: English, Hindi, and Marathi.
+
+        ${toneDirective}
+        ${specialDirective}
 
         MATCH EVENT SUMMARY:
         - Ball event category: ${event?.type || 'unknown'}
@@ -485,33 +780,68 @@ Output only the plain commentary sentence without extra labels.`;
         - Batsman facing delivery: ${batsman?.name || 'Batsman'}
         - Bowler delivering: ${bowler?.name || 'Bowler'}
         - Basic description: "${originalDescription || ''}"
-        ${incomingNewBatsman ? `- Incoming new batsman: ${incomingNewBatsman} (Crucial note: announce: "After wicket fell, ${incomingNewBatsman} new batsman come on crease.")` : ''}
+        ${incomingNewBatsman ? `- Incoming new batsman: ${incomingNewBatsman} (Crucial note: announce: "After wicket fell, ${incomingNewBatsman} new batsman come on crease" / हिंदी: "विकेट गिरने के बाद, ${incomingNewBatsman} नए बल्लेबाज क्रीज पर आए हैं." / मराठी: "विकेट पडल्यानंतर, ${incomingNewBatsman} नवीन फलंदाज क्रीजवर आले आहेत.")` : ''}
 
         CURRENT INNINGS STATE:
         - Score: ${matchState?.runs ?? 0}/${matchState?.wickets ?? 0}
         - Balls Bowled: ${matchState?.ballsBowled ?? 0}
         - Target Score: ${matchState?.targetRuns ?? 'N/A'}
 
-        RECENT PREVIOUS DELIVERIES COMMENTARY (DO NOT USE SIMILAR SENTENCE STRUCTURES OR WORDS):
+        RECENT PREVIOUS DELIVERIES COMMENTARY:
         ${previousCommentariesText}
 
-        CRITICAL AND ABSOLUTE REQUIREMENTS:
-        - Return EXACTLY one or two short, highly vivid, punchy sentences of commentary.
-        - NEVER repeat the exact same verbs, metaphors, or phrases used in the recent previous commentaries shown above.
-        - Ensure extreme variance: use cricket slang, crowd descriptions, local street tournament humor ("What a shot!", "Spun a web!", "Treat to watch!", "Absolute gold!", "Oh my goodness, clean as a whistle!"), and rich adjectives.
-        - Keep comments strictly relevant to the current delivery's event category (e.g. if dot ball, don't say they scored; if wicket, make sure to sound shocked or dramatic!).
-        - Output ONLY the plain text commentary. No markdown formatting, no surrounding quotation marks, and no introductory labeling text.
+        CRITICAL OUTPUT FORMAT:
+        Return ONLY a raw JSON object with exactly three keys: "en", "hi", and "mr".
+        - "en": Energetic English cricket commentary adhering strictly to the Contextual Tone (1-2 sentences).
+        - "hi": Authentic, lively Hindi cricket commentary in Devanagari script adhering to the Contextual Tone (1-2 sentences).
+        - "mr": Energetic, authentic Marathi cricket commentary in Devanagari script (उदा. चौकार, षटकार, बाद, सुरेख मारा, थरार) adhering to the Contextual Tone (1-2 sentences).
+        No surrounding markdown code blocks, no backticks, no explanations.
+        Example:
+        {"en":"Smoked over cover for a sensational FOUR!","hi":"कवर के ऊपर से शानदार चौका!","mr":"कव्हरच्या डोक्यावरून सुरेख फटका आणि खणखणीत चौकार!"}
       `;
 
       const response = await generateContentWithFallback(ai, {
         contents: prompt,
       });
 
-      res.json({ text: (response.text || "").trim() || originalDescription });
+      const raw = (response.text || "").trim();
+      const matchJson = raw.match(/\{[\s\S]*\}/);
+      if (matchJson) {
+        try {
+          const parsed = JSON.parse(matchJson[0]);
+          if (parsed.en && parsed.hi && parsed.mr) {
+            return res.json({
+              text: parsed[userPreferredLang] || parsed.en,
+              translations: {
+                en: parsed.en.trim(),
+                hi: parsed.hi.trim(),
+                mr: parsed.mr.trim()
+              }
+            });
+          }
+        } catch {
+          // fallback to standard text extraction
+        }
+      }
+
+      // If single language returned or couldn't parse JSON
+      const plainText = raw.replace(/^\{|\}$/g, '').trim();
+      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger);
+      res.json({
+        text: plainText || fallback[userPreferredLang] || fallback.en,
+        translations: {
+          en: plainText || fallback.en,
+          hi: fallback.hi,
+          mr: fallback.mr
+        }
+      });
     } catch (error: any) {
       console.warn("Gemini Commentary API Quota limit or error triggered. Reverting to local gully commentator:", error.message || error);
-      const fallbackText = getGullyCommentaryFallback(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman);
-      res.json({ text: fallbackText });
+      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger);
+      res.json({
+        text: fallback[userPreferredLang] || fallback.en,
+        translations: fallback
+      });
     }
   });
 

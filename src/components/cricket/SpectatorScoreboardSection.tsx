@@ -46,6 +46,12 @@ import { PlayerRegistrationForm } from './PlayerRegistrationForm';
 import { LiveStandingsSummaryWidget } from './LiveStandingsSummaryWidget';
 import { ConfettiCelebration } from './ConfettiCelebration';
 import { useSiteSettings } from '../../hooks/useCMS';
+import {
+  CommentaryLanguage,
+  useCommentaryLanguage,
+  getCommentaryText,
+  CommentaryLanguageSelector
+} from './modules/commentaryLanguage';
 
 // Struct definitions matching those in CricketScoreboard.tsx
 interface Batsman {
@@ -107,6 +113,11 @@ interface Innings {
     description: string;
     type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone';
     soundWave?: boolean;
+    translations?: {
+      en?: string;
+      hi?: string;
+      mr?: string;
+    };
   }[];
   history?: BallProgress[];
 }
@@ -799,6 +810,7 @@ export const SpectatorScoreboardSection = ({
   const [chartMetric, setChartMetric] = useState<'runs' | 'runrate' | 'winprob'>('runs');
   const [commentaryFilter, setCommentaryFilter] = useState<'all' | 'boundary' | 'wicket' | 'extra'>('all');
   const [commentarySearch, setCommentarySearch] = useState('');
+  const [spectatorCommentaryLang, setSpectatorCommentaryLang] = useCommentaryLanguage('en');
   const [selectedScorecardInnings, setSelectedScorecardInnings] = useState<1 | 2>(1);
   const [historyResultFilter, setHistoryResultFilter] = useState<'all' | 'wins' | 'ties'>('all');
   const [toastNotification, setToastNotification] = useState<string | null>(null);
@@ -3458,12 +3470,32 @@ export const SpectatorScoreboardSection = ({
                   className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-md flex flex-col justify-between"
                 >
                   <div className="flex-1 flex flex-col min-h-0">
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-50 dark:border-slate-800/80 mb-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-50 dark:border-slate-800/80 mb-4 gap-2 flex-wrap">
                       <div>
                         <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest block mb-0.5 animate-pulse">🔴 Live Commentary</span>
                         <h4 className="text-base font-black text-slate-800 dark:text-slate-100 font-sans">Ball-by-Ball Feed</h4>
                       </div>
-                      <span className="text-[9px] font-mono text-slate-400 font-bold bg-slate-50 dark:bg-slate-950 px-2.5 py-0.5 rounded border border-slate-200/50">REAL-TIME</span>
+                      <div className="flex items-center gap-1.5">
+                        {/* Compact language switcher for user */}
+                        <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                          {(['mr', 'hi', 'en'] as const).map(langId => (
+                            <button
+                              key={langId}
+                              type="button"
+                              onClick={() => setSpectatorCommentaryLang(langId)}
+                              className={`px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all border-none cursor-pointer ${
+                                spectatorCommentaryLang === langId
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
+                              }`}
+                              title={langId === 'mr' ? 'मराठी कॉमेंट्री' : langId === 'hi' ? 'हिंदी कमेंट्री' : 'English Commentary'}
+                            >
+                              {langId === 'mr' ? '🚩 मराठी' : langId === 'hi' ? '🇮🇳 हिंदी' : '🌐 EN'}
+                            </button>
+                          ))}
+                        </div>
+                        <span className="text-[9px] font-mono text-slate-400 font-bold bg-slate-50 dark:bg-slate-950 px-2.5 py-0.5 rounded border border-slate-200/50 hidden sm:inline-block">REAL-TIME</span>
+                      </div>
                     </div>
 
                     <div className="space-y-2.5 max-h-[17.5rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
@@ -3479,6 +3511,7 @@ export const SpectatorScoreboardSection = ({
                           const isBnd = comm.type === 'boundary';
                           const isExt = comm.type === 'extra';
                           const isMls = comm.type === 'milestone';
+                          const displayText = getCommentaryText(comm, spectatorCommentaryLang);
 
                           return (
                             <div 
@@ -3501,7 +3534,7 @@ export const SpectatorScoreboardSection = ({
                                   </span>
                                 )}
                               </div>
-                              <p className="leading-relaxed font-semibold">{comm.description}</p>
+                              <p className="leading-relaxed font-semibold">{displayText}</p>
                             </div>
                           );
                         });
@@ -4862,26 +4895,53 @@ export const SpectatorScoreboardSection = ({
                         </div>
                       </div>
 
-                      {/* Filter tabs by category */}
-                      <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 dark:bg-slate-950 rounded-xl w-full md:w-max border border-slate-200/50 dark:border-slate-850">
-                        {[
-                          { id: 'all', label: 'All Balls' },
-                          { id: 'boundary', label: '🏏 Boundaries Only' },
-                          { id: 'wicket', label: '🟥 Wickets Only' },
-                          { id: 'extra', label: '🟦 Extras Only' }
-                        ].map((btn) => (
-                          <button
-                            key={btn.id}
-                            onClick={() => setCommentaryFilter(btn.id as any)}
-                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                              commentaryFilter === btn.id 
-                                ? 'bg-white dark:bg-slate-850 text-emerald-600 dark:text-white shadow-sm' 
-                                : 'text-slate-450 dark:text-slate-400 bg-transparent hover:text-slate-700'
-                            }`}
-                          >
-                            {btn.label}
-                          </button>
-                        ))}
+                      {/* Filter tabs and Language selector */}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex flex-wrap gap-1.5 p-1 bg-slate-100 dark:bg-slate-950 rounded-xl w-full sm:w-max border border-slate-200/50 dark:border-slate-850">
+                          {[
+                            { id: 'all', label: 'All Balls' },
+                            { id: 'boundary', label: '🏏 Boundaries Only' },
+                            { id: 'wicket', label: '🟥 Wickets Only' },
+                            { id: 'extra', label: '🟦 Extras Only' }
+                          ].map((btn) => (
+                            <button
+                              key={btn.id}
+                              onClick={() => setCommentaryFilter(btn.id as any)}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                                commentaryFilter === btn.id 
+                                  ? 'bg-white dark:bg-slate-850 text-emerald-600 dark:text-white shadow-sm' 
+                                  : 'text-slate-450 dark:text-slate-400 bg-transparent hover:text-slate-700'
+                              }`}
+                            >
+                              {btn.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* User Language Option: Marathi, Hindi, English */}
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/50 dark:border-slate-850">
+                          <span className="text-[9px] font-black uppercase text-slate-500 dark:text-slate-400 px-1.5">
+                            Language:
+                          </span>
+                          {[
+                            { id: 'mr', label: '🚩 मराठी', name: 'Marathi' },
+                            { id: 'hi', label: '🇮🇳 हिंदी', name: 'Hindi' },
+                            { id: 'en', label: '🌐 English', name: 'English' }
+                          ].map((l) => (
+                            <button
+                              key={l.id}
+                              type="button"
+                              onClick={() => setSpectatorCommentaryLang(l.id as any)}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                                spectatorCommentaryLang === l.id
+                                  ? 'bg-emerald-600 text-white shadow-sm'
+                                  : 'text-slate-500 dark:text-slate-400 bg-transparent hover:text-slate-700 dark:hover:text-slate-200'
+                              }`}
+                            >
+                              {l.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       {/* Feeds stream logs */}
@@ -4900,7 +4960,11 @@ export const SpectatorScoreboardSection = ({
 
                           if (commentarySearch.trim()) {
                             const query = commentarySearch.toLowerCase().trim();
-                            list = list.filter(c => (c.description || '').toLowerCase().includes(query) || c.overBall.includes(query));
+                            list = list.filter(c => {
+                              const localizedText = getCommentaryText(c, spectatorCommentaryLang).toLowerCase();
+                              const origText = (c.description || '').toLowerCase();
+                              return localizedText.includes(query) || origText.includes(query) || c.overBall.includes(query);
+                            });
                           }
 
                           if (list.length === 0) {
@@ -4914,6 +4978,7 @@ export const SpectatorScoreboardSection = ({
                             const isBnd = comm.type === 'boundary';
                             const isExt = comm.type === 'extra';
                             const isMls = comm.type === 'milestone';
+                            const displayText = getCommentaryText(comm, spectatorCommentaryLang);
 
                             return (
                               <div 
@@ -4944,7 +5009,7 @@ export const SpectatorScoreboardSection = ({
                                     {isMls && <span className="bg-purple-500 text-white px-2 py-0.5 rounded shadow-sm">⭐ MILESTONE</span>}
                                   </div>
                                 </div>
-                                <p className="text-xs tracking-wide leading-relaxed font-sans">{comm.description}</p>
+                                <p className="text-xs tracking-wide leading-relaxed font-sans">{displayText}</p>
                               </div>
                             );
                           });
