@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, RotateCcw, AlertCircle, ShoppingBag, Plus, Sparkles, BookOpen, Clock, 
   ArrowRight, Users, Play, Undo, Calendar, Trash2, ArrowLeftRight, Check,
-  ChevronRight, Smile, Settings, Volume2, VolumeX, Edit, ChevronDown, ChevronUp, Sun, Moon, Info, HelpCircle,
+  ChevronRight, Smile, Settings, Volume2, VolumeX, Edit, Edit3, ChevronDown, ChevronUp, Sun, Moon, Info, HelpCircle,
   Share2, FileDown, PlusCircle, BarChart3, Radio, Flame, ShieldAlert, Award, Zap, Lock, UserPlus,
   Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2
 } from 'lucide-react';
@@ -1042,7 +1042,22 @@ export const CricketScoreboard: React.FC = () => {
   // Innings locking, mobile responsive tabs, and scorecard switches
   const [isInningsLocked, setIsInningsLocked] = useState<boolean>(false);
   const [activeMobileTab, setActiveMobileTab] = useState<'scorer' | 'stats' | 'feed'>('scorer');
-  const [activeScorecardTab, setActiveScorecardTab] = useState<'bat' | 'bowl'>('bat');
+  const [activeScorecardTab, setActiveScorecardTab] = useState<'bat' | 'bowl' | 'fow'>('bat');
+
+  // Manual Fall of Wickets entry/adjustment modal state
+  const [showManualFoWModal, setShowManualFoWModal] = useState(false);
+  const [manualFoWData, setManualFoWData] = useState<{
+    wicketNo: number;
+    score: number;
+    batsmanName: string;
+    oversList: string;
+    editIndex?: number;
+  }>({
+    wicketNo: 1,
+    score: 0,
+    batsmanName: '',
+    oversList: '0.1'
+  });
 
   // Simple commentary dialog text
   const [commentaryInput, setCommentaryInput] = useState('');
@@ -2197,7 +2212,7 @@ export const CricketScoreboard: React.FC = () => {
               id: `c-${Date.now()}`,
               overBall: '0.0',
               description: `Match Launched via GullyScore Digital Toss Simulator! ${coinTossWinTeam} won the toss and elected to ${choice} first at ${venueName}.`,
-              type: 'normal'
+              type: 'milestone'
             }
           ],
           history: [
@@ -2438,7 +2453,7 @@ export const CricketScoreboard: React.FC = () => {
       currentBowlerIndex: 0,
       fallOfWickets: [],
       commentaryList: [
-        { id: `c-${Date.now()}`, overBall: '0.0', description: `Match Started! ${batFirstTeam} won the toss and elected to ${tossChoice} first.`, type: 'normal' }
+        { id: `c-${Date.now()}`, overBall: '0.0', description: `Match Started! ${batFirstTeam} won the toss and elected to ${tossChoice} first.`, type: 'milestone' }
       ],
       history: [
         { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -3244,6 +3259,81 @@ export const CricketScoreboard: React.FC = () => {
     }
   };
 
+  // Helper to cleanly open wicket modal with current crease context
+  const openWicketModal = (who: 'striker' | 'non-striker' = 'striker') => {
+    setActiveAnimation('wicket');
+    setOutBatsmanWho(who);
+    if (currentInnings) {
+      const activeBowlerName = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name || '';
+      setWicketBowlerName(activeBowlerName);
+      setWicketHowOutDetails('Bowled');
+      setWicketType('Bowled');
+      setWicketFielderName('');
+      setWicketAdditionalDetails('');
+      setNewBatsmanName('');
+      setWicketValidationErr('');
+    }
+    setShowWicketModal(true);
+  };
+
+  // Manual Fall of Wickets entry or adjustment
+  const handleSaveManualFoW = () => {
+    if (!currentInnings) return;
+    if (!manualFoWData.batsmanName.trim()) {
+      showNotification('Dismissed batsman name is required', 'alert');
+      return;
+    }
+    const currentFoW = [...(currentInnings.fallOfWickets || [])];
+    const newEntry = {
+      wicketNo: manualFoWData.wicketNo,
+      score: Number(manualFoWData.score) || 0,
+      batsmanName: manualFoWData.batsmanName.trim(),
+      oversList: manualFoWData.oversList.trim() || formatOvers(currentInnings.ballsBowled)
+    };
+
+    if (manualFoWData.editIndex !== undefined && manualFoWData.editIndex >= 0 && manualFoWData.editIndex < currentFoW.length) {
+      currentFoW[manualFoWData.editIndex] = newEntry;
+    } else {
+      currentFoW.push(newEntry);
+    }
+    currentFoW.sort((a, b) => a.wicketNo - b.wicketNo);
+
+    syncMatch(prev => {
+      const innKey = prev.currentInningsNum === 1 ? 'innings1' : 'innings2';
+      const inn = prev[innKey];
+      if (!inn) return prev;
+      return {
+        ...prev,
+        [innKey]: {
+          ...inn,
+          fallOfWickets: currentFoW
+        }
+      };
+    });
+
+    showNotification(`Fall of Wicket #${newEntry.wicketNo} saved successfully!`, 'success');
+    setShowManualFoWModal(false);
+  };
+
+  const handleDeleteFoW = (idx: number) => {
+    if (!currentInnings) return;
+    const currentFoW = [...(currentInnings.fallOfWickets || [])];
+    currentFoW.splice(idx, 1);
+    syncMatch(prev => {
+      const innKey = prev.currentInningsNum === 1 ? 'innings1' : 'innings2';
+      const inn = prev[innKey];
+      if (!inn) return prev;
+      return {
+        ...prev,
+        [innKey]: {
+          ...inn,
+          fallOfWickets: currentFoW
+        }
+      };
+    });
+    showNotification('Fall of Wicket entry removed.', 'info');
+  };
+
   // Advanced Wicket Handler Modal Actions
   const handleWicketScore = () => {
     if (!currentInnings) return;
@@ -3544,7 +3634,7 @@ export const CricketScoreboard: React.FC = () => {
           currentBowlerIndex: 0,
           fallOfWickets: [],
           commentaryList: [
-            { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings 2 Started! ${inn1.bowlingTeam} needs ${targetRunsValue} runs in ${modifiedState.oversLimit} overs to win. Run Rate Required: ${((targetRunsValue / maxBalls) * 6).toFixed(2)} RPO.`, type: 'normal' }
+            { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings 2 Started! ${inn1.bowlingTeam} needs ${targetRunsValue} runs in ${modifiedState.oversLimit} overs to win. Run Rate Required: ${((targetRunsValue / maxBalls) * 6).toFixed(2)} RPO.`, type: 'milestone' }
           ],
           history: [
             { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -3638,7 +3728,7 @@ export const CricketScoreboard: React.FC = () => {
         currentBowlerIndex: 0,
         fallOfWickets: [],
         commentaryList: [
-          { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${inn1.bowlingTeam} needs ${targetRunsValue} runs to win.`, type: 'normal' }
+          { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${inn1.bowlingTeam} needs ${targetRunsValue} runs to win.`, type: 'milestone' }
         ],
         history: [
           { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -4049,7 +4139,7 @@ export const CricketScoreboard: React.FC = () => {
       currentBowlerIndex: 0,
       fallOfWickets: [],
       commentaryList: [
-        { id: `c-${Date.now()}`, overBall: '0.0', description: `Draft Match Created: ${teamA.trim()} vs ${teamB.trim()}`, type: 'normal' }
+        { id: `c-${Date.now()}`, overBall: '0.0', description: `Draft Match Created: ${teamA.trim()} vs ${teamB.trim()}`, type: 'milestone' }
       ],
       history: [
         { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -6865,8 +6955,30 @@ export const CricketScoreboard: React.FC = () => {
                   >
                     Bowling Card
                   </button>
+                  <button
+                    onClick={() => setActiveScorecardTab('fow')}
+                    className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
+                      activeScorecardTab === 'fow' ? 'bg-rose-600 text-white font-black' : 'text-slate-400 bg-transparent'
+                    }`}
+                  >
+                    Fall of Wickets {currentInnings.fallOfWickets?.length > 0 ? `(${currentInnings.fallOfWickets.length})` : ''}
+                  </button>
                 </div>
-                <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-widest">{activeScorecardTab === 'bat' ? 'BATSMAN REGISTRY' : 'BOWLER FIGURES'}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-widest">
+                    {activeScorecardTab === 'bat' ? 'BATSMAN REGISTRY' : activeScorecardTab === 'bowl' ? 'BOWLER FIGURES' : 'FALL OF WICKETS'}
+                  </span>
+                  {activeScorecardTab === 'fow' && (
+                    <button
+                      onClick={() => openWicketModal('striker')}
+                      disabled={isScoringDisabled}
+                      className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8px] font-black uppercase tracking-wider border-none cursor-pointer transition-all flex items-center gap-1 shadow"
+                    >
+                      <PlusCircle size={10} />
+                      Add Wicket
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Scrollable grid container inside 100vh bounds */}
@@ -6928,7 +7040,7 @@ export const CricketScoreboard: React.FC = () => {
                       </tr>
                     </tfoot>
                   </table>
-                ) : (
+                ) : activeScorecardTab === 'bowl' ? (
                   <table className="w-full text-left text-slate-400 font-sans">
                     <thead>
                       <tr className="border-b border-slate-850 text-[8px] font-black uppercase tracking-widest text-slate-500 text-center">
@@ -6967,6 +7079,113 @@ export const CricketScoreboard: React.FC = () => {
                       })}
                     </tbody>
                   </table>
+                ) : (
+                  /* Fall of Wickets Card View */
+                  <div className="space-y-2 font-sans">
+                    <div className="flex items-center justify-between px-1 pb-1 border-b border-slate-800">
+                      <span className="text-[9px] font-black uppercase text-slate-400">Chronological Dismissals</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextWktNo = (currentInnings.fallOfWickets?.length || 0) + 1;
+                            setManualFoWData({
+                              wicketNo: nextWktNo,
+                              score: currentInnings.runs,
+                              batsmanName: currentInnings.batsmen[currentInnings.strikerIndex]?.name || '',
+                              oversList: formatOvers(currentInnings.ballsBowled)
+                            });
+                            setShowManualFoWModal(true);
+                          }}
+                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[8px] font-bold uppercase cursor-pointer border-none"
+                        >
+                          Manual +
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openWicketModal('striker')}
+                          disabled={isScoringDisabled}
+                          className="px-2.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center gap-1 shadow"
+                        >
+                          <PlusCircle size={10} />
+                          + Add Wicket
+                        </button>
+                      </div>
+                    </div>
+
+                    {(!currentInnings.fallOfWickets || currentInnings.fallOfWickets.length === 0) ? (
+                      <div className="py-6 text-center space-y-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                          No wickets fallen yet in this innings
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => openWicketModal('striker')}
+                          disabled={isScoringDisabled}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider cursor-pointer border-none shadow transition-all inline-flex items-center gap-1"
+                        >
+                          <PlusCircle size={11} /> Record First Wicket
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {currentInnings.fallOfWickets.map((fw, idx) => (
+                          <div
+                            key={idx}
+                            className="p-2 bg-slate-950/70 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 rounded-md font-mono font-black text-[9px]">
+                                Wkt {fw.wicketNo}
+                              </span>
+                              <div>
+                                <p className="font-bold text-white text-[11px] leading-tight">{fw.batsmanName}</p>
+                                <p className="text-[9px] font-mono text-slate-400">
+                                  at <strong className="text-amber-300">{fw.score}</strong> runs • Over {fw.oversList}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManualFoWData({
+                                    wicketNo: fw.wicketNo,
+                                    score: fw.score,
+                                    batsmanName: fw.batsmanName,
+                                    oversList: fw.oversList,
+                                    editIndex: idx
+                                  });
+                                  setShowManualFoWModal(true);
+                                }}
+                                className="p-1 text-slate-400 hover:text-white bg-slate-900 rounded border-none cursor-pointer"
+                                title="Edit Fall of Wicket Entry"
+                              >
+                                <Edit size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteFoW(idx)}
+                                className="p-1 text-rose-400 hover:text-rose-300 bg-slate-900 rounded border-none cursor-pointer"
+                                title="Remove Entry"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => openWicketModal('striker')}
+                          disabled={isScoringDisabled}
+                          className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-dashed border-rose-500/40 rounded-xl text-rose-400 hover:text-rose-300 text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <PlusCircle size={12} />
+                          + Add Wicket Dismissal
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -7242,13 +7461,114 @@ export const CricketScoreboard: React.FC = () => {
                 )}
               </div>
 
-              <div className="font-sans">
+              <div className="font-sans flex flex-col sm:flex-row gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFallOfWicketModal(null);
+                    setTimeout(() => {
+                      openWicketModal('striker');
+                    }, 50);
+                  }}
+                  className="flex-1 py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <AlertCircle size={14} />
+                  + Add Next Wicket
+                </button>
                 <button
                   type="button"
                   onClick={() => setFallOfWicketModal(null)}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-md shadow-emerald-950/40 text-white"
+                  className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-md shadow-emerald-950/40 active:scale-95"
                 >
-                  Continue Scoring & Return
+                  Continue Scoring
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Manual Fall of Wickets entry & adjustment modal */}
+        {showManualFoWModal && currentInnings && (
+          <div className="fixed inset-0 z-[260] flex items-center justify-center p-4 bg-slate-950/80 select-none">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl text-white">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-base font-black uppercase text-white flex items-center gap-2">
+                    <AlertCircle size={16} className="text-rose-500" />
+                    {manualFoWData.editIndex !== undefined ? 'Edit Fall of Wicket' : 'Add Fall of Wicket Entry'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Reconcile wicket sequence, score & over details</p>
+                </div>
+                <button
+                  onClick={() => setShowManualFoWModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border-none cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3 font-sans text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Wicket #</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={11}
+                      value={manualFoWData.wicketNo}
+                      onChange={(e) => setManualFoWData({ ...manualFoWData, wicketNo: parseInt(e.target.value) || 1 })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono font-bold outline-none focus:border-rose-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Score at Dismissal</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={manualFoWData.score}
+                      onChange={(e) => setManualFoWData({ ...manualFoWData, score: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono font-bold outline-none focus:border-rose-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Dismissed Batsman Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Batsman name"
+                    value={manualFoWData.batsmanName}
+                    onChange={(e) => setManualFoWData({ ...manualFoWData, batsmanName: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-bold outline-none focus:border-rose-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Over Bowled (e.g. 4.2)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 4.2"
+                    value={manualFoWData.oversList}
+                    onChange={(e) => setManualFoWData({ ...manualFoWData, oversList: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono font-bold outline-none focus:border-rose-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2 font-sans">
+                <button
+                  type="button"
+                  onClick={() => setShowManualFoWModal(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold uppercase border-none cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveManualFoW}
+                  className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase border-none cursor-pointer shadow-lg shadow-rose-900/30"
+                >
+                  Save Wicket Entry
                 </button>
               </div>
             </div>
@@ -11843,36 +12163,130 @@ export const CricketScoreboard: React.FC = () => {
 
             {/* ==================== 5. FALL OF WICKETS PROFILE ==================== */}
             <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-md">
-              <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-105 dark:border-slate-800">
-                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
-                  Fall Of Wickets Profile
-                </h4>
-                <button 
-                  onClick={handleResetMatch}
-                  className="px-4 py-2 bg-rose-50 hover:bg-rose-105 text-rose-550 border-none rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all"
-                >
-                  Discard & Exit Scoreboard
-                </button>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div>
+                  <h4 className="text-[11px] font-black uppercase text-slate-700 dark:text-slate-300 tracking-wider flex items-center gap-1.5">
+                    <AlertCircle size={14} className="text-rose-500" />
+                    Fall Of Wickets Profile {currentInnings.fallOfWickets?.length > 0 ? `(${currentInnings.fallOfWickets.length} Fallen)` : ''}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Chronological wicket tracker & dismissal sequence</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button 
+                    onClick={() => openWicketModal('striker')}
+                    disabled={isScoringDisabled}
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white border-none rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all flex items-center gap-1.5 shadow-md active:scale-95 disabled:opacity-50"
+                  >
+                    <PlusCircle size={13} />
+                    + Add Wicket Dismissal
+                  </button>
+                  <button
+                    onClick={() => {
+                      const nextWktNo = (currentInnings.fallOfWickets?.length || 0) + 1;
+                      setManualFoWData({
+                        wicketNo: nextWktNo,
+                        score: currentInnings.runs,
+                        batsmanName: currentInnings.batsmen[currentInnings.strikerIndex]?.name || '',
+                        oversList: formatOvers(currentInnings.ballsBowled)
+                      });
+                      setShowManualFoWModal(true);
+                    }}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-none rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all flex items-center gap-1"
+                  >
+                    <Edit3 size={12} />
+                    Manual FoW
+                  </button>
+                  <button 
+                    onClick={handleResetMatch}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-550 dark:text-rose-400 border-none rounded-xl text-[9px] font-black uppercase tracking-widest cursor-pointer transition-all"
+                  >
+                    Discard & Exit
+                  </button>
+                </div>
               </div>
 
               {(!currentInnings.fallOfWickets || currentInnings.fallOfWickets.length === 0) ? (
-                <p className="text-center py-8 text-xs font-black uppercase tracking-widest text-slate-400">
-                  No wickets fallen yet
-                </p>
+                <div className="text-center py-8 space-y-3">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+                    No wickets fallen yet in this innings
+                  </p>
+                  <div className="flex justify-center gap-3 flex-wrap">
+                    <button
+                      onClick={() => openWicketModal('striker')}
+                      disabled={isScoringDisabled}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none shadow-md transition-all inline-flex items-center gap-2 active:scale-95 disabled:opacity-50"
+                    >
+                      <PlusCircle size={14} /> Record First Wicket
+                    </button>
+                    <button
+                      onClick={() => {
+                        setManualFoWData({
+                          wicketNo: 1,
+                          score: currentInnings.runs,
+                          batsmanName: currentInnings.batsmen[currentInnings.strikerIndex]?.name || '',
+                          oversList: formatOvers(currentInnings.ballsBowled)
+                        });
+                        setShowManualFoWModal(true);
+                      }}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer border-none transition-all flex items-center gap-1.5"
+                    >
+                      <PlusCircle size={14} /> Manual FoW Entry
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {(currentInnings.fallOfWickets || []).map((fw, idx) => (
                     <div 
                       key={idx}
-                      className="p-3 bg-slate-50 dark:bg-slate-950/40 rounded-xl space-y-1 text-xs font-bold border border-slate-100 dark:border-slate-800"
+                      className="p-3.5 bg-slate-50 dark:bg-slate-950/40 rounded-xl space-y-1.5 text-xs font-bold border border-slate-100 dark:border-slate-800 relative group"
                     >
-                      <span className="text-rose-500 font-extrabold font-mono text-[10px]">Wkt # {fw.wicketNo}</span>
+                      <div className="flex justify-between items-center">
+                        <span className="text-rose-500 font-extrabold font-mono text-[10px]">Wkt # {fw.wicketNo}</span>
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualFoWData({
+                                wicketNo: fw.wicketNo,
+                                score: fw.score,
+                                batsmanName: fw.batsmanName,
+                                oversList: fw.oversList,
+                                editIndex: idx
+                              });
+                              setShowManualFoWModal(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-white bg-slate-200 dark:bg-slate-800 rounded border-none cursor-pointer"
+                            title="Edit entry"
+                          >
+                            <Edit size={10} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFoW(idx)}
+                            className="p-1 text-rose-400 hover:text-rose-300 bg-slate-200 dark:bg-slate-800 rounded border-none cursor-pointer"
+                            title="Delete entry"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                      </div>
                       <p className="text-slate-800 dark:text-slate-200 text-sm font-black truncate">{fw.batsmanName}</p>
                       <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">
-                        at {fw.score} runs • {fw.oversList} ov
+                        at <strong className="text-amber-500 dark:text-amber-400">{fw.score}</strong> runs • {fw.oversList} ov
                       </span>
                     </div>
                   ))}
+
+                  {/* Add Wicket action card directly in the grid */}
+                  <button
+                    onClick={() => openWicketModal('striker')}
+                    disabled={isScoringDisabled}
+                    className="p-3.5 bg-rose-500/10 hover:bg-rose-500/20 border border-dashed border-rose-500/40 rounded-xl flex flex-col items-center justify-center gap-1.5 text-rose-600 dark:text-rose-400 cursor-pointer transition-all group active:scale-95 disabled:opacity-50 min-h-[85px]"
+                  >
+                    <PlusCircle size={20} className="group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] font-black uppercase tracking-wider">+ Add Wicket</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -12240,6 +12654,153 @@ export const CricketScoreboard: React.FC = () => {
 
               </div>
             </motion.div>
+          </div>
+        )}
+
+        {/* Fall of Wicket Modal Card */}
+        {fallOfWicketModal && (
+          <div className="fixed inset-0 bg-slate-950/90 z-[250] flex items-center justify-center p-4 select-none">
+            <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500 rounded-[2.5rem] p-6 max-w-md w-full space-y-6 shadow-2xl relative animate-scaleIn text-white text-center">
+              <div>
+                <span className="px-3 py-1 bg-emerald-500/15 text-emerald-400 rounded-full font-black text-[9px] uppercase tracking-[0.2em] block w-fit mx-auto animate-pulse mb-3">
+                  FALL OF WICKET 🏏
+                </span>
+                <h4 className="text-2xl font-black uppercase text-white tracking-tight">OUT! Dismissal Confirmed</h4>
+                <p className="text-xs text-slate-400 mt-1 font-medium">Recorded successfully in the scoreboard database</p>
+              </div>
+
+              <div className="bg-slate-900/60 p-5 rounded-2xl border border-white/5 text-left space-y-3 font-sans">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <span className="text-xs text-slate-400 font-medium">Batsman Out</span>
+                  <strong className="text-sm text-rose-400 font-extrabold">{fallOfWicketModal.batsmanName}</strong>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <span className="text-xs text-slate-400 font-medium">How Out</span>
+                  <span className="text-xs text-amber-400 font-bold">{fallOfWicketModal.wicketType} ({fallOfWicketModal.howOutDetails})</span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <span className="text-xs text-slate-400 font-medium">Bowler</span>
+                  <span className="text-xs text-white font-semibold">{fallOfWicketModal.bowlerName}</span>
+                </div>
+                {fallOfWicketModal.incomingBatsmanName && (
+                  <div className="flex justify-between items-center pt-1">
+                    <span className="text-xs text-slate-400 font-medium">Incoming Batsman</span>
+                    <strong className="text-sm text-emerald-400 font-extrabold">{fallOfWicketModal.incomingBatsmanName}</strong>
+                  </div>
+                )}
+              </div>
+
+              <div className="font-sans flex flex-col sm:flex-row gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFallOfWicketModal(null);
+                    setTimeout(() => {
+                      openWicketModal('striker');
+                    }, 50);
+                  }}
+                  className="flex-1 py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2 active:scale-95"
+                >
+                  <AlertCircle size={14} />
+                  + Add Next Wicket
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFallOfWicketModal(null)}
+                  className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-md shadow-emerald-950/40 active:scale-95"
+                >
+                  Continue Scoring
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Manual Fall of Wickets entry & adjustment modal */}
+        {showManualFoWModal && currentInnings && (
+          <div className="fixed inset-0 z-[260] flex items-center justify-center p-4 bg-slate-950/80 select-none">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl text-white">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-base font-black uppercase text-white flex items-center gap-2">
+                    <AlertCircle size={16} className="text-rose-500" />
+                    {manualFoWData.editIndex !== undefined ? 'Edit Fall of Wicket' : 'Add Fall of Wicket Entry'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Reconcile wicket sequence, score & over details</p>
+                </div>
+                <button
+                  onClick={() => setShowManualFoWModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 border-none cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-3 font-sans text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Wicket #</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={11}
+                      value={manualFoWData.wicketNo}
+                      onChange={(e) => setManualFoWData({ ...manualFoWData, wicketNo: parseInt(e.target.value) || 1 })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono font-bold outline-none focus:border-rose-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Score at Dismissal</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={manualFoWData.score}
+                      onChange={(e) => setManualFoWData({ ...manualFoWData, score: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono font-bold outline-none focus:border-rose-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Dismissed Batsman Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Batsman name"
+                    value={manualFoWData.batsmanName}
+                    onChange={(e) => setManualFoWData({ ...manualFoWData, batsmanName: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-bold outline-none focus:border-rose-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Over Bowled (e.g. 4.2)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 4.2"
+                    value={manualFoWData.oversList}
+                    onChange={(e) => setManualFoWData({ ...manualFoWData, oversList: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-mono font-bold outline-none focus:border-rose-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2 font-sans">
+                <button
+                  type="button"
+                  onClick={() => setShowManualFoWModal(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold uppercase border-none cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveManualFoW}
+                  className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase border-none cursor-pointer shadow-lg shadow-rose-900/30"
+                >
+                  Save Wicket Entry
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

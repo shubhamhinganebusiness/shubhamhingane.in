@@ -181,7 +181,9 @@ export const MiniLiveScoreboardWidget: React.FC<MiniLiveScoreboardWidgetProps> =
   const rrr = (ballsRemaining > 0 && runsNeeded > 0) ? ((runsNeeded / ballsRemaining) * 6).toFixed(1) : null;
 
   // Recent balls
-  const recentBalls = currInnings?.recentBalls?.slice(-6) || [];
+  const recentBalls = (ballsBowled > 0 && currInnings?.recentBalls && Array.isArray(currInnings.recentBalls))
+    ? currInnings.recentBalls.slice(-6)
+    : [];
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end max-w-sm w-full pointer-events-none">

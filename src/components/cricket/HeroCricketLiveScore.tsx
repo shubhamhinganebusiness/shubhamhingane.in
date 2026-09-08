@@ -351,19 +351,21 @@ export const HeroCricketLiveScore: React.FC = () => {
 
     // Recent deliveries in current over
     let recentBalls: string[] = [];
-    if ((innings as any)?.recentBalls && Array.isArray((innings as any).recentBalls)) {
-      recentBalls = (innings as any).recentBalls.slice(-6).map((b: any) => {
-        if (typeof b === 'string') return b;
-        if (b?.isWicket) return 'W';
-        if (b?.runs !== undefined) return `${b.runs}`;
-        return '•';
-      });
-    } else if (innings?.history && Array.isArray(innings.history)) {
-      recentBalls = innings.history.slice(-6).map(h => {
-        if (h.isWicket) return 'W';
-        if (h.isExtra) return h.extraType ? h.extraType.charAt(0).toUpperCase() : 'Ex';
-        return `${h.runsScored}`;
-      });
+    if (balls > 0) {
+      if ((innings as any)?.recentBalls && Array.isArray((innings as any).recentBalls)) {
+        recentBalls = (innings as any).recentBalls.slice(-6).map((b: any) => {
+          if (typeof b === 'string') return b;
+          if (b?.isWicket) return 'W';
+          if (b?.runs !== undefined) return `${b.runs}`;
+          return '•';
+        });
+      } else if (innings?.history && Array.isArray(innings.history)) {
+        recentBalls = innings.history.slice(-6).map(h => {
+          if (h.isWicket) return 'W';
+          if (h.isExtra) return h.extraType ? h.extraType.charAt(0).toUpperCase() : 'Ex';
+          return `${h.runsScored}`;
+        });
+      }
     }
 
     return {

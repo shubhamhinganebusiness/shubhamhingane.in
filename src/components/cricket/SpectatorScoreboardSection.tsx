@@ -478,7 +478,7 @@ export const LiveMatchGlobalBanner = () => {
   const striker = innings?.batsmen && innings.strikerIndex !== undefined ? innings.batsmen[innings.strikerIndex] : null;
   const nonStriker = innings?.batsmen && innings.nonStrikerIndex !== undefined ? innings.batsmen[innings.nonStrikerIndex] : null;
   const currentBowler = innings?.bowlers && innings.currentBowlerIndex !== undefined ? innings.bowlers[innings.currentBowlerIndex] : null;
-  const recentBalls = innings?.recentBalls?.slice(-6) || [];
+  const recentBalls = (balls > 0 && innings?.recentBalls && Array.isArray(innings.recentBalls)) ? innings.recentBalls.slice(-6) : [];
 
   return (
     <div id="live-match-global-banner" className="sticky top-0 z-50 w-full bg-slate-950/95 backdrop-blur-md border-b border-emerald-500/30 text-white shadow-2xl transition-all">
@@ -920,13 +920,47 @@ export const SpectatorScoreboardSection = ({
     return ((r / b) * 6).toFixed(2);
   };
 
+  // Helper to determine if a ball belongs to a given over index (0-based)
+  const isBallInOver = (overBallStr: string, targetOverNo: number) => {
+    if (!overBallStr || typeof overBallStr !== 'string') return false;
+    if (overBallStr === '0.0') return false;
+    const parts = overBallStr.split('.');
+    if (parts.length !== 2) return false;
+    const overPart = parseInt(parts[0], 10);
+    const ballPart = parseInt(parts[1], 10);
+    if (isNaN(overPart) || isNaN(ballPart)) return false;
+    if (overPart === 0 && ballPart === 0) return false;
+    const overIndex = ballPart === 0 ? overPart - 1 : overPart;
+    return overIndex === targetOverNo;
+  };
+
   // Dynamic pill formatting loader for recent balls
   const getPillData = (comm: any) => {
-    if (!comm) return { label: '•', color: 'bg-slate-800 text-slate-350 border-slate-700' };
+    if (!comm) return { label: '', color: 'hidden' };
+    
+    // Explicitly reject non-delivery commentary
+    if (comm.overBall === '0.0' || comm.type === 'milestone' || comm.type === 'announcement') {
+      return { label: '', color: 'hidden' };
+    }
+
     const desc = (comm.description || '').toLowerCase();
-    if (comm.type === 'wicket') return { label: 'W', color: 'bg-rose-600 text-white border-rose-600 font-extrabold shadow-inner' };
+    if (
+      desc.includes('started') || 
+      desc.includes('created') || 
+      desc.includes('toss') || 
+      desc.includes('declared') || 
+      desc.includes('bulletin') || 
+      desc.includes('match launched') ||
+      desc.includes('draft match')
+    ) {
+      return { label: '', color: 'hidden' };
+    }
+
+    if (comm.type === 'wicket' || desc.includes('wicket') || desc.includes('out!')) {
+      return { label: 'W', color: 'bg-rose-600 text-white border-rose-600 font-extrabold shadow-inner' };
+    }
     if (comm.type === 'boundary') {
-      const isSix = desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ');
+      const isSix = desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum');
       return isSix 
         ? { label: '6', color: 'bg-amber-500 text-slate-950 border-amber-500 font-black shadow shadow-amber-500/50' } 
         : { label: '4', color: 'bg-emerald-600 text-white border-emerald-600 font-extrabold shadow-sm' };
@@ -939,14 +973,16 @@ export const SpectatorScoreboardSection = ({
       return { label: 'Ex', color: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-450' };
     }
     // Default runs parsing
-    if (desc.includes('1 run') || desc.includes('single')) return { label: '1', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-350 font-bold' };
-    if (desc.includes('2 runs') || desc.includes('two')) return { label: '2', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 font-bold' };
-    if (desc.includes('3 runs') || desc.includes('three')) return { label: '3', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 font-bold' };
-    if (desc.includes('dot ball') || desc.includes('no run') || desc.includes('0 run')) return { label: '0', color: 'bg-slate-50 text-slate-400 dark:bg-slate-900/60 dark:text-slate-600' };
+    if (desc.includes('1 run') || desc.includes('single') || desc.includes('1 runs')) return { label: '1', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-350 font-bold' };
+    if (desc.includes('2 runs') || desc.includes('two runs') || desc.includes('two')) return { label: '2', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 font-bold' };
+    if (desc.includes('3 runs') || desc.includes('three runs') || desc.includes('three')) return { label: '3', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 font-bold' };
+    if (desc.includes('4 runs') || desc.includes('four')) return { label: '4', color: 'bg-emerald-600 text-white border-emerald-600 font-extrabold shadow-sm' };
+    if (desc.includes('6 runs') || desc.includes('six')) return { label: '6', color: 'bg-amber-500 text-slate-950 border-amber-500 font-black shadow shadow-amber-500/50' };
+    if (desc.includes('dot ball') || desc.includes('no run') || desc.includes('0 run') || comm.type === 'dot') return { label: '0', color: 'bg-slate-50 text-slate-400 dark:bg-slate-900/60 dark:text-slate-600' };
     
-    // Fallback digit capture
-    const numMatch = desc.match(/\d+/);
-    if (numMatch) return { label: numMatch[0], color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 font-bold' };
+    // Explicit runs match only - NEVER blindly match arbitrary digits in announcement text!
+    const numMatch = desc.match(/(\d+)\s*(?:runs?)/);
+    if (numMatch) return { label: numMatch[1], color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200 font-bold' };
     
     return { label: '•', color: 'bg-slate-50 text-slate-400 dark:bg-slate-900 dark:text-slate-705' };
   };
@@ -1432,11 +1468,28 @@ export const SpectatorScoreboardSection = ({
     const nonStriker = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
     const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings.bowlers?.find(b => b.isCurrent);
 
-    const currentOverNo = currentInnings.ballsBowled > 0 ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
-    const currentOverBalls = (currentInnings.commentaryList || [])
-      .filter((c: any) => c.overBall && c.overBall.startsWith(`${currentOverNo}.`))
-      .slice(0, 12)
-      .reverse();
+    const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
+    const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
+    const currentOverBalls = hasBowled
+      ? (currentInnings.commentaryList || [])
+          .filter((c: any) => {
+            if (!c || !c.overBall || c.overBall === '0.0') return false;
+            if (c.type === 'milestone' || c.type === 'announcement') return false;
+            const desc = (c.description || '').toLowerCase();
+            if (
+              desc.includes('started') || 
+              desc.includes('created') || 
+              desc.includes('toss') || 
+              desc.includes('declared') || 
+              desc.includes('bulletin') || 
+              desc.includes('match launched') ||
+              desc.includes('draft match')
+            ) return false;
+            return isBallInOver(c.overBall, currentOverNo);
+          })
+          .slice(0, 12)
+          .reverse()
+      : [];
 
     return { striker, nonStriker, bowler, currentOverNo, currentOverBalls };
   }, [currentInnings]);
@@ -2422,11 +2475,28 @@ export const SpectatorScoreboardSection = ({
                                   const nonStriker = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
                                   const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings.bowlers?.find(b => b.isCurrent);
 
-                                  const currentOverNo = currentInnings.ballsBowled > 0 ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
-                                  const currentOverBalls = (currentInnings.commentaryList || [])
-                                    .filter(c => c && c.overBall && typeof c.overBall === 'string' && c.overBall.startsWith(`${currentOverNo}.`))
-                                    .slice(0, 12) // Limit in case of multi-extras
-                                    .reverse();
+                                  const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
+                                  const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
+                                  const currentOverBalls = hasBowled
+                                    ? (currentInnings.commentaryList || [])
+                                        .filter(c => {
+                                          if (!c || !c.overBall || c.overBall === '0.0') return false;
+                                          if (c.type === 'milestone' || c.type === 'announcement') return false;
+                                          const desc = (c.description || '').toLowerCase();
+                                          if (
+                                            desc.includes('started') || 
+                                            desc.includes('created') || 
+                                            desc.includes('toss') || 
+                                            desc.includes('declared') || 
+                                            desc.includes('bulletin') || 
+                                            desc.includes('match launched') ||
+                                            desc.includes('draft match')
+                                          ) return false;
+                                          return isBallInOver(c.overBall, currentOverNo);
+                                        })
+                                        .slice(0, 12)
+                                        .reverse()
+                                    : [];
 
                                    return (
                                     <div className="mt-4 p-3.5 bg-slate-950/90 rounded-[1.5rem] border border-white/5 space-y-3 font-sans">
@@ -2490,6 +2560,7 @@ export const SpectatorScoreboardSection = ({
                                             <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5">
                                               {currentOverBalls.map((b, bIdx) => {
                                                 const pill = getPillData(b);
+                                                if (!pill.label || pill.color === 'hidden') return null;
                                                 return (
                                                   <div 
                                                     key={b.id || bIdx}
@@ -3249,6 +3320,7 @@ export const SpectatorScoreboardSection = ({
                             {currentOverBalls && currentOverBalls.length > 0 ? (
                               currentOverBalls.map((b: any, bIdx: number) => {
                                 const pill = getPillData(b);
+                                if (!pill.label || pill.color === 'hidden') return null;
                                 return (
                                   <div 
                                     key={b.id || bIdx}
