@@ -40,6 +40,7 @@ export function sanitizeForFirestore<T = any>(obj: T): T {
  */
 export function isMatchDeleted(id: string): boolean {
   if (typeof window === 'undefined' || !id) return false;
+  if (id === 'match-premier-live-exhibition') return true;
   try {
     if (sessionStorage.getItem(`deleted_match_${id}`) === 'true') {
       return true;
@@ -54,6 +55,23 @@ export function isMatchDeleted(id: string): boolean {
   } catch (e) {
     console.warn('Failed to read deleted matches registry:', e);
   }
+  return false;
+}
+
+/**
+ * Determines whether a match is an AI generated demo / synthetic / exhibition match.
+ * Strictly filters out AI/synthetic matches so only official manager created matches are displayed.
+ */
+export function isDemoOrAIMatch(m: any): boolean {
+  if (!m) return true;
+  const id = String(m.id || '');
+  if (id === 'match-premier-live-exhibition' || id.includes('exhibition') || id.includes('demo') || id.startsWith('custom-')) return true;
+  if (m.isSynthetic === true || m.isAIGenerated === true || m.isAiMatch === true || m.isSimulated === true) return true;
+  const teamA = String(m.teamA || '').toLowerCase();
+  const teamB = String(m.teamB || '').toLowerCase();
+  if (teamA.includes('demo') || teamB.includes('demo')) return true;
+  if (teamA.includes('adelaide strikers') || teamB.includes('adelaide strikers')) return true;
+  if (teamA === 'mumbai champions' && teamB === 'pune super warriors') return true;
   return false;
 }
 
@@ -127,7 +145,7 @@ export function getActiveMatch(): MatchState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as MatchState;
     if (parsed && parsed.id) {
-      if (isMatchDeleted(parsed.id)) {
+      if (isMatchDeleted(parsed.id) || isDemoOrAIMatch(parsed)) {
         localStorage.removeItem(ACTIVE_MATCH_KEY);
         return null;
       }
@@ -145,7 +163,7 @@ export function getActiveMatch(): MatchState | null {
 export function setActiveMatch(match: MatchState | null): void {
   if (typeof window === 'undefined') return;
   try {
-    if (!match || match.status === 'completed') {
+    if (!match || match.status === 'completed' || isDemoOrAIMatch(match)) {
       localStorage.removeItem(ACTIVE_MATCH_KEY);
       broadcastMatchChange(match, 'update');
     } else {
@@ -172,7 +190,7 @@ export function getLocalMatches(): MatchState[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          if (item && item.id && !isMatchDeleted(item.id)) {
+          if (item && item.id && !isMatchDeleted(item.id) && !isDemoOrAIMatch(item)) {
             list.push(item);
           }
         }
@@ -184,7 +202,7 @@ export function getLocalMatches(): MatchState[] {
 
   // Ensure active match is present in the list
   const active = getActiveMatch();
-  if (active && active.id && !isMatchDeleted(active.id)) {
+  if (active && active.id && !isMatchDeleted(active.id) && !isDemoOrAIMatch(active)) {
     const existingIdx = list.findIndex(m => m.id === active.id);
     if (existingIdx >= 0) {
       // If active match is newer, replace it
@@ -495,28 +513,26 @@ export function getOrCreateDefaultMatch(): MatchState {
 }
 
 /**
- * Resolves any active match, latest completed match, or defaults to exhibition match
+ * Resolves any active match or latest completed official match.
+ * Returns null if no official matches have been created yet.
  */
-export function getAnyActiveOrRecentMatch(): MatchState {
+export function getAnyActiveOrRecentMatch(): MatchState | null {
   const active = getActiveMatch();
-  if (active && !isMatchDeleted(active.id)) {
+  if (active && !isMatchDeleted(active.id) && !isDemoOrAIMatch(active)) {
     return active;
   }
 
   const all = getLocalMatches();
-  const liveMatch = all.find(m => m.status === 'live' && !isMatchDeleted(m.id));
+  const liveMatch = all.find(m => m.status === 'live' && !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
   if (liveMatch) {
     return liveMatch;
   }
 
-  const recent = all.find(m => !isMatchDeleted(m.id) && m.status !== 'deleted');
+  const recent = all.find(m => !isMatchDeleted(m.id) && m.status !== 'deleted' && !isDemoOrAIMatch(m));
   if (recent) {
     return recent;
   }
 
-  const defaultMatch = getOrCreateDefaultMatch();
-  saveMatchToRegistry(defaultMatch);
-  setActiveMatch(defaultMatch);
-  return defaultMatch;
+  return null;
 }
 

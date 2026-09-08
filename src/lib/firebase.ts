@@ -92,6 +92,9 @@ export async function syncScoreToRealtimeDB(matchId: string, matchData: any): Pr
         updatedAt: matchData.updatedAt || Date.now(),
         match: matchData
       });
+    } else if (matchData.status === 'completed') {
+      const completedRef = rtdbRef(rtdb, 'cricket_completed_match');
+      await rtdbSet(completedRef, matchData);
     }
   } catch (err) {
     console.warn('[Realtime Database] Live score push note:', err);
@@ -132,6 +135,53 @@ export function subscribeToRealtimeDBActiveLive(onUpdate: (data: any) => void): 
       }
     }, (error) => {
       console.warn('[Realtime Database] Global live listener note:', error);
+    });
+  } catch (e) {
+    return () => {};
+  }
+}
+
+/**
+ * Subscribe to the list of all matches in Firebase Realtime Database
+ */
+export function subscribeToRealtimeDBMatchesList(onUpdate: (matches: any[]) => void): () => void {
+  if (!rtdb) return () => {};
+  try {
+    const matchesRef = rtdbRef(rtdb, 'cricket_matches');
+    return rtdbOnValue(matchesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const val = snapshot.val();
+        if (val && typeof val === 'object') {
+          const list = Object.values(val);
+          onUpdate(list);
+        } else {
+          onUpdate([]);
+        }
+      } else {
+        onUpdate([]);
+      }
+    }, (error) => {
+      console.warn('[Realtime Database] Matches list listener note:', error);
+    });
+  } catch (e) {
+    return () => {};
+  }
+}
+
+/**
+ * Subscribe to completed match updates in Firebase Realtime Database
+ */
+export function subscribeToRealtimeDBCompletedMatch(onUpdate: (completedMatch: any) => void): () => void {
+  if (!rtdb) return () => {};
+  try {
+    const completedRef = rtdbRef(rtdb, 'cricket_completed_match');
+    return rtdbOnValue(completedRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const val = snapshot.val();
+        if (val) onUpdate(val);
+      }
+    }, (error) => {
+      console.warn('[Realtime Database] Completed match listener note:', error);
     });
   } catch (e) {
     return () => {};

@@ -13,7 +13,14 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // Firestore & Realtime Database imports
-import { db, handleFirestoreError, OperationType, subscribeToRealtimeDBMatch } from '../../lib/firebase';
+import { 
+  db, 
+  handleFirestoreError, 
+  OperationType, 
+  subscribeToRealtimeDBMatch,
+  subscribeToRealtimeDBMatchesList,
+  subscribeToRealtimeDBCompletedMatch 
+} from '../../lib/firebase';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 
 // Local storage & real-time sync across scoreboard components
@@ -28,14 +35,14 @@ import {
   deleteLocalMatch, 
   pruneDeletedMatchesFromStorage,
   getAnyActiveOrRecentMatch,
-  getOrCreateDefaultMatch
+  getOrCreateDefaultMatch,
+  isDemoOrAIMatch
 } from './cricketStorage';
 
 // Recharts imports
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 import { PlayerRegistrationForm } from './PlayerRegistrationForm';
-import { PlayerDirectoryDashboard } from './PlayerDirectoryDashboard';
 import { LiveStandingsSummaryWidget } from './LiveStandingsSummaryWidget';
 import { ConfettiCelebration } from './ConfettiCelebration';
 import { useSiteSettings } from '../../hooks/useCMS';
@@ -756,27 +763,28 @@ export const SpectatorScoreboardSection = ({
     const resolvedId = getMatchIdFromHashOrSearch();
     if (resolvedId) return resolvedId;
     const active = getActiveMatch();
-    if (active && !isMatchDeleted(active.id)) return active.id;
+    if (active && !isMatchDeleted(active.id) && !isDemoOrAIMatch(active)) return active.id;
     const all = getLocalMatches();
     if (all.length > 0) return all[0].id;
-    return getAnyActiveOrRecentMatch().id;
+    const anyMatch = getAnyActiveOrRecentMatch();
+    return anyMatch ? anyMatch.id : '';
   });
   const [selectedMatch, setSelectedMatch] = useState<MatchState | null>(() => {
     if (homepageMode) return null;
     const resolvedId = getMatchIdFromHashOrSearch();
     if (resolvedId) {
       const found = getLocalMatchById(resolvedId);
-      if (found && !isMatchDeleted(found.id) && found.status !== 'deleted' && !(found as any).isDeleted) {
+      if (found && !isMatchDeleted(found.id) && found.status !== 'deleted' && !(found as any).isDeleted && !isDemoOrAIMatch(found)) {
         return found;
       }
     }
     const active = getActiveMatch();
-    if (active && !isMatchDeleted(active.id) && active.status !== 'deleted' && !(active as any).isDeleted) {
+    if (active && !isMatchDeleted(active.id) && active.status !== 'deleted' && !(active as any).isDeleted && !isDemoOrAIMatch(active)) {
       return active;
     }
     const all = getLocalMatches();
     if (all.length > 0) {
-      const firstValid = all.find(m => !isMatchDeleted(m.id) && m.status !== 'deleted');
+      const firstValid = all.find(m => !isMatchDeleted(m.id) && m.status !== 'deleted' && !isDemoOrAIMatch(m));
       if (firstValid) return firstValid;
     }
     return getAnyActiveOrRecentMatch();
@@ -958,7 +966,7 @@ export const SpectatorScoreboardSection = ({
   // Fetch all matches list from Firestore & local storage for live selector
   useEffect(() => {
     // Initial load from local storage
-    const initialLocal = getLocalMatches().filter(m => !isMatchDeleted(m.id));
+    const initialLocal = getLocalMatches().filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
     if (initialLocal.length > 0) {
       setAllMatches(initialLocal);
     }
@@ -981,6 +989,10 @@ export const SpectatorScoreboardSection = ({
           return;
         }
 
+        if (isDemoOrAIMatch(m)) {
+          return;
+        }
+
         unmarkMatchDeleted(m.id);
         remoteMatches.push(m);
         remoteIds.add(m.id);
@@ -990,9 +1002,9 @@ export const SpectatorScoreboardSection = ({
       pruneDeletedMatchesFromStorage(remoteIds);
 
       // Merge with any active or local matches stored in localStorage
-      const localMatches = getLocalMatches().filter(lm => lm.status !== 'deleted' && !(lm as any).isDeleted);
+      const localMatches = getLocalMatches().filter(lm => lm.status !== 'deleted' && !(lm as any).isDeleted && !isDemoOrAIMatch(lm));
       const activeLocal = getActiveMatch();
-      if (activeLocal && activeLocal.status !== 'deleted' && !(activeLocal as any).isDeleted && !localMatches.some(l => l.id === activeLocal.id)) {
+      if (activeLocal && activeLocal.status !== 'deleted' && !(activeLocal as any).isDeleted && !isDemoOrAIMatch(activeLocal) && !localMatches.some(l => l.id === activeLocal.id)) {
         localMatches.push(activeLocal);
       }
 
@@ -1022,23 +1034,74 @@ export const SpectatorScoreboardSection = ({
       console.warn('Warning fetching cricket_matches collection:', error);
       setConnectionStatus('offline');
       // Offline fallback only when completely offline
-      const fallback = getLocalMatches().filter(m => !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted');
+      const fallback = getLocalMatches().filter(m => !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted' && !isDemoOrAIMatch(m));
       setAllMatches(fallback);
       setHasInitialMatchesLoaded(true);
     });
 
+    // Cross-device Firebase Realtime Database live sync for instant status updates on other laptops
+    const unsubRtdbList = subscribeToRealtimeDBMatchesList((rtdbMatches: any[]) => {
+      if (!Array.isArray(rtdbMatches) || rtdbMatches.length === 0) return;
+      setAllMatches(prev => {
+        const map = new Map<string, MatchState>();
+        prev.forEach(p => {
+          if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted && !isDemoOrAIMatch(p)) {
+            map.set(p.id, p);
+          }
+        });
+        rtdbMatches.forEach(rm => {
+          if (rm && rm.id && !isMatchDeleted(rm.id) && rm.status !== 'deleted' && !(rm as any).isDeleted && !isDemoOrAIMatch(rm)) {
+            const existing = map.get(rm.id);
+            if (!existing || (rm.updatedAt || 0) >= (existing.updatedAt || 0) || rm.status === 'completed') {
+              map.set(rm.id, { ...(existing || {}), ...rm });
+            }
+          }
+        });
+        const combined = Array.from(map.values());
+        combined.sort((a, b) => {
+          if (a.status === 'live' && b.status !== 'live') return -1;
+          if (b.status === 'live' && a.status !== 'live') return 1;
+          const timeA = a.updatedAt || (a.date ? new Date(a.date).getTime() : 0) || 0;
+          const timeB = b.updatedAt || (b.date ? new Date(b.date).getTime() : 0) || 0;
+          return timeB - timeA;
+        });
+        return combined;
+      });
+    });
+
+    // Realtime Database completed match listener for instant match result propagation across devices
+    const unsubCompleted = subscribeToRealtimeDBCompletedMatch((completedMatch: any) => {
+      if (completedMatch && completedMatch.id && !isDemoOrAIMatch(completedMatch)) {
+        setAllMatches(prev => {
+          const idx = prev.findIndex(m => m.id === completedMatch.id);
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...completedMatch, status: 'completed' };
+            return copy;
+          }
+          return [completedMatch, ...prev];
+        });
+        setSelectedMatch(current => {
+          if (current && current.id === completedMatch.id) {
+            return { ...current, ...completedMatch, status: 'completed' };
+          }
+          return current;
+        });
+      }
+    });
+
     // Subscribe to cross-tab / cross-component match sync
     const unsubSync = subscribeToMatchSync(() => {
-      const active = getLocalMatches().filter(m => !isMatchDeleted(m.id) && m.status !== 'deleted' && !(m as any).isDeleted);
+      const active = getLocalMatches().filter(m => !isMatchDeleted(m.id) && m.status !== 'deleted' && !(m as any).isDeleted && !isDemoOrAIMatch(m));
       if (active.length > 0) {
         setAllMatches(prev => {
           const map = new Map<string, MatchState>();
-          prev.forEach(p => { if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted) map.set(p.id, p); });
-          active.forEach(a => { if (map.has(a.id) && !isMatchDeleted(a.id) && a.status !== 'deleted' && !(a as any).isDeleted) map.set(a.id, { ...map.get(a.id)!, ...a }); });
+          prev.forEach(p => { if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted && !isDemoOrAIMatch(p)) map.set(p.id, p); });
+          active.forEach(a => { if (map.has(a.id) && !isMatchDeleted(a.id) && a.status !== 'deleted' && !(a as any).isDeleted && !isDemoOrAIMatch(a)) map.set(a.id, { ...map.get(a.id)!, ...a }); });
           return Array.from(map.values());
         });
       }
-      setSelectedMatch(current => (current && (isMatchDeleted(current.id) || current.status === 'deleted' || (current as any).isDeleted) ? null : current));
+      setSelectedMatch(current => (current && (isMatchDeleted(current.id) || current.status === 'deleted' || (current as any).isDeleted || isDemoOrAIMatch(current)) ? null : current));
     });
 
     const handleMatchDeleted = (e: any) => {
@@ -1052,10 +1115,25 @@ export const SpectatorScoreboardSection = ({
 
     return () => {
       unsub();
+      unsubRtdbList();
+      unsubCompleted();
       unsubSync();
       window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
     };
   }, []);
+
+  // Smooth scroll to spectator hub if navigated with #spectator-hub hash
+  useEffect(() => {
+    if (window.location.hash === '#spectator-hub' || window.location.hash.includes('spectator')) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById('spectator-hub');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [homepageMode]);
 
   // Listen to cricket tournaments in real-time
   useEffect(() => {
@@ -1197,16 +1275,16 @@ export const SpectatorScoreboardSection = ({
   }, [homepageMode, searchParams]);
 
   const liveMatches = useMemo(() => {
-    // 1. Gather all live matches from allMatches
+    // 1. Gather all genuine live matches created by score manager from allMatches
     const list = allMatches.filter(m => {
-      if (!m || m.status !== 'live' || m.isHidden || m.isBlocked || isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted') return false;
+      if (!m || m.status !== 'live' || m.isHidden || m.isBlocked || isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted' || isDemoOrAIMatch(m)) return false;
       return true;
     });
 
     // Only if completely offline and list is empty, fallback to active local match
     if (list.length === 0 && connectionStatus === 'offline') {
       const activeLocal = getActiveMatch();
-      if (activeLocal && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !(activeLocal as any).isDeleted) {
+      if (activeLocal && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !(activeLocal as any).isDeleted && !isDemoOrAIMatch(activeLocal)) {
         list.push(activeLocal);
       }
     }
@@ -1226,105 +1304,8 @@ export const SpectatorScoreboardSection = ({
       return enriched;
     });
 
-    // 2. Synthesize outstanding live matches declared inside tournament matrices
-    // Only synthesize tournament/synthetic matches if there is at least one genuinely active, non-demo live match going on
-    if (list.length > 0 && tournaments && tournaments.length > 0) {
-      tournaments.forEach(t => {
-        if (t.matches && Array.isArray(t.matches)) {
-          t.matches.forEach((tm: any) => {
-            if (tm.status === 'live') {
-              const tmNameA = (tm.teamAName || '').toLowerCase();
-              const tmNameB = (tm.teamBName || '').toLowerCase();
-              const isDemoTourMatch = tmNameA.includes('demo') || tmNameB.includes('demo') ||
-                                      tmNameA.includes('test') || tmNameB.includes('test') ||
-                                      (tmNameA.includes('gully gladiators') && tmNameB.includes('street strikers'));
-
-              if (isDemoTourMatch || isMatchDeleted(tm.id) || (tm as any).isDeleted === true || tm.status === 'deleted') return;
-
-              const alreadyExists = enrichedList.some(em => 
-                em.tournamentMatchId === tm.id || 
-                em.id === tm.id ||
-                (em.tournamentId === t.id && (em.teamA === tm.teamAName || em.teamB === tm.teamBName))
-              );
-
-              if (!alreadyExists) {
-                const tAObj = t.teams?.find((st: any) => st.id === tm.teamAId || st.name === tm.teamAName);
-                const tBObj = t.teams?.find((st: any) => st.id === tm.teamBId || st.name === tm.teamBName);
-
-                const parseScore = (scoreStr: string) => {
-                  const parts = (scoreStr || "0/0").split('/');
-                  return {
-                    runs: parseInt(parts[0], 10) || 0,
-                    wickets: parseInt(parts[1], 10) || 0
-                  };
-                };
-                const scoreAObj = parseScore(tm.scoreA);
-                const scoreBObj = parseScore(tm.scoreB);
-
-                const parseOversToBalls = (ovsStr: string) => {
-                  const parts = (ovsStr || "0").split('.');
-                  const ov = parseInt(parts[0], 10) || 0;
-                  const balls = parseInt(parts[1], 15) || 0;
-                  return (ov * 6) + balls;
-                };
-
-                const currentInningsNum = parseFloat(tm.oversB || '0') > 0 ? 2 : 1;
-                const activeInningsTeamName = currentInningsNum === 1 ? tm.teamAName : tm.teamBName;
-
-                const innings1 = {
-                  battingTeam: tm.teamAName,
-                  runs: scoreAObj.runs,
-                  wickets: scoreAObj.wickets,
-                  ballsBowled: parseOversToBalls(tm.oversA),
-                  batsmen: tm.batsmen || [],
-                  bowlers: tm.bowlers || [],
-                  commentaryList: tm.commentaryList || []
-                };
-
-                const innings2 = {
-                  battingTeam: tm.teamBName,
-                  runs: scoreBObj.runs,
-                  wickets: scoreBObj.wickets,
-                  ballsBowled: parseOversToBalls(tm.oversB),
-                  batsmen: tm.batsmen || [],
-                  bowlers: tm.bowlers || [],
-                  commentaryList: tm.commentaryList || []
-                };
-
-                enrichedList.push({
-                  id: tm.id,
-                  teamA: tm.teamAName,
-                  teamB: tm.teamBName,
-                  oversLimit: t.format === 'T20' ? 20 : 10,
-                  tossWinner: tm.teamAName,
-                  tossChoice: 'bat',
-                  currentInningsNum,
-                  innings1,
-                  innings2: (parseFloat(tm.oversB || '0') > 0 || scoreBObj.runs > 0 || scoreBObj.wickets > 0) ? innings2 : null,
-                  scoreA: tm.scoreA || '0/0',
-                  scoreB: tm.scoreB || 'yet to bat',
-                  oversA: tm.oversA || '0',
-                  oversB: tm.oversB || '0',
-                  status: 'live',
-                  date: tm.date || t.startDate || 'Today',
-                  freeHitNext: false,
-                  teamALogo: tAObj?.logo || '',
-                  teamBLogo: tBObj?.logo || '',
-                  playerPhotos: {},
-                  tournamentId: t.id,
-                  tournamentMatchId: tm.id,
-                  tournamentName: t.name,
-                  isSynthetic: true
-                } as any);
-              }
-            }
-          });
-        }
-      });
-    }
-
     return enrichedList;
-  }, [allMatches, tournaments]);
+  }, [allMatches, tournaments, connectionStatus]);
 
   // Auto-select latest live match on dedicated live spectator page and homepage if no specific match
   useEffect(() => {
@@ -1597,19 +1578,25 @@ export const SpectatorScoreboardSection = ({
   }, [selectedMatch]);
 
   const selectMatch = (id: string) => {
-    if (homepageMode) {
-      if (id) {
-        unmarkMatchDeleted(id);
-        navigate(`/live/cricket-details?matchId=${encodeURIComponent(id)}`);
-      } else {
-        setDismissedAutoSelect(true);
-      }
+    if (!id) {
+      // Clear selected match and redirect to the home page Spectator Scoreboard section
+      setSelectedMatch(null);
+      setLocalSelectedMatchId(null);
+      setDismissedAutoSelect(true);
+      setShowMatchSelectionHub(true);
+      navigate('/#spectator-hub');
+      setTimeout(() => {
+        const el = document.getElementById('spectator-hub');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 150);
       return;
     }
-    
-    if (!id) {
-      // Toggle match selection hub on details page so user can choose any match
-      setShowMatchSelectionHub(true);
+
+    if (homepageMode) {
+      unmarkMatchDeleted(id);
+      navigate(`/live/cricket-details?matchId=${encodeURIComponent(id)}`);
       return;
     }
 
@@ -1656,13 +1643,20 @@ export const SpectatorScoreboardSection = ({
       });
   };
 
-  const handleExportMatchPDF = (matchParam?: any, defaultMatch = selectedMatch) => {
-    const selectedMatch = matchParam || defaultMatch;
-    if (!selectedMatch || !selectedMatch.innings1) {
+  const handleExportMatchPDF = (matchParam?: any) => {
+    // Safely distinguish between a MatchState object and a React click event
+    const isSyntheticEvent = matchParam && (matchParam.nativeEvent || matchParam.target || matchParam.preventDefault || (!matchParam.teamA && !matchParam.innings1));
+    const rawTarget = isSyntheticEvent ? null : matchParam;
+    const resolvedMatch = rawTarget || (selectedMatch?.innings1 ? selectedMatch : (allMatches.find(m => m.id === localSelectedMatchId) || selectedMatch));
+    if (!resolvedMatch || !resolvedMatch.innings1) {
       showToast('No match data to export!');
       return;
     }
 
+    generateLedgerPDF(resolvedMatch);
+  };
+
+  const generateLedgerPDF = (selectedMatch: any) => {
     try {
       showToast('Generating PDF Match Ledger...');
       const doc = new jsPDF();
@@ -2999,10 +2993,10 @@ export const SpectatorScoreboardSection = ({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setShowMatchSelectionHub(true)}
+                  onClick={() => selectMatch('')}
                   className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-200 text-slate-800 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border-none shadow-sm active:scale-95 hover:scale-[1.02]"
                 >
-                  ← Browse All Matches & Fixtures
+                  ← Change Match (Home Scoreboard)
                 </button>
                 <button
                   onClick={() => navigate('/')}
@@ -3115,7 +3109,7 @@ export const SpectatorScoreboardSection = ({
                   <span className="truncate">Refresh</span>
                 </button>
                 <button
-                  onClick={handleExportMatchPDF}
+                  onClick={() => handleExportMatchPDF(selectedMatch)}
                   className="flex-1 sm:flex-initial px-3 py-2 sm:px-3.5 sm:py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm min-h-[38px]"
                 >
                   <Download size={13} />
@@ -3127,14 +3121,6 @@ export const SpectatorScoreboardSection = ({
                 >
                   <Share2 size={13} />
                   <span className="truncate">{copiedNotification ? 'Copied!' : 'Share Link'}</span>
-                </button>
-                <button
-                  onClick={handleCopyOBSLink}
-                  className="flex-1 sm:flex-initial px-3 py-2 sm:px-3.5 sm:py-2.5 bg-rose-500 hover:bg-rose-450 text-white rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm min-h-[38px]"
-                  title="Copy transparent 1080p overlay link for OBS Studio"
-                >
-                  <Share2 size={13} className="text-white" />
-                  <span className="truncate">{copiedOBSNotification ? 'Copied OBS!' : 'Instant OBS Link'}</span>
                 </button>
               </div>
             </div>
@@ -3778,7 +3764,7 @@ export const SpectatorScoreboardSection = ({
                           )}
 
                           <button
-                            onClick={handleExportMatchPDF}
+                            onClick={() => handleExportMatchPDF(selectedMatch)}
                             className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-wider text-[11px] rounded-2xl transition-all cursor-pointer border-none shadow-md active:scale-95 flex items-center justify-center gap-1.5 font-sans"
                           >
                             <Download size={14} className="text-emerald-200" /> Export Match Report PDF
@@ -5224,11 +5210,6 @@ export const SpectatorScoreboardSection = ({
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Player Roster & Admin Portfolio Section */}
-        {(!cmsSettings || !cmsSettings.visibility || cmsSettings.visibility.verifiedRoster !== false) && (
-          <PlayerDirectoryDashboard />
-        )}
 
         {/* Player Registration Form Modal */}
         <AnimatePresence>

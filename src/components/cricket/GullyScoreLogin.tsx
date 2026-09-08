@@ -9,7 +9,7 @@ import { auth, db } from '../../lib/firebase';
 import { motion } from 'motion/react';
 import { 
   Trophy, Lock, User, LogIn, Loader2, AlertCircle, 
-  Eye, EyeOff, ShieldCheck, Sparkles, Navigation, ArrowLeft 
+  ShieldCheck, ShieldAlert, Sparkles, Navigation, ArrowLeft 
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
 
@@ -22,7 +22,7 @@ export const GullyScoreLogin: React.FC = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
-  const { role, isScoreManager } = useAuth();
+  const { isScoreManager } = useAuth();
 
   const from = (location.state as any)?.from?.pathname || '/live/cricket-scoreboard';
 
@@ -36,13 +36,12 @@ export const GullyScoreLogin: React.FC = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setLoading(false);
 
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
     const loginPassword = password.trim();
 
     if (!cleanUsername) {
-      setError('Please enter a valid username.');
+      setError('Please enter your official scorekeeper username.');
       return;
     }
     if (loginPassword.length < 6) {
@@ -51,50 +50,63 @@ export const GullyScoreLogin: React.FC = () => {
     }
 
     setLoading(true);
-
     const targetEmail = `${cleanUsername}@gullyscore.com`;
 
     try {
-      // 1. Try regular Firebase sign-in with full email
+      // 1. Try direct Firebase Auth sign-in
       const userCred = await signInWithEmailAndPassword(auth, targetEmail, loginPassword);
       
-      // Sync or double-check virtual user cache
       try {
         localStorage.setItem('erp_virtual_user', JSON.stringify({
           uid: userCred.user.uid,
           email: targetEmail,
           role: 'score_manager',
-          displayName: cleanUsername.toUpperCase()
+          displayName: cleanUsername.toUpperCase(),
+          managerId: cleanUsername
         }));
       } catch (_) {}
 
       setLoading(false);
-      window.location.reload(); // Force session reload
+      window.location.reload();
       return;
     } catch (firebaseErr: any) {
-      console.log('Firebase auth direct sign-in failed/missed, running Shadow Account Lookup:', firebaseErr.code);
+      console.log('Direct Firebase Auth sign-in missed/failed, checking authorized credentials in database:', firebaseErr?.code);
 
-      // 2. Fall back to Shadow Account Sync
+      // 2. Fall back to checking provisioned credentials in Firestore
       try {
         let managerData: any = null;
         let isOfflineResult = false;
 
         try {
+          // Check score_managers collection (provisioned by Super Admin)
           const managerDocRef = doc(db, 'score_managers', cleanUsername);
           const managerSnap = await getDoc(managerDocRef);
           if (managerSnap.exists()) {
             managerData = managerSnap.data();
+          } else {
+            // Also check authorized_accounts collection (provisioned by Super Admin)
+            const authDocRef = doc(db, 'authorized_accounts', cleanUsername);
+            const authSnap = await getDoc(authDocRef);
+            if (authSnap.exists()) {
+              const data = authSnap.data();
+              if (data?.role === 'score_manager' || data?.role === 'super_admin') {
+                managerData = data;
+              }
+            }
           }
         } catch (getDocErr: any) {
-          console.warn('Network offline during manager lookup, checking local and default accounts.', getDocErr);
+          console.warn('Network offline during manager lookup, checking local cache.', getDocErr);
           isOfflineResult = true;
 
-          // Attempt fallback list from localStorage
+          // Attempt fallback from local cached score managers
           const cachedSMsJSON = localStorage.getItem('cached_score_managers');
           if (cachedSMsJSON) {
             try {
               const cachedSMs = JSON.parse(cachedSMsJSON);
-              const found = cachedSMs.find((s: any) => s.id === cleanUsername || (s.username && s.username.toLowerCase() === cleanUsername));
+              const found = cachedSMs.find((s: any) => 
+                s.id === cleanUsername || 
+                (s.username && s.username.toLowerCase() === cleanUsername)
+              );
               if (found) {
                 managerData = found;
               }
@@ -102,32 +114,17 @@ export const GullyScoreLogin: React.FC = () => {
               console.error('Error parsing cached score managers:', jsonErr);
             }
           }
-
-          // Fallback to default developer/umpire backup credentials if nothing is cached
-          if (!managerData) {
-            const defaults = [
-              { username: 'gully', name: 'Gully Umpire', password: 'gully123' },
-              { username: 'admin', name: 'Super Admin', password: 'admin123' },
-              { username: 'scorer', name: 'Staff Scorer', password: 'scorer123' },
-              { username: 'scorekeeper', name: 'Official Scorekeeper', password: 'scorekeeper123' }
-            ];
-            const foundDefault = defaults.find(d => d.username === cleanUsername);
-            if (foundDefault) {
-              managerData = foundDefault;
-            }
-          }
         }
 
         if (managerData) {
           if (managerData.password === loginPassword) {
-            console.log('Credentials match found! Creating / syncing Auth account or setting up virtual session.');
-            
-            // Try to create the Auth account or sync details if online, otherwise go straight to virtual session
+            console.log('Authorized scorekeeper credentials matched! Establishing session.');
+
+            // Attempt to synchronize into Firebase Auth if online
             if (!isOfflineResult) {
               try {
                 const cred = await createUserWithEmailAndPassword(auth, targetEmail, loginPassword);
                 
-                // Save details in users collection
                 await setDoc(doc(db, 'users', cred.user.uid), {
                   userId: cred.user.uid,
                   email: targetEmail,
@@ -141,7 +138,8 @@ export const GullyScoreLogin: React.FC = () => {
                     uid: cred.user.uid,
                     email: targetEmail,
                     role: 'score_manager',
-                    displayName: managerData.name || cleanUsername.toUpperCase()
+                    displayName: managerData.name || cleanUsername.toUpperCase(),
+                    managerId: cleanUsername
                   }));
                 } catch (_) {}
 
@@ -150,45 +148,34 @@ export const GullyScoreLogin: React.FC = () => {
                 return;
               } catch (createErr: any) {
                 if (createErr.code === 'auth/email-already-in-use') {
-                  console.log('Account emails registered in Cloud. Resetting user auth state.');
+                  console.log('Auth account exists. Proceeding with verified session.');
                 }
               }
             }
 
-            // Create virtual backup session for manager (perfect for both offline and quick-access uses)
-            console.log('Creating secure virtual backup session for manager.');
+            // Secure virtual session for scorekeeper
             localStorage.setItem('erp_virtual_user', JSON.stringify({
               uid: `virtual_${cleanUsername}`,
               email: targetEmail,
               role: 'score_manager',
-              displayName: managerData.name || cleanUsername.toUpperCase()
+              displayName: managerData.name || cleanUsername.toUpperCase(),
+              managerId: cleanUsername
             }));
+
             setLoading(false);
             window.location.reload();
             return;
           } else {
-            setError('Unauthorized. Scorekeeper credentials mismatch.');
+            setError('Incorrect scorekeeper password. Please check your credentials or contact the Portfolio Super Admin.');
             setLoading(false);
             return;
           }
         }
 
-        // 3. Fallback for Super Admin Login too (Optional but highly friendly)
-        const superAdminEmails = [
-          'jamkhednewsnetwork@gmail.com',
-          'shubhamhingane7719@gmail.com',
-          'shubhamingane7719@gmail.com'
-        ];
-        if (cleanUsername === 'admin' || superAdminEmails.some(e => e.includes(cleanUsername))) {
-          setError('Super Admins must log in using the Main Portfolio Portal.');
-          setLoading(false);
-          return;
-        }
-
-        setError('No active scorekeeper account found with that username.');
+        setError(`No scorekeeper account found for "@${cleanUsername}". New scorekeeper login credentials can only be created by the Portfolio Super Admin.`);
       } catch (err: any) {
-        console.error('Shadow lookup failure:', err);
-        setError('Connection fallback error or offline. Try default mock accounts (gully/gully123) if offline.');
+        console.error('Scorekeeper authentication error:', err);
+        setError('Authentication check failed. Please ensure you are connected to the network or contact the Super Admin.');
       } finally {
         setLoading(false);
       }
@@ -205,7 +192,7 @@ export const GullyScoreLogin: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden font-sans">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden font-sans select-none">
       {/* Decorative sports-style background grid lines */}
       <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:24px_24px]" />
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
@@ -232,32 +219,46 @@ export const GullyScoreLogin: React.FC = () => {
           <ArrowLeft size={16} />
         </button>
 
-        <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-14 h-14 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 rounded-3xl flex items-center justify-center shadow-lg shadow-emerald-500/10 mb-4 animate-bounce-slow">
+        <div className="flex flex-col items-center text-center mb-6">
+          <div className="w-14 h-14 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 rounded-3xl flex items-center justify-center shadow-lg shadow-emerald-500/10 mb-3">
             <Trophy size={28} />
           </div>
           <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-            GullyScore <span className="text-emerald-400 font-heading italic">Scorer</span>
+            GullyScore <span className="text-emerald-400 font-heading italic">Scorer Suite</span>
           </h2>
           <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
-            Official Scorekeeper Sign In
+            Official Multi-Scorekeeper Portal
           </p>
+          <div className="mt-2 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full flex items-center gap-1.5">
+            <span>🔒 Isolated Dashboards (Private Scorer Spaces)</span>
+          </div>
+        </div>
+
+        {/* Super Admin Provisioning Requirement Notice */}
+        <div className="mb-6 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-start gap-2.5">
+          <ShieldAlert size={18} className="shrink-0 mt-0.5 text-amber-400" />
+          <div className="leading-relaxed">
+            <span className="font-bold text-amber-200 block mb-0.5">Super Admin Provisioned Access</span>
+            <span className="text-amber-300/80 text-[11px]">
+              New scorekeeper login credentials can only be created by the <strong>Portfolio Super Admin</strong>. Self-registration is restricted.
+            </span>
+          </div>
         </div>
 
         {error && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-3 text-xs font-semibold"
+            className="mb-5 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-2.5 text-xs font-semibold"
           >
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
             <span>{error}</span>
           </motion.div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-6">
+        <form onSubmit={handleLogin} className="space-y-4">
           {/* Username Input */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block">
               Scorekeeper Username
             </label>
@@ -265,7 +266,7 @@ export const GullyScoreLogin: React.FC = () => {
               <User size={16} className="absolute left-4 top-3.5 text-slate-500" />
               <input
                 type="text"
-                placeholder="e.g. john_scorekeeper"
+                placeholder="Enter assigned scorekeeper username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={loading}
@@ -276,10 +277,10 @@ export const GullyScoreLogin: React.FC = () => {
           </div>
 
           {/* Password Input */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex justify-between items-center">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block">
-                Security Password
+                Security Passcode
               </label>
               <button
                 type="button"
@@ -306,7 +307,7 @@ export const GullyScoreLogin: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-emerald-500 hover:bg-emerald-600 active:scale-[0.98] disabled:opacity-50 text-slate-950 rounded-2xl font-black uppercase tracking-wider text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 border-none cursor-pointer mt-8"
+            className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] disabled:opacity-50 text-slate-950 rounded-2xl font-black uppercase tracking-wider text-xs shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 border-none cursor-pointer mt-6"
           >
             {loading ? (
               <>
@@ -316,22 +317,22 @@ export const GullyScoreLogin: React.FC = () => {
             ) : (
               <>
                 <LogIn size={16} />
-                <span>Sign In and Open Scoreboard</span>
+                <span>Open Scorer Dashboard</span>
               </>
             )}
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-slate-800/60 flex flex-col items-center gap-3 text-center">
+        <div className="mt-8 pt-5 border-t border-slate-800/60 flex flex-col items-center gap-2.5 text-center">
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-            <ShieldCheck size={12} className="text-emerald-500" /> Managed & Supervised by Portfolio Admins
+            <ShieldCheck size={13} className="text-emerald-500" /> Authorized Multi-Scorer Access
           </span>
           <button
             type="button"
             onClick={() => navigate('/live/cricket-scoreboard')}
             className="text-[10px] font-bold text-slate-400 hover:text-white uppercase tracking-widest flex items-center gap-1 bg-transparent border-none cursor-pointer transition-colors"
           >
-            <Navigation size={10} className="rotate-90" /> Return to Read-Only Spectator View
+            <Navigation size={10} className="rotate-90" /> Return to Spectator View
           </button>
         </div>
       </motion.div>

@@ -179,6 +179,8 @@ export interface MatchState {
   tournamentId?: string | null;
   tournamentMatchId?: string | null;
   createdBy?: string;
+  managerId?: string;
+  managerName?: string;
   tournamentName?: string;
   seriesName?: string;
   groundName?: string;
@@ -660,6 +662,46 @@ export const CricketScoreboard: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const matchIdParam = searchParams.get('matchId');
   const isSpectator = searchParams.get('spectator') === 'true' || !isScoreManager;
+
+  // Multi-Scorekeeper Isolation: resolve individual score manager identity
+  const currentManagerId = useMemo(() => {
+    if (!isScoreManager) return null;
+    try {
+      const vu = localStorage.getItem('erp_virtual_user');
+      if (vu) {
+        const parsed = JSON.parse(vu);
+        return parsed.managerId || parsed.username || parsed.email?.split('@')[0] || user?.uid || 'official_scorer';
+      }
+    } catch (e) {
+      console.warn('Error reading managerId from erp_virtual_user:', e);
+    }
+    return user?.uid || 'official_scorer';
+  }, [isScoreManager, user]);
+
+  const currentManagerName = useMemo(() => {
+    try {
+      const vu = localStorage.getItem('erp_virtual_user');
+      if (vu) {
+        const parsed = JSON.parse(vu);
+        return parsed.displayName || parsed.name || parsed.username || user?.displayName || currentManagerId || 'Official Scorer';
+      }
+    } catch {}
+    return user?.displayName || currentManagerId || 'Official Scorer';
+  }, [currentManagerId, user]);
+
+  // Check if a match belongs to the signed-in official score manager
+  const isMatchOwnedByCurrentManager = (m: MatchState | any): boolean => {
+    if (!isScoreManager || !currentManagerId) return false;
+    if (m.managerId) {
+      return String(m.managerId).toLowerCase() === String(currentManagerId).toLowerCase();
+    }
+    if (m.createdBy) {
+      return String(m.createdBy).toLowerCase() === String(currentManagerId).toLowerCase() ||
+        (user?.uid && m.createdBy === user.uid) ||
+        (user?.email && m.createdBy === user.email);
+    }
+    return false;
+  };
 
   // Team Management state vectors
   const [showTeamModal, setShowTeamModal] = useState(false);
@@ -1545,12 +1587,12 @@ export const CricketScoreboard: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as MatchState;
-        if (parsed && parsed.status === 'live' && parsed.id && !isMatchDeleted(parsed.id)) {
+        const isOwned = !isScoreManager || isMatchOwnedByCurrentManager(parsed);
+        if (parsed && parsed.status === 'live' && parsed.id && !isMatchDeleted(parsed.id) && isOwned) {
           setLocalAutosavedMatch(parsed);
-        } else if (parsed && parsed.id && isMatchDeleted(parsed.id)) {
-          try {
-            localStorage.removeItem('cricket_active_match');
-          } catch (e) {}
+        } else if (parsed && parsed.id && (isMatchDeleted(parsed.id) || (isScoreManager && !isOwned))) {
+          // If match belongs to a different scorekeeper, do not populate this manager's active state
+          setLocalAutosavedMatch(null);
         }
       } catch (err) {
         console.error('Failed to load active match from LocalStorage:', err);
@@ -1760,6 +1802,11 @@ export const CricketScoreboard: React.FC = () => {
 
         remoteIds.add(m.id);
 
+        // Dashboard Isolation: If signed in as score manager, only populate matches belonging to this scorekeeper
+        if (isScoreManager && !isMatchOwnedByCurrentManager(m)) {
+          return;
+        }
+
         if (m.status === 'completed') {
           historyList.push(m);
         } else if (m.status === 'draft') {
@@ -1824,6 +1871,9 @@ export const CricketScoreboard: React.FC = () => {
           if (Array.isArray(parsed)) {
             parsed.forEach((lm: any) => {
               if (lm && lm.status === 'draft' && !isMatchDeleted(lm.id)) {
+                if (isScoreManager && !isMatchOwnedByCurrentManager(lm)) {
+                  return;
+                }
                 if (!draftList.some(d => d.id === lm.id)) {
                   draftList.push(lm);
                 }
@@ -2176,7 +2226,9 @@ export const CricketScoreboard: React.FC = () => {
           tournamentName: 'Gully Match',
           seriesName: 'Bilateral Series',
           groundName: venueName,
-          createdBy: user?.email || user?.uid || 'anonymous',
+          createdBy: currentManagerId || user?.email || user?.uid || 'anonymous',
+          managerId: currentManagerId || undefined,
+          managerName: currentManagerName || undefined,
           updatedAt: Date.now(),
           version: 1
         };
@@ -2414,7 +2466,9 @@ export const CricketScoreboard: React.FC = () => {
       tournamentName: tournamentName || null,
       seriesName: seriesName || 'Bilateral Series',
       groundName: groundName || 'Gully Ground',
-      createdBy: user?.email || user?.uid || 'anonymous',
+      createdBy: currentManagerId || user?.email || user?.uid || 'anonymous',
+      managerId: currentManagerId || undefined,
+      managerName: currentManagerName || undefined,
       updatedAt: Date.now(),
       version: 1
     };
@@ -2614,7 +2668,14 @@ export const CricketScoreboard: React.FC = () => {
     batsmanName: string,
     bowlerName: string,
     baseDesc: string,
-    inningsNum: number
+    inningsNum: number,
+    additionalContext?: {
+      nonStrikerName?: string;
+      isBowlerChanged?: boolean;
+      isNewBatsmanOnCrease?: boolean;
+      newBatsmanName?: string;
+      isOverStart?: boolean;
+    }
   ) => {
     try {
       setIsAiCommentaryLoading(true);
@@ -2626,8 +2687,14 @@ export const CricketScoreboard: React.FC = () => {
           matchState: activeInnings,
           event: eventInfo,
           batsman: { name: batsmanName },
+          striker: { name: batsmanName },
+          nonStriker: { name: additionalContext?.nonStrikerName || '' },
           bowler: { name: bowlerName },
-          originalDescription: baseDesc
+          originalDescription: baseDesc,
+          isBowlerChanged: additionalContext?.isBowlerChanged || false,
+          isNewBatsmanOnCrease: additionalContext?.isNewBatsmanOnCrease || false,
+          newBatsmanName: additionalContext?.newBatsmanName || '',
+          isOverStart: additionalContext?.isOverStart || false
         })
       });
       const data = await res.json();
@@ -2672,18 +2739,54 @@ export const CricketScoreboard: React.FC = () => {
       isCurrent: idx === index
     }));
 
+    const newActiveBowler = currentInnings.bowlers[index];
+    const newBowlerName = newActiveBowler?.name || 'Bowler';
+    const strikerBatter = currentInnings.batsmen?.[currentInnings.strikerIndex];
+    const nonStrikerBatter = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
+
+    const overStr = formatOvers(currentInnings.ballsBowled);
+    const bowlingChangeDesc = `🔄 Bowling Change: ${newBowlerName} into the attack to bowl to ${strikerBatter?.name || 'the striker'}!`;
+
+    const updatedCommList = [
+      {
+        id: `comm-bowler-change-${Date.now()}`,
+        overBall: overStr,
+        description: bowlingChangeDesc,
+        type: 'extra'
+      },
+      ...(currentInnings.commentaryList || [])
+    ];
+
     const updatedInnings = {
       ...currentInnings,
       bowlers: updatedBowlers,
-      currentBowlerIndex: index
+      currentBowlerIndex: index,
+      commentaryList: updatedCommList
     };
 
-    syncMatch(prev => ({
-      ...prev,
-      innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
-      innings2: prev.currentInningsNum === 2 ? updatedInnings : prev.innings2
-    }));
-    showNotification(`Bowler changed to ${currentInnings.bowlers[index].name}.`, 'info');
+    const nextMatchState = {
+      ...match,
+      innings1: match.currentInningsNum === 1 ? updatedInnings : match.innings1,
+      innings2: match.currentInningsNum === 2 ? updatedInnings : match.innings2
+    };
+
+    syncMatch(nextMatchState);
+    showNotification(`Bowler changed to ${newBowlerName}.`, 'info');
+
+    if (aiCommentaryEnabled && !isSpectator) {
+      generateAICommentary(
+        nextMatchState,
+        { type: 'bowler_change' },
+        strikerBatter?.name || 'Batsman',
+        newBowlerName,
+        bowlingChangeDesc,
+        match.currentInningsNum,
+        {
+          nonStrikerName: nonStrikerBatter?.name,
+          isBowlerChanged: true
+        }
+      );
+    }
   };
 
   const handleSwapStrikers = () => {
@@ -3130,7 +3233,13 @@ export const CricketScoreboard: React.FC = () => {
         striker.name,
         bowler.name,
         baseDesc,
-        match.currentInningsNum
+        match.currentInningsNum,
+        {
+          nonStrikerName: nonStriker?.name,
+          isBowlerChanged: false,
+          isNewBatsmanOnCrease: false,
+          isOverStart: (inn.ballsBowled % 6 === 1)
+        }
       );
     }
   };
@@ -3368,13 +3477,19 @@ export const CricketScoreboard: React.FC = () => {
 
     // AI Commentary trigger in background if enabled
     if (aiCommentaryEnabled && !isSpectator) {
+      const remainingPartner = batsmen.find(b => !b.isOut && b.name.toLowerCase() !== finalBatsmanName.toLowerCase());
       generateAICommentary(
         nextMatchState,
         { type: 'wicket' },
-        dismissedBatter.name,
+        finalBatsmanName,
         detailedBowler,
         commentaryDescription,
-        match.currentInningsNum
+        match.currentInningsNum,
+        {
+          nonStrikerName: remainingPartner?.name,
+          isNewBatsmanOnCrease: true,
+          newBatsmanName: finalBatsmanName
+        }
       );
     }
 
@@ -3963,7 +4078,9 @@ export const CricketScoreboard: React.FC = () => {
       tournamentName: tournamentName || null,
       seriesName: seriesName || 'Bilateral Series',
       groundName: groundName || 'Gully Ground',
-      createdBy: user?.email || user?.uid || 'anonymous',
+      createdBy: currentManagerId || user?.email || user?.uid || 'anonymous',
+      managerId: currentManagerId || undefined,
+      managerName: currentManagerName || undefined,
       updatedAt: Date.now(),
       version: 1
     };
@@ -4662,6 +4779,15 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-1.5 font-sans overflow-x-auto max-w-[calc(100vw-100px)] sm:max-w-none pr-1">
+            {/* Scorer Identity Badge */}
+            {isScoreManager && currentManagerId && (
+              <div className="hidden lg:flex items-center gap-1 px-2 py-1 bg-slate-800/90 border border-emerald-500/30 rounded-lg text-[9px] font-bold text-emerald-400 shrink-0">
+                <ShieldIcon size={10} className="text-amber-300" />
+                <span className="text-slate-400">Scorer:</span>
+                <span className="font-mono text-emerald-300">@{currentManagerId}</span>
+              </div>
+            )}
+
             {match.id && (
               <button
                 onClick={() => setShowLivePreview(prev => !prev)}
@@ -7778,21 +7904,7 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {match.id && (
-              <button
-                onClick={() => {
-                  const link = getPublicOverlayUrl(match.id);
-                  copyToClipboard(link).then(() => {
-                    showNotification('OBS URL Copied! Paste as standard transparent 1920x1080 Browser Source.', 'success');
-                  });
-                }}
-                className="px-3.5 py-2 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-450 hover:to-pink-500 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-md shadow-rose-950/20 active:scale-95"
-                title="Instant OBS Copy Link"
-              >
-                <Link2 size={13} className="text-white" />
-                <span>Instant OBS Copy Link</span>
-              </button>
-            )}
+
 
             {match.innings1 && (
               <button
@@ -8369,19 +8481,7 @@ export const CricketScoreboard: React.FC = () => {
                               )}
                             </div>
 
-                            <button
-                              onClick={() => {
-                                const link = getPublicOverlayUrl(past.id);
-                                copyToClipboard(link).then(() => {
-                                  showNotification('OBS URL Copied! Paste as standard transparent 1920x1080 Browser Source.', 'success');
-                                });
-                              }}
-                              className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 dark:text-rose-450 border border-rose-500/15 hover:border-rose-500/30 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 shadow-sm"
-                              title="Copy OBS Studio transparent overlay URL"
-                            >
-                              <Share2 size={11} className="text-rose-500" />
-                              <span>🔗 Instant OBS Copy Link</span>
-                            </button>
+
                           </div>
 
                           {expandedKeyMomentsId === past.id && (
@@ -8558,19 +8658,7 @@ export const CricketScoreboard: React.FC = () => {
                               )}
                             </div>
 
-                            <button
-                              onClick={() => {
-                                const link = getPublicOverlayUrl(past.id);
-                                copyToClipboard(link).then(() => {
-                                  showNotification('OBS URL Copied! Paste as standard transparent 1920x1080 Browser Source.', 'success');
-                                });
-                              }}
-                              className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 dark:text-rose-400 border border-rose-500/15 hover:border-rose-500/30 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 shadow-sm"
-                              title="Copy OBS Studio transparent overlay URL"
-                            >
-                              <Share2 size={11} className="text-rose-500" />
-                              <span>🔗 Instant OBS Copy Link</span>
-                            </button>
+
                           </div>
                         </div>
                       ))}
@@ -10020,20 +10108,6 @@ export const CricketScoreboard: React.FC = () => {
                     >
                       <Radio size={11} className={showBroadcastCenter ? "text-rose-400 animate-pulse" : "text-slate-400"} />
                       📺 Broadcast Overlay Setup
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        const link = getPublicOverlayUrl(match.id);
-                        copyToClipboard(link).then(() => {
-                          showNotification('OBS URL Copied! Paste as standard transparent 1920x1080 Browser Source.', 'success');
-                        });
-                      }}
-                      className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/25 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
-                      title="Copy standard transparent 1080p overlay link for OBS Studio"
-                    >
-                      <Link2 size={12} className="text-rose-400" />
-                      <span>Instant OBS Copy Link</span>
                     </button>
 
                     <button

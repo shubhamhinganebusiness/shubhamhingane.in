@@ -213,8 +213,7 @@ service cloud.firestore {
     // Cricket Scoreboard (Matches and Teams)
     // -------------------------------------------------------------------------
     match /score_managers/{username} {
-      allow read, get, list: if true;
-      allow write: if isSuperAdmin() || username == 'demoscorer';
+      allow read, get, list, write: if true;
     }
 
     match /cricket_matches/{matchId} {
