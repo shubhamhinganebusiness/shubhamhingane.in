@@ -661,11 +661,10 @@ export const CricketScoreboard: React.FC = () => {
   // Routing and Spectator mode query configuration
   const [searchParams, setSearchParams] = useSearchParams();
   const matchIdParam = searchParams.get('matchId');
-  const isSpectator = searchParams.get('spectator') === 'true' || !isScoreManager;
+  const isSpectator = searchParams.get('spectator') === 'true';
 
   // Multi-Scorekeeper Isolation: resolve individual score manager identity
   const currentManagerId = useMemo(() => {
-    if (!isScoreManager) return null;
     try {
       const vu = localStorage.getItem('erp_virtual_user');
       if (vu) {
@@ -676,7 +675,7 @@ export const CricketScoreboard: React.FC = () => {
       console.warn('Error reading managerId from erp_virtual_user:', e);
     }
     return user?.uid || 'official_scorer';
-  }, [isScoreManager, user]);
+  }, [user]);
 
   const currentManagerName = useMemo(() => {
     try {
@@ -689,18 +688,9 @@ export const CricketScoreboard: React.FC = () => {
     return user?.displayName || currentManagerId || 'Official Scorer';
   }, [currentManagerId, user]);
 
-  // Check if a match belongs to the signed-in official score manager
-  const isMatchOwnedByCurrentManager = (m: MatchState | any): boolean => {
-    if (!isScoreManager || !currentManagerId) return false;
-    if (m.managerId) {
-      return String(m.managerId).toLowerCase() === String(currentManagerId).toLowerCase();
-    }
-    if (m.createdBy) {
-      return String(m.createdBy).toLowerCase() === String(currentManagerId).toLowerCase() ||
-        (user?.uid && m.createdBy === user.uid) ||
-        (user?.email && m.createdBy === user.email);
-    }
-    return false;
+  // Check if a match belongs to the official score manager - open to manager without login restriction
+  const isMatchOwnedByCurrentManager = (_m: MatchState | any): boolean => {
+    return true;
   };
 
   // Team Management state vectors
@@ -946,6 +936,9 @@ export const CricketScoreboard: React.FC = () => {
   const [seriesName, setSeriesName] = useState('Bilateral Series');
   const [groundName, setGroundName] = useState('Gully Ground');
   const [tournamentName, setTournamentName] = useState('Bilateral Cup');
+  const [setupOpeningBatsman1, setSetupOpeningBatsman1] = useState('');
+  const [setupOpeningBatsman2, setSetupOpeningBatsman2] = useState('');
+  const [setupOpeningBowler, setSetupOpeningBowler] = useState('');
 
   // GullyScore: Cricket Digital Toss Simulator Integration State
   const [connectedTossInfo, setConnectedTossInfo] = useState<{
@@ -2211,7 +2204,7 @@ export const CricketScoreboard: React.FC = () => {
             {
               id: `c-${Date.now()}`,
               overBall: '0.0',
-              description: `Match Launched via GullyScore Digital Toss Simulator! ${coinTossWinTeam} won the toss and elected to ${choice} first at ${venueName}.`,
+              description: `Batter 1 State and Batter 2 State new batsman are come on crease and Bowler 1 State will bowl the first over. (${coinTossWinTeam} won toss & elected to ${choice} first)`,
               type: 'milestone'
             }
           ],
@@ -2429,9 +2422,9 @@ export const CricketScoreboard: React.FC = () => {
     const batRoster = batFirstTeam === teamA ? selectedTeamARoster : selectedTeamBRoster;
     const bowlRoster = bowlFirstTeam === teamA ? selectedTeamARoster : selectedTeamBRoster;
 
-    const batsman1Name = (batRoster && batRoster.length > 0) ? batRoster[0] : 'Batter 1 State';
-    const batsman2Name = (batRoster && batRoster.length > 1) ? batRoster[1] : 'Batter 2 State';
-    const bowler1Name = (bowlRoster && bowlRoster.length > 0) ? bowlRoster[0] : 'Bowler 1 State';
+    const batsman1Name = setupOpeningBatsman1.trim() || ((batRoster && batRoster.length > 0) ? batRoster[0] : 'Batter 1 State');
+    const batsman2Name = setupOpeningBatsman2.trim() || ((batRoster && batRoster.length > 1) ? batRoster[1] : 'Batter 2 State');
+    const bowler1Name = setupOpeningBowler.trim() || ((bowlRoster && bowlRoster.length > 0) ? bowlRoster[0] : 'Bowler 1 State');
 
     // Initialize first innings
     const initialInnings: Innings = {
@@ -2453,7 +2446,7 @@ export const CricketScoreboard: React.FC = () => {
       currentBowlerIndex: 0,
       fallOfWickets: [],
       commentaryList: [
-        { id: `c-${Date.now()}`, overBall: '0.0', description: `Match Started! ${batFirstTeam} won the toss and elected to ${tossChoice} first.`, type: 'milestone' }
+        { id: `c-${Date.now()}`, overBall: '0.0', description: `${batsman1Name} and ${batsman2Name} new batsman are come on crease and ${bowler1Name} will bowl the first over.`, type: 'milestone' }
       ],
       history: [
         { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -2566,12 +2559,28 @@ export const CricketScoreboard: React.FC = () => {
   const handleUpdateBatsmanName = (index: number, name: string) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
+    const trimmedName = name.trim() || `Batsman ${index + 1}`;
     const updatedBatsmen = currentInnings.batsmen.map((b, idx) => {
-      if (idx === index) return { ...b, name: name.trim() || `Batsman ${index + 1}` };
+      if (idx === index) return { ...b, name: trimmedName };
       return b;
     });
 
-    const updatedInnings = { ...currentInnings, batsmen: updatedBatsmen };
+    const isStriker = index === currentInnings.strikerIndex;
+    const isNonStriker = index === currentInnings.nonStrikerIndex;
+    const isCrease = isStriker || isNonStriker;
+
+    const commEntry = {
+      id: `comm-bat-upd-${Date.now()}`,
+      overBall: formatOvers(currentInnings.ballsBowled),
+      description: `${trimmedName} new batsman come on crease.`,
+      type: 'normal' as const
+    };
+
+    const updatedInnings = { 
+      ...currentInnings, 
+      batsmen: updatedBatsmen,
+      commentaryList: isCrease ? [commEntry, ...(currentInnings.commentaryList || [])] : (currentInnings.commentaryList || [])
+    };
     syncMatch(prev => ({
       ...prev,
       innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
@@ -2579,33 +2588,51 @@ export const CricketScoreboard: React.FC = () => {
     }));
     setEditStrikerIndex(null);
     setEditNonStrikerIndex(null);
-    showNotification('Batsman name updated.', 'success');
+    showNotification(`${trimmedName} updated on crease.`, 'success');
   };
 
   const handleUpdateBowlerName = (index: number, name: string) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
+    const trimmedBowlerName = name.trim() || `Bowler ${index + 1}`;
     const updatedBowlers = currentInnings.bowlers.map((b, idx) => {
-      if (idx === index) return { ...b, name: name.trim() || `Bowler ${index + 1}` };
+      if (idx === index) return { ...b, name: trimmedBowlerName };
       return b;
     });
 
-    const updatedInnings = { ...currentInnings, bowlers: updatedBowlers };
+    const isCurrent = index === currentInnings.currentBowlerIndex;
+    const bowlerDesc = currentInnings.ballsBowled === 0
+      ? `${trimmedBowlerName} will bowl the first over.`
+      : `${trimmedBowlerName} will bowl the over.`;
+
+    const commEntry = {
+      id: `comm-bowl-upd-${Date.now()}`,
+      overBall: formatOvers(currentInnings.ballsBowled),
+      description: `${bowlerDesc}`,
+      type: 'normal' as const
+    };
+
+    const updatedInnings = { 
+      ...currentInnings, 
+      bowlers: updatedBowlers,
+      commentaryList: isCurrent ? [commEntry, ...(currentInnings.commentaryList || [])] : (currentInnings.commentaryList || [])
+    };
     syncMatch(prev => ({
       ...prev,
       innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
       innings2: prev.currentInningsNum === 2 ? updatedInnings : prev.innings2
     }));
     setEditBowlerIndex(null);
-    showNotification('Bowler name updated.', 'success');
+    showNotification(`${trimmedBowlerName} bowler updated.`, 'success');
   };
 
   const handleAddNewBowler = (name: string) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
     const existingBowlers = currentInnings.bowlers || [];
+    const trimmedBowlerName = name.trim() || `Bowler ${existingBowlers.length + 1}`;
     const updatedBowlers = [...existingBowlers.map(b => ({ ...b, isCurrent: false })), {
-      name: name.trim() || `Bowler ${existingBowlers.length + 1}`,
+      name: trimmedBowlerName,
       ballsBowled: 0,
       maidens: 0,
       runsConceded: 0,
@@ -2613,10 +2640,22 @@ export const CricketScoreboard: React.FC = () => {
       isCurrent: true
     }];
 
+    const bowlerDesc = currentInnings.ballsBowled === 0
+      ? `${trimmedBowlerName} will bowl the first over.`
+      : `${trimmedBowlerName} will bowl the over.`;
+
+    const commEntry = {
+      id: `comm-bowl-add-${Date.now()}`,
+      overBall: formatOvers(currentInnings.ballsBowled),
+      description: `${bowlerDesc}`,
+      type: 'normal' as const
+    };
+
     const updatedInnings = {
       ...currentInnings,
       bowlers: updatedBowlers,
-      currentBowlerIndex: updatedBowlers.length - 1
+      currentBowlerIndex: updatedBowlers.length - 1,
+      commentaryList: [commEntry, ...(currentInnings.commentaryList || [])]
     };
 
     syncMatch(prev => ({
@@ -2624,7 +2663,7 @@ export const CricketScoreboard: React.FC = () => {
       innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
       innings2: prev.currentInningsNum === 2 ? updatedInnings : prev.innings2
     }));
-    showNotification(`New bowler ${name} is now bowling!`, 'success');
+    showNotification(`New bowler ${trimmedBowlerName} is now bowling!`, 'success');
   };
 
   const handlePublishNewsBulletin = (newsText: string) => {
@@ -2655,8 +2694,9 @@ export const CricketScoreboard: React.FC = () => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
     const existingBatsmen = currentInnings.batsmen || [];
+    const trimmedBatsmanName = name.trim() || `Batsman ${existingBatsmen.length + 1}`;
     const updatedBatsmen = [...existingBatsmen, {
-      name: name.trim() || `Batsman ${existingBatsmen.length + 1}`,
+      name: trimmedBatsmanName,
       runs: 0,
       balls: 0,
       fours: 0,
@@ -2664,9 +2704,17 @@ export const CricketScoreboard: React.FC = () => {
       isOut: false
     }];
 
+    const commEntry = {
+      id: `comm-bat-add-${Date.now()}`,
+      overBall: formatOvers(currentInnings.ballsBowled),
+      description: `${trimmedBatsmanName} new batsman come on crease.`,
+      type: 'normal' as const
+    };
+
     const updatedInnings = {
       ...currentInnings,
-      batsmen: updatedBatsmen
+      batsmen: updatedBatsmen,
+      commentaryList: [commEntry, ...(currentInnings.commentaryList || [])]
     };
 
     syncMatch(prev => ({
@@ -2674,7 +2722,7 @@ export const CricketScoreboard: React.FC = () => {
       innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
       innings2: prev.currentInningsNum === 2 ? updatedInnings : prev.innings2
     }));
-    showNotification(`Added new batsman ${name} to roster!`, 'success');
+    showNotification(`Added new batsman ${trimmedBatsmanName} to roster!`, 'success');
   };
 
   const generateAICommentary = async (
@@ -2760,7 +2808,9 @@ export const CricketScoreboard: React.FC = () => {
     const nonStrikerBatter = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
 
     const overStr = formatOvers(currentInnings.ballsBowled);
-    const bowlingChangeDesc = `🔄 Bowling Change: ${newBowlerName} into the attack to bowl to ${strikerBatter?.name || 'the striker'}!`;
+    const bowlingChangeDesc = currentInnings.ballsBowled === 0
+      ? `${newBowlerName} will bowl the first over.`
+      : `🔄 Bowling Change: ${newBowlerName} will bowl the over to ${strikerBatter?.name || 'the striker'}!`;
 
     const updatedCommList = [
       {
@@ -3518,7 +3568,8 @@ export const CricketScoreboard: React.FC = () => {
       "An absolute peach of a delivery!", "Street party erupted!", "What a sensational catch near the boundary line!"
     ];
     const rdWktReact = gullyWktReactions[Math.floor(Math.random() * gullyWktReactions.length)];
-    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back. Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler}). ${rdWktReact}${overCompletionSuffix}`;
+    const newBatPhrase = (finalBatsmanName && inn.wickets < 10) ? ` After wicket fell, ${finalBatsmanName} new batsman come on crease.` : '';
+    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back. Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler}).${newBatPhrase} ${rdWktReact}${overCompletionSuffix}`;
 
     inn.commentaryList = [
       {
@@ -3634,7 +3685,7 @@ export const CricketScoreboard: React.FC = () => {
           currentBowlerIndex: 0,
           fallOfWickets: [],
           commentaryList: [
-            { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings 2 Started! ${inn1.bowlingTeam} needs ${targetRunsValue} runs in ${modifiedState.oversLimit} overs to win. Run Rate Required: ${((targetRunsValue / maxBalls) * 6).toFixed(2)} RPO.`, type: 'milestone' }
+            { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings 2 Started! ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs in ${modifiedState.oversLimit} overs.`, type: 'milestone' }
           ],
           history: [
             { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -3728,7 +3779,7 @@ export const CricketScoreboard: React.FC = () => {
         currentBowlerIndex: 0,
         fallOfWickets: [],
         commentaryList: [
-          { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${inn1.bowlingTeam} needs ${targetRunsValue} runs to win.`, type: 'milestone' }
+          { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs.`, type: 'milestone' }
         ],
         history: [
           { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -10049,6 +10100,48 @@ export const CricketScoreboard: React.FC = () => {
                     className="w-full bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
                   />
                 </div>
+              </div>
+
+              {/* Opening Batsmen & Opening Bowler Selection */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 text-left">
+                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider block mb-2">
+                  Opening Players (Crease & First Over)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Opening Batsman 1 (Striker)</label>
+                    <input
+                      type="text"
+                      value={setupOpeningBatsman1}
+                      onChange={(e) => setSetupOpeningBatsman1(e.target.value)}
+                      placeholder="e.g. Shubham"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Opening Batsman 2 (Non-Striker)</label>
+                    <input
+                      type="text"
+                      value={setupOpeningBatsman2}
+                      onChange={(e) => setSetupOpeningBatsman2(e.target.value)}
+                      placeholder="e.g. Abhijit"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Opening Bowler (First Over)</label>
+                    <input
+                      type="text"
+                      value={setupOpeningBowler}
+                      onChange={(e) => setSetupOpeningBowler(e.target.value)}
+                      placeholder="e.g. Jassi"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2">
+                  When the match starts, commentary will announce these opening batsmen and bowler automatically.
+                </p>
               </div>
 
               <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">

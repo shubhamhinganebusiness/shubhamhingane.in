@@ -304,7 +304,8 @@ async function startServer() {
     event: any,
     batsmanName: string,
     bowlerName: string,
-    originalDesc: string
+    originalDesc: string,
+    newBatsmanName?: string
   ): string {
     const bats = batsmanName || 'The batsman';
     const bowl = bowlerName || 'The bowler';
@@ -370,7 +371,11 @@ async function startServer() {
     // Priority logic matching
     const oLower = (originalDesc || '').toLowerCase();
     if (type === 'wicket' || oLower.includes('out') || oLower.includes('wkt') || oLower.includes('gone') || oLower.includes('bowled')) {
-      return wickets[Math.floor(Math.random() * wickets.length)];
+      const baseWkt = wickets[Math.floor(Math.random() * wickets.length)];
+      if (newBatsmanName) {
+        return `${baseWkt} After wicket fell, ${newBatsmanName} new batsman come on crease.`;
+      }
+      return baseWkt;
     }
     if (type === 'boundary' || val === 4 || oLower.includes('four') || oLower.includes('boundary')) {
       return boundaries[Math.floor(Math.random() * boundaries.length)];
@@ -397,7 +402,8 @@ async function startServer() {
   // AI Cricket Commentary Generator Endpoint (supports both ball-by-ball match deliveries & auction updates)
   app.post("/api/cricket/commentary", async (req, res) => {
     console.log("AI Cricket Commentary request received");
-    const { matchState, event, batsman, bowler, originalDescription, eventType, eventData, voiceStyle } = req.body;
+    const { matchState, event, batsman, bowler, originalDescription, eventType, eventData, voiceStyle, additionalContext, newBatsmanName: reqNewBat } = req.body;
+    const incomingNewBatsman = reqNewBat || additionalContext?.newBatsmanName || '';
 
     // Auction event commentary handling
     if (eventType) {
@@ -446,7 +452,7 @@ Output only the plain commentary sentence without extra labels.`;
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         console.warn("GEMINI_API_KEY missing. Handing over to local gully commentator.");
-        const fallbackText = getGullyCommentaryFallback(event, batsman?.name, bowler?.name, originalDescription);
+        const fallbackText = getGullyCommentaryFallback(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman);
         return res.json({ text: fallbackText });
       }
 
@@ -479,6 +485,7 @@ Output only the plain commentary sentence without extra labels.`;
         - Batsman facing delivery: ${batsman?.name || 'Batsman'}
         - Bowler delivering: ${bowler?.name || 'Bowler'}
         - Basic description: "${originalDescription || ''}"
+        ${incomingNewBatsman ? `- Incoming new batsman: ${incomingNewBatsman} (Crucial note: announce: "After wicket fell, ${incomingNewBatsman} new batsman come on crease.")` : ''}
 
         CURRENT INNINGS STATE:
         - Score: ${matchState?.runs ?? 0}/${matchState?.wickets ?? 0}
@@ -503,7 +510,7 @@ Output only the plain commentary sentence without extra labels.`;
       res.json({ text: (response.text || "").trim() || originalDescription });
     } catch (error: any) {
       console.warn("Gemini Commentary API Quota limit or error triggered. Reverting to local gully commentator:", error.message || error);
-      const fallbackText = getGullyCommentaryFallback(event, batsman?.name, bowler?.name, originalDescription);
+      const fallbackText = getGullyCommentaryFallback(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman);
       res.json({ text: fallbackText });
     }
   });
