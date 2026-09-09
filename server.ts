@@ -1440,9 +1440,31 @@ Adopting modular paradigms accelerates iteration velocity while keeping technica
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const mainServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on port ${PORT}`);
   });
+  mainServer.on("error", (err: any) => {
+    console.error(`Main server listener error on port ${PORT}:`, err.message || err);
+  });
+
+  // Support Google Cloud Run dynamic $PORT (e.g. 8080) for standalone container deployments
+  const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+  if (envPort && envPort !== PORT) {
+    try {
+      const crServer = app.listen(envPort, "0.0.0.0", () => {
+        console.log(`Cloud Run container listener active on port ${envPort}`);
+      });
+      crServer.on("error", (err: any) => {
+        if (err.code === "EADDRINUSE") {
+          console.log(`Port ${envPort} in use (e.g. reverse proxy active), serving exclusively on port ${PORT}`);
+        } else {
+          console.warn(`Cloud Run secondary port ${envPort} error:`, err.message || err);
+        }
+      });
+    } catch (bindErr: any) {
+      console.log(`Cloud Run port ${envPort} bind skipped:`, bindErr.message || bindErr);
+    }
+  }
 }
 
 startServer();
