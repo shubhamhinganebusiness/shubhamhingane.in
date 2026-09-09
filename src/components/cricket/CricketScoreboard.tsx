@@ -63,6 +63,8 @@ import {
   MatchContextualTone,
   ContextualToneInfo
 } from './modules/commentaryLanguage';
+import { WinProbabilityCard } from './modules/WinProbabilityCard';
+import { calculateWinProbabilityDetails } from './modules/winProbabilityEngine';
 
 // Types & Interfaces
 export interface Batsman {
@@ -1113,6 +1115,7 @@ export const CricketScoreboard: React.FC = () => {
   const [aiCommentaryEnabled, setAiCommentaryEnabled] = useState(true);
   const [isAiCommentaryLoading, setIsAiCommentaryLoading] = useState(false);
   const [userCommentaryLang, setUserCommentaryLang] = useCommentaryLanguage('en');
+  const [showWinProbabilityDesk, setShowWinProbabilityDesk] = useState<boolean>(true);
 
   // Copy Overlay Link state
   const [copiedOverlayLink, setCopiedOverlayLink] = useState(false);
@@ -1124,7 +1127,7 @@ export const CricketScoreboard: React.FC = () => {
   const [bulkAddTeamBText, setBulkAddTeamBText] = useState('');
 
   // Overlay graphics control panel states
-  const [activeControlTab, setActiveControlTab] = useState<'alerts' | 'graphics' | 'sequencer' | 'templates' | 'media'>('alerts');
+  const [activeControlTab, setActiveControlTab] = useState<'alerts' | 'graphics' | 'templates' | 'media'>('alerts');
   const [lowerThirdMode, setLowerThirdMode] = useState<'intro' | 'equation' | 'umpires'>('intro');
   const [selectedUmpireSignal, setSelectedUmpireSignal] = useState<'out' | 'noball' | 'freehit' | 'deadball' | 'wide'>('out');
   const [customMilestone, setCustomMilestone] = useState<{ name: string; type: 'fifty' | 'hundred' | '5wkt'; value: number } | null>(null);
@@ -2164,6 +2167,45 @@ export const CricketScoreboard: React.FC = () => {
     setTimeout(() => {
       setFeedback(null);
     }, 4000);
+  };
+
+  const handleAddWinProbCommentaryToFeed = (text: string, translations?: { en: string; hi: string; mr: string }) => {
+    if (!match) return;
+    const activeInnings = match.currentInningsNum === 1 ? match.innings1 : match.innings2;
+    if (!activeInnings) return;
+
+    const currentOverBall = `${Math.floor(activeInnings.ballsBowled / 6)}.${activeInnings.ballsBowled % 6}`;
+    const newEntry = {
+      id: `winprob-comm-${Date.now()}`,
+      overBall: currentOverBall,
+      description: text,
+      type: 'milestone' as const,
+      specialEvent: 'win_probability_insight',
+      translations: translations || {
+        en: text,
+        hi: translations?.hi,
+        mr: translations?.mr
+      }
+    };
+
+    syncMatch(prev => {
+      const targetInnings = prev.currentInningsNum === 1 ? prev.innings1 : prev.innings2;
+      if (!targetInnings) return prev;
+      const updatedList = [newEntry, ...(targetInnings.commentaryList || [])];
+      return {
+        ...prev,
+        innings1: prev.currentInningsNum === 1 ? {
+          ...targetInnings,
+          commentaryList: updatedList
+        } : prev.innings1,
+        innings2: prev.currentInningsNum === 2 ? {
+          ...targetInnings,
+          commentaryList: updatedList
+        } : prev.innings2
+      };
+    });
+
+    showNotification('⚡ Predictive Win Probability Commentary posted to live match feed!', 'success');
   };
 
   // GullyScore Digital Toss Simulator: Auto-fill setup or Auto-launch live match
@@ -5736,11 +5778,10 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
 
                     {/* Controller Mode Tabs */}
-                    <div className="grid grid-cols-5 gap-1 mb-2 bg-slate-950 p-1 rounded-xl shrink-0">
+                    <div className="grid grid-cols-4 gap-1 mb-2 bg-slate-950 p-1 rounded-xl shrink-0">
                       {[
                         { id: 'alerts', label: '🚀 Alerts' },
                         { id: 'graphics', label: '📊 Display' },
-                        { id: 'sequencer', label: '🔁 Queue' },
                         { id: 'templates', label: '🎨 Theme' },
                         { id: 'media', label: '🖼️ Media' }
                       ].map(tab => (
@@ -6086,9 +6127,39 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       )}
 
-                      {/* --- SEQUENCER TAB --- */}
-                      {activeControlTab === 'sequencer' && (
-                        <div className="space-y-3.5 text-left">
+                      {/* --- THEME TAB --- */}
+                      {activeControlTab === 'templates' && (
+                        <div className="space-y-3">
+                          <div>
+                            <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1">Pick Active Theme Template</span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {[
+                                { id: 'slanted-pro-design', label: '🖼️ Slanted Pro Design' },
+                                { id: 'score-bug-1900-200', label: '🎮 Vintage Retro (1900x200)' }
+                              ].map(t => {
+                                const isThemeActive = activeOverlayConfig.template === t.id || (t.id === 'slanted-pro-design' && !['slanted-pro-design', 'score-bug-1900-200'].includes(activeOverlayConfig.template));
+                                return (
+                                  <button
+                                    key={t.id}
+                                    onClick={() => updateOverlayProp({ template: t.id as any })}
+                                    className={`py-1 text-[8px] font-extrabold text-left px-2 rounded-lg border cursor-pointer transition-all truncate ${
+                                      isThemeActive
+                                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-extrabold'
+                                        : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-400'
+                                    }`}
+                                  >
+                                    {t.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* --- MEDIA TAB --- */}
+                      {activeControlTab === 'media' && (
+                        <div className="space-y-3 font-sans pb-4">
                           {/* Streaming Connection Section */}
                           <div className="border border-white/5 bg-slate-950/40 p-2.5 rounded-2xl space-y-2">
                             <span className="text-[7.5px] font-black text-rose-450 uppercase tracking-widest block">📡 Live Streaming Server</span>
@@ -6186,283 +6257,6 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Sequence Loop Controller */}
-                          <div className="border border-white/5 bg-slate-950/40 p-2.5 rounded-2xl space-y-2">
-                            <span className="text-[7.5px] font-black text-rose-455 uppercase tracking-widest block font-sans">🔁 Auto Sequence Controller</span>
-                            
-                            <div className="space-y-2">
-                              {/* Duration selector */}
-                              <div className="flex justify-between items-center bg-slate-950/60 p-1.5 border border-white/5 rounded-xl">
-                                <div>
-                                  <span className="text-[8px] font-black uppercase text-slate-350 block font-sans">Slide Duration</span>
-                                  <span className="text-[6px] text-slate-500 font-mono">Visible time per active graphic</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => setSequenceDuration(prev => Math.max(3, prev - 1))}
-                                    disabled={isSequencePlaying}
-                                    className="w-5 h-5 bg-slate-900 border border-slate-850 hover:bg-slate-800 disabled:opacity-30 rounded text-[9px] font-black cursor-pointer text-slate-300 flex items-center justify-center border-none"
-                                  >
-                                    -
-                                  </button>
-                                  <span className="font-mono text-[9px] font-black text-white w-7 text-center">{sequenceDuration}s</span>
-                                  <button
-                                    onClick={() => setSequenceDuration(prev => Math.min(30, prev + 1))}
-                                    disabled={isSequencePlaying}
-                                    className="w-5 h-5 bg-slate-900 border border-slate-850 hover:bg-slate-800 disabled:opacity-30 rounded text-[9px] font-black cursor-pointer text-slate-300 flex items-center justify-center border-none"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Play Control Action Buttons */}
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => {
-                                    if (isSequencePlaying) {
-                                      setIsSequencePlaying(false);
-                                      setCurrentQueueIndex(-1);
-                                      updateOverlayProp({ activeGraphic: 'none' });
-                                      showNotification('Sequence playback stopped.', 'info');
-                                    } else {
-                                      if (graphicsQueue.length === 0) {
-                                        showNotification('Cannot play: The sequence queue is empty!', 'alert');
-                                        return;
-                                      }
-                                      setIsSequencePlaying(true);
-                                      setCurrentQueueIndex(0);
-                                      showNotification('Sequence play looping initialized.', 'success');
-                                    }
-                                  }}
-                                  className={`flex-1 py-1.5 rounded-xl border border-solid font-black text-[8px] uppercase tracking-widest cursor-pointer transition-all flex items-center justify-center gap-1 ${
-                                    isSequencePlaying
-                                      ? 'bg-amber-600/20 border-amber-500/40 text-amber-400 font-bold'
-                                      : 'bg-emerald-600/10 hover:bg-emerald-600/20 active:scale-95 border-emerald-500/25 hover:border-emerald-500/40 text-emerald-400'
-                                  }`}
-                                >
-                                  {isSequencePlaying ? '⏹ STOP SEQUENCE' : '▶ START SEQUENCE'}
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    setGraphicsQueue([]);
-                                    if (isSequencePlaying) {
-                                      setIsSequencePlaying(false);
-                                      setCurrentQueueIndex(-1);
-                                      updateOverlayProp({ activeGraphic: 'none' });
-                                    }
-                                    showNotification('Cleared seq queue.', 'info');
-                                  }}
-                                  className="py-1.5 px-3 bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/20 hover:border-rose-500/30 rounded-xl text-rose-450 font-black text-[8px] uppercase tracking-widest cursor-pointer transition-all border-none"
-                                >
-                                  Reset
-                                </button>
-                              </div>
-
-                              {/* Sequence Queue list container */}
-                              <div className="space-y-1 bg-slate-950/80 border border-[#ffffff0c] rounded-xl p-2 max-h-[160px] overflow-y-auto" id="graphics-sequence-queue">
-                                <span className="text-[7px] font-bold text-slate-500 uppercase font-mono block border-b border-white/5 pb-1 mb-1.5">Ordered Sequence Loop ({graphicsQueue.length} items):</span>
-                                
-                                {graphicsQueue.length === 0 ? (
-                                  <div className="text-center py-3 text-[7.5px] italic text-slate-550 font-mono">
-                                    No graphic slides in queue. Click options below to add.
-                                  </div>
-                                ) : (
-                                  graphicsQueue.map((item, idx) => {
-                                    const isCurrentOnAir = isSequencePlaying && currentQueueIndex === idx;
-                                    const graphicMeta = AVAILABLE_QUEUE_GRAPHICS.find(g => g.id === item) || { id: item, label: item.toUpperCase() };
-                                    return (
-                                      <div key={idx} className={`flex items-center justify-between p-1 rounded-lg border text-[8px] transition-all ${
-                                        isCurrentOnAir 
-                                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-black scale-[1.02]' 
-                                          : 'bg-slate-950 border-[#ffffff08] text-slate-350'
-                                      }`}>
-                                        <div className="flex items-center gap-1.5 min-w-0">
-                                          <span className="w-3.5 h-3.5 rounded bg-slate-900 border border-white/10 flex items-center justify-center font-mono font-black text-[7px] text-slate-400">
-                                            {idx + 1}
-                                          </span>
-                                          {isCurrentOnAir && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>}
-                                          <span className="truncate uppercase font-black tracking-wide leading-none">{graphicMeta.label}</span>
-                                        </div>
-
-                                        <div className="flex items-center gap-1 shrink-0">
-                                          {isCurrentOnAir && (
-                                            <span className="px-1 bg-rose-500/20 text-rose-400 font-mono text-[6.5px] rounded border border-rose-500/10 mr-1 animate-pulse leading-none py-0.5 animate-none">
-                                              ON AIR
-                                            </span>
-                                          )}
-                                          
-                                          {/* Move Up */}
-                                          <button
-                                            onClick={() => {
-                                              if (idx === 0) return;
-                                              const nextQueue = [...graphicsQueue];
-                                              const temp = nextQueue[idx];
-                                              nextQueue[idx] = nextQueue[idx - 1];
-                                              nextQueue[idx - 1] = temp;
-                                              setGraphicsQueue(nextQueue);
-                                            }}
-                                            disabled={idx === 0 || isSequencePlaying}
-                                            className="w-4 h-4 bg-slate-900 border border-slate-800 disabled:opacity-20 rounded text-[7px] cursor-pointer hover:bg-slate-800 text-slate-300 flex items-center justify-center leading-none border-none"
-                                            title="Move Up"
-                                          >
-                                            ▲
-                                          </button>
-
-                                          {/* Move Down */}
-                                          <button
-                                            onClick={() => {
-                                              if (idx === graphicsQueue.length - 1) return;
-                                              const nextQueue = [...graphicsQueue];
-                                              const temp = nextQueue[idx];
-                                              nextQueue[idx] = nextQueue[idx + 1];
-                                              nextQueue[idx + 1] = temp;
-                                              setGraphicsQueue(nextQueue);
-                                            }}
-                                            disabled={idx === graphicsQueue.length - 1 || isSequencePlaying}
-                                            className="w-4 h-4 bg-slate-900 border border-slate-800 disabled:opacity-20 rounded text-[7px] cursor-pointer hover:bg-slate-800 text-slate-300 flex items-center justify-center leading-none border-none"
-                                            title="Move Down"
-                                          >
-                                            ▼
-                                          </button>
-
-                                          {/* Remove */}
-                                          <button
-                                            onClick={() => {
-                                              const nextQueue = graphicsQueue.filter((_, i) => i !== idx);
-                                              setGraphicsQueue(nextQueue);
-                                              if (isSequencePlaying) {
-                                                if (idx === currentQueueIndex) {
-                                                  setCurrentQueueIndex(idx);
-                                                } else if (idx < currentQueueIndex) {
-                                                  setCurrentQueueIndex(prev => prev - 1);
-                                                }
-                                              }
-                                              showNotification(`Removed slide from sequence queue.`, 'info');
-                                            }}
-                                            disabled={isSequencePlaying}
-                                            className="w-4 h-4 bg-slate-900 border border-slate-800 hover:border-rose-500/30 hover:bg-rose-500/10 disabled:opacity-20 rounded text-[7.5px] cursor-pointer text-slate-450 flex items-center justify-center leading-none border-none"
-                                            title="Delete"
-                                          >
-                                            ✕
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })
-                                )}
-                              </div>
-
-                              {/* Available Slides Picker to Add to Queue */}
-                              <div className="bg-slate-950/60 p-2 border border-white/5 rounded-xl space-y-1.5" id="sequence-add-options">
-                                <span className="text-[7px] font-bold text-slate-500 uppercase font-mono block">Add Graphic Slides to Queue:</span>
-                                
-                                <div className="grid grid-cols-2 gap-1 mb-1">
-                                  {AVAILABLE_QUEUE_GRAPHICS.map(item => (
-                                    <button
-                                      key={item.id}
-                                      onClick={() => {
-                                        setGraphicsQueue(prev => [...prev, item.id]);
-                                        showNotification(`Added ${item.label} to sequence queue.`, 'success');
-                                      }}
-                                      disabled={isSequencePlaying}
-                                      className="py-1 px-1.5 bg-slate-900/45 hover:bg-slate-900 border border-white/5 disabled:opacity-30 rounded-lg text-[7.5px] font-black uppercase text-slate-300 cursor-pointer text-left transition-all hover:text-white flex items-center justify-between"
-                                    >
-                                      <span>➕ {item.label}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* --- THEME TAB --- */}
-                      {activeControlTab === 'templates' && (
-                        <div className="space-y-3">
-                          <div>
-                            <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1">Pick Active Theme Template</span>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              {[
-                                { id: 'broadcast-pro', label: '📺 Broadcast Pro' },
-                                { id: 'neon-sport', label: '⚡ Neon Sport' },
-                                { id: 'clean-white', label: '🥚 Clean Minimal' },
-                                { id: 'ipl-style', label: '🏏 IPL Style' },
-                                { id: 'score-bug-1900-200', label: '🎮 Vintage Retro' },
-                                { id: 'slanted-pro-design', label: '🖼️ Slanted Pro Design' }
-                              ].map(t => {
-                                const isThemeActive = activeOverlayConfig.template === t.id;
-                                return (
-                                  <button
-                                    key={t.id}
-                                    onClick={() => updateOverlayProp({ template: t.id as any })}
-                                    className={`py-1 text-[8px] font-extrabold text-left px-2 rounded-lg border cursor-pointer transition-all truncate ${
-                                      isThemeActive
-                                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-extrabold'
-                                        : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-400'
-                                    }`}
-                                  >
-                                    {t.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* Team Colors custom picker right on board! */}
-                          <div>
-                            <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1">Accents</span>
-                            <div className="grid grid-cols-2 gap-1.5 text-[7px] uppercase font-bold text-slate-500 font-sans">
-                              <div>
-                                <span className="block mb-0.5 truncate">{match.teamA} Color</span>
-                                <div className="flex items-center gap-1 p-1 bg-slate-950 border border-white/5 rounded-lg">
-                                  <input
-                                    type="color"
-                                    value={activeOverlayConfig.teamAColor || '#ea002a'}
-                                    onChange={(e) => updateOverlayProp({ teamAColor: e.target.value })}
-                                    className="w-4 h-4 rounded cursor-pointer border-none bg-transparent shrink-0"
-                                  />
-                                  <span className="text-[7px] font-mono text-slate-400 font-bold">
-                                    {(activeOverlayConfig.teamAColor || '#ea002a').substring(0, 7)}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div>
-                                <span className="block mb-0.5 truncate">{match.teamB} Color</span>
-                                <div className="flex items-center gap-1 p-1 bg-slate-950 border border-white/5 rounded-lg">
-                                  <input
-                                    type="color"
-                                    value={activeOverlayConfig.teamBColor || '#00529b'}
-                                    onChange={(e) => updateOverlayProp({ teamBColor: e.target.value })}
-                                    className="w-4 h-4 rounded cursor-pointer border-none bg-transparent shrink-0"
-                                  />
-                                  <span className="text-[7px] font-mono text-slate-400 font-semibold">
-                                    {(activeOverlayConfig.teamBColor || '#00529b').substring(0, 7)}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div>
-                            <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1">Overlay Ticker News Text</span>
-                            <input
-                              type="text"
-                              value={activeOverlayConfig.tickerMessage || ''}
-                              onChange={(e) => updateOverlayProp({ tickerMessage: e.target.value })}
-                              className="w-full bg-slate-950 text-slate-350 rounded-lg text-[9px] px-2 py-1.5 border border-white/5 hover:border-white/10 outline-none uppercase font-mono"
-                              placeholder="E.g., RAIN DELAYED GAME NOW PROGRESSED."
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* --- MEDIA TAB --- */}
-                      {activeControlTab === 'media' && (
-                        <div className="space-y-3 font-sans pb-4">
                           {/* Section: Upload Team Logos */}
                           <div className="p-3 bg-slate-950/45 border border-white/5 rounded-xl space-y-3">
                             <span className="text-[7.5px] font-black text-rose-400 uppercase tracking-widest block border-b border-white/5 pb-1">Team Logo Branding</span>
@@ -7452,6 +7246,37 @@ export const CricketScoreboard: React.FC = () => {
                       </span>
                     </div>
 
+                    {/* Predictive Win Probability Commentary Section */}
+                    <div className="mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowWinProbabilityDesk(!showWinProbabilityDesk)}
+                        className={`w-full py-1.5 px-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-between border transition-all cursor-pointer ${
+                          showWinProbabilityDesk 
+                            ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40 shadow-xs' 
+                            : 'bg-slate-900/80 hover:bg-slate-900 text-slate-300 border-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-emerald-400">⚡</span>
+                          <span>Win Probability AI Commentary</span>
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping inline-block ml-1" />
+                        </div>
+                        <span className="text-[8.5px] text-slate-400 font-mono">
+                          {showWinProbabilityDesk ? '▲ Hide Analysis' : '▼ View Tilt Analysis'}
+                        </span>
+                      </button>
+                      {showWinProbabilityDesk && (
+                        <div className="mt-2">
+                          <WinProbabilityCard
+                            match={match}
+                            userLanguage={userCommentaryLang}
+                            onAddToCommentary={handleAddWinProbCommentaryToFeed}
+                          />
+                        </div>
+                      )}
+                    </div>
+
                     {/* Contextual Tone Shifter Banner */}
                     {(() => {
                       const matchTone = getMatchContextualTone(match, currentInnings);
@@ -7467,6 +7292,7 @@ export const CricketScoreboard: React.FC = () => {
                           const isBnd = comm.type === 'boundary';
                           const isExt = comm.type === 'extra';
                           const isMilestone = comm.type === 'milestone' || !!comm.specialEvent;
+                          const isWinProb = comm.specialEvent === 'win_probability_insight';
                           const isAnnouncement = !!comm.announcementType;
                           const displayText = getCommentaryText(comm, userCommentaryLang);
 
@@ -7474,6 +7300,7 @@ export const CricketScoreboard: React.FC = () => {
                             <div
                               key={comm.id}
                               className={`p-2 rounded-xl text-[10.5px] border transition-all ${
+                                isWinProb ? 'bg-teal-500/15 border-teal-500/40 text-teal-200 shadow-teal-500/10' :
                                 comm.specialEvent === 'hundred' ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-amber-500/5' :
                                 comm.specialEvent === 'fifty' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-emerald-500/5' :
                                 comm.specialEvent === 'hat_trick' ? 'bg-rose-500/15 border-rose-500/40 text-rose-200 shadow-rose-500/5' :
@@ -7492,12 +7319,14 @@ export const CricketScoreboard: React.FC = () => {
                                   </span>
                                   {comm.specialEvent && (
                                     <span className={`text-[7px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
+                                      isWinProb ? 'bg-teal-400 text-slate-950 font-black' :
                                       comm.specialEvent === 'hundred' ? 'bg-amber-400 text-black' :
                                       comm.specialEvent === 'fifty' ? 'bg-emerald-400 text-black' :
                                       comm.specialEvent === 'hat_trick' ? 'bg-rose-500 text-white animate-pulse' :
                                       'bg-rose-400 text-black'
                                     }`}>
-                                      {comm.specialEvent === 'hundred' ? '👑 CENTURY' :
+                                      {isWinProb ? '⚡ WIN PROBABILITY TILT' :
+                                       comm.specialEvent === 'hundred' ? '👑 CENTURY' :
                                        comm.specialEvent === 'fifty' ? '🌟 HALF-CENTURY' :
                                        comm.specialEvent === 'hat_trick' ? '🔥 HAT-TRICK' :
                                        '⚡ WICKET'}

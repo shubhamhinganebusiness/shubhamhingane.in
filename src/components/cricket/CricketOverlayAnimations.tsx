@@ -25,35 +25,25 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
     let timers: NodeJS.Timeout[] = [];
 
     if (activeAnimation === 'six') {
-      // Phase TIMINGS for SIX Overlay (Total: 4.0s)
-      // Phase 1 (0-0.3s)
-      // Phase 2 (0.3-1s)
-      // Phase 3 (1-2.5s)
-      // Phase 4 (2.5-3.5s)
-      // Phase 5 (3.5-4s) -> fade out & reset
-      timers.push(setTimeout(() => setPhase(2), 300));
-      timers.push(setTimeout(() => setPhase(3), 1000));
-      timers.push(setTimeout(() => setPhase(4), 2500));
-      timers.push(setTimeout(() => setPhase(5), 3500));
+      // Phase TIMINGS for SIX Overlay (Total: 2.0s: 0-0.15s Intro, 0.15-1.6s Impact, 1.6-2.0s Outro)
+      timers.push(setTimeout(() => setPhase(2), 150));
+      timers.push(setTimeout(() => setPhase(3), 450));
+      timers.push(setTimeout(() => setPhase(4), 900));
+      timers.push(setTimeout(() => setPhase(5), 1600)); // Outro fade
       timers.push(setTimeout(() => {
         onAnimationComplete();
         setPhase(0);
-      }, 4000));
+      }, 2000));
     } else if (activeAnimation === 'four') {
-      // Phase TIMINGS for FOUR Overlay (Total: 3.5s)
-      // Phase 1 (0-0.4s)
-      // Phase 2 (0.4-1s)
-      // Phase 3 (1-2.5s)
-      // Phase 4 (2.5-3.0s)
-      // Phase 5 (3.0-3.5s) -> move & fade
-      timers.push(setTimeout(() => setPhase(2), 400));
-      timers.push(setTimeout(() => setPhase(3), 1000));
-      timers.push(setTimeout(() => setPhase(4), 2500));
-      timers.push(setTimeout(() => setPhase(5), 3000));
+      // Phase TIMINGS for FOUR Overlay (Total: 2.0s: 0-0.15s Intro, 0.15-0.45s Impact, 0.45-0.9s Lightning, 0.9-1.6s Boundary Subtitle, 1.6-2.0s Outro)
+      timers.push(setTimeout(() => setPhase(2), 150));
+      timers.push(setTimeout(() => setPhase(3), 450));
+      timers.push(setTimeout(() => setPhase(4), 900));
+      timers.push(setTimeout(() => setPhase(5), 1600)); // Outro fade
       timers.push(setTimeout(() => {
         onAnimationComplete();
         setPhase(0);
-      }, 3500));
+      }, 2000));
     } else if (activeAnimation === 'wicket') {
       // Phase TIMINGS for WICKET Overlay (Total: 5.0s)
       // Phase 1 (0-0.5s) -> flash + vignette
@@ -235,7 +225,7 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
       >
         {/* ==================================== 1. SIX ANIMATION CANVAS ==================================== */}
         {activeAnimation === 'six' && (
-          <div className="relative w-full h-full flex flex-col items-center justify-center">
+          <div className={`relative w-full h-full flex flex-col items-center justify-center transition-all duration-300 ${phase === 5 ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
             
             {/* Spark explosion (Phase 1) */}
             {phase >= 1 && renderGoldSparks()}
@@ -250,9 +240,9 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                 initial={{ rotate: 0, scale: 0.8, opacity: 0 }}
                 animate={{ rotate: 360, scale: 1, opacity: 1 }}
                 transition={{
-                  scale: { duration: 0.4 },
-                  opacity: { duration: 0.4 },
-                  rotate: { repeat: Infinity, duration: 6, ease: "linear" }
+                  scale: { duration: 0.3 },
+                  opacity: { duration: 0.3 },
+                  rotate: { repeat: Infinity, duration: 4, ease: "linear" }
                 }}
               >
                 {Array.from({ length: 8 }).map((_, idx) => {
@@ -277,19 +267,19 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
             {phase >= 2 && (
               <motion.div
                 className="text-center z-10"
-                initial={{ y: -500, scale: 2.2, opacity: 0 }}
+                initial={{ y: -400, scale: 2.0, opacity: 0 }}
                 animate={{ 
                   y: 0, 
-                  scale: phase >= 3 ? [1, 1.1, 1] : 1,
+                  scale: phase >= 3 ? [1, 1.08, 1] : 1,
                   opacity: 1 
                 }}
                 transition={phase >= 3 ? {
-                  y: { type: "spring", bounce: 0.42, duration: 0.8 },
-                  scale: { repeat: Infinity, duration: 0.8, ease: "easeInOut" }
+                  y: { type: "spring", bounce: 0.35, duration: 0.4 },
+                  scale: { repeat: Infinity, duration: 0.6, ease: "easeInOut" }
                 } : {
                   type: "spring",
-                  bounce: 0.42,
-                  duration: 0.8
+                  bounce: 0.35,
+                  duration: 0.4
                 }}
               >
                 <h1 
@@ -341,7 +331,7 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
 
         {/* ==================================== 2. FOUR ANIMATION CANVAS ==================================== */}
         {activeAnimation === 'four' && (
-          <div className="relative w-full h-full flex flex-col items-center justify-center">
+          <div className={`relative w-full h-full flex flex-col items-center justify-center transition-all duration-300 ${phase === 5 ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
             {/* Speed Horizontal Sweeping Lines (Phase 1) */}
             {phase >= 1 && renderSpeedLines()}
 
@@ -359,7 +349,7 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                     }}
                     transition={{ 
                       repeat: Infinity, 
-                      duration: 0.5 + Math.random() * 0.4, 
+                      duration: 0.35 + Math.random() * 0.25, 
                       ease: "linear" 
                     }}
                     style={{
@@ -386,9 +376,9 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                   filter: phase >= 5 ? "blur(12px)" : "blur(0px)",
                 }}
                 transition={{
-                  x: phase >= 5 ? { duration: 0.5, ease: "easeIn" } : { type: "spring", stiffness: 90, damping: 12 },
-                  rotate: { duration: 0.4 },
-                  skewX: { duration: 0.4 }
+                  x: phase >= 5 ? { duration: 0.35, ease: "easeIn" } : { type: "spring", stiffness: 120, damping: 12 },
+                  rotate: { duration: 0.3 },
+                  skewX: { duration: 0.3 }
                 }}
               >
                 <h1 
@@ -406,14 +396,24 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
               </motion.div>
             )}
 
+            {/* Flash screen brief burst background on Phase 3 anchor */}
+            {phase === 3 && (
+              <motion.div 
+                className="absolute inset-0 bg-cyan-300 pointer-events-none z-0"
+                initial={{ opacity: 0.5 }}
+                animate={{ opacity: 0 }}
+                transition={{ duration: 0.4 }}
+              />
+            )}
+
             {/* BOUNDARY subtitle rises (Phase 4) */}
             {phase >= 4 && phase < 5 && (
               <motion.div
                 className="absolute bottom-28 z-20"
-                initial={{ y: 200, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 200, opacity: 0 }}
-                transition={{ type: "spring", stiffness: 140, damping: 14 }}
+                initial={{ y: 150, opacity: 0, scale: 0.6 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: 150, opacity: 0 }}
+                transition={{ type: "spring", stiffness: 140, damping: 12 }}
               >
                 <div 
                   className="font-black text-white text-4xl md:text-6xl uppercase tracking-widest px-8 py-3 rounded-2xl bg-black/60 border border-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.4)]"

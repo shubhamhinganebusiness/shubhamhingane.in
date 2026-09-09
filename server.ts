@@ -130,6 +130,7 @@ async function generateContentWithFallback(
   try {
     // Official valid Gemini models ordered for maximum rate-limit tolerance and speed
     const modelsToTry = [
+      "gemini-3.8-flash",
       "gemini-3.1-flash-lite",
       "gemini-3.7-flash",
       "gemini-flash-latest",
@@ -1012,6 +1013,147 @@ Return JSON format:
     };
 
     res.json(fallbackPrediction);
+  });
+
+  // AI Cricket Predictive Win Probability Commentary Endpoint
+  app.post(["/api/cricket/win-prob-commentary", "/api/cricket/win-probability-commentary"], async (req, res) => {
+    console.log("AI Cricket Win Probability Commentary request received");
+    const {
+      matchId,
+      teamA,
+      teamB,
+      currentInningsNum,
+      battingTeam,
+      bowlingTeam,
+      runs,
+      wickets,
+      ballsBowled,
+      totalBalls,
+      ballsRemaining,
+      oversRemaining,
+      oversBowledText,
+      crr,
+      target,
+      runsNeeded,
+      rrr,
+      probA,
+      probB,
+      favoredTeam,
+      favoredProbability,
+      underdogTeam,
+      underdogProbability,
+      tiltStatus,
+      equationText,
+      language
+    } = req.body;
+
+    const cacheKey = `winprob_comm_${matchId || 'm'}_inn${currentInningsNum}_${runs}_${wickets}_${ballsBowled}`;
+    const cached = getCachedAIResponse(cacheKey);
+    if (cached) return res.json(cached);
+
+    const userPreferredLang = (language === 'mr' || language === 'hi' || language === 'en') ? language : 'en';
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+        });
+
+        const prompt = `You are a world-class cricket statistician and broadcast commentator (like Harsha Bhogle, Ravi Shastri, and Marathi/Hindi sports experts).
+Analyze this live match situation and EXPLAIN WHY the match is tilting toward a specific team.
+
+CURRENT MATCH SITUATION:
+- Match: ${teamA || 'Team A'} vs ${teamB || 'Team B'}
+- Current Innings: Innings ${currentInningsNum || 1} (${battingTeam || 'Batting side'} batting, ${bowlingTeam || 'Bowling side'} bowling)
+- Score: ${runs ?? 0}/${wickets ?? 0} in ${oversBowledText || '0.0'} overs (CRR: ${crr ?? 0})
+- Target: ${target ? target : '1st Innings benchmark setting'}
+- Crunch Equation: ${equationText || 'N/A'} (Balls Left: ${ballsRemaining ?? 0}, Runs Needed: ${runsNeeded ?? 'N/A'}, RRR: ${rrr ?? 'N/A'} RPO)
+- Current Win Probability: ${teamA}: ${probA}%, ${teamB}: ${probB}%
+- Favored Team: ${favoredTeam} (${favoredProbability}%)
+- Tilt Classification: ${tiltStatus}
+
+STYLE DIRECTIVE:
+- Explain with high broadcast energy, tactical clarity, and emotion WHY the match is tilting this way.
+- Cite the exact equation, balls left, wickets in hand, and required run rate pressure vs bowling control.
+- Example tone reference: "With 40 needed off 12, India's win probability has plummeted to 5%. They need a miracle..."
+- If it's a tight 50-50, capture the nail-biting suspense.
+- If one team is dominating, explain the specific factors (e.g., soaring required rate, top-order collapse, wickets in hand, death over boundary drought).
+
+CRITICAL OUTPUT REQUIREMENT:
+Return ONLY a valid raw JSON object with four keys: "en", "hi", "mr", and "keyTacticalReason".
+- "en": Punchy English commentary explaining why it's tilting (1-2 sentences).
+- "hi": Authentic Hindi commentary in Devanagari script explaining why it's tilting (1-2 sentences).
+- "mr": Authentic Marathi commentary in Devanagari script explaining why it's tilting (1-2 sentences).
+- "keyTacticalReason": Short 3-6 word summary (e.g. "Mounting RRR Pressure & Dot Ball Squeeze")
+No markdown fences, no backticks.`;
+
+        const response = await generateContentWithFallback(ai, {
+          contents: prompt,
+          config: { responseMimeType: "application/json" }
+        });
+
+        const parsed = JSON.parse(response.text || "{}");
+        if (parsed.en && parsed.hi && parsed.mr) {
+          const result = {
+            text: parsed[userPreferredLang] || parsed.en,
+            translations: {
+              en: parsed.en,
+              hi: parsed.hi,
+              mr: parsed.mr
+            },
+            keyTacticalReason: parsed.keyTacticalReason || "Run Rate & Wicket Pressure"
+          };
+          setCachedAIResponse(cacheKey, result);
+          return res.json(result);
+        }
+      }
+    } catch (err: any) {
+      console.warn("Win probability commentary fallback triggered:", err.message || err);
+    }
+
+    // High quality deterministic fallback matching the user's prompt
+    const wicketsLeft = 10 - (wickets || 0);
+    let enFallback = "";
+    let hiFallback = "";
+    let mrFallback = "";
+    let reason = "Run Rate Pressure & Wickets in Hand";
+
+    if (currentInningsNum === 2) {
+      if (tiltStatus === 'miracle_needed' || (underdogProbability && underdogProbability <= 8)) {
+        reason = `Skyrocketing RRR (${rrr} RPO) & Death Over Squeeze`;
+        enFallback = `With ${runsNeeded} needed off ${ballsRemaining}, ${underdogTeam}'s win probability has plummeted to ${underdogProbability}%. They need a miracle as the required rate has spiked to ${rrr} RPO with only ${wicketsLeft} wicket${wicketsLeft === 1 ? '' : 's'} left!`;
+        hiFallback = `${ballsRemaining} गेंदों में ${runsNeeded} रनों की भारी दरकार के साथ, ${underdogTeam} की जीत की संभावना घटकर मात्र ${underdogProbability}% रह गई है! आवश्यक रन रेट ${rrr} तक पहुंच चुका है और उन्हें मैच बचाने के लिए किसी करिश्मे की दरकार है!`;
+        mrFallback = `${ballsRemaining} चेंडूत ${runsNeeded} धावांची अशक्यप्राय गरज असताना, ${underdogTeam} च्या विजयाची शक्यता थेट ${underdogProbability}% वर घसरली आहे! आवश्यक धावगती ${rrr} वर पोहोचल्यामुळे आता केवळ चमत्काराचीच आशा उरली आहे!`;
+      } else if (tiltStatus === 'heavy_tilt') {
+        reason = favoredTeam === battingTeam ? `Manageable Target (${runsNeeded} off ${ballsRemaining}b)` : `Bowling Squeeze (${rrr} RRR)`;
+        enFallback = `${favoredTeam} is in full command with a ${favoredProbability}% win probability, controlling the chase equation with ${wicketsLeft} wickets intact.`;
+        hiFallback = `${favoredTeam} ${favoredProbability}% जीत की संभावना के साथ मैच पर पूरी तरह हावी है और मुकाबले का पूरा नियंत्रण उनके पास है।`;
+        mrFallback = `${favoredTeam} संघ ${favoredProbability}% विजयाच्या शक्यतेसह सामन्यावर भक्कम पकड मिळवून आहे आणि विजयाचा मार्ग स्पष्ट दिसत आहे.`;
+      } else {
+        reason = "Evenly Poised Crunch Contest";
+        enFallback = `Right down to the wire! Win probability sits poised between ${teamA} and ${teamB}. With ${runsNeeded} needed off ${ballsRemaining} balls, one big over will decide the victor.`;
+        hiFallback = `कांटे की टक्कर! दोनों टीमों की जीत की संभावना बराबरी पर टिकी है। ${ballsRemaining} गेंदों में ${runsNeeded} रन चाहिए—मुकाबला किसी भी ओर मुड़ सकता है।`;
+        mrFallback = `अटीतटीचा थरार! सामना दोन्ही बाजूंनी खुला आहे. ${ballsRemaining} चेंडूत ${runsNeeded} धावा हव्या असताना पुढचे षटक सामन्याचा फैसला करेल.`;
+      }
+    } else {
+      enFallback = `${favoredTeam} holds a ${favoredProbability}% win probability in the first innings, setting the pace at ${crr} RPO.`;
+      hiFallback = `पहली पारी में ${favoredTeam} का पलड़ा ${favoredProbability}% संभावना के साथ भारी है।`;
+      mrFallback = `पहिल्या डावात ${favoredTeam} चे पारडे ${favoredProbability}% विजयाच्या शक्यतेसह जड दिसत आहे.`;
+    }
+
+    const fallbackResult = {
+      text: userPreferredLang === 'mr' ? mrFallback : userPreferredLang === 'hi' ? hiFallback : enFallback,
+      translations: {
+        en: enFallback,
+        hi: hiFallback,
+        mr: mrFallback
+      },
+      keyTacticalReason: reason
+    };
+
+    res.json(fallbackResult);
   });
 
   // AI Agro & Product Smart Search Grounding Endpoint

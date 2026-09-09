@@ -241,7 +241,7 @@ export const CricketOverlay: React.FC = () => {
   // Default broadcast overlay options if none synced
   const activeConfig = useMemo<Required<Omit<OverlayConfig, 'manualAlertTrigger'>> & { manualAlertTrigger?: OverlayConfig['manualAlertTrigger'] }>(() => {
     const fallback: Required<Omit<OverlayConfig, 'manualAlertTrigger'>> & { manualAlertTrigger?: OverlayConfig['manualAlertTrigger'] } = {
-      template: 'broadcast-pro',
+      template: 'slanted-pro-design',
       showStatsPanel: true,
       showTicker: true,
       tickerMessage: 'LIVE BROADCAST REPLAY STREAMING',
@@ -540,10 +540,10 @@ export const CricketOverlay: React.FC = () => {
       const diff = currentInnings.runs - prevRuns;
       if (diff === 4) {
         setLastBdryFlash('4');
-        setTimeout(() => setLastBdryFlash(null), 4000);
+        setTimeout(() => setLastBdryFlash(null), 2000);
       } else if (diff === 6) {
         setLastBdryFlash('6');
-        setTimeout(() => setLastBdryFlash(null), 6000);
+        setTimeout(() => setLastBdryFlash(null), 2000);
       }
     }
     setPrevRuns(currentInnings.runs);
