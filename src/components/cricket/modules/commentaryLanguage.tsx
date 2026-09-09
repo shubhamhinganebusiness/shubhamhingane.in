@@ -75,6 +75,341 @@ export function useCommentaryLanguage(defaultLang?: CommentaryLanguage): [Commen
 }
 
 /**
+ * Rich, authentic localized commentary phrase pools for Gully Cricket.
+ * Provides fresh, unique, and colorful commentary on every ball for English, Hindi, and Marathi.
+ */
+export const GULLY_COMMENTARY_POOLS = {
+  dots: {
+    mr: [
+      "{bwl} चा भेदक मारा! {bat} ला चेंडूचा अंदाज आला नाही, चेंडू थेट यष्टिरक्षकाच्या हातात. निर्धाव चेंडू!",
+      "सुरेख टप्पा आणि अचूक लाईन! {bat} ने बचावात्मक पवित्रा घेत चेंडू अडवला. कोणतीही धाव नाही.",
+      "अतिशय चतुर गोलंदाजी {bwl} कडून! ऑफ स्टंपबाहेर जाणारा चेंडू, फलंदाज पूर्णपणे चकवला!",
+      "{bat} चा मोठा फटका मारण्याचा प्रयत्न, पण बॅट आणि चेंडूचा संपर्क नाही! निर्धाव चेंडू!",
+      "कडक गोलंदाजी! {bwl} ने फलंदाजाला जखडून ठेवले आहे, गल्लीत प्रेक्षकांचा जोरदार टाळ्यांचा गजर!",
+      "अप्रतिम नियंत्रण! {bat} ने हलक्या हाताने चेंडू ढकलला पण क्षेत्ररक्षक चपळ, धाव नाही.",
+      "{bwl} चा उसळता चेंडू! {bat} ने शांत डोक्याने चेंडू सोडून दिला. निर्धाव!",
+      "उत्कृष्ट क्षेत्ररक्षण गल्लीच्या कोपऱ्यावर! निश्चित धाव वाचवली, शून्य धाव!"
+    ],
+    hi: [
+      "{bwl} की सटीक लाइन और लेंथ! {bat} पूरी तरह बीट हुए, गेंद सीधे कीपर के दस्तानों में. कोई रन नहीं!",
+      "शानदार स्विंग और उछाल! {bat} ने रक्षात्मक तरीके से गेंद को ब्लॉक किया. डॉट बॉल!",
+      "चतुर गेंदबाजी {bwl} द्वारा! ऑफ स्टंप के बाहर रखी गेंद, बल्लेबाज के पास कोई जवाब नहीं.",
+      "{bat} ने बड़ा शॉट खेलने का प्रयास किया, लेकिन सिर्फ हवा में बल्ला घूमा! डॉट गेंद!",
+      "कसी हुई गेंदबाजी! {bwl} ने बल्लेबाज को बांध कर रखा है, दर्शकों में जोरदार उत्साह!",
+      "हल्के हाथों से खेला {bat} ने, लेकिन गली के फील्डर ने तेजी से गेंद उठा ली. कोई रन नहीं.",
+      "{bwl} की खतरनाक बाउंसर! बल्लेबाज ने सूझबूझ से गेंद को छोड़ा, डॉट बॉल!",
+      "गली के कोने पर जबरदस्त फील्डिंग! एक निश्चित रन बचाया, कोई रन नहीं मिला."
+    ],
+    en: [
+      "{bwl} fires a skidding delivery, and {bat} defends it resolutely. No run. (Whistle whistles!)",
+      "High-class bowling by {bwl}! {bat} gets beaten on the off-stump. (Spectators cheering!)",
+      "No room given by {bwl}. {bat} pats it with flat-bat back to the bowler.",
+      "A lovely tight line from {bwl}. {bat} leaves it safely into keeper's gloves.",
+      "{bat} attempts a big swing but gets only air against {bwl}'s clever spin!",
+      "Excellent defense from {bat} against a probing ball from {bwl}. Close keeping!"
+    ]
+  },
+  singles: {
+    mr: [
+      "{bat} ने हलक्या हाताने कव्हर गॅपमध्ये चेंडू ढकलला आणि चपळाईने १ धाव पूर्ण केली!",
+      "सुरेख स्ट्राईक रोटेशन! पॅडवरचा चेंडू ऑन-साईडला वळवून सहज एक धाव घेतली.",
+      "चतुर गल्ली क्रिकेट! {bat} चा हलका टच आणि दोन्ही फलंदाजांची विजेच्या वेगाने धाव, १ धाव!",
+      "{bwl} च्या वेगाचा फायदा घेत चेंडू थर्ड मॅनच्या दिशेने फिरवला, १ धाव खात्यात जमा.",
+      "थेट क्षेत्ररक्षकाच्या हातात जाण्यापूर्वी चपळाईने सिंगल पूर्ण! फलंदाजांमध्ये सुरेख ताळमेळ.",
+      "{bat} ने मिड-ऑफला चेंडू ढकलून धाव घेतली, प्रेक्षकांकडून खेळाडूंना दाद!",
+      "संयमी खेळ! एकेरी धाव घेत धावफलक हलता ठेवला, सुंदर क्रिकेट!",
+      "अचूक प्लेसमेंट! गॅप शोधून १ धाव सहज चोरली, फलंदाजीची उत्तम रणनीती."
+    ],
+    hi: [
+      "{bat} ने हल्के हाथों से कवर की तरफ खेला और फुर्ती से एक रन चुरा लिया!",
+      "बेहतरीन स्ट्राइक रोटेशन! पैड्स पर आती गेंद को फ्लिक करके आसानी से सिंगल लिया.",
+      "स्मार्ट गली क्रिकेट! हल्का सा पुश किया और दोनों बल्लेबाजों ने दौड़कर १ रन पूरा किया!",
+      "{bwl} की रफ्तार का इस्तेमाल करते हुए गेंद को थर्ड मैन की दिशा में गाइड किया, १ रन!",
+      "फील्डर की पहुंच से दूर गेंद को धकेलकर तेजी से रन पूरा किया. कमाल की रनिंग!",
+      "{bat} ने मिड-ऑन की तरफ ड्राइव किया और सुरक्षित एक रन ले लिया.",
+      "धीमी लेकिन सूझबूझ भरी शुरुआत! सिंगल लेकर स्ट्राइक रोटेट की, दबाव कम किया.",
+      "गैप में गेंद को प्लेस किया और बिना किसी जोखिम के १ रन आसानी से बटोरा."
+    ],
+    en: [
+      "{bat} works the delivery from {bwl} through the off-side for a swift single.",
+      "Quick single taken as {bat} tucks it into the cover gap. Beautiful running!",
+      "{bat} guides this one down to third-man area. Soft hands, comfortable run.",
+      "Excellent rotation! {bat} taps a tight ball and scampers across immediately.",
+      "A gentle tap from {bat} towards mid-off, easy single. The local crowd applauds!"
+    ]
+  },
+  doubles: {
+    mr: [
+      "खूपच सुंदर फटका! {bat} ने चेंडू डीप कव्हरला मारला आणि जोरदार धावून २ धावा पूर्ण केल्या!",
+      "उत्कृष्ट रनिंग बिटवीन द विकेट्स! पहिल्या धावेनंतर लगेच दुसरी धाव पूर्ण केली, २ धावा!",
+      "{bat} चा सुरेख फ्लिक! चेंडू मिड-विकेटच्या गॅपमध्ये, दोन्ही फलंदाजांची चपळ धावपळ, २ धावा!",
+      "क्षेत्ररक्षक चेंडूच्या मागे धावतोय, पण तोपर्यंत २ धावा सुरक्षित पूर्ण! गल्लीत टाळ्यांचा कडकडाट!",
+      "{bwl} च्या चेंडूवर सुंदर कट शॉट! गल्लीच्या रस्त्यावरून चेंडू वळवला, २ धावा सहज मिळाल्या.",
+      "पहिल्याच क्षणी कॉल केला आणि वेगाने धावून सुरक्षित २ धावा घेतल्या. उत्तम समन्वय!",
+      "बॅकफूटवर जाऊन स्क्वेअर लेगच्या दिशेने फटका, २ धावा वसूल!",
+      "उत्तम प्लेसमेंट! रिकाम्या जागेत चेंडू टोलवला आणि धावपळीने २ धावा पूर्ण केल्या."
+    ],
+    hi: [
+      "कमाल का शॉट! {bat} ने डीप कवर में प्लेस किया और चीते जैसी रफ्तार से २ रन पूरे किए!",
+      "विकेटों के बीच जबरदस्त दौड़! पहली रन तेजी से पूरी की और मुड़कर आसानी से दूसरा रन बना लिया.",
+      "{bat} का खूबसूरत फ्लिक! मिड-विकेट की खाली जगह में गेंद और दोनों बल्लेबाजों ने २ रन बटोरे!",
+      "फील्डर गेंद के पीछे भागा, लेकिन बल्लेबाजों ने चुस्ती दिखाते हुए दो रन पूरे कर लिए!",
+      "{bwl} की गेंद पर नफासत भरा कट शॉट! गेंद तेजी से दौड़ी, २ रन खाते में!",
+      "शानदार तालमेल! कॉल किया और बिना हिचकिचाहट के तेजी से डबल पूरा किया.",
+      "बैकफुट पर जाकर स्क्वायर लेग की दिशा में खेला और २ कीमती रन अपनी टीम के लिए जोड़े.",
+      "गैप को अच्छी तरह परखा, सूझबूझ भरी दौड़ और शानदार २ रन!"
+    ],
+    en: [
+      "Shot! {bat} drives deep through covers, pushing hard with great hustle for two!",
+      "{bat} flicks {bwl} through mid-wicket. Splendid speed gets them a couple.",
+      "Two runs taken! {bat} plays with soft hands into vacant deep space.",
+      "{bwl}'s delivery is cut past point. Fielder chases hard, {bat} safely back for two!",
+      "Excellent placement by {bat}! Swept away towards deep leg-side, double completed."
+    ]
+  },
+  threes: {
+    mr: [
+      "अविश्वसनीय धावपळ! {bat} ने चेंडू लांब गॅपमध्ये टोलवला आणि धावून तब्बल ३ धावा काढल्या!",
+      "मैदानातील प्रचंड स्टॅमिना! गल्लीच्या मोकळ्या कोपऱ्यात चेंडू, फलंदाजांनी पळून ३ धावा पूर्ण केल्या!",
+      "{bat} चा उत्कृष्ट ड्राईव्ह! क्षेत्ररक्षकाने सीमारेषेवर चेंडू अडवला तोवर फलंदाजांनी ३ धावा लुटल्या!",
+      "अप्रतिम रनिंग! दोन्ही फलंदाजांमध्ये कमालीचा वेग, सलग तिसरी धाव पूर्ण!",
+      "क्षेत्ररक्षकाची थोडीशी चूक झाली आणि फलंदाजांनी क्षणात तिसरी धाव पळवून घेतली!",
+      "खोलवर मारलेला फटका, लांबून चेंडू फेकेपर्यंत ३ धावा पूर्ण! प्रेक्षकांची उभे राहून दाद!",
+      "हवेतील फटका जमिनीवर पडला, चपळाई दाखवून फलंदाजांनी ३ धावा आपल्या नावावर केल्या!"
+    ],
+    hi: [
+      "अविश्वसनीय रनिंग! {bat} ने गेंद को डीप गैप में धकेला और दौड़कर ३ रन पूरे किए!",
+      "सख्त मेहनत और गजब का स्टेमिना! गली के खाली कोने में गेंद गई और बल्लेबाजों ने ३ रन लूट लिए!",
+      "{bat} का शानदार ड्राइव! फील्डर ने बाउंड्री से गेंद रोकी तब तक ३ रन आसानी से पूरे!",
+      "लाजवाब दौड़! दोनों बल्लेबाजों में जबरदस्त तेजी, बिजली की रफ्तार से तीसरा रन पूरा किया!",
+      "फील्डिंग में हल्की सी चूक और उसका पूरा फायदा उठाकर बल्लेबाजों ने ३ रन बना लिए!",
+      "लंबा शॉट, जब तक थ्रो आता तब तक बल्लेबाजों ने दौड़कर ३ रन पूरे कर लिए!",
+      "गजब की फुर्ती! फील्डर के थ्रो से पहले ही बल्ला क्रीज के अंदर, ३ रन!"
+    ],
+    en: [
+      "Phenomenal running! {bat} punches it through the off-side gap and scampers for three.",
+      "Slick placement as {bat} sweeps {bwl} fine. They push hard and complete three runs!",
+      "{bat} launches this into the empty corner of the street. Terrific endurance to get three!",
+      "A misfield gives {bat} and partner enough confidence to sprint back for a hard-earned three."
+    ]
+  },
+  fours: {
+    mr: [
+      "खणखणीत चौकार! {bat} चा तुफानी कव्हर ड्राईव्ह, चेंडू सुसाट सीमारेषेबाहेर ४ धावांसाठी! 🔥",
+      "गोळीच्या वेगाने चौकार! {bwl} च्या चेंडूचा समाचार घेत बॅटच्या मधोमध लागलेला फटका, ४ धावा!",
+      "नजाकतदार चौकार! {bat} ने अप्रतिम टायमिंग साधत चेंडू थेट सीमारेषेपलीकडे धाडला!",
+      "गल्लीत एकच जल्लोष! बॅकफूटवर जाऊन मारलेला सुरेख पंच, चेंडू भिंतीला आदळून चौकार!",
+      "क्लासिक फटका! {bat} चा नयनरम्य स्ट्रेट ड्राईव्ह, गोलंदाजाला पाहत राहण्याशिवाय पर्याय नव्हता, ४ धावा!",
+      "ताकद आणि टायमिंगचा मिलाफ! कव्हरच्या वरून चेंडू उसळत सीमारेषेबाहेर, दणदणीत चौकार!",
+      "खोलवर टाकलेला चेंडू खोदून काढला आणि गॅपमधून रॉकेटच्या वेगाने सीमारेषेला स्पर्श, ४ धावा!",
+      "{bwl} वर हल्लाबोल! फिरकी चेंडूवर रिव्हर्स स्वीप करत सीमारेषा पार, अप्रतिम चौकार!"
+    ],
+    hi: [
+      "करारा चौका! {bat} का रॉकेट कवर ड्राइव, गेंद गोली की रफ्तार से बाउंड्री पार ४ रन! 🔥",
+      "गोली की रफ्तार से चौका! बल्ले का भरपूर संपर्क और गेंद दर्शकों की तालियों के बीच सीमा पार!",
+      "नजाकत और टाइमिंग की मिसाल! {bat} ने गेंद को गैप में तराशा, दर्शनीय चौका!",
+      "गली में जश्न का माहौल! बैकफुट पर जाकर लगाया जोरदार पंच, गेंद दीवार से टकराई और चार रन!",
+      "क्लासिक स्ट्रेट ड्राइव! {bwl} बस देखते ही रह गए, गेंद बिजली की तेजी से बाउंड्री पार, ४ रन!",
+      "ताकत और क्लास का अद्भुत नजारा! फील्डर्स के सिर के ऊपर से टप्पा खाती हुई गेंद बाउंड्री पार, चौका!",
+      "यॉर्कर गेंद को खोदा और नजाकत से गैप में निकाला, गेंद बुलेट की तरह बाउंड्री पार, ४ रन!",
+      "{bwl} पर करारा प्रहार! गैप ढूंढकर लगाया खूबसूरत स्वीप शॉट, शानदार चौका!"
+    ],
+    en: [
+      "BOOM! {bat} lashes a gorgeous drive through covers for FOUR runs! Magnificent! 🔥",
+      "CRACKING FOUR! {bat} pulls {bwl} over mid-wicket, bouncing over the boundary lines!",
+      "Splendid timing from {bat}! Elegant lofted cover drive over the circle. Boundary!",
+      "Pure street class! {bat} cuts past point with supreme precision. Four runs!",
+      "{bat} uses the pace of {bwl}'s delivery and guides it down past keeper for a boundary!"
+    ]
+  },
+  sixes: {
+    mr: [
+      "उत्तुंग षटकार! {bat} चा प्रचंड तडाखा, चेंडू थेट इमारतीच्या छतावर! ६ धावा! 🚀",
+      "गल्ली क्रिकेटचा महा-षटकार! {bat} ने क्रीजबाहेर निघून मारलेला हेलिकॉप्टर शॉट, चेंडू गायब! ६ धावा!",
+      "आकाशाला गवसणी घालणारा षटकार! प्रेक्षकांमध्ये प्रचंड जल्लोष, चेंडू थेट गल्लीबाहेर! ६ धावा!",
+      "तुफानी फटका! {bwl} च्या शॉर्ट चेंडूवर गगनभेदी पूल शॉट, प्रेक्षकांकडून टाळ्यांचा कडकडाट!",
+      "दणदणीत सिक्सर! चेंडू हवेत उंच, उंच आणि थेट शेजारच्या घराच्या गच्चीवर! काय हा प्रहार!",
+      "ताकदीचा महाविस्फोट! {bat} ने सरळ बॅटने टोलवला चेंडू, थेट मैदानाबाहेर लांब षटकार!",
+      "डोळ्यांचे पारणे फेडणारा षटकार! बॉल सीमारेषेच्या खूप लांब जाऊन पडला, अंगावर रोमांच आणणारा सिक्स!",
+      "अप्रतिम बॅट स्पीड! {bat} च्या बॅटमधून निघालेला असा फटका जो थेट रस्त्यापलीकडे गेला, ६ धावा!"
+    ],
+    hi: [
+      "गगनचुंबी छक्का! {bat} का मॉन्स्टर हिट, गेंद सीधे पड़ोस की छत पर! ६ रन! 🚀",
+      "गली क्रिकेट का आइकोनिक छक्का! आगे बढ़कर खेला गया धमाकेदार हेलीकॉप्टर शॉट, गेंद लापता! ६ रन!",
+      "आसमान को छूता हुआ सिक्सर! दर्शकों में भारी उत्साह, गेंद सीधे गली के पार! ६ रन!",
+      "तूफानी शॉट! {bwl} की छोटी गेंद पर लगाया गगनभेदी पुल शॉट, दर्शकों ने खड़े होकर बजाई तालियां!",
+      "विशालकाय छक्का! गेंद हवा में तैरती हुई सीधे सामने वाले मकान की बालकनी में गिरी! अद्भुत प्रहार!",
+      "पावर-हिटिंग का महामुकाबला! {bat} ने सीधे बल्ले से गेंद को अंतरिक्ष में भेज दिया! लंबा सिक्स!",
+      "आंखें खुली की खुली रह गईं! गेंद बाउंड्री के बहुत आगे जाकर गिरी, रोमांच से भरपूर सिक्स!",
+      "शानदार बैट स्पीड! {bat} के बल्ले से निकला ऐसा रॉकेट शॉट जो सीधा सड़क पार गिरा, ६ रन!"
+    ],
+    en: [
+      "MONSTROUS HIT! {bat} sends the ball high, high, and over the building rooftop! SIX runs! 🚀",
+      "OUT OF THE ALLEY! {bat} plays a staggering helicopter shot off {bwl} for an iconic SIX!",
+      "A majestic maximum! {bat} dancing down the crease and lofting it over long-on! SIX!",
+      "Colossal strike! {bat} swings clean, sending this straight into orbit! Massive SIX!",
+      "Absolute power! {bat} slaps the ball from {bwl} over deep mid-wicket for six!"
+    ]
+  },
+  wickets: {
+    mr: [
+      "आऊट! मोठा धक्का! {bwl} च्या भेदक चेंडूवर त्रिफळा उडाला! दांड्या हवेत गुल! 💥",
+      "बाद! बॅटची कड लागली आणि यष्टिरक्षकाने चपळाईने झेल टिपला! {bat} तंबूकडे रवाना.",
+      "मोठा गडी बाद! सीमारेषेवर उंच उडालेला चेंडू आणि क्षेत्ररक्षकाने अचूक पकडला! गल्लीत शांतता पसरली.",
+      "क्लीन बोल्ड! {bwl} चा आत येणारा चेंडू, {bat} पूर्णपणे चकवला आणि स्टंप्स हवेत उडाले!",
+      "धावबाद! फलंदाजांमध्ये गोंधळ, थेट थ्रोने यष्ट्या उडवल्या! दुर्दैवी पद्धतीने {bat} बाद!",
+      "पायचीत बाद! पंचांचे बोट वर, जोरदार अपील आणि {bat} ला मैदान सोडावेच लागले!",
+      "मोठी विकेट! सेट झालेला फलंदाज {bat} बाद झाल्याने गोलंदाजी संघाचा मैदानात जल्लोष!",
+      "उत्कृष्ट फिरकीची जादू! फलंदाज पुढे आला आणि यष्टिरक्षकाने क्षणात बेल्स उडवल्या, स्टंपिंग बाद!"
+    ],
+    hi: [
+      "आउट! बहुत बड़ा झटका! {bwl} की तूफानी गेंद पर उड़ गए डंडे! विकेटों की गिल्लियां हवा में! 💥",
+      "विकेट! बल्ले का बाहरी किनारा लगा और विकेटकीपर ने कोई गलती नहीं की! {bat} पवेलियन लौटे.",
+      "बड़ा झटका! हवा में लहराती गेंद और बाउंड्री लाइन पर पकड़ा गया हैरतअंगेज कैच! {bat} आउट!",
+      "क्लीन बोल्ड! {bwl} की जादुई इन-स्विंगर, {bat} चारों खाने चित्त, स्टंप्स बिखर गए!",
+      "रन आउट! तालमेल में गड़बड़ी, सीधा थ्रो स्टंप्स पर लगा और {bat} क्रीज से बाहर रह गए!",
+      "एलबीडब्ल्यू आउट! जोरदार अपील के सामने अंपायर की उंगली उठी, {bat} को जाना होगा!",
+      "करारा झटका! क्रीज पर जमे हुए प्रमुख बल्लेबाज {bat} को आउट कर बॉलिंग टीम ने जश्न मनाया!",
+      "स्पिन का कमाल! बल्लेबाज आगे निकला और कीपर ने पलक झपकते ही गिल्लियां बिखेर दीं, स्टंप्ड आउट!"
+    ],
+    en: [
+      "OUT! ABSOLUTE DRAMA! {bat} is clean bowled! {bwl} spins a web and breaks the timber! 💥",
+      "GOT 'EM! A thick edge taken safely by the keeper! {bat} has to make the long walk back!",
+      "GONE! In the air and a magnificent, diving catch in the deep! What a stellar breakthrough!",
+      "TIMBER! An absolute peach of an inswinger from {bwl}, stumps rattling everywhere!",
+      "RUN OUT! A catastrophic mix-up between the wickets, and the direct hit seals {bat}'s fate!",
+      "TRAPPED! Loud appeal for LBW and the umpire matches it with a raised finger! Out!"
+    ]
+  },
+  extras: {
+    wide: {
+      mr: [
+        "वाईड चेंडू! {bwl} ची दिशा भरकटली, पंचांनी हात पसरवून अतिरिक्त धावेचा इशारा केला!",
+        "ऑफ-स्टंपच्या खूप बाहेर चेंडू, पंचांचा वाईडचा इशारा. १ अतिरिक्त धाव!",
+        "लेग-स्टंपच्या बाहेर जाणारा चेंडू, फलंदाजाने सोडून दिला. वाईड चेंडू घोषित."
+      ],
+      hi: [
+        "वाइड गेंद! {bwl} लेग स्टंप की दिशा से भटके, अंपायर का इशारा अतिरिक्त रन का!",
+        "ऑफ स्टंप के काफी बाहर गेंद, अंपायर के हाथ फैले. १ अतिरिक्त रन मिला!",
+        "दिशाहीन गेंदबाजी, गेंद लेग साइड से बाहर निकली. वाइड गेंद करार!"
+      ],
+      en: [
+        "Wide delivery called! {bwl} loses line down the leg side, extra conceded.",
+        "Way outside off-stump! Umpire signals wide, extra run into the total.",
+        "Wayward bowling down leg side, batsmen easily leave it. Wide ball!"
+      ]
+    },
+    noball: {
+      mr: [
+        "रेषेबाहेर पाय! नो बॉल घोषित! आता फलंदाजाला पुढच्या चेंडूवर फ्री हिट मिळणार!",
+        "नो-बॉल! गोलंदाजाचा पाय क्रीजबाहेर गेला, पंचांचा नो-बॉलचा इशारा. पुढील चेंडू फ्री-हिट!",
+        "कमरेच्या वरचा धोकादायक चेंडू, पंचांनी नो-बॉल दिला! फलंदाजाला फ्री-हिटची सुवर्णसंधी!"
+      ],
+      hi: [
+        "कदम सीमा रेखा से बाहर! नो-बॉल करार! अब अगली गेंद पर फ्री-हिट!",
+        "नो-बॉल! गेंदबाज ने ओवरस्टेप किया, अंपायर का सायरन. अगली गेंद फ्री-हिट!",
+        "कमर से ऊपर की बीमर गेंद, अंपायर ने तुरंत नो-बॉल का इशारा किया. फ्री-हिट का मौका!"
+      ],
+      en: [
+        "Over-the-line! No-ball declared! Free-hit loading for the batting side!",
+        "No-ball called for overstepping! Free hit awarded on the very next delivery!",
+        "Dangerous high full toss over waist height! No-ball signaled, Free Hit next!"
+      ]
+    }
+  }
+};
+
+const pickRandom = (arr: string[]): string => {
+  if (!arr || arr.length === 0) return '';
+  return arr[Math.floor(Math.random() * arr.length)];
+};
+
+/**
+ * Generates a unique, localized commentary snippet for any cricket delivery or event
+ */
+export function generateLocalizedCricketCommentary(
+  type: 'dot' | 'runs' | 'boundary' | 'wicket' | 'extra',
+  val: number,
+  striker: string,
+  bowler: string,
+  lang: CommentaryLanguage,
+  options?: {
+    extraType?: string;
+    newBatsman?: string;
+    howOut?: string;
+  }
+): string {
+  const bat = striker?.trim() || 'फलंदाज';
+  const bwl = bowler?.trim() || 'गोलंदाज';
+  const targetLang = lang === 'mr' ? 'mr' : lang === 'hi' ? 'hi' : 'en';
+
+  if (type === 'dot' || val === 0) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.dots[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  if (type === 'wicket') {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.wickets[targetLang]);
+    let text = raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    if (options?.newBatsman) {
+      const newBat = options.newBatsman.trim();
+      if (targetLang === 'mr') {
+        text += ` विकेट पडल्यानंतर, ${newBat} नवीन फलंदाज क्रीजवर आले आहेत.`;
+      } else if (targetLang === 'hi') {
+        text += ` विकेट गिरने के बाद, ${newBat} नए बल्लेबाज क्रीज पर आए हैं.`;
+      } else {
+        text += ` After wicket fell, ${newBat} new batsman come on crease.`;
+      }
+    }
+    return text;
+  }
+
+  if (val === 4 || type === 'boundary' && val !== 6) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.fours[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  if (val === 6) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.sixes[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  if (val === 1) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.singles[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  if (val === 2) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.doubles[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  if (val === 3) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.threes[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  if (type === 'extra' || options?.extraType) {
+    const isNoBall = options?.extraType === 'noball' || (type === 'extra' && val > 0 && options?.extraType?.includes('no'));
+    if (isNoBall) {
+      const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.noball[targetLang]);
+      return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    }
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.wide[targetLang]);
+    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+  }
+
+  // Generic fallback for any other run counts
+  if (targetLang === 'mr') {
+    return `${bwl} च्या चेंडूवर ${bat} ने सुरेख फटका मारून ${val} धावा पूर्ण केल्या!`;
+  }
+  if (targetLang === 'hi') {
+    return `${bwl} की गेंद पर ${bat} ने बेहतरीन शॉट खेलकर ${val} रन बनाए!`;
+  }
+  return `${bat} scores ${val} runs off ${bwl}'s delivery with good placement.`;
+}
+
+/**
  * Intelligent client-side phrase translator for cricket commentary
  */
 export function translateCommentaryText(text: string, lang: CommentaryLanguage): string {
@@ -124,31 +459,51 @@ export function translateCommentaryText(text: string, lang: CommentaryLanguage):
     const batsman = deliveryMatch[2].trim();
     const outcome = deliveryMatch[3].trim();
 
-    if (lang === 'mr') {
-      let outcomeMr = outcome;
-      if (/dot ball|no run|0 run/i.test(outcome)) outcomeMr = 'निर्धाव चेंडू, कोणतीही धाव नाही.';
-      else if (/six|6 runs/i.test(outcome)) outcomeMr = 'उत्तुंग षटकार! चेंडू सीमारेषेबाहेर ६ धावांसाठी!';
-      else if (/four|4 runs/i.test(outcome)) outcomeMr = 'खणखणीत चौकार! सुरेख फटका ४ धावांसाठी!';
-      else if (/single|1 run/i.test(outcome)) outcomeMr = 'चपळाईने १ धाव पूर्ण केली.';
-      else if (/two runs|2 runs/i.test(outcome)) outcomeMr = 'चांगल्या रनिंगने २ धावा पूर्ण केल्या.';
-      else if (/three runs|3 runs/i.test(outcome)) outcomeMr = 'उत्कृष्ट रनिंग, ३ धावा पूर्ण.';
-      else if (/wide/i.test(outcome)) outcomeMr = 'वाईड चेंडू, अतिरिक्त धाव.';
-      else if (/no[- ]?ball/i.test(outcome)) outcomeMr = 'नो बॉल! पुढचा चेंडू फ्री हिट!';
-      else if (/wicket|out|bowled|caught/i.test(outcome)) outcomeMr = 'आऊट! मोठा धक्का, फलंदाज बाद!';
-      return `${bowler} चा ${batsman} ला चेंडू: ${outcomeMr}`;
-    } else if (lang === 'hi') {
-      let outcomeHi = outcome;
-      if (/dot ball|no run|0 run/i.test(outcome)) outcomeHi = 'डॉट गेंद, कोई रन नहीं.';
-      else if (/six|6 runs/i.test(outcome)) outcomeHi = 'गगनचुंबी छक्का! गेंद दर्शकों के बीच ६ रन के लिए!';
-      else if (/four|4 runs/i.test(outcome)) outcomeHi = 'शानदार चौका! गोली की रफ्तार से गेंद सीमा पार ४ रन!';
-      else if (/single|1 run/i.test(outcome)) outcomeHi = 'हल्के हाथों से खेलकर १ रन पूरा किया.';
-      else if (/two runs|2 runs/i.test(outcome)) outcomeHi = 'अच्छी दौड़, २ रन पूरे किए.';
-      else if (/three runs|3 runs/i.test(outcome)) outcomeHi = 'तेज दौड़ लगाकर ३ रन बनाए.';
-      else if (/wide/i.test(outcome)) outcomeHi = 'वाइड गेंद, अतिरिक्त रन मिला.';
-      else if (/no[- ]?ball/i.test(outcome)) outcomeHi = 'नो बॉल! अगली गेंद फ्री हिट!';
-      else if (/wicket|out|bowled|caught/i.test(outcome)) outcomeHi = 'आउट! बड़ा झटका, बल्लेबाज पवेलियन लौटे!';
-      return `${bowler} की ${batsman} को गेंद: ${outcomeHi}`;
+    let eventType: 'dot' | 'runs' | 'boundary' | 'wicket' | 'extra' = 'runs';
+    let val = 0;
+    let extraType = '';
+
+    if (/dot ball|no run|0 run/i.test(outcome)) {
+      eventType = 'dot';
+      val = 0;
+    } else if (/six|6 runs/i.test(outcome)) {
+      eventType = 'boundary';
+      val = 6;
+    } else if (/four|4 runs|boundary/i.test(outcome)) {
+      eventType = 'boundary';
+      val = 4;
+    } else if (/three runs|3 runs/i.test(outcome)) {
+      eventType = 'runs';
+      val = 3;
+    } else if (/two runs|2 runs/i.test(outcome)) {
+      eventType = 'runs';
+      val = 2;
+    } else if (/single|1 run/i.test(outcome)) {
+      eventType = 'runs';
+      val = 1;
+    } else if (/wide/i.test(outcome)) {
+      eventType = 'extra';
+      extraType = 'wide';
+    } else if (/no[- ]?ball/i.test(outcome)) {
+      eventType = 'extra';
+      extraType = 'noball';
+    } else if (/wicket|out|bowled|caught/i.test(outcome)) {
+      eventType = 'wicket';
     }
+
+    return generateLocalizedCricketCommentary(eventType, val, batsman, bowler, lang, { extraType });
+  }
+
+  // Pattern: "OUT! [Batter] has to walk back..."
+  const wktOutMatch = trimmed.match(/OUT!\s+([^(\s]+)/i);
+  if (wktOutMatch) {
+    const dismissedBat = wktOutMatch[1].trim();
+    const bowlMatch = trimmed.match(/Bowler:\s*([^)]+)/i);
+    const bowl = bowlMatch ? bowlMatch[1].trim() : 'गोलंदाज';
+    const newBatMatch = trimmed.match(/After wicket fell,\s*([^.]+?)\s*new batsman/i);
+    const newBat = newBatMatch ? newBatMatch[1].trim() : undefined;
+
+    return generateLocalizedCricketCommentary('wicket', 0, dismissedBat, bowl, lang, { newBatsman: newBat });
   }
 
   // Common phrase replacements for general text

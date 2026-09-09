@@ -53,6 +53,7 @@ import {
   useCommentaryLanguage,
   getCommentaryText,
   createMultilingualCommentary,
+  generateLocalizedCricketCommentary,
   CommentaryLanguageSelector,
   getMatchContextualTone,
   createBatsmanAnnouncement,
@@ -1112,6 +1113,15 @@ export const CricketScoreboard: React.FC = () => {
   const [aiCommentaryEnabled, setAiCommentaryEnabled] = useState(true);
   const [isAiCommentaryLoading, setIsAiCommentaryLoading] = useState(false);
   const [userCommentaryLang, setUserCommentaryLang] = useCommentaryLanguage('en');
+
+  // Copy Overlay Link state
+  const [copiedOverlayLink, setCopiedOverlayLink] = useState(false);
+
+  // Bulk Player adding states for setup roster builder
+  const [showBulkAddTeamA, setShowBulkAddTeamA] = useState(false);
+  const [bulkAddTeamAText, setBulkAddTeamAText] = useState('');
+  const [showBulkAddTeamB, setShowBulkAddTeamB] = useState(false);
+  const [bulkAddTeamBText, setBulkAddTeamBText] = useState('');
 
   // Overlay graphics control panel states
   const [activeControlTab, setActiveControlTab] = useState<'alerts' | 'graphics' | 'sequencer' | 'templates' | 'media'>('alerts');
@@ -3311,12 +3321,38 @@ export const CricketScoreboard: React.FC = () => {
     else if (event.type === 'legbye') ballLabel = 'Lb';
 
     const ballDesc = `${bowler.name} to ${striker.name}: ${outcomeDescription}`;
+    const localizedEventCat: 'dot' | 'runs' | 'boundary' | 'wicket' | 'extra' = 
+      eventType === 'boundary' ? 'boundary' : 
+      eventType === 'extra' ? 'extra' : 
+      (event.type === 'dot' ? 'dot' : 'runs');
+
+    const generatedHi = generateLocalizedCricketCommentary(
+      localizedEventCat,
+      ballRuns,
+      striker.name,
+      bowler.name,
+      'hi',
+      { extraType: event.extraType }
+    );
+    const generatedMr = generateLocalizedCricketCommentary(
+      localizedEventCat,
+      ballRuns,
+      striker.name,
+      bowler.name,
+      'mr',
+      { extraType: event.extraType }
+    );
+
     const ballCommEntry = {
       id: `c-${Date.now()}`,
       overBall: formatOvers(inn.ballsBowled),
       description: ballDesc,
       type: eventType,
-      translations: createMultilingualCommentary(ballDesc)
+      translations: {
+        en: ballDesc,
+        hi: generatedHi,
+        mr: generatedMr
+      }
     };
 
     inn.commentaryList = [
@@ -3456,10 +3492,10 @@ export const CricketScoreboard: React.FC = () => {
   const handleWicketScore = () => {
     if (!currentInnings) return;
 
-    // Validate that if LBW or Caught are selected, Additional Notes is mandatory
-    if ((wicketType === 'LBW' || wicketType === 'Caught') && !wicketAdditionalDetails.trim()) {
-      setWicketValidationErr(`Additional Notes are mandatory when '${wicketType}' is selected.`);
-      showNotification(`Additional Notes are required for '${wicketType}' dismissal.`, 'alert');
+    // Validate that if LBW is selected, Additional Notes is mandatory
+    if (wicketType === 'LBW' && !wicketAdditionalDetails.trim()) {
+      setWicketValidationErr(`Additional Notes are mandatory when 'LBW' is selected.`);
+      showNotification(`Additional Notes are required for 'LBW' dismissal.`, 'alert');
       return;
     }
     setWicketValidationErr('');
@@ -3479,9 +3515,18 @@ export const CricketScoreboard: React.FC = () => {
       return;
     }
 
-    const baseHowOut = wicketHowOutDetails.trim() || wicketType;
-    const detailedHowOut = baseHowOut + (wicketAdditionalDetails.trim() ? ` (${wicketAdditionalDetails.trim()})` : '');
     const detailedBowler = wicketBowlerName.trim() || bowler.name;
+    let baseHowOut = wicketHowOutDetails.trim() || wicketType;
+    if (wicketType === 'Caught') {
+      const catcher = wicketFielderName.trim();
+      if (catcher) {
+        baseHowOut = catcher.toLowerCase() === detailedBowler.toLowerCase() ? `c & b ${detailedBowler}` : `c ${catcher} b ${detailedBowler}`;
+      } else {
+        baseHowOut = `c & b ${detailedBowler}`;
+      }
+    }
+
+    const detailedHowOut = baseHowOut + (wicketAdditionalDetails.trim() ? ` (${wicketAdditionalDetails.trim()})` : '');
     const finalBatsmanName = newBatsmanName.trim() || `Batsman ${batsmen.length + 1}`;
 
     setShowWicketModal(false);
@@ -3659,14 +3704,24 @@ export const CricketScoreboard: React.FC = () => {
       "An absolute peach of a delivery!", "Street party erupted!", "What a sensational catch near the boundary line!"
     ];
     const rdWktReact = gullyWktReactions[Math.floor(Math.random() * gullyWktReactions.length)];
-    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back (${dismissedBatter.runs} off ${dismissedBatter.balls}b). Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler}). After wicket fell, ${finalBatsmanName} new batsman come on crease. ${rdWktReact}${overCompletionSuffix}`;
+    const catchDetails = replay.wicketType === 'Caught' && replay.fielderName
+      ? `c ${replay.fielderName} b ${detailedBowler} (Catch taken cleanly by ${replay.fielderName})`
+      : `Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler})`;
+    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back (${dismissedBatter.runs} off ${dismissedBatter.balls}b). ${catchDetails}. After wicket fell, ${finalBatsmanName} new batsman come on crease. ${rdWktReact}${overCompletionSuffix}`;
+
+    const wktHi = generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', { newBatsman: finalBatsmanName });
+    const wktMr = generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName });
 
     const normalWicketComm = {
       id: `c-${Date.now()}`,
       overBall: formatOvers(inn.ballsBowled),
       description: commentaryDescription,
       type: 'wicket',
-      translations: createMultilingualCommentary(commentaryDescription)
+      translations: {
+        en: commentaryDescription,
+        hi: `${wktHi}${overCompletionSuffix}`,
+        mr: `${wktMr}${overCompletionSuffix}`
+      }
     };
 
     const newEntries = [
@@ -5054,6 +5109,23 @@ export const CricketScoreboard: React.FC = () => {
 
             {match.id && match.status !== 'setup' && (
               <>
+                <button
+                  onClick={() => {
+                    const overlayUrl = getPublicOverlayUrl(match.id);
+                    copyToClipboard(overlayUrl).then(() => {
+                      setCopiedOverlayLink(true);
+                      setTimeout(() => setCopiedOverlayLink(false), 2500);
+                      showNotification('OBS Studio Overlay link copied! Paste as Browser Source (1920x1080) in OBS.', 'success');
+                    });
+                  }}
+                  className="h-8 sm:h-9 px-2 sm:px-2.5 bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-rose-300 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
+                  title="Copy OBS Studio Overlay Link (1920x1080 transparent)"
+                  id="btn-copy-obs-overlay-top"
+                >
+                  {copiedOverlayLink ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
+                  <span className="hidden sm:inline">{copiedOverlayLink ? 'Copied' : 'Overlay'}</span>
+                </button>
+
                 <button
                   onClick={handleExportMatchPDF}
                   className="h-8 sm:h-9 px-1.5 sm:px-3 bg-slate-800 hover:bg-slate-750 text-slate-200 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-0.5 transition-all text-white shrink-0"
@@ -9786,20 +9858,121 @@ export const CricketScoreboard: React.FC = () => {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* Team A Customizer */}
-                    <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-3 rounded-2xl flex flex-col justify-between">
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between shadow-sm space-y-3">
                       <div>
-                        <span className="text-[9px] font-black text-slate-450 dark:text-slate-400 uppercase block mb-1.5">{teamA || 'Team A'} Squad ({selectedTeamARoster.length})</span>
+                        <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
+                              {teamA || 'Team A'} Squad
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                              selectedTeamARoster.length >= 11
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : selectedTeamARoster.length > 0
+                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                            }`}>
+                              {selectedTeamARoster.length >= 11 ? 'Playing XI Ready ✓' : `${selectedTeamARoster.length} / 11 Players`}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setShowBulkAddTeamA(prev => !prev)}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[9px] font-bold uppercase tracking-wider border-none cursor-pointer transition-colors"
+                              title="Bulk paste player names separated by comma or new lines"
+                            >
+                              {showBulkAddTeamA ? 'Close' : '📋 Bulk Paste'}
+                            </button>
+                            {selectedTeamARoster.length === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTeamARoster([
+                                    'Rohit', 'Shubman', 'Virat', 'Shreyas', 'KL Rahul',
+                                    'Hardik', 'Jadeja', 'Axar', 'Kuldeep', 'Bumrah', 'Siraj'
+                                  ]);
+                                  showNotification(`Auto-filled 11 players for ${teamA || 'Team A'}!`, 'success');
+                                }}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-lg text-[9px] font-bold uppercase tracking-wider border border-emerald-500/20 cursor-pointer transition-colors"
+                                title="Quick populate standard 11 players"
+                              >
+                                ⚡ Auto 11
+                              </button>
+                            )}
+                            {selectedTeamARoster.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (confirm(`Clear all ${selectedTeamARoster.length} players from ${teamA || 'Team A'}?`)) {
+                                    setSelectedTeamARoster([]);
+                                  }
+                                }}
+                                className="px-1.5 py-1 text-slate-400 hover:text-rose-500 bg-transparent border-none cursor-pointer text-[9px] font-bold"
+                                title="Clear squad list"
+                              >
+                                ✕ Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bulk Paste Box for Team A */}
+                        {showBulkAddTeamA && (
+                          <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-emerald-500/30 space-y-2 mb-2 animate-fadeIn">
+                            <span className="text-[8.5px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                              Paste players from WhatsApp / Notes (comma or newline separated):
+                            </span>
+                            <textarea
+                              value={bulkAddTeamAText}
+                              onChange={(e) => setBulkAddTeamAText(e.target.value)}
+                              placeholder="e.g. Rohit Sharma, Shubman Gill, Virat Kohli, KL Rahul, Hardik Pandya..."
+                              rows={3}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const names = bulkAddTeamAText
+                                    .split(/[\n,\t]+/)
+                                    .map(s => s.trim())
+                                    .filter(Boolean);
+                                  if (names.length > 0) {
+                                    const merged = Array.from(new Set([...selectedTeamARoster, ...names]));
+                                    setSelectedTeamARoster(merged);
+                                    setBulkAddTeamAText('');
+                                    setShowBulkAddTeamA(false);
+                                    showNotification(`Added ${merged.length - selectedTeamARoster.length} new player(s) to ${teamA || 'Team A'}!`, 'success');
+                                  }
+                                }}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider border-none cursor-pointer"
+                              >
+                                Add All Players
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {selectedTeamARoster.length === 0 ? (
-                          <p className="text-[10px] text-slate-400 italic py-1 leading-normal">No players loaded. Quick-add custom names or select from the approved picker below.</p>
+                          <p className="text-[10px] text-slate-400 italic py-2 leading-normal">
+                            No players added yet. Type player name below, use 📋 Bulk Paste, or click ⚡ Auto 11.
+                          </p>
                         ) : (
-                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto pr-1">
+                          <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1 py-1">
                             {selectedTeamARoster.map((player, idx) => (
-                              <span key={idx} className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-300 rounded-lg text-[10px] font-bold border border-slate-105 dark:border-slate-800 shadow-sm">
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-200 rounded-lg text-[10px] font-extrabold border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 transition-all"
+                              >
+                                <span className="text-[8px] text-emerald-500 font-mono font-bold">#{idx + 1}</span>
                                 {player}
                                 <button 
                                   type="button" 
                                   onClick={() => setSelectedTeamARoster(prev => prev.filter((_, i) => i !== idx))} 
-                                  className="text-slate-400 hover:text-rose-500 bg-transparent border-none font-sans font-bold cursor-pointer text-[10px] ml-1 p-0 flex items-center justify-center"
+                                  className="text-slate-400 hover:text-rose-500 bg-transparent border-none font-sans font-bold cursor-pointer text-[10px] ml-0.5 p-0 flex items-center justify-center hover:scale-125 transition-transform"
+                                  title={`Remove ${player}`}
                                 >
                                   ✕
                                 </button>
@@ -9808,12 +9981,14 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <div className="mt-3 pt-2 border-t border-slate-50 dark:border-slate-850/65 flex gap-1">
+
+                      {/* Single Player Direct Input for Team A */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex gap-1.5">
                         <input
                           type="text"
-                          placeholder="Force custom player name..."
+                          placeholder="Type player name & press Enter..."
                           id="team-a-direct-add-input"
-                          className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1 text-2xs font-extrabold outline-none flex-1 text-slate-800 dark:text-white"
+                          className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold outline-none flex-1 text-slate-800 dark:text-white focus:ring-1 focus:ring-emerald-500"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -9821,6 +9996,9 @@ export const CricketScoreboard: React.FC = () => {
                               if (val) {
                                 if (!selectedTeamARoster.includes(val)) {
                                   setSelectedTeamARoster(prev => [...prev, val]);
+                                  showNotification(`Added ${val} to ${teamA || 'Team A'}!`, 'info');
+                                } else {
+                                  showNotification(`${val} is already in the squad!`, 'alert');
                                 }
                                 e.currentTarget.value = '';
                               }
@@ -9835,32 +10013,136 @@ export const CricketScoreboard: React.FC = () => {
                               const val = input.value.trim();
                               if (!selectedTeamARoster.includes(val)) {
                                 setSelectedTeamARoster(prev => [...prev, val]);
+                                showNotification(`Added ${val} to ${teamA || 'Team A'}!`, 'info');
+                              } else {
+                                showNotification(`${val} is already in the squad!`, 'alert');
                               }
                               input.value = '';
                             }
                           }}
-                          className="bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white rounded-lg px-2.5 text-[9px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center justify-center mr-0"
+                          className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl px-3.5 text-[10px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center justify-center transition-all shadow-sm shrink-0"
                         >
-                          Add
+                          + Add
                         </button>
                       </div>
                     </div>
 
                     {/* Team B Customizer */}
-                    <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 p-3 rounded-2xl flex flex-col justify-between">
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl flex flex-col justify-between shadow-sm space-y-3">
                       <div>
-                        <span className="text-[9px] font-black text-slate-450 dark:text-slate-400 uppercase block mb-1.5">{teamB || 'Team B'} Squad ({selectedTeamBRoster.length})</span>
+                        <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
+                              {teamB || 'Team B'} Squad
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                              selectedTeamBRoster.length >= 11
+                                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                : selectedTeamBRoster.length > 0
+                                ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                            }`}>
+                              {selectedTeamBRoster.length >= 11 ? 'Playing XI Ready ✓' : `${selectedTeamBRoster.length} / 11 Players`}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setShowBulkAddTeamB(prev => !prev)}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[9px] font-bold uppercase tracking-wider border-none cursor-pointer transition-colors"
+                              title="Bulk paste player names separated by comma or new lines"
+                            >
+                              {showBulkAddTeamB ? 'Close' : '📋 Bulk Paste'}
+                            </button>
+                            {selectedTeamBRoster.length === 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedTeamBRoster([
+                                    'David Warner', 'Travis Head', 'Steve Smith', 'Mitchell Marsh', 'Glenn Maxwell',
+                                    'Marcus Stoinis', 'Josh Inglis', 'Pat Cummins', 'Mitchell Starc', 'Adam Zampa', 'Josh Hazlewood'
+                                  ]);
+                                  showNotification(`Auto-filled 11 players for ${teamB || 'Team B'}!`, 'success');
+                                }}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-lg text-[9px] font-bold uppercase tracking-wider border border-emerald-500/20 cursor-pointer transition-colors"
+                                title="Quick populate standard 11 players"
+                              >
+                                ⚡ Auto 11
+                              </button>
+                            )}
+                            {selectedTeamBRoster.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (confirm(`Clear all ${selectedTeamBRoster.length} players from ${teamB || 'Team B'}?`)) {
+                                    setSelectedTeamBRoster([]);
+                                  }
+                                }}
+                                className="px-1.5 py-1 text-slate-400 hover:text-rose-500 bg-transparent border-none cursor-pointer text-[9px] font-bold"
+                                title="Clear squad list"
+                              >
+                                ✕ Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bulk Paste Box for Team B */}
+                        {showBulkAddTeamB && (
+                          <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-emerald-500/30 space-y-2 mb-2 animate-fadeIn">
+                            <span className="text-[8.5px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                              Paste players from WhatsApp / Notes (comma or newline separated):
+                            </span>
+                            <textarea
+                              value={bulkAddTeamBText}
+                              onChange={(e) => setBulkAddTeamBText(e.target.value)}
+                              placeholder="e.g. Warner, Head, Smith, Marsh, Maxwell, Cummins, Starc..."
+                              rows={3}
+                              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const names = bulkAddTeamBText
+                                    .split(/[\n,\t]+/)
+                                    .map(s => s.trim())
+                                    .filter(Boolean);
+                                  if (names.length > 0) {
+                                    const merged = Array.from(new Set([...selectedTeamBRoster, ...names]));
+                                    setSelectedTeamBRoster(merged);
+                                    setBulkAddTeamBText('');
+                                    setShowBulkAddTeamB(false);
+                                    showNotification(`Added ${merged.length - selectedTeamBRoster.length} new player(s) to ${teamB || 'Team B'}!`, 'success');
+                                  }
+                                }}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider border-none cursor-pointer"
+                              >
+                                Add All Players
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         {selectedTeamBRoster.length === 0 ? (
-                          <p className="text-[10px] text-slate-400 italic py-1 leading-normal">No players loaded. Quick-add custom names or select from the approved picker below.</p>
+                          <p className="text-[10px] text-slate-400 italic py-2 leading-normal">
+                            No players added yet. Type player name below, use 📋 Bulk Paste, or click ⚡ Auto 11.
+                          </p>
                         ) : (
-                          <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto pr-1">
+                          <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1 py-1">
                             {selectedTeamBRoster.map((player, idx) => (
-                              <span key={idx} className="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 bg-slate-50 dark:bg-slate-950 text-slate-755 dark:text-slate-300 rounded-lg text-[10px] font-bold border border-slate-105 dark:border-slate-800 shadow-sm">
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-slate-50 dark:bg-slate-950 text-slate-755 dark:text-slate-200 rounded-lg text-[10px] font-extrabold border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 transition-all"
+                              >
+                                <span className="text-[8px] text-emerald-500 font-mono font-bold">#{idx + 1}</span>
                                 {player}
                                 <button 
                                   type="button" 
                                   onClick={() => setSelectedTeamBRoster(prev => prev.filter((_, i) => i !== idx))} 
-                                  className="text-slate-400 hover:text-rose-500 bg-transparent border-none font-sans font-bold cursor-pointer text-[10px] ml-1 p-0 flex items-center justify-center"
+                                  className="text-slate-400 hover:text-rose-500 bg-transparent border-none font-sans font-bold cursor-pointer text-[10px] ml-0.5 p-0 flex items-center justify-center hover:scale-125 transition-transform"
+                                  title={`Remove ${player}`}
                                 >
                                   ✕
                                 </button>
@@ -9869,12 +10151,14 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <div className="mt-3 pt-2 border-t border-slate-50 dark:border-slate-850/65 flex gap-1">
+
+                      {/* Single Player Direct Input for Team B */}
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex gap-1.5">
                         <input
                           type="text"
-                          placeholder="Force custom player name..."
+                          placeholder="Type player name & press Enter..."
                           id="team-b-direct-add-input"
-                          className="bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-800 rounded-lg px-2 py-1 text-2xs font-extrabold outline-none flex-1 text-slate-800 dark:text-white"
+                          className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold outline-none flex-1 text-slate-800 dark:text-white focus:ring-1 focus:ring-emerald-500"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -9882,6 +10166,9 @@ export const CricketScoreboard: React.FC = () => {
                               if (val) {
                                 if (!selectedTeamBRoster.includes(val)) {
                                   setSelectedTeamBRoster(prev => [...prev, val]);
+                                  showNotification(`Added ${val} to ${teamB || 'Team B'}!`, 'info');
+                                } else {
+                                  showNotification(`${val} is already in the squad!`, 'alert');
                                 }
                                 e.currentTarget.value = '';
                               }
@@ -9896,13 +10183,16 @@ export const CricketScoreboard: React.FC = () => {
                               const val = input.value.trim();
                               if (!selectedTeamBRoster.includes(val)) {
                                 setSelectedTeamBRoster(prev => [...prev, val]);
+                                showNotification(`Added ${val} to ${teamB || 'Team B'}!`, 'info');
+                              } else {
+                                showNotification(`${val} is already in the squad!`, 'alert');
                               }
                               input.value = '';
                             }
                           }}
-                          className="bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white rounded-lg px-2.5 text-[9px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center justify-center mr-0"
+                          className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl px-3.5 text-[10px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center justify-center transition-all shadow-sm shrink-0"
                         >
-                          Add
+                          + Add
                         </button>
                       </div>
                     </div>
@@ -10282,7 +10572,7 @@ export const CricketScoreboard: React.FC = () => {
               </div>
 
               {/* Match Details Extra Fields */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800">
                 <div>
                   <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Tournament Name (Optional)</label>
                   <input
@@ -10290,16 +10580,6 @@ export const CricketScoreboard: React.FC = () => {
                     value={tournamentName}
                     onChange={(e) => setTournamentName(e.target.value)}
                     placeholder="E.g. Bilateral Cup"
-                    className="w-full bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Series Name</label>
-                  <input
-                    type="text"
-                    value={seriesName}
-                    onChange={(e) => setSeriesName(e.target.value)}
-                    placeholder="E.g. Bilateral Series"
                     className="w-full bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
                   />
                 </div>
@@ -10316,10 +10596,13 @@ export const CricketScoreboard: React.FC = () => {
               </div>
 
               {/* Opening Batsmen & Opening Bowler Selection */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 text-left">
-                <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider block mb-2">
-                  Opening Players (Crease & First Over)
-                </span>
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 text-left space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider block">
+                    Opening Players (Crease & First Over)
+                  </span>
+                  <span className="text-[8.5px] text-slate-400 italic">Quick-tap or type custom name</span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Opening Batsman 1 (Striker)</label>
@@ -10327,9 +10610,26 @@ export const CricketScoreboard: React.FC = () => {
                       type="text"
                       value={setupOpeningBatsman1}
                       onChange={(e) => setSetupOpeningBatsman1(e.target.value)}
-                      placeholder="e.g. Shubham"
+                      placeholder="e.g. Rohit"
                       className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
                     />
+                    {/* Quick selection chips from batting squad */}
+                    {(tossChoice === 'bat' ? selectedTeamARoster : selectedTeamBRoster).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5 max-h-16 overflow-y-auto">
+                        {(tossChoice === 'bat' ? selectedTeamARoster : selectedTeamBRoster).slice(0, 6).map((p, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setSetupOpeningBatsman1(p)}
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-bold border-none cursor-pointer transition-colors ${
+                              setupOpeningBatsman1 === p ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Opening Batsman 2 (Non-Striker)</label>
@@ -10337,9 +10637,26 @@ export const CricketScoreboard: React.FC = () => {
                       type="text"
                       value={setupOpeningBatsman2}
                       onChange={(e) => setSetupOpeningBatsman2(e.target.value)}
-                      placeholder="e.g. Abhijit"
+                      placeholder="e.g. Shubman"
                       className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
                     />
+                    {/* Quick selection chips from batting squad */}
+                    {(tossChoice === 'bat' ? selectedTeamARoster : selectedTeamBRoster).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5 max-h-16 overflow-y-auto">
+                        {(tossChoice === 'bat' ? selectedTeamARoster : selectedTeamBRoster).slice(0, 6).map((p, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setSetupOpeningBatsman2(p)}
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-bold border-none cursor-pointer transition-colors ${
+                              setupOpeningBatsman2 === p ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="text-[9px] font-bold uppercase text-slate-400 block mb-1">Opening Bowler (First Over)</label>
@@ -10347,9 +10664,26 @@ export const CricketScoreboard: React.FC = () => {
                       type="text"
                       value={setupOpeningBowler}
                       onChange={(e) => setSetupOpeningBowler(e.target.value)}
-                      placeholder="e.g. Jassi"
+                      placeholder="e.g. Starc"
                       className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
                     />
+                    {/* Quick selection chips from bowling squad */}
+                    {(tossChoice === 'bat' ? selectedTeamBRoster : selectedTeamARoster).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5 max-h-16 overflow-y-auto">
+                        {(tossChoice === 'bat' ? selectedTeamBRoster : selectedTeamARoster).slice(0, 6).map((p, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setSetupOpeningBowler(p)}
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-bold border-none cursor-pointer transition-colors ${
+                              setupOpeningBowler === p ? 'bg-amber-500 text-slate-950 font-black' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-2">
@@ -10378,51 +10712,6 @@ export const CricketScoreboard: React.FC = () => {
               </div>
             </div>
           </div>
-
-          {/* OBS Studio Stream Integration Widget */}
-          <div className="max-w-2xl mx-auto mt-8 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] p-8 shadow-xl text-slate-800 dark:text-white relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl -z-10" />
-            
-            <div className="flex items-center gap-3.5 mb-5 text-left">
-              <div className="p-3 bg-rose-505/10 text-rose-500 border border-rose-500/15 rounded-2xl">
-                <Radio className="animate-pulse" size={20} />
-              </div>
-              <div className="text-left">
-                <span className="px-2.5 py-0.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 font-mono text-[9px] font-extrabold uppercase tracking-widest rounded-full">OBS Integration Hub</span>
-                <h3 className="text-lg font-black uppercase tracking-tight text-slate-800 dark:text-white mt-1">
-                  OBS Studio Television Overlay Setup
-                </h3>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed text-left">
-              Turn your live cricket streaming broadcasts into professional television channels. This platform generates standard, hardware-accelerated <strong>1920x1080 transparent overlays</strong> that you can easily overlay inside your OBS Studio scenes.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 text-left">
-              <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-150 dark:border-slate-850/50">
-                <span className="text-[9px] font-black uppercase text-amber-500 tracking-wider font-bold">How to configure in OBS</span>
-                <ol className="list-decimal list-inside text-2xs text-slate-550 dark:text-slate-450 mt-1.5 space-y-1 font-semibold leading-relaxed">
-                  <li>Start or resume any live cricket match above.</li>
-                  <li>Click <span className="text-rose-500 dark:text-rose-400 font-bold">🔗 Instant OBS Copy Link</span> to grab your custom link.</li>
-                  <li>In OBS Studio, add a new <span className="text-emerald-400 font-bold">Browser Source</span> to your scene.</li>
-                  <li>Paste the copied URL and configure dimensions to: <span className="font-mono text-slate-800 dark:text-white">Width: 1920, Height: 1080</span>.</li>
-                </ol>
-              </div>
-
-              <div className="p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-150 dark:border-slate-850/50 flex flex-col justify-between">
-                <div>
-                  <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider font-bold">Overlay Specifications</span>
-                  <ul className="text-2xs text-slate-550 dark:text-slate-450 mt-1.5 space-y-1.5 font-semibold">
-                    <li className="flex justify-between"><span>Design Style:</span> <span className="text-slate-700 dark:text-slate-300">Slanted Pro Design</span></li>
-                    <li className="flex justify-between"><span>Render Width:</span> <span className="text-slate-700 dark:text-slate-300 font-mono">1900px centered</span></li>
-                    <li className="flex justify-between"><span>Base Resolution:</span> <span className="text-slate-700 dark:text-slate-300 font-mono">1920 x 1080 (HD)</span></li>
-                    <li className="flex justify-between"><span>Background:</span> <span className="text-emerald-600 dark:text-emerald-400">Transparent (Chroma-Free)</span></li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
         </>)}
 
 
@@ -10431,7 +10720,7 @@ export const CricketScoreboard: React.FC = () => {
           <div className="space-y-8 animate-fadeIn">
             
             {/* INNINGS HEADER OR CONCLUDED BANNER */}
-            <div className={`rounded-3xl p-6 shadow-md border ${
+            <div className={`rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-md border ${
               match.status === 'completed'
                 ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white border-amber-600'
                 : 'bg-emerald-800 dark:bg-emerald-950 text-white border-emerald-900'
@@ -10472,7 +10761,7 @@ export const CricketScoreboard: React.FC = () => {
                   )}
 
                   {matchPerformanceHighlights && (
-                    <div className="max-w-md mx-auto grid grid-cols-2 gap-4 mt-6 pt-4 border-t border-white/20 text-xs text-white/90">
+                    <div className="max-w-md mx-auto grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 pt-4 border-t border-white/20 text-xs text-white/90">
                       <div className="bg-white/10 p-3 rounded-xl border border-white/15">
                         <span className="text-[9px] uppercase tracking-widest text-yellow-300 block mb-1 font-black">Top Scorer</span>
                         <strong className="text-sm">{matchPerformanceHighlights.bestBatter.name}</strong>
@@ -10496,28 +10785,28 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
                   <div>
-                    <div className="flex items-center gap-3">
-                      <span className="px-3 py-1 bg-amber-500 text-white text-[9px] font-black uppercase tracking-wider rounded-md animate-pulse">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <span className="px-2.5 py-1 bg-amber-500 text-white text-[9px] font-black uppercase tracking-wider rounded-md animate-pulse">
                         Innings {match.currentInningsNum} Active
                       </span>
                       {match.targetRuns && (
-                        <span className="px-3 py-1 bg-black/20 text-amber-200 text-[9px] font-black uppercase tracking-wider rounded-md">
+                        <span className="px-2.5 py-1 bg-black/20 text-amber-200 text-[9px] font-black uppercase tracking-wider rounded-md">
                           Target: {match.targetRuns} Runs
                         </span>
                       )}
                     </div>
-                    <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white mt-2 leading-none">
+                    <h2 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tight text-white mt-2 leading-tight">
                       {currentInnings.battingTeam} is Batting
                     </h2>
-                    <p className="text-[10px] text-emerald-200 font-bold uppercase tracking-widest mt-1.5 flex items-center gap-1">
+                    <p className="text-[10px] text-emerald-200 font-bold uppercase tracking-widest mt-1.5 flex flex-wrap items-center gap-1">
                       Defending Bowling side: <strong className="text-white bg-emerald-900 px-2 py-0.5 rounded-md font-extrabold">{currentInnings.bowlingTeam}</strong>
                     </p>
                   </div>
 
                   {/* CRR & RRR statistics bar */}
-                  <div className="flex items-center gap-6 text-sm bg-black/20 p-4 rounded-2xl border border-emerald-700/30">
+                  <div className="flex flex-wrap sm:flex-nowrap items-center justify-around sm:justify-start gap-4 sm:gap-6 text-xs sm:text-sm bg-black/20 p-3 sm:p-4 rounded-2xl border border-emerald-700/30">
                     <div className="text-center">
                       <span className="text-[8px] font-black uppercase tracking-widest text-emerald-200 block mb-0.5">Current Run Rate</span>
                       <strong className="font-mono text-base text-yellow-300 block">
@@ -10534,7 +10823,7 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
 
                     {match.currentInningsNum === 2 && match.targetRuns && (
-                      <div className="text-center border-l border-white/10 pl-6">
+                      <div className="text-center sm:border-l border-white/10 sm:pl-6">
                         <span className="text-[8px] font-black uppercase tracking-widest text-emerald-200 block mb-0.5">Required Run Rate</span>
                         <strong className="font-mono text-base text-yellow-300 block">
                           <motion.span
@@ -10560,7 +10849,7 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="text-center border-l border-white/10 pl-6">
+                    <div className="text-center sm:border-l border-white/10 sm:pl-6">
                       <span className="text-[8px] font-black uppercase tracking-widest text-emerald-200 block mb-0.5">Overs Limit</span>
                       <strong className="font-mono text-base text-white">
                         {match.oversLimit} Overs
@@ -10572,7 +10861,7 @@ export const CricketScoreboard: React.FC = () => {
             </div>
 
             {/* ==================== UNIFIED MATCH COCKPIT FRAME ==================== */}
-            <div className="bg-slate-900 border-2 border-slate-950 dark:border-slate-800 rounded-[2.5rem] p-6 lg:p-8 shadow-2xl relative overflow-hidden text-white space-y-6">
+            <div className="bg-slate-900 border-2 border-slate-950 dark:border-slate-800 rounded-2xl sm:rounded-3xl lg:rounded-[2.5rem] p-3.5 sm:p-6 lg:p-8 shadow-2xl relative overflow-hidden text-white space-y-4 sm:space-y-6">
               
               {/* INNINGS BREAK CONTROLS & VISUAL COUNTDOWN TIMER */}
               {match.status === 'live' && match.currentInningsNum === 2 && match.innings2 && match.innings2.ballsBowled === 0 && (
@@ -10763,6 +11052,23 @@ export const CricketScoreboard: React.FC = () => {
                     >
                       <Radio size={11} className={showBroadcastCenter ? "text-rose-400 animate-pulse" : "text-slate-400"} />
                       📺 Broadcast Overlay Setup
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const overlayUrl = getPublicOverlayUrl(match.id);
+                        copyToClipboard(overlayUrl).then(() => {
+                          setCopiedOverlayLink(true);
+                          setTimeout(() => setCopiedOverlayLink(false), 2500);
+                          showNotification('OBS Studio Overlay link copied! Paste as transparent 1920x1080 Browser Source in OBS.', 'success');
+                        });
+                      }}
+                      className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/25 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                      title="Copy OBS Studio Overlay Link (1920x1080) for OBS Studio Browser Source"
+                      id="btn-copy-obs-overlay-management"
+                    >
+                      {copiedOverlayLink ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
+                      <span>{copiedOverlayLink ? 'Copied' : 'Copy Overlay'}</span>
                     </button>
 
                     <button
@@ -11642,11 +11948,11 @@ export const CricketScoreboard: React.FC = () => {
               </AnimatePresence>
 
               {/* Central Multi-column Grid in One Frame */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch">
                 
                 {/* COLUMN 1: LIVE SCOREBOARD STATS PANEL (lg:col-span-4) */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-6 rounded-2xl border border-white/5 space-y-5 flex flex-col justify-between">
-                  <div className="space-y-4">
+                <div className="lg:col-span-4 bg-slate-950/40 p-4 sm:p-6 rounded-2xl border border-white/5 space-y-4 sm:space-y-5 flex flex-col justify-between">
+                  <div className="space-y-3 sm:space-y-4">
                     <div>
                       <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400 block mb-1">SCOREBOARD</span>
                       <h3 className="text-xl font-black uppercase tracking-widest text-white">{currentInnings.battingTeam}</h3>
@@ -11656,14 +11962,14 @@ export const CricketScoreboard: React.FC = () => {
                     {/* Big score text block */}
                     <motion.div 
                       key={`pulse-${currentInnings.runs}-${currentInnings.wickets}`}
-                      className="flex items-baseline gap-3 pt-2 px-3.5 py-1.5 rounded-2xl border border-transparent cricket-scoreboard-container relative overflow-hidden"
+                      className="flex items-baseline gap-2 sm:gap-3 pt-2 px-2.5 sm:px-3.5 py-1.5 rounded-2xl border border-transparent cricket-scoreboard-container relative overflow-hidden"
                       animate={{
                         backgroundColor: ["rgba(16, 185, 129, 0)", "rgba(16, 185, 129, 0.12)", "rgba(16, 185, 129, 0)"],
                         borderColor: ["rgba(16, 185, 129, 0)", "rgba(16, 185, 129, 0.5)", "rgba(16, 185, 129, 0)"]
                       }}
                       transition={{ duration: 0.65, ease: "easeInOut" }}
                     >
-                      <div className="text-6xl font-black text-white font-mono tracking-tighter leading-none flex items-center">
+                      <div className="text-4xl sm:text-5xl lg:text-6xl font-black text-white font-mono tracking-tighter leading-none flex items-center">
                         <motion.span
                           key={`runs-cockpit-${currentInnings.runs}`}
                           initial={{ scale: 0.75, opacity: 0.5, y: -6 }}
@@ -11685,7 +11991,7 @@ export const CricketScoreboard: React.FC = () => {
                         </motion.span>
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-sm font-black font-mono text-emerald-400">
+                        <span className="text-xs sm:text-sm font-black font-mono text-emerald-400">
                           {formatOvers(currentInnings.ballsBowled)} overs
                         </span>
                         <span className="text-[8px] uppercase font-black text-slate-500 tracking-widest mt-0.5">
@@ -11789,7 +12095,7 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
 
                 {/* COLUMN 2: ACTIVE CREASE DUO & BOWLER PANEL (lg:col-span-4) */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-6 rounded-2xl border border-white/5 space-y-4 flex flex-col justify-between">
+                <div className="lg:col-span-4 bg-slate-950/40 p-4 sm:p-6 rounded-2xl border border-white/5 space-y-4 flex flex-col justify-between">
                   <div>
                     <div className="flex justify-between items-center mb-3 pb-1 border-b border-white/5">
                       <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Crease batsmen Duo</span>
@@ -11818,7 +12124,7 @@ export const CricketScoreboard: React.FC = () => {
                             
                             {editStrikerIndex === null ? (
                               <div className="flex justify-between items-center">
-                                <div className="truncate mr-10">
+                                <div className="truncate mr-2 sm:mr-8 flex-1 min-w-0">
                                   <h5 className="font-extrabold text-sm text-white flex items-center gap-1.5 truncate">
                                     {st.name}
                                     {!isSpectator && (
@@ -11831,7 +12137,7 @@ export const CricketScoreboard: React.FC = () => {
                                     SR: {st.balls === 0 ? '0.0' : ((st.runs / st.balls) * 100).toFixed(0)} %
                                   </p>
                                 </div>
-                                <div className="text-right">
+                                <div className="text-right shrink-0">
                                   <span className="text-base font-black font-mono text-white">
                                     {st.runs}
                                   </span>
@@ -11849,7 +12155,7 @@ export const CricketScoreboard: React.FC = () => {
                                   type="text"
                                   defaultValue={st.name}
                                   id="striker-name-input"
-                                  className="bg-slate-900 border border-white/10 rounded px-2 py-1 text-xs text-white font-bold outline-none flex-1"
+                                  className="bg-slate-900 border border-white/10 rounded px-2 py-1 text-xs text-white font-bold outline-none flex-1 min-w-0"
                                 />
                                 <button
                                   onClick={() => {
@@ -11874,7 +12180,7 @@ export const CricketScoreboard: React.FC = () => {
                           <div className="bg-slate-900/40 border border-white/5 rounded-xl p-3">
                             {editNonStrikerIndex === null ? (
                               <div className="flex justify-between items-center">
-                                <div className="truncate mr-10">
+                                <div className="truncate mr-2 sm:mr-8 flex-1 min-w-0">
                                   <h5 className="font-extrabold text-sm text-slate-300 flex items-center gap-1.5 truncate">
                                     {nst.name}
                                     {!isSpectator && (
@@ -11887,7 +12193,7 @@ export const CricketScoreboard: React.FC = () => {
                                     SR: {nst.balls === 0 ? '0.0' : ((nst.runs / nst.balls) * 100).toFixed(0)} %
                                   </p>
                                 </div>
-                                <div className="text-right">
+                                <div className="text-right shrink-0">
                                   <span className="text-sm font-black font-mono text-slate-300">
                                     {nst.runs}
                                   </span>
@@ -11905,7 +12211,7 @@ export const CricketScoreboard: React.FC = () => {
                                   type="text"
                                   defaultValue={nst.name}
                                   id="nonstriker-name-input"
-                                  className="bg-slate-900 border border-white/10 rounded px-2 py-1 text-xs text-white font-bold outline-none flex-1"
+                                  className="bg-slate-900 border border-white/10 rounded px-2 py-1 text-xs text-white font-bold outline-none flex-1 min-w-0"
                                 />
                                 <button
                                   onClick={() => {
@@ -11985,7 +12291,7 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
 
                 {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-6 rounded-2xl border border-white/5 space-y-4">
+                <div className="lg:col-span-4 bg-slate-950/40 p-4 sm:p-6 rounded-2xl border border-white/5 space-y-4">
                   {isSpectator ? (
                     <div className="h-full flex flex-col justify-between space-y-4">
                       <div className="space-y-2">
@@ -12319,11 +12625,11 @@ export const CricketScoreboard: React.FC = () => {
             </div>
 
             {/* ==================== 4. STATISTICS ROSTERS BATTING & BOWLING ==================== */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
               
               {/* Batting Detailed register */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-md">
-                <div className="flex justify-between items-center mb-6 pb-2 border-b border-slate-50 dark:border-slate-800">
+              <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-md">
+                <div className="flex justify-between items-center mb-4 sm:mb-6 pb-2 border-b border-slate-50 dark:border-slate-800">
                   <h3 className="text-[11px] font-black text-slate-450 uppercase tracking-widest flex items-center gap-1.5">
                     <Users size={16} className="text-emerald-500" />
                     Batting Scorecard ({currentInnings.battingTeam})
@@ -12410,9 +12716,9 @@ export const CricketScoreboard: React.FC = () => {
 
 
               {/* Bowling roster register + choice selectors */}
-              <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-md flex flex-col justify-between">
+              <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 shadow-md flex flex-col justify-between">
                 <div>
-                  <div className="flex justify-between items-center mb-6 pb-2 border-b border-slate-50 dark:border-slate-800">
+                  <div className="flex justify-between items-center mb-4 sm:mb-6 pb-2 border-b border-slate-50 dark:border-slate-800">
                     <h3 className="text-[11px] font-black text-slate-450 uppercase tracking-widest flex items-center gap-1.5">
                       <Users size={16} className="text-emerald-500" />
                       Bowlers Scorecard ({currentInnings.bowlingTeam})
