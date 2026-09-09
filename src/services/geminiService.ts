@@ -316,7 +316,7 @@ export const getGeminiResponse = async (userMessage: string, portfolioData: any,
       `;
 
       // Try valid models in sequence on client-side
-      const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.7-flash", "gemini-flash-latest", "gemini-2.5-flash"];
+      const modelsToTry = ["gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"];
       let generatedText = null;
       let lastError = null;
 

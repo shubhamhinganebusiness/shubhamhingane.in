@@ -9,7 +9,8 @@ import { CricketOverlayAnimations } from './CricketOverlayAnimations';
 // Firestore imports
 import { db } from '../../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { isMatchDeleted, markMatchDeleted } from './cricketStorage';
+import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch } from './cricketStorage';
+import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -316,6 +317,27 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [activeConfig.activeGraphic, activeConfig.lowerThirdMode, activeConfig.selectedUmpireSignal, activeConfig.customMilestone]);
 
+  // Sync graphic URL parameter for direct TV overlay testing or OBS links
+  useEffect(() => {
+    const graphicParam = searchParams.get('graphic');
+    if (graphicParam) {
+      setActiveGraphic(graphicParam);
+    }
+  }, [searchParams]);
+
+  // Fallback to any recent/default match if standalone overlay is opened without a matchId
+  useEffect(() => {
+    if (!match && !matchId) {
+      const recent = getAnyActiveOrRecentMatch();
+      if (recent) {
+        setMatch(recent);
+      } else {
+        const def = getOrCreateDefaultMatch();
+        if (def) setMatch(def);
+      }
+    }
+  }, [match, matchId]);
+
   // Primary real-time Firestore synchronization
   useEffect(() => {
     if (!matchId) return;
@@ -528,7 +550,7 @@ export const CricketOverlay: React.FC = () => {
       : match.currentInningsNum;
 
     const inn = activeInningsNum === 1 ? match.innings1 : match.innings2;
-    return { currentInnings: inn, inningsNum: activeInningsNum };
+    return { currentInnings: inn || match.innings1 || match.innings2, inningsNum: activeInningsNum };
   }, [match, activeConfig]);
 
   // Track boundaries & wicket transitions
@@ -875,7 +897,17 @@ export const CricketOverlay: React.FC = () => {
     return { label, style };
   };
 
-  if (!match) {
+  const isFullScreenTransition = [
+    'team_lineups', 'lineups', 'playing_xi', 
+    'innings_scorecard', 'full_scorecard', 
+    'match_presentation', 'potm_card', 'presentation', 
+    'tournament_standings', 'points_table', 'standings',
+    'prematch_matchup', 'matchup_card', 'matchup',
+    'toss_result', 'toss_card', 'toss',
+    'pitch_weather_report', 'pitch_report', 'pitch_weather'
+  ].includes(activeGraphic);
+
+  if (!match && !isFullScreenTransition) {
     return (
       <div className="absolute inset-0 bg-transparent flex flex-col items-center justify-center font-sans">
         <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 p-8 rounded-[2rem] text-center shadow-2xl backdrop-blur-md">
@@ -894,7 +926,7 @@ export const CricketOverlay: React.FC = () => {
     );
   }
 
-  if (!currentInnings) {
+  if (!currentInnings && !isFullScreenTransition) {
     return (
       <div className="absolute inset-0 bg-transparent flex items-center justify-center font-sans">
         <div className="bg-slate-900/90 border border-slate-800 p-8 rounded-2xl text-center backdrop-blur-md">
@@ -958,7 +990,7 @@ export const CricketOverlay: React.FC = () => {
   }
 
   // Active Team Accent color variables
-  const activeTeamColor = currentInnings.battingTeam === match.teamA 
+  const activeTeamColor = (currentInnings?.battingTeam || '') === (match?.teamA || '') 
     ? activeConfig.teamAColor 
     : activeConfig.teamBColor;
 
@@ -2380,7 +2412,90 @@ export const CricketOverlay: React.FC = () => {
             </motion.div>
           </div>
         )}
+
+        {/* 13. FULL-SCREEN OVERLAYS (MATCH TRANSITIONS) */}
+        {isFullScreenTransition && (
+          <CricketFullScreenTransitions
+            activeGraphic={activeGraphic}
+            match={(match || getOrCreateDefaultMatch()) as any}
+            onClose={() => setActiveGraphic('none')}
+          />
+        )}
       </AnimatePresence>
+
+      {/* ON-SCREEN HOVER TRANSITIONS TOOLBAR (Convenience bar for TV Directors & OBS Testers) */}
+      <div className="absolute top-2 inset-x-0 flex justify-center z-[60] pointer-events-auto opacity-0 hover:opacity-100 transition-opacity duration-300">
+        <div className="bg-slate-950/90 border border-white/10 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-1.5 text-xs font-mono flex-wrap justify-center">
+          <span className="text-amber-400 font-bold uppercase text-[10px] mr-1">TV Transitions:</span>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'prematch_matchup' ? 'none' : 'prematch_matchup')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'prematch_matchup' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+            title="The Matchup Card: Split full-screen or large lower-third"
+          >
+            ⚔️ Matchup
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'toss_result' ? 'none' : 'toss_result')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'toss_result' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+            title="Toss Result Card: Official Toss decision"
+          >
+            🪙 Toss Result
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'pitch_weather_report' ? 'none' : 'pitch_weather_report')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'pitch_weather_report' ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+            title="Pitch & Weather Report: Pitch analysis and atmospheric conditions"
+          >
+            🌤️ Pitch & Weather
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'team_lineups' ? 'none' : 'team_lineups')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'team_lineups' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+          >
+            👥 Lineups (XI)
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'innings_scorecard' ? 'none' : 'innings_scorecard')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'innings_scorecard' ? 'bg-sky-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+          >
+            📋 Innings Scorecard
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'match_presentation' ? 'none' : 'match_presentation')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'match_presentation' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+          >
+            🏆 Presentation & POTM
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'tournament_standings' ? 'none' : 'tournament_standings')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'tournament_standings' ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+          >
+            📊 Standings Table
+          </button>
+          {activeGraphic !== 'none' && (
+            <button
+              onClick={() => setActiveGraphic('none')}
+              className="px-2 py-1 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 font-bold uppercase text-[10px] cursor-pointer"
+            >
+              ✕ Clear
+            </button>
+          )}
+        </div>
+      </div>
 
       {renderCustomOverlayImage()}
 

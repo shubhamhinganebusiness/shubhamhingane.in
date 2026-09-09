@@ -79,7 +79,7 @@ function sleep(ms: number): Promise<void> {
 function isRateLimitOrTemporaryError(err: any): boolean {
   if (!err) return false;
   const msg = (err.message || String(err)).toLowerCase();
-  const status = err.status || err.statusCode || (err.response && err.response.status);
+  const status = err.status || err.statusCode || (err.response && err.response.status) || (err.error && err.error.code);
   return (
     status === 429 ||
     status === 503 ||
@@ -92,8 +92,39 @@ function isRateLimitOrTemporaryError(err: any): boolean {
     msg.includes("limit") ||
     msg.includes("overloaded") ||
     msg.includes("unavailable") ||
+    msg.includes("high demand") ||
     msg.includes("exceeded")
   );
+}
+
+function isServiceUnavailableOrDemandSpike(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  const status = err.status || err.statusCode || (err.response && err.response.status) || (err.error && err.error.code);
+  return (
+    status === 503 ||
+    msg.includes("503") ||
+    msg.includes("unavailable") ||
+    msg.includes("high demand") ||
+    msg.includes("overloaded")
+  );
+}
+
+// Track temporary model cooldowns to avoid repeatedly hammering a model experiencing high demand spikes
+const modelCoolDownUntil = new Map<string, number>();
+
+function isModelCoolingDown(model: string): boolean {
+  const coolUntil = modelCoolDownUntil.get(model);
+  if (!coolUntil) return false;
+  if (Date.now() > coolUntil) {
+    modelCoolDownUntil.delete(model);
+    return false;
+  }
+  return true;
+}
+
+function markModelUnavailable(model: string, durationMs = 180000): void {
+  modelCoolDownUntil.set(model, Date.now() + durationMs);
 }
 
 // Queue / concurrency throttler to prevent bursts of API calls from exceeding rate limits
@@ -128,21 +159,35 @@ async function generateContentWithFallback(
 ): Promise<any> {
   await acquireCallSlot();
   try {
-    // Official valid Gemini models ordered for maximum rate-limit tolerance and speed
-    const modelsToTry = [
-      "gemini-3.8-flash",
+    // Official valid Gemini models ordered for maximum availability and high throughput
+    const baseModels = [
       "gemini-3.1-flash-lite",
-      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.8-flash",
       "gemini-flash-latest",
-      "gemini-2.5-flash"
+      "gemini-3.7-flash"
     ];
+
+    // Prioritize healthy models that are not currently cooling down from a 503 spike
+    const modelsToTry = [...baseModels].sort((a, b) => {
+      const aCool = isModelCoolingDown(a) ? 1 : 0;
+      const bCool = isModelCoolingDown(b) ? 1 : 0;
+      return aCool - bCool;
+    });
+
     let lastError: any = null;
 
     for (const model of modelsToTry) {
-      // Allow up to 2 retries with exponential backoff + jitter per model for rate limits
+      const isCooling = isModelCoolingDown(model);
+      if (isCooling && modelsToTry.some(m => !isModelCoolingDown(m))) {
+        // Skip cooling model if we have non-cooling alternatives
+        continue;
+      }
+
+      // Allow up to 2 attempts for standard transient blips, but immediately switch on 503 high demand
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
-          console.log(`[Gemini] Attempting generation with model: ${model} (attempt ${attempt + 1})`);
+          console.log(`[Gemini] Calling model: ${model}${attempt > 0 ? ` (retry ${attempt + 1})` : ''}`);
           const response = await ai.models.generateContent({
             ...params,
             model,
@@ -153,20 +198,37 @@ async function generateContentWithFallback(
           }
         } catch (err: any) {
           lastError = err;
-          console.warn(`[Gemini] Model ${model} attempt ${attempt + 1} failed:`, err.message || err);
 
+          // If the model is experiencing high demand (503), put it on cooldown and switch immediately
+          if (isServiceUnavailableOrDemandSpike(err)) {
+            console.log(`[Gemini] Model ${model} is experiencing high demand (503). Setting 3m cooldown and switching to next model.`);
+            markModelUnavailable(model, 180000);
+            break; // Switch to next model immediately without delay
+          }
+
+          // Handle 404 (deprecated / unavailable model name)
+          const errStatus = err.status || err.statusCode || (err.error && err.error.code);
+          if (errStatus === 404) {
+            console.log(`[Gemini] Model ${model} returned 404. Setting long cooldown and switching to next model.`);
+            markModelUnavailable(model, 3600000);
+            break;
+          }
+
+          // Handle 429 rate limits with quick backoff on first attempt
           if (isRateLimitOrTemporaryError(err) && attempt === 0) {
-            const backoffMs = 600 + Math.floor(Math.random() * 400);
-            console.log(`[Gemini] Rate limit / quota detected. Backing off for ${backoffMs}ms before retry...`);
+            const backoffMs = 500 + Math.floor(Math.random() * 300);
+            console.log(`[Gemini] Rate limit detected for ${model}. Backing off ${backoffMs}ms...`);
             await sleep(backoffMs);
             continue;
           }
+
+          console.log(`[Gemini] Model ${model} failed: ${err.message || err}. Moving to next fallback model.`);
           break; // Move to next fallback model
         }
       }
     }
 
-    throw lastError || new Error("All fallback Gemini models encountered rate limits or errors.");
+    throw lastError || new Error("All fallback Gemini models encountered rate limits or temporary unavailability.");
   } finally {
     releaseCallSlot();
   }

@@ -63,8 +63,6 @@ import {
   MatchContextualTone,
   ContextualToneInfo
 } from './modules/commentaryLanguage';
-import { WinProbabilityCard } from './modules/WinProbabilityCard';
-import { calculateWinProbabilityDetails } from './modules/winProbabilityEngine';
 
 // Types & Interfaces
 export interface Batsman {
@@ -1115,7 +1113,6 @@ export const CricketScoreboard: React.FC = () => {
   const [aiCommentaryEnabled, setAiCommentaryEnabled] = useState(true);
   const [isAiCommentaryLoading, setIsAiCommentaryLoading] = useState(false);
   const [userCommentaryLang, setUserCommentaryLang] = useCommentaryLanguage('en');
-  const [showWinProbabilityDesk, setShowWinProbabilityDesk] = useState<boolean>(true);
 
   // Copy Overlay Link state
   const [copiedOverlayLink, setCopiedOverlayLink] = useState(false);
@@ -2167,45 +2164,6 @@ export const CricketScoreboard: React.FC = () => {
     setTimeout(() => {
       setFeedback(null);
     }, 4000);
-  };
-
-  const handleAddWinProbCommentaryToFeed = (text: string, translations?: { en: string; hi: string; mr: string }) => {
-    if (!match) return;
-    const activeInnings = match.currentInningsNum === 1 ? match.innings1 : match.innings2;
-    if (!activeInnings) return;
-
-    const currentOverBall = `${Math.floor(activeInnings.ballsBowled / 6)}.${activeInnings.ballsBowled % 6}`;
-    const newEntry = {
-      id: `winprob-comm-${Date.now()}`,
-      overBall: currentOverBall,
-      description: text,
-      type: 'milestone' as const,
-      specialEvent: 'win_probability_insight',
-      translations: translations || {
-        en: text,
-        hi: translations?.hi,
-        mr: translations?.mr
-      }
-    };
-
-    syncMatch(prev => {
-      const targetInnings = prev.currentInningsNum === 1 ? prev.innings1 : prev.innings2;
-      if (!targetInnings) return prev;
-      const updatedList = [newEntry, ...(targetInnings.commentaryList || [])];
-      return {
-        ...prev,
-        innings1: prev.currentInningsNum === 1 ? {
-          ...targetInnings,
-          commentaryList: updatedList
-        } : prev.innings1,
-        innings2: prev.currentInningsNum === 2 ? {
-          ...targetInnings,
-          commentaryList: updatedList
-        } : prev.innings2
-      };
-    });
-
-    showNotification('⚡ Predictive Win Probability Commentary posted to live match feed!', 'success');
   };
 
   // GullyScore Digital Toss Simulator: Auto-fill setup or Auto-launch live match
@@ -5568,7 +5526,7 @@ export const CricketScoreboard: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-hidden min-h-0 p-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2">
+            <div className="flex-1 overflow-y-auto lg:overflow-hidden min-h-0 p-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 custom-scrollbar">
           
           {/* COLUMN 1: Score overview, Last 5 action logs, Live Commentary Stream */}
           <div className={`flex flex-col gap-2 min-h-0 overflow-hidden ${
@@ -6082,6 +6040,162 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
 
+                          {/* Pre-Match & Toss Cards (The Build-Up) Room */}
+                          <div className="space-y-1.5 bg-gradient-to-br from-blue-950/20 via-slate-950/40 to-slate-950/20 p-2.5 border border-sky-500/20 rounded-2xl">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[8px] font-black text-sky-400 uppercase tracking-widest block">
+                                Pre-Match & Toss Cards (The Build-Up)
+                              </span>
+                              <span className="text-[6.5px] font-mono text-sky-300/60 uppercase">
+                                Broadcast Preshow
+                              </span>
+                            </div>
+                            
+                            <div className="space-y-1.5">
+                              {[
+                                {
+                                  id: 'prematch_matchup',
+                                  label: 'The Matchup Card',
+                                  desc: 'Split full-screen or large lower-third: team logos, tournament branding & match details',
+                                  icon: '⚔️',
+                                  isActive: currentActiveGraphic === 'prematch_matchup',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'prematch_matchup' ? 'none' : 'prematch_matchup' })
+                                },
+                                {
+                                  id: 'toss_result',
+                                  label: 'Toss Result Card',
+                                  desc: 'Official toss winner & election: e.g. MUMBAI WON THE TOSS & ELECTED TO BAT FIRST',
+                                  icon: '🪙',
+                                  isActive: currentActiveGraphic === 'toss_result',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'toss_result' ? 'none' : 'toss_result' })
+                                },
+                                {
+                                  id: 'pitch_weather_report',
+                                  label: 'Pitch & Weather Report',
+                                  desc: 'Pitch conditions (Dry, Grass cover, Cracks) and overhead weather/temperature conditions',
+                                  icon: '🌤️',
+                                  isActive: currentActiveGraphic === 'pitch_weather_report',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'pitch_weather_report' ? 'none' : 'pitch_weather_report' })
+                                }
+                              ].map(item => (
+                                <div key={item.id} className="flex items-center justify-between p-2 bg-slate-950/80 border border-sky-500/10 hover:border-sky-500/30 rounded-xl transition-all">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-6 h-6 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-xs shrink-0">
+                                      {item.icon}
+                                    </div>
+                                    <div className="text-left min-w-0">
+                                      <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-100 block truncate leading-none">{item.label}</span>
+                                      <span className="text-[6.5px] text-slate-400 block font-mono truncate leading-normal">{item.desc}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className={`text-[6px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none ${item.isActive ? 'bg-sky-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'}`}>
+                                      {item.isActive ? 'ON AIR' : 'STANDBY'}
+                                    </span>
+                                    <button
+                                      onClick={() => {
+                                        item.onToggle();
+                                        showNotification(`Pre-match broadcast: ${item.label}`, 'info');
+                                      }}
+                                      className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
+                                        item.isActive ? 'bg-sky-500' : 'bg-slate-800'
+                                      }`}
+                                    >
+                                      <div
+                                        className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
+                                          item.isActive ? 'left-[13px]' : 'left-0.5'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Full-Screen Overlays (Match Transitions) Room */}
+                          <div className="space-y-1.5 bg-gradient-to-br from-amber-950/20 via-slate-950/40 to-slate-950/20 p-2.5 border border-amber-500/20 rounded-2xl">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest block">
+                                Full-Screen Overlays (Match Transitions)
+                              </span>
+                              <span className="text-[6.5px] font-mono text-amber-300/60 uppercase">
+                                Broadcast TV Breaks
+                              </span>
+                            </div>
+                            
+                            <div className="space-y-1.5">
+                              {[
+                                {
+                                  id: 'team_lineups',
+                                  label: 'Team Lineups / Playing XI',
+                                  desc: "Both teams' playing 11, captains, wicketkeepers & headshots",
+                                  icon: '👥',
+                                  isActive: currentActiveGraphic === 'team_lineups',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_lineups' ? 'none' : 'team_lineups' })
+                                },
+                                {
+                                  id: 'innings_scorecard',
+                                  label: 'Innings Scorecard',
+                                  desc: 'Detailed breakdown: all batsmen, dismissals, scores, extras & bowling',
+                                  icon: '📋',
+                                  isActive: currentActiveGraphic === 'innings_scorecard',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'innings_scorecard' ? 'none' : 'innings_scorecard' })
+                                },
+                                {
+                                  id: 'match_presentation',
+                                  label: 'Match Presentation / Results',
+                                  desc: 'Final summary: winner, margin of victory & Player of the Match card',
+                                  icon: '🏆',
+                                  isActive: currentActiveGraphic === 'match_presentation',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'match_presentation' ? 'none' : 'match_presentation' })
+                                },
+                                {
+                                  id: 'tournament_standings',
+                                  label: 'Tournament Standings / Points Table',
+                                  desc: 'Full-screen table: group rankings, points, matches played & Net Run Rate',
+                                  icon: '📊',
+                                  isActive: currentActiveGraphic === 'tournament_standings',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'tournament_standings' ? 'none' : 'tournament_standings' })
+                                }
+                              ].map(item => (
+                                <div key={item.id} className="flex items-center justify-between p-2 bg-slate-950/80 border border-amber-500/10 hover:border-amber-500/30 rounded-xl transition-all">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-6 h-6 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-xs shrink-0">
+                                      {item.icon}
+                                    </div>
+                                    <div className="text-left min-w-0">
+                                      <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-100 block truncate leading-none">{item.label}</span>
+                                      <span className="text-[6.5px] text-slate-400 block font-mono truncate leading-normal">{item.desc}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className={`text-[6px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none ${item.isActive ? 'bg-amber-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'}`}>
+                                      {item.isActive ? 'ON AIR' : 'STANDBY'}
+                                    </span>
+                                    <button
+                                      onClick={() => {
+                                        item.onToggle();
+                                        showNotification(`Broadcast transition: ${item.label}`, 'info');
+                                      }}
+                                      className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
+                                        item.isActive ? 'bg-amber-500' : 'bg-slate-800'
+                                      }`}
+                                    >
+                                      <div
+                                        className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
+                                          item.isActive ? 'left-[13px]' : 'left-0.5'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
                           {currentActiveGraphic === 'lower_third' && (
                             <div className="border border-white/5 bg-slate-950/40 p-2 rounded-xl space-y-1.5 font-sans mt-2">
                               <span className="text-[7.5px] font-black text-rose-450 uppercase tracking-widest block text-left">Configure Lower Third Bar:</span>
@@ -6491,9 +6605,9 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           {/* COLUMN 2: Crease Batsmen, Bowlers and Tactile Scoring Panels */}
-          <div className={`flex flex-col gap-2 min-h-0 overflow-hidden ${
+          <div className={`flex flex-col gap-2 min-h-0 overflow-y-auto lg:overflow-visible custom-scrollbar ${
             activeMobileTab === 'scorer' ? 'flex' : 'hidden lg:flex'
-          } lg:col-span-5`}>
+          } lg:col-span-5 pb-3`}>
             
             {/* Direct crease details card */}
             <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-2xl shrink-0 space-y-2 shadow-md">
@@ -6554,11 +6668,25 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       )}
 
-                      <div className="flex justify-between items-baseline mt-1.5 pt-1.5 border-t border-slate-800/60">
+                      <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-slate-800/60 gap-1.5">
                         <span className="text-[8.5px] font-mono text-slate-500">{st.fours}x4 / {st.sixes}x6</span>
-                        <div className="text-right">
-                          <strong className="text-sm font-black text-emerald-400 font-mono leading-none">{st.runs}</strong>
-                          <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({st.balls}b)</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-right">
+                            <strong className="text-sm font-black text-emerald-400 font-mono leading-none">{st.runs}</strong>
+                            <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({st.balls}b)</span>
+                          </div>
+                          {!isSpectator && (
+                            <button
+                              type="button"
+                              disabled={isScoringDisabled}
+                              id="btn-striker-out-quick"
+                              onClick={() => openWicketModal('striker')}
+                              className="px-2 py-1 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                              title="Dismiss Striker (Wicket / Out)"
+                            >
+                              🔴 OUT
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -6619,11 +6747,25 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       )}
 
-                      <div className="flex justify-between items-baseline mt-1.5 pt-1.5 border-t border-slate-800/60">
+                      <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-slate-800/60 gap-1.5">
                         <span className="text-[8.5px] font-mono text-slate-505">{nst.fours}x4 / {nst.sixes}x6</span>
-                        <div className="text-right">
-                          <strong className="text-sm font-black text-slate-205 font-mono leading-none">{nst.runs}</strong>
-                          <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({nst.balls}b)</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-right">
+                            <strong className="text-sm font-black text-slate-205 font-mono leading-none">{nst.runs}</strong>
+                            <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({nst.balls}b)</span>
+                          </div>
+                          {!isSpectator && (
+                            <button
+                              type="button"
+                              disabled={isScoringDisabled}
+                              id="btn-nonstriker-out-quick"
+                              onClick={() => openWicketModal('non-striker')}
+                              className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                              title="Dismiss Non-Striker (Run Out / Mankad)"
+                            >
+                              🔴 OUT
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -6696,7 +6838,7 @@ export const CricketScoreboard: React.FC = () => {
             </div>
 
             {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions >= 44x44px */}
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2.5 flex flex-col justify-between relative overflow-hidden min-h-0 shadow-lg select-none">
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2.5 flex flex-col justify-between relative overflow-visible min-h-0 shadow-lg select-none">
               
               {/* Overlay padlock cover */}
               {isScoringDisabled && (
@@ -6860,8 +7002,8 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* EXTRAS CHOOSE: Wide and No Ball - h-11 provides 44px compliant touch area */}
-                <div className="grid grid-cols-2 gap-2">
+                {/* EXTRAS CHOOSE: Wide, No Ball & Quick Wicket - h-11 provides 44px compliant touch area */}
+                <div className="grid grid-cols-3 gap-1.5">
                   <button
                     disabled={isScoringDisabled}
                     onClick={() => {
@@ -6870,8 +7012,8 @@ export const CricketScoreboard: React.FC = () => {
                     }}
                     className="h-11 flex flex-col items-center justify-center bg-purple-950 border border-purple-800/45 hover:bg-purple-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
                   >
-                    <span className="leading-none font-extrabold">+1 WIDE (WD)</span>
-                    <span className="text-[7px] text-purple-400 font-semibold mt-0.5">Bowler re-delivers ball</span>
+                    <span className="leading-none font-extrabold">+1 WIDE</span>
+                    <span className="text-[6.5px] text-purple-400 font-semibold mt-0.5 truncate max-w-full px-0.5">Re-bowls</span>
                   </button>
                   <button
                     disabled={isScoringDisabled}
@@ -6881,8 +7023,19 @@ export const CricketScoreboard: React.FC = () => {
                     }}
                     className="h-11 flex flex-col items-center justify-center bg-amber-955 border border-amber-800/45 hover:bg-amber-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
                   >
-                    <span className="leading-none font-extrabold">+1 NO BALL (NB)</span>
-                    <span className="text-[7px] text-amber-400 font-semibold mt-0.5">Triggers next as FREE HIT</span>
+                    <span className="leading-none font-extrabold">+1 NO BALL</span>
+                    <span className="text-[6.5px] text-amber-400 font-semibold mt-0.5 truncate max-w-full px-0.5">Free hit</span>
+                  </button>
+                  <button
+                    disabled={isScoringDisabled}
+                    id="btn-quick-wicket"
+                    onClick={() => openWicketModal('striker')}
+                    className="h-11 flex flex-col items-center justify-center bg-rose-600 hover:bg-rose-500 border border-rose-400/50 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow"
+                  >
+                    <span className="leading-none font-extrabold flex items-center gap-1">
+                      <AlertCircle size={11} /> 🔴 WICKET
+                    </span>
+                    <span className="text-[6.5px] text-rose-100 font-semibold mt-0.5">Dismiss Out</span>
                   </button>
                 </div>
 
@@ -6928,22 +7081,8 @@ export const CricketScoreboard: React.FC = () => {
                   <button
                     disabled={isScoringDisabled}
                     id="btn-wicket"
-                    onClick={() => {
-                      setActiveAnimation('wicket');
-                      setOutBatsmanWho('striker');
-                      if (currentInnings) {
-                        const activeBowlerName = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name || '';
-                        setWicketBowlerName(activeBowlerName);
-                        setWicketHowOutDetails('Bowled');
-                        setWicketType('Bowled');
-                        setWicketFielderName('');
-                        setWicketAdditionalDetails('');
-                        setNewBatsmanName('');
-                        setWicketValidationErr('');
-                      }
-                      setShowWicketModal(true);
-                    }}
-                    className="h-12 w-full flex items-center justify-center bg-rose-600 hover:bg-rose-500 rounded-xl font-black text-xs uppercase uppercase tracking-wider text-white gap-2 transition-all cursor-pointer border-none animate-pulse active:scale-95"
+                    onClick={() => openWicketModal('striker')}
+                    className="h-12 w-full flex items-center justify-center bg-rose-600 hover:bg-rose-500 rounded-xl font-black text-xs uppercase uppercase tracking-wider text-white gap-2 transition-all cursor-pointer border-none animate-pulse active:scale-95 shadow-lg"
                   >
                     <AlertCircle size={14} />
                     🔴 DISMISS / WICKET (OUT RECONCILER)
@@ -7000,11 +7139,11 @@ export const CricketScoreboard: React.FC = () => {
                   <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-widest">
                     {activeScorecardTab === 'bat' ? 'BATSMAN REGISTRY' : activeScorecardTab === 'bowl' ? 'BOWLER FIGURES' : activeScorecardTab === 'comm' ? 'AI COMMENTARY' : 'FALL OF WICKETS'}
                   </span>
-                  {activeScorecardTab === 'fow' && (
+                  {(activeScorecardTab === 'fow' || activeScorecardTab === 'bat') && (
                     <button
                       onClick={() => openWicketModal('striker')}
                       disabled={isScoringDisabled}
-                      className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8px] font-black uppercase tracking-wider border-none cursor-pointer transition-all flex items-center gap-1 shadow"
+                      className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8px] font-black uppercase tracking-wider border-none cursor-pointer transition-all flex items-center gap-1 shadow active:scale-95"
                     >
                       <PlusCircle size={10} />
                       Add Wicket
@@ -7036,9 +7175,21 @@ export const CricketScoreboard: React.FC = () => {
                               isStriker ? 'text-emerald-450 bg-emerald-500/5' : isNonStriker ? 'text-slate-205 font-medium' : 'text-slate-400 opacity-60'
                             }`}
                           >
-                            <td className="py-2 text-left font-semibold truncate max-w-[90px]">
-                              {b.name} {isStriker ? '★' : ''}
-                              <p className="text-[7px] text-slate-500 truncate lowercase italic mt-0.5 leading-none">{b.howOut || 'yet bounds'}</p>
+                            <td className="py-2 text-left font-semibold truncate max-w-[120px]">
+                              <div className="flex items-center gap-1.5 justify-between pr-1">
+                                <span className="truncate">{b.name} {isStriker ? '★' : ''}</span>
+                                {!isSpectator && !b.isOut && (isStriker || isNonStriker) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openWicketModal(isStriker ? 'striker' : 'non-striker')}
+                                    className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white text-[7.5px] font-black uppercase rounded border-none cursor-pointer transition-all shrink-0 active:scale-95"
+                                    title={`Dismiss ${b.name} (Wicket)`}
+                                  >
+                                    Out
+                                  </button>
+                                )}
+                              </div>
+                              <p className="text-[7px] text-slate-500 truncate lowercase italic mt-0.5 leading-none">{b.howOut || 'not out'}</p>
                             </td>
                             <td className="py-2 font-mono font-black text-white">{b.runs}</td>
                             <td className="py-2 font-mono">{b.balls}</td>
@@ -7246,37 +7397,6 @@ export const CricketScoreboard: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Predictive Win Probability Commentary Section */}
-                    <div className="mb-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowWinProbabilityDesk(!showWinProbabilityDesk)}
-                        className={`w-full py-1.5 px-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-between border transition-all cursor-pointer ${
-                          showWinProbabilityDesk 
-                            ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/40 shadow-xs' 
-                            : 'bg-slate-900/80 hover:bg-slate-900 text-slate-300 border-slate-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-emerald-400">⚡</span>
-                          <span>Win Probability AI Commentary</span>
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping inline-block ml-1" />
-                        </div>
-                        <span className="text-[8.5px] text-slate-400 font-mono">
-                          {showWinProbabilityDesk ? '▲ Hide Analysis' : '▼ View Tilt Analysis'}
-                        </span>
-                      </button>
-                      {showWinProbabilityDesk && (
-                        <div className="mt-2">
-                          <WinProbabilityCard
-                            match={match}
-                            userLanguage={userCommentaryLang}
-                            onAddToCommentary={handleAddWinProbCommentaryToFeed}
-                          />
-                        </div>
-                      )}
-                    </div>
-
                     {/* Contextual Tone Shifter Banner */}
                     {(() => {
                       const matchTone = getMatchContextualTone(match, currentInnings);
@@ -7292,7 +7412,6 @@ export const CricketScoreboard: React.FC = () => {
                           const isBnd = comm.type === 'boundary';
                           const isExt = comm.type === 'extra';
                           const isMilestone = comm.type === 'milestone' || !!comm.specialEvent;
-                          const isWinProb = comm.specialEvent === 'win_probability_insight';
                           const isAnnouncement = !!comm.announcementType;
                           const displayText = getCommentaryText(comm, userCommentaryLang);
 
@@ -7300,7 +7419,6 @@ export const CricketScoreboard: React.FC = () => {
                             <div
                               key={comm.id}
                               className={`p-2 rounded-xl text-[10.5px] border transition-all ${
-                                isWinProb ? 'bg-teal-500/15 border-teal-500/40 text-teal-200 shadow-teal-500/10' :
                                 comm.specialEvent === 'hundred' ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-amber-500/5' :
                                 comm.specialEvent === 'fifty' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-emerald-500/5' :
                                 comm.specialEvent === 'hat_trick' ? 'bg-rose-500/15 border-rose-500/40 text-rose-200 shadow-rose-500/5' :
@@ -7319,14 +7437,12 @@ export const CricketScoreboard: React.FC = () => {
                                   </span>
                                   {comm.specialEvent && (
                                     <span className={`text-[7px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
-                                      isWinProb ? 'bg-teal-400 text-slate-950 font-black' :
                                       comm.specialEvent === 'hundred' ? 'bg-amber-400 text-black' :
                                       comm.specialEvent === 'fifty' ? 'bg-emerald-400 text-black' :
                                       comm.specialEvent === 'hat_trick' ? 'bg-rose-500 text-white animate-pulse' :
                                       'bg-rose-400 text-black'
                                     }`}>
-                                      {isWinProb ? '⚡ WIN PROBABILITY TILT' :
-                                       comm.specialEvent === 'hundred' ? '👑 CENTURY' :
+                                      {comm.specialEvent === 'hundred' ? '👑 CENTURY' :
                                        comm.specialEvent === 'fifty' ? '🌟 HALF-CENTURY' :
                                        comm.specialEvent === 'hat_trick' ? '🔥 HAT-TRICK' :
                                        '⚡ WICKET'}
@@ -7801,7 +7917,13 @@ export const CricketScoreboard: React.FC = () => {
                           type="button"
                           onClick={() => {
                             setWicketType(mode);
-                            setWicketHowOutDetails(mode);
+                            if (mode === 'Caught') {
+                              const bName = wicketBowlerName.trim() || (currentInnings?.bowlers?.[currentInnings.currentBowlerIndex]?.name || 'Bowler');
+                              const cName = wicketFielderName.trim();
+                              setWicketHowOutDetails(cName ? (cName.toLowerCase() === bName.toLowerCase() ? `c & b ${bName}` : `c ${cName} b ${bName}`) : `Caught`);
+                            } else {
+                              setWicketHowOutDetails(mode);
+                            }
                           }}
                           className={`py-1.5 rounded text-[8.5px] font-black uppercase tracking-widest transition-all cursor-pointer border-none ${
                             wicketType === mode ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
@@ -7812,6 +7934,79 @@ export const CricketScoreboard: React.FC = () => {
                       ))}
                     </div>
                   </div>
+
+                  {/* Who took the catch / Fielder selector */}
+                  {(wicketType === 'Caught' || wicketType === 'Run Out' || wicketType === 'Stumped') && (
+                    <div className="p-3 bg-slate-950/90 border border-emerald-500/40 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[8px] font-black text-emerald-400 uppercase tracking-widest block leading-none">
+                          {wicketType === 'Caught' ? 'Who took the catch? (Catcher Name)' : 'Fielder Name (Run Out / Stumping)'}
+                        </label>
+                        {wicketType === 'Caught' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const bName = wicketBowlerName.trim() || (currentInnings?.bowlers?.[currentInnings.currentBowlerIndex]?.name || 'Bowler');
+                              setWicketFielderName(bName);
+                              setWicketHowOutDetails(`c & b ${bName}`);
+                            }}
+                            className="text-[8px] font-black uppercase text-amber-400 hover:text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded cursor-pointer transition-all"
+                          >
+                            🎯 Caught & Bowled (c & b)
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={wicketFielderName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setWicketFielderName(val);
+                          if (wicketType === 'Caught') {
+                            const bName = wicketBowlerName.trim() || (currentInnings?.bowlers?.[currentInnings.currentBowlerIndex]?.name || 'Bowler');
+                            if (val.trim()) {
+                              setWicketHowOutDetails(val.trim().toLowerCase() === bName.toLowerCase() ? `c & b ${bName}` : `c ${val.trim()} b ${bName}`);
+                            } else {
+                              setWicketHowOutDetails('Caught');
+                            }
+                          }
+                        }}
+                        placeholder={wicketType === 'Caught' ? "Player name who took the catch" : "Fielder or keeper name"}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs font-bold outline-none text-white focus:border-emerald-500 placeholder:text-slate-500"
+                      />
+                      {(() => {
+                        if (!currentInnings) return null;
+                        const bowlingTeam = currentInnings.battingTeam === match.teamA ? match.teamB : match.teamA;
+                        const bowlingRoster = bowlingTeam === match.teamA ? selectedTeamARoster : selectedTeamBRoster;
+                        if (!bowlingRoster || bowlingRoster.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1 mt-1 items-center">
+                            <span className="text-[7.5px] text-slate-400 font-extrabold uppercase py-0.5 select-none font-sans">Quick Select Fielder:</span>
+                            {bowlingRoster.slice(0, 11).map((player, idx) => (
+                              <button
+                                key={`dismissal-fielder-chip-${player}-${idx}`}
+                                type="button"
+                                onClick={() => {
+                                  setWicketFielderName(player);
+                                  if (wicketType === 'Caught') {
+                                    const bName = wicketBowlerName.trim() || (currentInnings?.bowlers?.[currentInnings.currentBowlerIndex]?.name || 'Bowler');
+                                    setWicketHowOutDetails(player.toLowerCase() === bName.toLowerCase() ? `c & b ${bName}` : `c ${player} b ${bName}`);
+                                  }
+                                }}
+                                className={`px-2 py-0.5 rounded text-[8px] uppercase font-black tracking-widest border transition-all cursor-pointer ${
+                                  wicketFielderName.toLowerCase() === player.toLowerCase()
+                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black'
+                                    : 'bg-slate-800 hover:bg-emerald-500/20 text-slate-300 border-slate-700'
+                                }`}
+                              >
+                                {player}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
 
                   <div>
                     <label className="text-[8px] font-black text-slate-450 uppercase tracking-widest block mb-1 leading-none">Details</label>
@@ -11966,14 +12161,27 @@ export const CricketScoreboard: React.FC = () => {
                                     SR: {st.balls === 0 ? '0.0' : ((st.runs / st.balls) * 100).toFixed(0)} %
                                   </p>
                                 </div>
-                                <div className="text-right shrink-0">
-                                  <span className="text-base font-black font-mono text-white">
-                                    {st.runs}
-                                  </span>
-                                  <span className="text-xs font-mono font-bold text-slate-400 ml-1">
-                                    ({st.balls}b)
-                                  </span>
-                                  <p className="text-[7.5px] text-slate-400 font-bold mt-0.5 uppercase tracking-wider">
+                                <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-base font-black font-mono text-white">
+                                      {st.runs}
+                                    </span>
+                                    <span className="text-xs font-mono font-bold text-slate-400">
+                                      ({st.balls}b)
+                                    </span>
+                                    {!isSpectator && (
+                                      <button
+                                        type="button"
+                                        disabled={isScoringDisabled}
+                                        onClick={() => openWicketModal('striker')}
+                                        className="px-2 py-1 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0 ml-1"
+                                        title="Dismiss Striker (Wicket / Out)"
+                                      >
+                                        🔴 OUT
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="text-[7.5px] text-slate-400 font-bold uppercase tracking-wider">
                                     {st.fours}x4s • {st.sixes}x6s
                                   </p>
                                 </div>
@@ -12022,13 +12230,26 @@ export const CricketScoreboard: React.FC = () => {
                                     SR: {nst.balls === 0 ? '0.0' : ((nst.runs / nst.balls) * 100).toFixed(0)} %
                                   </p>
                                 </div>
-                                <div className="text-right shrink-0">
-                                  <span className="text-sm font-black font-mono text-slate-300">
-                                    {nst.runs}
-                                  </span>
-                                  <span className="text-xs font-mono font-bold text-slate-505 ml-1">
-                                    ({nst.balls}b)
-                                  </span>
+                                <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm font-black font-mono text-slate-300">
+                                      {nst.runs}
+                                    </span>
+                                    <span className="text-xs font-mono font-bold text-slate-505">
+                                      ({nst.balls}b)
+                                    </span>
+                                    {!isSpectator && (
+                                      <button
+                                        type="button"
+                                        disabled={isScoringDisabled}
+                                        onClick={() => openWicketModal('non-striker')}
+                                        className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0 ml-1"
+                                        title="Dismiss Non-Striker (Run Out)"
+                                      >
+                                        🔴 OUT
+                                      </button>
+                                    )}
+                                  </div>
                                   <p className="text-[7.5px] text-slate-450 mt-0.5 font-bold uppercase tracking-wider">
                                     {nst.fours}x4s • {nst.sixes}x6s
                                   </p>
@@ -12268,22 +12489,29 @@ export const CricketScoreboard: React.FC = () => {
                         </>
                       )}
 
-                      {/* Extras quick selections (W, NB, Byes, LegByes) */}
-                      <div className="grid grid-cols-2 gap-2 font-bold">
+                      {/* Extras quick selections (W, NB, Wicket) */}
+                      <div className="grid grid-cols-3 gap-1.5 font-bold">
                         <button
                           onClick={() => handleScoreEvent({ type: 'wide', val: 0 })}
-                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-3 items-center"
+                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
                         >
-                          <span>Wide only</span>
+                          <span>Wide</span>
                           <span className="text-emerald-400">+1</span>
                         </button>
 
                         <button
                           onClick={() => handleScoreEvent({ type: 'noball', val: 0 })}
-                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-3 items-center"
+                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
                         >
                           <span>No ball</span>
                           <span className="text-amber-400">+1</span>
+                        </button>
+
+                        <button
+                          onClick={() => openWicketModal('striker')}
+                          className="py-2 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer border-none flex justify-center items-center gap-1 shadow"
+                        >
+                          🔴 <span>Wicket</span>
                         </button>
                       </div>
 
@@ -12497,13 +12725,13 @@ export const CricketScoreboard: React.FC = () => {
                               )}
                               {b.isOut && (
                                 <span className="text-[8px] font-black uppercase text-rose-500 italic bg-rose-500/10 px-2 py-0.5 rounded ml-2">
-                                  Out ({b.outMode})
+                                  Out ({b.fielderName ? `c ${b.fielderName} b ${b.dismissedBy || 'bowler'}` : b.outMode})
                                 </span>
                               )}
                             </span>
                             {b.dismissedBy && (
                               <p className="text-[8px] text-slate-400 mt-1 uppercase font-semibold">
-                                dismiss by {b.dismissedBy}
+                                {b.fielderName ? `c ${b.fielderName} • b ${b.dismissedBy}` : `dismiss by ${b.dismissedBy}`}
                               </p>
                             )}
                           </td>
