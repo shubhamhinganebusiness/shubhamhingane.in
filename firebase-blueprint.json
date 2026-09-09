@@ -243,27 +243,9 @@
         "winnerTeamName": { "type": "string" }
       },
       "required": ["id", "name", "status"]
-    },
-    "ScoreManager": {
-      "title": "Score Manager Profile",
-      "description": "Scorekeeper profile and pointer to currently active live broadcast match for permanent OBS overlay links",
-      "type": "object",
-      "properties": {
-        "managerId": { "type": "string" },
-        "displayName": { "type": "string" },
-        "activeMatchId": { "type": "string" },
-        "streamKey": { "type": "string" },
-        "status": { "type": "string" },
-        "updatedAt": { "type": "number" }
-      },
-      "required": ["managerId"]
     }
   },
   "firestore": {
-    "/score_managers/{managerId}": {
-      "schema": "ScoreManager",
-      "description": "Scorekeeper identity and permanent active match routing pointer for OBS Studio links"
-    },
     "/cricket_tournaments/{tournamentId}": {
       "schema": "CricketTournament",
       "description": "Full details, rosters, fixtures, and standing information of cricket tournaments"

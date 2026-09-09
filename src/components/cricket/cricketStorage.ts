@@ -731,4 +731,14 @@ export async function setMatchCompletedForManager(
   broadcastMatchChange(resolvedMatch, 'update');
 }
 
+/**
+ * Generates the official Captain 15-player Squad Submission URL
+ */
+export function getCaptainInviteUrl(teamId: string): string {
+  if (typeof window === 'undefined') return '';
+  const origin = window.location.origin;
+  const path = window.location.pathname;
+  return `${origin}${path}#/cricket-team-invite?teamId=${encodeURIComponent(teamId)}`;
+}
+
 
