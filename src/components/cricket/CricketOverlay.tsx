@@ -3,12 +3,12 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, TrendingUp, Zap, Radio, ChevronRight, Play, Flame, Award, Skull, Star, Check 
 } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useParams } from 'react-router-dom';
 import { CricketOverlayAnimations } from './CricketOverlayAnimations';
 
 // Firestore imports
 import { db } from '../../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, limit } from 'firebase/firestore';
 import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch } from './cricketStorage';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 
@@ -137,48 +137,72 @@ interface MatchState {
 
 export const CricketOverlay: React.FC = () => {
   const [searchParams] = useSearchParams();
+  const routeParams = useParams<{ managerId?: string }>();
   const [matchId, setMatchId] = useState<string>('');
+  const [managerId, setManagerId] = useState<string>('');
+  const [streamKey, setStreamKey] = useState<string>('');
+  const [isPermanentRoute, setIsPermanentRoute] = useState<boolean>(false);
 
   useEffect(() => {
-    // 1. Try react-router useSearchParams
-    const rParam = searchParams.get('matchId');
-    if (rParam) {
-      setMatchId(rParam);
-      return;
-    }
+    // 1. Extract managerId / userId / scorer / channel from params
+    const resolvedManager = 
+      routeParams.managerId ||
+      searchParams.get('managerId') || 
+      searchParams.get('userId') || 
+      searchParams.get('user') || 
+      searchParams.get('scorer') || 
+      searchParams.get('channel') ||
+      '';
 
-    // 2. Try window.location.hash parsing
+    const resolvedStreamKey = searchParams.get('streamKey') || '';
+
+    // Check hash query fallback
     const hash = window.location.hash || '';
     const hashQueryIdx = hash.indexOf('?');
+    let hashManager = '';
+    let hashStreamKey = '';
+    let hashMatchId = '';
     if (hashQueryIdx !== -1) {
       const qParams = new URLSearchParams(hash.substring(hashQueryIdx));
-      const qParamVal = qParams.get('matchId');
-      if (qParamVal) {
-        setMatchId(qParamVal);
-        return;
-      }
+      hashManager = qParams.get('managerId') || qParams.get('userId') || qParams.get('user') || '';
+      hashStreamKey = qParams.get('streamKey') || '';
+      hashMatchId = qParams.get('matchId') || '';
     }
 
-    // 3. Try window.location.search parsing
-    const sParams = new URLSearchParams(window.location.search);
-    const sParamVal = sParams.get('matchId');
-    if (sParamVal) {
-      setMatchId(sParamVal);
+    const finalManager = resolvedManager || hashManager;
+    const finalStreamKey = resolvedStreamKey || hashStreamKey;
+
+    if (finalManager) {
+      setManagerId(finalManager);
+      setIsPermanentRoute(true);
+    }
+    if (finalStreamKey) {
+      setStreamKey(finalStreamKey);
+      setIsPermanentRoute(true);
+    }
+
+    // Direct matchId param (for legacy or explicit match inspection)
+    const directMatchId = searchParams.get('matchId') || hashMatchId;
+    if (directMatchId) {
+      setMatchId(directMatchId);
       return;
     }
 
-    // 4. Try getting from active match state from localStorage
-    try {
-      const activeStr = localStorage.getItem('cricket_active_match');
-      if (activeStr) {
-        const parsed = JSON.parse(activeStr);
-        if (parsed && parsed.id) {
-          setMatchId(parsed.id);
-          return;
+    // If permanent route with managerId, matchId will be dynamically resolved via the active match query.
+    // Otherwise try localStorage active match
+    if (!finalManager && !finalStreamKey) {
+      try {
+        const activeStr = localStorage.getItem('cricket_active_match');
+        if (activeStr) {
+          const parsed = JSON.parse(activeStr);
+          if (parsed && parsed.id) {
+            setMatchId(parsed.id);
+            return;
+          }
         }
-      }
-    } catch {}
-  }, [searchParams]);
+      } catch {}
+    }
+  }, [searchParams, routeParams.managerId]);
   
   // Real-time Match State synced via Firestore & LocalStorage fallback
   const [match, setMatch] = useState<MatchState | null>(null);
@@ -325,8 +349,96 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Fallback to any recent/default match if standalone overlay is opened without a matchId
+  // Real-time Active Match resolution for Permanent OBS Overlay Links (managerId or streamKey)
   useEffect(() => {
+    if (!managerId && !streamKey) return;
+
+    console.log(`[Overlay Permanent Route] Subscribing to active match for manager: "${managerId}", streamKey: "${streamKey}"`);
+
+    let unsubManager: (() => void) | null = null;
+    let unsubQuery: (() => void) | null = null;
+
+    if (managerId) {
+      // 1. Direct O(1) listener on the manager's active match pointer document in Firestore
+      const managerDocRef = doc(db, 'score_managers', managerId);
+      unsubManager = onSnapshot(managerDocRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.status === 'live' && data.activeMatchId) {
+            console.log('[Overlay Permanent Route] Manager activeMatchId pointer:', data.activeMatchId);
+            setMatchId(data.activeMatchId);
+          } else if (data.status === 'completed' || !data.activeMatchId) {
+            console.log('[Overlay Permanent Route] Manager marked match completed or idle');
+            setMatchId('');
+            setMatch(null);
+          }
+        }
+      }, (err) => {
+        console.warn('[Overlay Permanent Route] Manager pointer snapshot note:', err);
+      });
+
+      // 2. Collection query listener for any match with status == 'live' owned by this manager
+      const q = query(
+        collection(db, 'cricket_matches'),
+        where('managerId', '==', managerId),
+        where('status', '==', 'live'),
+        limit(1)
+      );
+      unsubQuery = onSnapshot(q, (snap) => {
+        if (!snap.empty) {
+          const liveDoc = snap.docs[0];
+          const liveData = liveDoc.data() as MatchState;
+          if (liveData && !isMatchDeleted(liveDoc.id)) {
+            console.log('[Overlay Permanent Route] Live match found in query:', liveDoc.id);
+            setMatchId(liveDoc.id);
+            setMatch(liveData);
+          }
+        } else {
+          // If query returns empty and manager pointer doesn't have live match, reset match
+          setMatch((prev) => {
+            if (prev && prev.managerId === managerId && prev.status === 'live') {
+              return null;
+            }
+            return prev;
+          });
+        }
+      }, (err) => {
+        console.warn('[Overlay Permanent Route] Live match query note:', err);
+      });
+    } else if (streamKey) {
+      // Direct streamKey query
+      const q = query(
+        collection(db, 'cricket_matches'),
+        where('streamKey', '==', streamKey),
+        where('status', '==', 'live'),
+        limit(1)
+      );
+      unsubQuery = onSnapshot(q, (snap) => {
+        if (!snap.empty) {
+          const liveDoc = snap.docs[0];
+          setMatchId(liveDoc.id);
+          setMatch(liveDoc.data() as MatchState);
+        } else {
+          setMatch(null);
+          setMatchId('');
+        }
+      }, (err) => {
+        console.warn('[Overlay Permanent Route] Stream key query note:', err);
+      });
+    }
+
+    return () => {
+      if (unsubManager) unsubManager();
+      if (unsubQuery) unsubQuery();
+    };
+  }, [managerId, streamKey]);
+
+  // Fallback to any recent/default match ONLY if standalone overlay is opened without a matchId and NOT on a permanent channel
+  useEffect(() => {
+    if (isPermanentRoute || managerId || streamKey) {
+      // In permanent broadcast mode, never display artificial demo matches while waiting for live game
+      return;
+    }
     if (!match && !matchId) {
       const recent = getAnyActiveOrRecentMatch();
       if (recent) {
@@ -336,7 +448,7 @@ export const CricketOverlay: React.FC = () => {
         if (def) setMatch(def);
       }
     }
-  }, [match, matchId]);
+  }, [match, matchId, isPermanentRoute, managerId, streamKey]);
 
   // Primary real-time Firestore synchronization
   useEffect(() => {
@@ -908,6 +1020,33 @@ export const CricketOverlay: React.FC = () => {
   ].includes(activeGraphic);
 
   if (!match && !isFullScreenTransition) {
+    if (isPermanentRoute || managerId || streamKey) {
+      return (
+        <div className="absolute inset-0 bg-transparent flex flex-col items-end justify-end p-6 md:p-10 font-sans pointer-events-none select-none">
+          {/* Glassmorphism TV Broadcast Standby Bug in Lower Corner - Transparent OBS Background */}
+          <div className="bg-slate-950/85 border border-emerald-500/30 backdrop-blur-md px-5 py-3.5 rounded-2xl shadow-[0_10px_35px_rgba(0,0,0,0.6)] flex items-center gap-3.5 text-white max-w-md pointer-events-auto">
+            <div className="relative flex items-center justify-center shrink-0">
+              <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 animate-ping absolute opacity-75"></span>
+              <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-black text-[9px] uppercase tracking-widest">
+                  OBS FEED READY
+                </span>
+                <span className="text-[11px] font-mono text-slate-300 font-bold truncate">
+                  @{managerId || streamKey || 'Official Scorer'}
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-slate-200 mt-1 leading-snug">
+                Permanent stream link active. Waiting for score manager to toggle match to <span className="text-rose-400 font-black uppercase">Live</span>.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="absolute inset-0 bg-transparent flex flex-col items-center justify-center font-sans">
         <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 p-8 rounded-[2rem] text-center shadow-2xl backdrop-blur-md">
@@ -916,7 +1055,7 @@ export const CricketOverlay: React.FC = () => {
           </div>
           <h2 className="text-xl font-black text-white uppercase tracking-widest mb-3">Broadcast Score Bug</h2>
           <p className="text-slate-400 text-sm font-medium mb-6 leading-relaxed">
-            Please copy the Browser Source URL from the live scorer cockpit and use it directly inside OBS Studio, or open a live match.
+            Please copy your Permanent OBS Browser Source URL from the live score cockpit and use it directly inside OBS Studio.
           </p>
           <div className="text-[10px] font-mono font-black border border-white/5 bg-black/40 text-rose-400 rounded-xl p-3 uppercase tracking-wider">
             Waiting for real-time match data...

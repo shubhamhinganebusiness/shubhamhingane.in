@@ -1,4 +1,6 @@
 import { MatchState } from './CricketScoreboard';
+import { db, safeSetDoc } from '../../lib/firebase';
+import { doc, collection, query, where, getDocs } from 'firebase/firestore';
 
 const ACTIVE_MATCH_KEY = 'cricket_active_match';
 const LOCAL_REGISTRY_KEY = 'cricket_matches_local_registry';
@@ -535,4 +537,198 @@ export function getAnyActiveOrRecentMatch(): MatchState | null {
 
   return null;
 }
+
+/**
+ * Generates a ONE single, permanent OBS overlay link for a Score Manager.
+ * This URL never changes across matches, tournaments, or days.
+ * Works with managerId or streamKey. Automatically handles preview mode and dev domain replacement.
+ */
+export function getPermanentOverlayUrl(managerId: string, preview = false): string {
+  let origin = typeof window !== 'undefined' ? window.location.origin : '';
+  if (origin.includes('ais-dev-')) {
+    origin = origin.replace('ais-dev-', 'ais-pre-');
+  }
+  const cleanManagerId = encodeURIComponent(managerId || 'official_scorer');
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
+  return `${origin}${pathname}#/live/cricket-overlay?managerId=${cleanManagerId}${preview ? '&preview=true' : ''}`;
+}
+
+/**
+ * Sets a match as the ONE currently active 'live' match for a Score Manager.
+ * Automatically marks all previously 'live' matches for this manager as 'completed'
+ * so only one match is active per user at any given time.
+ * Updates both the match document, the score_managers pointer document, and local caches.
+ */
+export async function setActiveLiveMatchForManager(
+  matchId: string,
+  managerId: string,
+  matchData?: MatchState
+): Promise<void> {
+  if (!matchId || !managerId) return;
+
+  const now = Date.now();
+  console.log(`[Active Match Routing] Activating match ${matchId} for manager @${managerId}`);
+
+  // 1. Update local storage & local cache first for zero-latency local experience
+  unmarkMatchDeleted(matchId);
+  let resolvedMatch: MatchState | null = matchData || getLocalMatchById(matchId);
+  if (resolvedMatch) {
+    resolvedMatch = {
+      ...resolvedMatch,
+      status: 'live',
+      managerId,
+      updatedAt: now
+    };
+    setActiveMatch(resolvedMatch);
+    saveMatchToRegistry(resolvedMatch);
+  }
+
+  // 2. Demote any other local matches for this manager that were 'live' to 'completed'
+  try {
+    const localMatches = getLocalMatches();
+    let localChanged = false;
+    for (const m of localMatches) {
+      if (m.id !== matchId && (m.managerId === managerId || !m.managerId) && m.status === 'live') {
+        m.status = 'completed';
+        m.updatedAt = now;
+        localChanged = true;
+      }
+    }
+    if (localChanged) {
+      localStorage.setItem(LOCAL_REGISTRY_KEY, JSON.stringify(localMatches));
+    }
+  } catch (e) {
+    console.warn('[Active Match Routing] Local demote note:', e);
+  }
+
+  // 3. Update the manager's O(1) active match pointer in Firestore
+  try {
+    const managerDocRef = doc(db, 'score_managers', managerId);
+    await safeSetDoc(managerDocRef, {
+      managerId,
+      activeMatchId: matchId,
+      status: 'live',
+      updatedAt: now
+    }, { merge: true });
+  } catch (err) {
+    console.warn('[Active Match Routing] Failed to write score_managers pointer:', err);
+  }
+
+  // 4. Update the target match document in Firestore to status: 'live'
+  try {
+    const matchDocRef = doc(db, 'cricket_matches', matchId);
+    if (resolvedMatch) {
+      await safeSetDoc(matchDocRef, sanitizeForFirestore({
+        ...resolvedMatch,
+        status: 'live',
+        managerId,
+        updatedAt: now
+      }), { merge: true });
+    } else {
+      await safeSetDoc(matchDocRef, {
+        status: 'live',
+        managerId,
+        updatedAt: now
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.warn('[Active Match Routing] Failed to set live match doc:', err);
+  }
+
+  // 5. Query Firestore for any other matches belonging to this manager with status == 'live' and mark them 'completed'
+  try {
+    const q = query(
+      collection(db, 'cricket_matches'),
+      where('managerId', '==', managerId),
+      where('status', '==', 'live')
+    );
+    const snap = await getDocs(q);
+    const updates: Promise<any>[] = [];
+    snap.forEach((d) => {
+      if (d.id !== matchId) {
+        updates.push(
+          safeSetDoc(doc(db, 'cricket_matches', d.id), {
+            status: 'completed',
+            updatedAt: now
+          }, { merge: true }).catch(err => {
+            console.warn('[Active Match Routing] Archiving previous match note:', d.id, err);
+          })
+        );
+      }
+    });
+    if (updates.length > 0) {
+      await Promise.allSettled(updates);
+    }
+  } catch (err) {
+    console.warn('[Active Match Routing] Query previous matches note:', err);
+  }
+
+  // 6. Broadcast change so all open windows, tabs, and OBS overlays update immediately
+  broadcastMatchChange(resolvedMatch, 'update');
+}
+
+/**
+ * Sets a match as 'completed' for a Score Manager.
+ * If this match was the active match, clears the manager's active match pointer
+ * so the permanent OBS overlay enters standby mode.
+ */
+export async function setMatchCompletedForManager(
+  matchId: string,
+  managerId: string,
+  matchData?: MatchState
+): Promise<void> {
+  if (!matchId) return;
+
+  const now = Date.now();
+  console.log(`[Active Match Routing] Setting match ${matchId} to COMPLETED for manager @${managerId}`);
+
+  // 1. Local update
+  let resolvedMatch: MatchState | null = matchData || getLocalMatchById(matchId);
+  if (resolvedMatch) {
+    resolvedMatch = {
+      ...resolvedMatch,
+      status: 'completed',
+      updatedAt: now
+    };
+    saveMatchToRegistry(resolvedMatch);
+  }
+  const active = getActiveMatch();
+  if (active && active.id === matchId) {
+    localStorage.removeItem(ACTIVE_MATCH_KEY);
+  }
+
+  // 2. Firestore update on match
+  try {
+    const matchDocRef = doc(db, 'cricket_matches', matchId);
+    if (resolvedMatch) {
+      await safeSetDoc(matchDocRef, sanitizeForFirestore(resolvedMatch), { merge: true });
+    } else {
+      await safeSetDoc(matchDocRef, {
+        status: 'completed',
+        updatedAt: now
+      }, { merge: true });
+    }
+  } catch (err) {
+    console.warn('[Active Match Routing] Failed to mark match doc completed:', err);
+  }
+
+  // 3. Clear score_managers pointer if it pointed to this match
+  if (managerId) {
+    try {
+      const managerDocRef = doc(db, 'score_managers', managerId);
+      await safeSetDoc(managerDocRef, {
+        managerId,
+        activeMatchId: null,
+        status: 'completed',
+        updatedAt: now
+      }, { merge: true });
+    } catch (err) {
+      console.warn('[Active Match Routing] Failed to clear score_managers pointer:', err);
+    }
+  }
+
+  // 4. Broadcast change
+  broadcastMatchChange(resolvedMatch, 'update');
+}
+
 

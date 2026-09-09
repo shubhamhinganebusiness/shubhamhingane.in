@@ -46,7 +46,10 @@ import {
   setActiveMatch, 
   getLocalMatchById,
   pruneDeletedMatchesFromStorage,
-  sanitizeForFirestore
+  sanitizeForFirestore,
+  getPermanentOverlayUrl,
+  setActiveLiveMatchForManager,
+  setMatchCompletedForManager
 } from './cricketStorage';
 import {
   CommentaryLanguage,
@@ -778,6 +781,60 @@ export const CricketScoreboard: React.FC = () => {
   // Player of the Match modal & settings state
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [lastMatchStatus, setLastMatchStatus] = useState<string>('setup');
+
+  // Permanent OBS Overlay active routing state
+  const [copiedPermanentOverlayLink, setCopiedPermanentOverlayLink] = useState(false);
+  const [isTogglingLiveStatus, setIsTogglingLiveStatus] = useState(false);
+
+  // Active Match routing handler: Set this match as the ONE active live broadcast match for this score manager
+  const handleSetMatchActiveLive = async (targetMatch?: MatchState) => {
+    const matchToActivate = targetMatch || match;
+    if (!matchToActivate || !matchToActivate.id) return;
+
+    try {
+      setIsTogglingLiveStatus(true);
+      await setActiveLiveMatchForManager(matchToActivate.id, currentManagerId, matchToActivate);
+      
+      // Update active state in component
+      setMatch(prev => ({
+        ...prev,
+        status: 'live',
+        managerId: currentManagerId,
+        updatedAt: Date.now()
+      }));
+
+      showNotification('🔴 Match is now LIVE on your Permanent OBS Overlay! Any previously live match has been archived.', 'success');
+    } catch (err) {
+      console.error('Failed to set match live:', err);
+      showNotification('Failed to toggle live status. Please check connection.', 'alert');
+    } finally {
+      setIsTogglingLiveStatus(false);
+    }
+  };
+
+  // Active Match routing handler: Mark match completed and put permanent OBS overlay on Standby
+  const handleSetMatchCompleted = async (targetMatch?: MatchState) => {
+    const matchToComplete = targetMatch || match;
+    if (!matchToComplete || !matchToComplete.id) return;
+
+    try {
+      setIsTogglingLiveStatus(true);
+      await setMatchCompletedForManager(matchToComplete.id, currentManagerId, matchToComplete);
+
+      setMatch(prev => ({
+        ...prev,
+        status: 'completed',
+        updatedAt: Date.now()
+      }));
+
+      showNotification('✅ Match marked as COMPLETED. Your Permanent OBS Overlay is now in Standby mode.', 'info');
+    } catch (err) {
+      console.error('Failed to complete match:', err);
+      showNotification('Failed to set match completed.', 'alert');
+    } finally {
+      setIsTogglingLiveStatus(false);
+    }
+  };
 
   // Innings break timer states
   const [inningsBreakTimeLeft, setInningsBreakTimeLeft] = useState<number>(300); // 5 min
@@ -8584,7 +8641,53 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Active Live Match Broadcast Status & Controller */}
+            {match.status === 'live' ? (
+              <div className="flex items-center gap-1.5 bg-rose-950/80 border border-rose-500/40 px-3 py-1.5 rounded-xl shadow-[0_0_15px_rgba(244,63,94,0.3)]">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+                <span className="text-[10px] sm:text-xs font-black text-rose-300 uppercase tracking-widest flex items-center gap-1">
+                  <Radio size={12} className="text-rose-400 animate-pulse" />
+                  LIVE ON OBS
+                </span>
+                <button
+                  onClick={() => handleSetMatchCompleted()}
+                  disabled={isTogglingLiveStatus}
+                  className="ml-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[9px] font-black rounded uppercase transition-all cursor-pointer border border-slate-700"
+                  title="Mark match completed and put permanent OBS overlay in Standby"
+                >
+                  End Match
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => handleSetMatchActiveLive()}
+                disabled={isTogglingLiveStatus}
+                className="px-3 py-2 bg-rose-600 hover:bg-rose-500 text-slate-950 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-md shadow-rose-600/20 active:scale-95"
+                title="Broadcast this match on your permanent OBS Overlay link"
+              >
+                <Radio size={13} className="text-slate-950" />
+                <span>Go Live On OBS</span>
+              </button>
+            )}
 
+            {/* ONE Single, Permanent OBS Overlay Link Copy Button */}
+            <button
+              onClick={() => {
+                const permUrl = getPermanentOverlayUrl(currentManagerId);
+                copyToClipboard(permUrl).then(() => {
+                  setCopiedPermanentOverlayLink(true);
+                  setTimeout(() => setCopiedPermanentOverlayLink(false), 2500);
+                  showNotification('Permanent OBS Overlay link copied! Paste once in OBS Studio - never changes across matches.', 'success');
+                });
+              }}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-sm"
+              title="Copy ONE single, permanent OBS Overlay link that never changes"
+              id="btn-copy-permanent-obs-header"
+            >
+              {copiedPermanentOverlayLink ? <Check size={13} className="text-emerald-300" /> : <Link2 size={13} />}
+              <span className="hidden md:inline">{copiedPermanentOverlayLink ? 'Copied' : 'Permanent OBS Link'}</span>
+              <span className="md:hidden">{copiedPermanentOverlayLink ? 'Copied' : 'OBS Link'}</span>
+            </button>
 
             {match.innings1 && (
               <button
@@ -9103,6 +9206,21 @@ export const CricketScoreboard: React.FC = () => {
                                 Restore on Scoreboard
                               </button>
                               <button
+                                onClick={async () => {
+                                  handleLoadPastMatch(past);
+                                  await handleSetMatchActiveLive(past);
+                                }}
+                                className={`px-2.5 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border flex items-center justify-center gap-1 shrink-0 ${
+                                  match.id === past.id && match.status === 'live'
+                                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 font-black'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-500 border-slate-200 dark:border-slate-700'
+                                }`}
+                                title="Broadcast this match live to your permanent OBS overlay"
+                              >
+                                <Radio size={11} className={match.id === past.id && match.status === 'live' ? "text-rose-400 animate-pulse" : "text-slate-400"} />
+                                <span>{match.id === past.id && match.status === 'live' ? 'On OBS' : 'Go Live'}</span>
+                              </button>
+                              <button
                                 onClick={() => setExpandedKeyMomentsId(expandedKeyMomentsId === past.id ? null : past.id)}
                                 className={`px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border-none flex items-center justify-center gap-1 shrink-0 ${
                                   expandedKeyMomentsId === past.id
@@ -9298,6 +9416,21 @@ export const CricketScoreboard: React.FC = () => {
                               >
                                 <Play size={10} />
                                 Open Live Panel
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  handleLoadDraftMatch(past);
+                                  await handleSetMatchActiveLive(past);
+                                }}
+                                className={`px-2.5 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border flex items-center justify-center gap-1 shrink-0 ${
+                                  match.id === past.id && match.status === 'live'
+                                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 font-black'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-500 border-slate-200 dark:border-slate-700'
+                                }`}
+                                title="Broadcast this match live to your permanent OBS overlay"
+                              >
+                                <Radio size={11} className={match.id === past.id && match.status === 'live' ? "text-rose-400 animate-pulse" : "text-slate-400"} />
+                                <span>{match.id === past.id && match.status === 'live' ? 'On OBS' : 'Go Live'}</span>
                               </button>
                               <a
                                 href={`${window.location.origin}${window.location.pathname}#/live/cricket-details?matchId=${past.id}`}
@@ -11080,19 +11213,19 @@ export const CricketScoreboard: React.FC = () => {
 
                     <button
                       onClick={() => {
-                        const overlayUrl = getPublicOverlayUrl(match.id);
-                        copyToClipboard(overlayUrl).then(() => {
+                        const permUrl = getPermanentOverlayUrl(currentManagerId);
+                        copyToClipboard(permUrl).then(() => {
                           setCopiedOverlayLink(true);
                           setTimeout(() => setCopiedOverlayLink(false), 2500);
-                          showNotification('OBS Studio Overlay link copied! Paste as transparent 1920x1080 Browser Source in OBS.', 'success');
+                          showNotification('Permanent OBS Overlay link copied! Paste once in OBS - never changes across matches.', 'success');
                         });
                       }}
                       className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/25 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
-                      title="Copy OBS Studio Overlay Link (1920x1080) for OBS Studio Browser Source"
+                      title="Copy Permanent OBS Studio Overlay Link (never changes across matches)"
                       id="btn-copy-obs-overlay-management"
                     >
                       {copiedOverlayLink ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
-                      <span>{copiedOverlayLink ? 'Copied' : 'Copy Overlay'}</span>
+                      <span>{copiedOverlayLink ? 'Copied' : 'Permanent OBS Link'}</span>
                     </button>
 
                     <button
@@ -11211,29 +11344,78 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                         </div>
 
-                      {/* COPY OBS BROWSER SOURCE LINK */}
-                      <div className="flex gap-2 w-full lg:w-auto">
+                      {/* PERMANENT OBS BROADCAST CONTROLLER & LINK */}
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
+                        {/* Active Match Status Switch */}
+                        {match.status === 'live' ? (
+                          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-rose-950/80 border border-rose-500/40 rounded-xl shadow-[0_0_15px_rgba(244,63,94,0.25)]">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+                              <span className="text-[10px] font-black text-rose-300 uppercase tracking-wider">
+                                ON-AIR
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleSetMatchCompleted()}
+                              disabled={isTogglingLiveStatus}
+                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border border-slate-700"
+                              title="End match and return permanent OBS overlay to standby"
+                            >
+                              End / Standby
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => handleSetMatchActiveLive()}
+                            disabled={isTogglingLiveStatus}
+                            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-slate-950 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 cursor-pointer border-none active:scale-95"
+                            title="Switch your permanent OBS overlay to broadcast this match live"
+                          >
+                            <Radio size={13} className="text-slate-950" />
+                            <span>Go Live On OBS</span>
+                          </button>
+                        )}
+
+                        {/* Permanent OBS Browser Source Link */}
+                        <button
+                          onClick={() => {
+                            const permLink = getPermanentOverlayUrl(currentManagerId);
+                            copyToClipboard(permLink).then(() => {
+                              showNotification('Permanent OBS URL Copied! Paste once into OBS Browser Source (1920x1080) — never changes across matches.', 'success');
+                            });
+                          }}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer border-none"
+                          title="Copy ONE single, permanent OBS Browser Source link that never changes"
+                          id="btn-copy-permanent-obs-broadcast-center"
+                        >
+                          <Check size={14} className="text-white" />
+                          <span>Copy Permanent OBS URL</span>
+                        </button>
+
+                        <a
+                          href={getPermanentOverlayUrl(currentManagerId)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-white/5 flex items-center justify-center gap-1.5"
+                          title="Preview the permanent OBS overlay feed in a new tab"
+                        >
+                          <Eye size={14} />
+                          <span>Preview</span>
+                        </a>
+
+                        {/* Fallback Match-Specific URL option */}
                         <button
                           onClick={() => {
                             const link = getPublicOverlayUrl(match.id);
                             copyToClipboard(link).then(() => {
-                              showNotification('OBS URL Copied! Paste as transparent 1920x1080 Browser Source.', 'success');
+                              showNotification('Match-Specific URL Copied! (Note: Permanent URL above is recommended so you never need to recopy).', 'info');
                             });
                           }}
-                          className="flex-1 lg:flex-none px-4 py-3 bg-rose-600 hover:bg-rose-500 text-slate-950 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md shadow-rose-600/10 flex items-center justify-center gap-1.5 active:scale-95"
+                          className="px-2.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border border-slate-800 flex items-center justify-center gap-1"
+                          title="Copy single match URL (legacy)"
                         >
-                          <Check size={14} className="text-slate-950" />
-                          Copy OBS overlay URL
+                          <span>Match URL</span>
                         </button>
-                        <a
-                          href={getPublicOverlayUrl(match.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-white/5 flex items-center justify-center gap-1.5"
-                        >
-                          <Eye size={14} />
-                          Preview Overlay
-                        </a>
                       </div>
                     </div>
 
