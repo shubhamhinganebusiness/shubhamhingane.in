@@ -99,6 +99,7 @@ interface CricketTeam {
   name: string;
   players: string[];
   createdAt: string;
+  logo?: string;
   captainName?: string;
   captainPhone?: string;
   status?: 'pending_squad' | 'squad_submitted' | 'ready';
@@ -110,6 +111,8 @@ interface CricketTeam {
     isViceCaptain?: boolean;
     isWicketkeeper?: boolean;
     jerseyNumber?: string;
+    mobileNumber?: string;
+    photo?: string;
   }>;
   updatedAt?: number;
   managerId?: string;
@@ -209,6 +212,12 @@ export interface MatchState {
   overlayConfig?: OverlayConfig;
   teamALogo?: string;
   teamBLogo?: string;
+  teamASquad?: (string | { name: string; isCaptain?: boolean; isWicketKeeper?: boolean; role?: string; photo?: string })[];
+  teamBSquad?: (string | { name: string; isCaptain?: boolean; isWicketKeeper?: boolean; role?: string; photo?: string })[];
+  teamACaptain?: string;
+  teamBCaptain?: string;
+  teamAWicketKeeper?: string;
+  teamBWicketKeeper?: string;
   playerPhotos?: Record<string, string>;
   tournamentId?: string | null;
   tournamentMatchId?: string | null;
@@ -2535,9 +2544,11 @@ export const CricketScoreboard: React.FC = () => {
       status: 'live',
       date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       freeHitNext: false,
-      teamALogo: teamALogoUrl || null,
-      teamBLogo: teamBLogoUrl || null,
-      playerPhotos: {},
+      teamALogo: teamALogoUrl || match?.teamALogo || null,
+      teamBLogo: teamBLogoUrl || match?.teamBLogo || null,
+      teamASquad: selectedTeamARoster,
+      teamBSquad: selectedTeamBRoster,
+      playerPhotos: match?.playerPhotos || {},
       tournamentId: match?.tournamentId || null,
       tournamentMatchId: match?.tournamentMatchId || null,
       tournamentName: tournamentName || null,
@@ -4611,9 +4622,11 @@ export const CricketScoreboard: React.FC = () => {
       status: 'draft',
       date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       freeHitNext: false,
-      teamALogo: teamALogoUrl || null,
-      teamBLogo: teamBLogoUrl || null,
-      playerPhotos: {},
+      teamALogo: teamALogoUrl || match?.teamALogo || null,
+      teamBLogo: teamBLogoUrl || match?.teamBLogo || null,
+      teamASquad: selectedTeamARoster,
+      teamBSquad: selectedTeamBRoster,
+      playerPhotos: match?.playerPhotos || {},
       tournamentId: match?.tournamentId || null,
       tournamentMatchId: match?.tournamentMatchId || null,
       tournamentName: tournamentName || null,
@@ -4910,12 +4923,20 @@ export const CricketScoreboard: React.FC = () => {
   const handleOneClickLoadTeam = (team: CricketTeam, target: 'A' | 'B') => {
     if (target === 'A') {
       setTeamA(team.name);
+      if (team.logo) {
+        setTeamALogoUrl(team.logo);
+        setMatch(prev => ({ ...prev, teamALogo: team.logo }));
+      }
       if (team.players && team.players.length > 0) {
         setSelectedTeamARoster(team.players);
       }
       showNotification(`⚡ Loaded "${team.name}" (${team.players?.length || 0} players) for Team A!`, 'success');
     } else {
       setTeamB(team.name);
+      if (team.logo) {
+        setTeamBLogoUrl(team.logo);
+        setMatch(prev => ({ ...prev, teamBLogo: team.logo }));
+      }
       if (team.players && team.players.length > 0) {
         setSelectedTeamBRoster(team.players);
       }
@@ -6421,11 +6442,11 @@ export const CricketScoreboard: React.FC = () => {
                               {[
                                 {
                                   id: 'team_lineups',
-                                  label: 'Team Lineups / Playing XI',
-                                  desc: "Both teams' playing 11, captains, wicketkeepers & headshots",
+                                  label: 'Both Squads / Playing XI (Gold TV Overlay)',
+                                  desc: "Both teams' playing 11, team logos, VS emblem & tournament banner in 3D Gold TV overlay",
                                   icon: '👥',
-                                  isActive: currentActiveGraphic === 'team_lineups',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_lineups' ? 'none' : 'team_lineups' })
+                                  isActive: currentActiveGraphic === 'team_lineups' || currentActiveGraphic === 'both_squads',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'team_lineups' || currentActiveGraphic === 'both_squads') ? 'none' : 'team_lineups' })
                                 },
                                 {
                                   id: 'innings_scorecard',
@@ -10234,7 +10255,10 @@ export const CricketScoreboard: React.FC = () => {
                             key={t.id} 
                             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl shadow-sm hover:border-emerald-500/40 transition-all flex flex-col justify-between gap-2"
                           >
-                            <div className="flex items-start justify-between gap-1.5">
+                            <div className="flex items-start justify-between gap-2">
+                              {t.logo && (
+                                <img src={t.logo} alt={t.name} className="w-8 h-8 rounded-xl object-contain bg-slate-100 dark:bg-slate-800 p-0.5 shrink-0 border border-slate-200 dark:border-slate-700" />
+                              )}
                               <div className="min-w-0 flex-1">
                                 <strong className="text-xs font-black text-slate-850 dark:text-white truncate block">
                                   {t.name}
@@ -11538,24 +11562,6 @@ export const CricketScoreboard: React.FC = () => {
                     </button>
 
                     <button
-                      type="button"
-                      onClick={() => {
-                        const permUrl = getPermanentOverlayUrl(currentManagerId, streamKey);
-                        copyToClipboard(permUrl).then(() => {
-                          setCopiedPermanentOverlayLink(true);
-                          setTimeout(() => setCopiedPermanentOverlayLink(false), 2500);
-                          showNotification('🔥 Permanent OBS Link Copied! Add once to OBS (1920x1080); updates across all matches!', 'success');
-                        });
-                      }}
-                      className="px-3 py-2 bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 text-emerald-400 border border-emerald-500/40 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
-                      title="Copy Permanent OBS Link (Single link active for all matches, 1920x1080 transparent)"
-                      id="btn-copy-permanent-obs-toolbar"
-                    >
-                      {copiedPermanentOverlayLink ? <Check size={12} className="text-emerald-300" /> : <Radio size={12} className="text-emerald-400 animate-pulse" />}
-                      <span>{copiedPermanentOverlayLink ? 'Permanent Copied!' : '🔥 Permanent OBS'}</span>
-                    </button>
-
-                    <button
                       onClick={() => setShowBroadcastCenter(prev => !prev)}
                       className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border flex items-center gap-1.5 shadow-sm active:scale-95 ${
                         showBroadcastCenter 
@@ -11573,11 +11579,12 @@ export const CricketScoreboard: React.FC = () => {
                         copyToClipboard(overlayUrl).then(() => {
                           setCopiedOverlayLink(true);
                           setTimeout(() => setCopiedOverlayLink(false), 2500);
-                          showNotification('OBS Studio Overlay link copied! Paste as transparent 1920x1080 Browser Source in OBS.', 'success');
+                          showNotification('Overlay link copied!', 'success');
                         });
                       }}
                       className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/25 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
-                      title="Copy OBS Studio Overlay Link (1920x1080) for OBS Studio Browser Source"
+                      title={copiedOverlayLink ? "Copied overlay link!" : "Copy overlay link"}
+                      aria-label="Copy overlay link"
                       id="btn-copy-obs-overlay-management"
                     >
                       {copiedOverlayLink ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
@@ -14216,6 +14223,9 @@ export const CricketScoreboard: React.FC = () => {
                               <div className="flex justify-between items-start gap-2">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
+                                    {t.logo && (
+                                      <img src={t.logo} alt={t.name} className="w-6 h-6 rounded-lg object-contain bg-white dark:bg-slate-800 p-0.5 shrink-0 border border-slate-200 dark:border-slate-700" />
+                                    )}
                                     <strong className="font-black text-slate-850 dark:text-white block text-sm truncate">
                                       {t.name}
                                     </strong>

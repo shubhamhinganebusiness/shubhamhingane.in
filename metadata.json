@@ -1,6 +1,6 @@
 {
   "name": "Remix shubhamhingane.in (MAin Website)",
-  "description": "Comprehensive multi-tenant platform for Dairy milk collection and Agro Shop inventory \u0026 billing management.",
+  "description": "Comprehensive multi-tenant platform featuring Google Sheets and Google Forms workspace integrations, Dairy milk collection, and Agro Shop inventory & billing management.",
   "requestFramePermissions": [
     "camera",
     "microphone"

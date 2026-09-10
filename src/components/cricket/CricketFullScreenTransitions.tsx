@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
+import { BothSquadsImageOverlay } from './BothSquadsImageOverlay';
 import { 
   Trophy, Award, Star, Shield, Users, 
   TrendingUp, CheckCircle2, ChevronRight,
@@ -203,6 +204,8 @@ const PlayerAvatar: React.FC<{
    1. TEAM LINEUPS / PLAYING XI FULL-SCREEN OVERLAY
    ========================================================================= */
 export const TeamLineupsOverlay: React.FC<{ match: MatchState; onClose?: () => void }> = ({ match, onClose }) => {
+  const [viewStyle, setViewStyle] = useState<'uploaded_gold_overlay' | 'classic_board'>('uploaded_gold_overlay');
+
   // Build Team A and Team B player rosters
   const getTeamRoster = (teamName: string, isTeamA: boolean) => {
     // 1. Check explicit squad in match
@@ -270,6 +273,25 @@ export const TeamLineupsOverlay: React.FC<{ match: MatchState; onClose?: () => v
   const rosterA = useMemo(() => getTeamRoster(match.teamA, true), [match]);
   const rosterB = useMemo(() => getTeamRoster(match.teamB, false), [match]);
 
+  // Render the exact uploaded Gold TV broadcast graphic by default
+  if (viewStyle === 'uploaded_gold_overlay') {
+    return (
+      <div className="relative w-full h-full">
+        <BothSquadsImageOverlay match={match} onClose={onClose} />
+        {/* Toggle to Classic Board in bottom left corner */}
+        <div className="absolute bottom-4 left-6 z-50">
+          <button
+            onClick={() => setViewStyle('classic_board')}
+            className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-white/20 text-slate-400 hover:text-white font-mono text-[10px] uppercase cursor-pointer transition shadow-lg flex items-center gap-1.5"
+            title="Switch to detailed stats lineup view"
+          >
+            📋 Table View
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
@@ -301,6 +323,13 @@ export const TeamLineupsOverlay: React.FC<{ match: MatchState; onClose?: () => v
 
         {/* Venue & Toss Pill */}
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setViewStyle('uploaded_gold_overlay')}
+            className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-mono text-xs font-bold uppercase transition cursor-pointer shadow-lg"
+            title="Switch back to 3D Gold TV Overlay"
+          >
+            ★ 3D Gold TV Overlay
+          </button>
           <div className="text-right font-mono text-xs text-slate-300 bg-white/5 border border-white/10 rounded-2xl px-5 py-2.5">
             <div className="flex items-center justify-end gap-1.5 text-amber-400 font-bold uppercase tracking-wider text-[11px]">
               <MapPin size={13} />
@@ -2106,8 +2135,16 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({ activeGraphic, m
     return <PitchWeatherReportOverlay match={match} onClose={onClose} />;
   }
 
-  // 1. Team Lineups / Playing XI
-  if (activeGraphic === 'team_lineups' || activeGraphic === 'lineups' || activeGraphic === 'playing_xi') {
+  // 1. Team Lineups / Playing XI / Both Squads
+  if (
+    activeGraphic === 'team_lineups' || 
+    activeGraphic === 'lineups' || 
+    activeGraphic === 'playing_xi' || 
+    activeGraphic === 'both_squads' || 
+    activeGraphic === 'both_squad_overlay' || 
+    activeGraphic === 'squad_overlay' || 
+    activeGraphic === 'squad_lineup'
+  ) {
     return <TeamLineupsOverlay match={match} onClose={onClose} />;
   }
 

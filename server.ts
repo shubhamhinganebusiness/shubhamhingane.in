@@ -24,7 +24,7 @@ async function getFirebaseDb(): Promise<any> {
     
     const apps = getApps();
     const app = apps.length === 0 ? initializeApp(config) : apps[0];
-    serverFirebaseDb = getFirestore(app);
+    serverFirebaseDb = config.firestoreDatabaseId ? getFirestore(app, config.firestoreDatabaseId) : getFirestore(app);
     return serverFirebaseDb;
   } catch (error: any) {
     console.warn("[Meta SEO] Failed to initialize Firebase client inside server:", error.message || error);
@@ -242,7 +242,7 @@ async function startServer() {
   app.use(express.json());
 
   // API routes go here FIRST
-  app.get("/api/health", (req, res) => {
+  app.get(["/api/health", "/health", "/healthz"], (req, res) => {
     res.json({ status: "ok" });
   });
 
@@ -1572,8 +1572,16 @@ Adopting modular paradigms accelerates iteration velocity while keeping technica
     res.json({ text: "Action processed successfully." });
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  // Determine production mode:
+  // True if NODE_ENV === "production", or if executing the compiled dist/server.cjs bundle,
+  // or if running in a container where dist/index.html is pre-built.
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    (typeof __filename !== "undefined" && __filename.includes("server.cjs")) ||
+    (Boolean(process.argv[1]) && process.argv[1].includes("server.cjs")) ||
+    (!process.argv[1]?.endsWith("server.ts") && fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
+
+  if (!isProduction) {
     console.log("Starting in DEVELOPMENT mode");
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -1584,7 +1592,9 @@ Adopting modular paradigms accelerates iteration velocity while keeping technica
     app.use(vite.middlewares);
   } else {
     console.log("Starting in PRODUCTION mode");
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = fs.existsSync(path.join(process.cwd(), "dist"))
+      ? path.join(process.cwd(), "dist")
+      : (typeof __dirname !== "undefined" ? __dirname : process.cwd());
     
     // Serve static files with custom cache control headers
     app.use(express.static(distPath, {
@@ -1669,31 +1679,17 @@ Adopting modular paradigms accelerates iteration velocity while keeping technica
     });
   }
 
-  const mainServer = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+  // Bind to port 3000 as required by the reverse proxy infrastructure
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
-  mainServer.on("error", (err: any) => {
-    console.error(`Main server listener error on port ${PORT}:`, err.message || err);
-  });
-
-  // Support Google Cloud Run dynamic $PORT (e.g. 8080) for standalone container deployments
-  const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
-  if (envPort && envPort !== PORT) {
-    try {
-      const crServer = app.listen(envPort, "0.0.0.0", () => {
-        console.log(`Cloud Run container listener active on port ${envPort}`);
-      });
-      crServer.on("error", (err: any) => {
-        if (err.code === "EADDRINUSE") {
-          console.log(`Port ${envPort} in use (e.g. reverse proxy active), serving exclusively on port ${PORT}`);
-        } else {
-          console.warn(`Cloud Run secondary port ${envPort} error:`, err.message || err);
-        }
-      });
-    } catch (bindErr: any) {
-      console.log(`Cloud Run port ${envPort} bind skipped:`, bindErr.message || bindErr);
-    }
-  }
 }
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[Server] Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[Server] Uncaught exception:", err);
+});
 
 startServer();

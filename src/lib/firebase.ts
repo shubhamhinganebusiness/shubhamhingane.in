@@ -51,11 +51,13 @@ if (typeof window !== 'undefined') {
 
 const app = initializeApp(firebaseConfig);
 
+export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-a0ff377c-7ae5-429e-9263-df2bcb690093';
+
 // Initialize Firestore with memory cache to prevent IndexedDB lock conflicts in preview iframes
 export const db = initializeFirestore(app, {
   localCache: memoryLocalCache(),
   ignoreUndefinedProperties: true
-}, (firebaseConfig as any).firestoreDatabaseId);
+}, firestoreDatabaseId);
 
 // Initialize Firebase Realtime Database (RTDB)
 export let rtdb: Database | null = null;

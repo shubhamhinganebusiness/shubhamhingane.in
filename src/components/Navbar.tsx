@@ -107,6 +107,7 @@ export const Navbar = () => {
     { name: t.nav.features, href: '/#features' },
     { name: t.nav.resume, href: '/#resume' },
     { name: t.nav.projects, href: '/projects' },
+    { name: 'Sheets & Forms', href: '/workspace' },
     { name: t.nav.courses, href: '/#courses' },
     { name: t.nav.blog, href: '/#blog' },
     { name: t.nav.contact, href: '/#contact' },

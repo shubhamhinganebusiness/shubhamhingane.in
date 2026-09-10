@@ -1246,6 +1246,21 @@ export const CricketOverlay: React.FC = () => {
         .animate-bounce-custom {
           animation: bounce 1s infinite;
         }
+        @keyframes livePulseGlow {
+          0%, 100% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.6), 0 0 12px rgba(225, 29, 72, 0.4);
+            opacity: 0.95;
+          }
+          50% {
+            transform: scale(1.04);
+            box-shadow: 0 0 0 6px rgba(225, 29, 72, 0), 0 0 20px rgba(225, 29, 72, 0.85);
+            opacity: 1;
+          }
+        }
+        .live-badge-pulsing {
+          animation: livePulseGlow 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
       `}</style>
 
       {/* EXTREMELY POLISHED, NEON-RGB BOUNDARY & WICKET BLAST EFFECT */}
@@ -1301,6 +1316,40 @@ export const CricketOverlay: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {/* =========================================================================
+          TOP BROADCAST 'LIVE' MATCH STATUS BADGE (PULSING WHILE IN PROGRESS)
+          ========================================================================= */}
+      {match?.status === 'live' && !isFullScreenTransition && (
+        <motion.div
+          id="overlay-top-live-badge"
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ 
+            opacity: [0.92, 1, 0.92],
+            scale: [1, 1.03, 1],
+          }}
+          transition={{ 
+            repeat: Infinity, 
+            duration: 2.2, 
+            ease: "easeInOut" 
+          }}
+          className="absolute top-6 left-8 z-40 flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-slate-950/85 backdrop-blur-md border border-rose-500/40 text-white shadow-[0_0_20px_rgba(225,29,72,0.35)] live-badge-pulsing select-none pointer-events-none"
+        >
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-80" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 shadow-sm shadow-rose-500/80" />
+          </span>
+          <span className="text-[11px] font-black uppercase tracking-widest text-white font-sans flex items-center gap-1.5">
+            <Radio size={12} className="text-rose-400 animate-pulse" />
+            LIVE
+          </span>
+          {match.tournamentName && (
+            <span className="text-[10px] font-mono text-slate-300 font-bold border-l border-white/15 pl-2 uppercase tracking-wide">
+              {match.tournamentName}
+            </span>
+          )}
+        </motion.div>
       )}
 
       {/* =========================================================================
@@ -1551,6 +1600,31 @@ export const CricketOverlay: React.FC = () => {
               <h2 className={`text-2xl font-black uppercase tracking-widest ${themeColors.titleText}`}>
                 {currentInnings.battingTeam}
               </h2>
+              {match?.status === 'live' ? (
+                <motion.div
+                  id="standard-live-match-badge"
+                  animate={{ 
+                    scale: [1, 1.05, 1],
+                    opacity: [0.92, 1, 0.92],
+                  }}
+                  transition={{ 
+                    repeat: Infinity, 
+                    duration: 2.2, 
+                    ease: "easeInOut" 
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-600 text-white border border-rose-400/50 text-[10px] font-black uppercase tracking-wider shadow-[0_0_14px_rgba(225,29,72,0.6)] live-badge-pulsing shrink-0"
+                >
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-300 opacity-80" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                  </span>
+                  <span>LIVE</span>
+                </motion.div>
+              ) : match?.status && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/10 text-slate-300 uppercase shrink-0">
+                  {match.status}
+                </span>
+              )}
             </div>
             
             {/* Innings Target or Toss situation caption */}
@@ -1799,6 +1873,31 @@ export const CricketOverlay: React.FC = () => {
                   <h2 className="text-3xl font-black uppercase tracking-widest truncate max-w-[280px]">
                     {currentInnings.battingTeam}
                   </h2>
+                  {match?.status === 'live' ? (
+                    <motion.div
+                      id="giant-live-match-badge"
+                      animate={{ 
+                        scale: [1, 1.05, 1],
+                        opacity: [0.92, 1, 0.92],
+                      }}
+                      transition={{ 
+                        repeat: Infinity, 
+                        duration: 2.2, 
+                        ease: "easeInOut" 
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-600 text-white border border-rose-400/50 text-[10px] font-black uppercase tracking-wider shadow-[0_0_14px_rgba(225,29,72,0.6)] live-badge-pulsing shrink-0"
+                    >
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-300 opacity-80" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                      </span>
+                      <span>LIVE</span>
+                    </motion.div>
+                  ) : match?.status && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/10 text-slate-300 uppercase shrink-0">
+                      {match.status}
+                    </span>
+                  )}
                 </div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1.5 block">
                   {inningsNum === 1 
@@ -1987,6 +2086,40 @@ export const CricketOverlay: React.FC = () => {
           className="absolute bottom-12 left-1/2 -translate-x-1/2 w-[1900px] h-[80px] select-none font-sans z-30"
           id="custom-slanted-pro-bug"
         >
+          {/* Subtle Framer-Motion / CSS Pulsing 'Live' Match Status Badge */}
+          {match?.status === 'live' ? (
+            <motion.div
+              id="slanted-pro-live-badge"
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ 
+                scale: [1, 1.04, 1],
+                opacity: [0.93, 1, 0.93],
+              }}
+              transition={{ 
+                repeat: Infinity, 
+                duration: 2.2, 
+                ease: "easeInOut" 
+              }}
+              className="absolute -top-7.5 left-2 z-40 flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-rose-600 to-red-600 text-white border border-rose-400/50 shadow-[0_0_15px_rgba(225,29,72,0.6)] live-badge-pulsing"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-300 opacity-80" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+              </span>
+              <span className="text-[10px] font-black tracking-widest uppercase font-sans">
+                LIVE
+              </span>
+              <span className="text-[9px] font-mono text-rose-100 font-bold border-l border-white/20 pl-1.5 uppercase">
+                IN PROGRESS
+              </span>
+            </motion.div>
+          ) : match?.status && (
+            <div className="absolute -top-7.5 left-2 z-40 flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900/90 text-slate-400 border border-white/10 text-[9px] font-mono uppercase font-bold">
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-500 inline-block" />
+              <span>{match.status}</span>
+            </div>
+          )}
+
           {/* Main outer container - maintains a standard, unskewed layout perspective */}
           <div className="w-full h-full flex items-stretch overflow-hidden bg-black/45 backdrop-blur-md rounded-xl border border-slate-900/80 shadow-[0_15px_45px_rgba(0,0,0,0.85)]">
             
@@ -2618,12 +2751,13 @@ export const CricketOverlay: React.FC = () => {
             🌤️ Pitch & Weather
           </button>
           <button
-            onClick={() => setActiveGraphic(activeGraphic === 'team_lineups' ? 'none' : 'team_lineups')}
+            onClick={() => setActiveGraphic((activeGraphic === 'team_lineups' || activeGraphic === 'both_squads') ? 'none' : 'team_lineups')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
-              activeGraphic === 'team_lineups' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+              (activeGraphic === 'team_lineups' || activeGraphic === 'both_squads') ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
             }`}
+            title="Both Squads Overlay: Gold broadcast 3D TV graphic showing both teams playing 11, team logos & VS emblem"
           >
-            👥 Lineups (XI)
+            👥 Both Squads (XI)
           </button>
           <button
             onClick={() => setActiveGraphic(activeGraphic === 'innings_scorecard' ? 'none' : 'innings_scorecard')}

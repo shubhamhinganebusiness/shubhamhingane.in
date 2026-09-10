@@ -71,6 +71,7 @@ const ElectionCommandCenter = lazy(() => import('./components/election/ElectionC
 const GanpatiMandalApp = lazy(() => import('./components/ganpati/GanpatiMandalApp').then(m => ({ default: m.GanpatiMandalApp })));
 const CricketDigitalToss = lazy(() => import('./components/cricket/CricketDigitalToss').then(m => ({ default: m.CricketDigitalToss })));
 const CaptainSquadSubmission = lazy(() => import('./components/cricket/CaptainSquadSubmission').then(m => ({ default: m.CaptainSquadSubmission })));
+const GoogleWorkspaceHub = lazy(() => import('./components/workspace/GoogleWorkspaceHub').then(m => ({ default: m.GoogleWorkspaceHub })));
 
 const hideOnRoutes = [
   '/live/cricket-captain-squad',
@@ -354,6 +355,9 @@ function AppContent() {
           <Route path="/live/election-command-center" element={<ElectionCommandCenter />} />
           <Route path="/live/ganpati-mandal" element={<GanpatiMandalApp />} />
           <Route path="/ganpati-mandal" element={<GanpatiMandalApp />} />
+          <Route path="/workspace" element={<GoogleWorkspaceHub />} />
+          <Route path="/google-sheets" element={<GoogleWorkspaceHub />} />
+          <Route path="/google-forms" element={<GoogleWorkspaceHub />} />
           <Route path="/agro-dashboard" element={<AgroDashboard />} />
           <Route path="/portfolio-admin" element={<PortfolioAdmin />} />
           <Route path="/service/:id" element={<ServiceDetail />} />

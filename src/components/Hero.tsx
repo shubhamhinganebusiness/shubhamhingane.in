@@ -1,5 +1,5 @@
 import React from 'react';
-import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Receipt, Sparkles } from 'lucide-react';
+import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Receipt, Sparkles, LogIn, Trophy } from 'lucide-react';
 import { TypingText } from './TypingText';
 import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
@@ -300,6 +300,22 @@ export const Hero = () => {
                   <span>
                     {language === 'mr' ? 'कोर्सेस' : language === 'hi' ? 'कोर्सेस' : 'Courses'}
                   </span>
+                </motion.button>
+
+                {/* Direct One-Click Gully Score Board Login */}
+                <motion.button 
+                  id="hero-quick-access-cricket-login"
+                  whileHover={{ y: -2, scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => navigate('/cricket-login')}
+                  className="h-12 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 font-bold hover:brightness-110 transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer border border-emerald-400/40 group"
+                  title="Direct 1-Click Login to Gully Scoreboard & Tournament Manager"
+                >
+                  <Trophy size={14} className="text-amber-300 group-hover:scale-110 transition-transform" />
+                  <span>
+                    {language === 'mr' ? 'गुल्ली स्कोअर लॉगिन' : language === 'hi' ? 'गल्ली स्कोर लॉगिन' : 'Gully Score Login'}
+                  </span>
+                  <LogIn size={13} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform" />
                 </motion.button>
               </div>
             </div>

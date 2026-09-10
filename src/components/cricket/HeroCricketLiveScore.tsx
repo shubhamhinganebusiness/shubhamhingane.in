@@ -430,10 +430,14 @@ export const HeroCricketLiveScore: React.FC = () => {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-80" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-sm shadow-emerald-500/50" />
             </span>
-            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
+            <motion.span 
+              animate={{ scale: [1, 1.04, 1], opacity: [0.92, 1, 0.92] }}
+              transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
+              className="text-[10px] font-black uppercase tracking-widest text-emerald-300 bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1.5 shadow-sm"
+            >
               <Radio size={11} className="animate-pulse text-emerald-400" />
               LIVE MATCH
-            </span>
+            </motion.span>
           </div>
 
           <div className="flex items-center gap-2">
