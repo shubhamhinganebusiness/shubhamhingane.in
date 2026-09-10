@@ -308,6 +308,173 @@ async function startServer() {
     }
   });
 
+  // Active Match routing endpoint for OBS overlay and external integrations
+  app.get("/api/cricket/active-match/:managerId", async (req, res) => {
+    try {
+      const { managerId } = req.params;
+      if (!managerId) {
+        return res.status(400).json({ error: "managerId parameter is required" });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, getDoc, collection, query, where, getDocs, limit } = await import("firebase/firestore");
+
+      // 1. Check direct score_managers pointer document
+      const managerRef = doc(db, "score_managers", managerId);
+      const managerSnap = await getDoc(managerRef);
+      if (managerSnap.exists()) {
+        const mgrData = managerSnap.data();
+        if (mgrData.status === 'live' && mgrData.activeMatchId) {
+          const matchRef = doc(db, "cricket_matches", mgrData.activeMatchId);
+          const matchSnap = await getDoc(matchRef);
+          if (matchSnap.exists() && matchSnap.data().status === 'live') {
+            return res.json({
+              active: true,
+              managerId,
+              matchId: mgrData.activeMatchId,
+              streamKey: mgrData.streamKey || null,
+              match: matchSnap.data()
+            });
+          }
+        }
+      }
+
+      // 2. Query cricket_matches for any live match by managerId or streamKey
+      const q = query(
+        collection(db, "cricket_matches"),
+        where("managerId", "==", managerId),
+        where("status", "==", "live"),
+        limit(1)
+      );
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        const matchDoc = qSnap.docs[0];
+        return res.json({
+          active: true,
+          managerId,
+          matchId: matchDoc.id,
+          match: matchDoc.data()
+        });
+      }
+
+      // No active match currently running
+      return res.json({
+        active: false,
+        managerId,
+        message: "No live match currently active for this score manager."
+      });
+    } catch (err: any) {
+      console.error("[Cricket Active Match API] Error fetching active match:", err);
+      res.status(500).json({ error: err.message || "Failed to query active match" });
+    }
+  });
+
+  // Set Active Match endpoint (switches match to 'live' and retires previous matches to 'completed')
+  app.post("/api/cricket/set-active-match", async (req, res) => {
+    try {
+      const { managerId, matchId, streamKey } = req.body || {};
+      if (!managerId || !matchId) {
+        return res.status(400).json({ error: "managerId and matchId are required" });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, setDoc, updateDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+
+      // 1. Mark target match as 'live' and assign managerId
+      const targetMatchRef = doc(db, "cricket_matches", matchId);
+      await updateDoc(targetMatchRef, {
+        status: "live",
+        managerId,
+        streamKey: streamKey || null,
+        updatedAt: Date.now()
+      });
+
+      // 2. Retire any previously 'live' matches for this manager to 'completed'
+      try {
+        const oldMatchesQ = query(
+          collection(db, "cricket_matches"),
+          where("managerId", "==", managerId),
+          where("status", "==", "live")
+        );
+        const oldSnaps = await getDocs(oldMatchesQ);
+        for (const oldDoc of oldSnaps.docs) {
+          if (oldDoc.id !== matchId) {
+            await updateDoc(doc(db, "cricket_matches", oldDoc.id), {
+              status: "completed",
+              updatedAt: Date.now()
+            });
+          }
+        }
+      } catch (retireErr) {
+        console.warn("[Cricket API] Error retiring old live matches:", retireErr);
+      }
+
+      // 3. Update pointer in score_managers
+      const managerRef = doc(db, "score_managers", managerId);
+      await setDoc(managerRef, {
+        managerId,
+        streamKey: streamKey || null,
+        activeMatchId: matchId,
+        status: "live",
+        updatedAt: Date.now()
+      }, { merge: true });
+
+      return res.json({
+        success: true,
+        managerId,
+        activeMatchId: matchId,
+        status: "live",
+        message: "Match is now LIVE on the permanent OBS overlay."
+      });
+    } catch (err: any) {
+      console.error("[Cricket API] Error setting active match:", err);
+      res.status(500).json({ error: err.message || "Failed to set active match" });
+    }
+  });
+
+  // Complete match endpoint
+  app.post("/api/cricket/complete-match", async (req, res) => {
+    try {
+      const { managerId, matchId } = req.body || {};
+      if (!matchId) {
+        return res.status(400).json({ error: "matchId required" });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, updateDoc } = await import("firebase/firestore");
+      await updateDoc(doc(db, "cricket_matches", matchId), {
+        status: "completed",
+        updatedAt: Date.now()
+      });
+
+      if (managerId) {
+        const managerRef = doc(db, "score_managers", managerId);
+        await updateDoc(managerRef, {
+          activeMatchId: null,
+          status: "completed",
+          updatedAt: Date.now()
+        }).catch(() => {});
+      }
+
+      return res.json({ success: true, matchId, status: "completed" });
+    } catch (err: any) {
+      console.error("[Cricket API] Error completing match:", err);
+      res.status(500).json({ error: err.message || "Failed to complete match" });
+    }
+  });
+
   // Gemini API Proxy Route
   app.post("/api/chat", async (req, res) => {
     console.log("AI Chat request received");

@@ -208,6 +208,8 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "managerId": { "type": "string" },
+        "streamKey": { "type": "string" },
         "teamA": { "type": "string" },
         "teamB": { "type": "string" },
         "oversLimit": { "type": "number" },
@@ -216,15 +218,30 @@
         "currentInningsNum": { "type": "number" },
         "innings1": { "type": "object" },
         "innings2": { "type": "object" },
-        "status": { "type": "string" },
+        "status": { "type": "string", "enum": ["setup", "live", "completed", "draft", "deleted"] },
         "winner": { "type": "string" },
         "winReason": { "type": "string" },
         "date": { "type": "string" },
         "targetRuns": { "type": "number" },
         "freeHitNext": { "type": "boolean" },
-        "lastBallResult": { "type": "string" }
+        "lastBallResult": { "type": "string" },
+        "updatedAt": { "type": "number" }
       },
       "required": ["id", "teamA", "teamB", "oversLimit", "status"]
+    },
+    "ScoreManagerProfile": {
+      "title": "Score Manager Profile & Stream Pointer",
+      "description": "Manager profile and active match routing pointer for permanent OBS overlays",
+      "type": "object",
+      "properties": {
+        "managerId": { "type": "string" },
+        "managerName": { "type": "string" },
+        "streamKey": { "type": "string" },
+        "activeMatchId": { "type": "string" },
+        "status": { "type": "string", "enum": ["live", "completed", "idle"] },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["managerId", "status"]
     },
     "CricketTournament": {
       "title": "Cricket Tournament",
@@ -246,6 +263,10 @@
     }
   },
   "firestore": {
+    "/score_managers/{managerId}": {
+      "schema": "ScoreManagerProfile",
+      "description": "Score manager profile, stream key credentials, and active live match pointer for OBS overlay"
+    },
     "/cricket_tournaments/{tournamentId}": {
       "schema": "CricketTournament",
       "description": "Full details, rosters, fixtures, and standing information of cricket tournaments"

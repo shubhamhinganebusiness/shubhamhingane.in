@@ -5,7 +5,7 @@ import {
   ArrowRight, Users, Play, Undo, Calendar, Trash2, ArrowLeftRight, Check,
   ChevronRight, Smile, Settings, Volume2, VolumeX, Edit, Edit3, ChevronDown, ChevronUp, Sun, Moon, Info, HelpCircle,
   Share2, FileDown, PlusCircle, BarChart3, Radio, Flame, ShieldAlert, Award, Zap, Lock, UserPlus,
-  Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2
+  Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2, Copy, ExternalLink, Send, Smartphone, Shield, Tv
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
@@ -46,10 +46,7 @@ import {
   setActiveMatch, 
   getLocalMatchById,
   pruneDeletedMatchesFromStorage,
-  sanitizeForFirestore,
-  getPermanentOverlayUrl,
-  setActiveLiveMatchForManager,
-  setMatchCompletedForManager
+  sanitizeForFirestore
 } from './cricketStorage';
 import {
   CommentaryLanguage,
@@ -102,6 +99,20 @@ interface CricketTeam {
   name: string;
   players: string[];
   createdAt: string;
+  captainName?: string;
+  captainPhone?: string;
+  status?: 'pending_squad' | 'squad_submitted' | 'ready';
+  squadDetails?: Array<{
+    id: string;
+    name: string;
+    role?: string;
+    isCaptain?: boolean;
+    isViceCaptain?: boolean;
+    isWicketkeeper?: boolean;
+    jerseyNumber?: string;
+  }>;
+  updatedAt?: number;
+  managerId?: string;
 }
 
 export interface Innings {
@@ -204,6 +215,7 @@ export interface MatchState {
   createdBy?: string;
   managerId?: string;
   managerName?: string;
+  streamKey?: string;
   tournamentName?: string;
   seriesName?: string;
   groundName?: string;
@@ -655,7 +667,17 @@ const getPublicOverlayUrl = (matchId: string, preview = false) => {
   if (origin.includes('ais-dev-')) {
     origin = origin.replace('ais-dev-', 'ais-pre-');
   }
-  return `${origin}${window.location.pathname}#/live/cricket-overlay?matchId=${matchId}${preview ? '&preview=true' : ''}`;
+  return `${origin}/#/live/cricket-overlay?matchId=${encodeURIComponent(matchId)}${preview ? '&preview=true' : ''}`;
+};
+
+// Helper to generate a single, permanent OBS overlay link per score manager that NEVER changes between matches
+const getPermanentOverlayUrl = (managerId: string, streamKey?: string, preview = false) => {
+  let origin = window.location.origin;
+  if (origin.includes('ais-dev-')) {
+    origin = origin.replace('ais-dev-', 'ais-pre-');
+  }
+  const keyParam = streamKey ? `&streamKey=${encodeURIComponent(streamKey)}` : '';
+  return `${origin}/#/live/cricket-overlay?managerId=${encodeURIComponent(managerId)}${keyParam}${preview ? '&preview=true' : ''}`;
 };
 
 export const CricketScoreboard: React.FC = () => {
@@ -718,10 +740,20 @@ export const CricketScoreboard: React.FC = () => {
 
   // Team Management state vectors
   const [showTeamModal, setShowTeamModal] = useState(false);
+  const [teamModalTab, setTeamModalTab] = useState<'presets' | 'invite_captain' | 'direct_add'>('presets');
   const [savedTeams, setSavedTeams] = useState<CricketTeam[]>([]);
   const [newTeamName, setNewTeamName] = useState('');
+  const [newTeamCaptainName, setNewTeamCaptainName] = useState('');
   const [newTeamPlayersText, setNewTeamPlayersText] = useState('');
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
+  
+  // Captain squad invite link state
+  const [captainInviteTeamName, setCaptainInviteTeamName] = useState('');
+  const [captainInviteCaptainName, setCaptainInviteCaptainName] = useState('');
+  const [captainInvitePhone, setCaptainInvitePhone] = useState('');
+  const [generatedCaptainLink, setGeneratedCaptainLink] = useState<string | null>(null);
+  const [copiedCaptainLink, setCopiedCaptainLink] = useState(false);
+
   const [localAutosavedMatch, setLocalAutosavedMatch] = useState<MatchState | null>(null);
   
   // States and refs for debounced autosave / persistence
@@ -782,60 +814,6 @@ export const CricketScoreboard: React.FC = () => {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [lastMatchStatus, setLastMatchStatus] = useState<string>('setup');
 
-  // Permanent OBS Overlay active routing state
-  const [copiedPermanentOverlayLink, setCopiedPermanentOverlayLink] = useState(false);
-  const [isTogglingLiveStatus, setIsTogglingLiveStatus] = useState(false);
-
-  // Active Match routing handler: Set this match as the ONE active live broadcast match for this score manager
-  const handleSetMatchActiveLive = async (targetMatch?: MatchState) => {
-    const matchToActivate = targetMatch || match;
-    if (!matchToActivate || !matchToActivate.id) return;
-
-    try {
-      setIsTogglingLiveStatus(true);
-      await setActiveLiveMatchForManager(matchToActivate.id, currentManagerId, matchToActivate);
-      
-      // Update active state in component
-      setMatch(prev => ({
-        ...prev,
-        status: 'live',
-        managerId: currentManagerId,
-        updatedAt: Date.now()
-      }));
-
-      showNotification('🔴 Match is now LIVE on your Permanent OBS Overlay! Any previously live match has been archived.', 'success');
-    } catch (err) {
-      console.error('Failed to set match live:', err);
-      showNotification('Failed to toggle live status. Please check connection.', 'alert');
-    } finally {
-      setIsTogglingLiveStatus(false);
-    }
-  };
-
-  // Active Match routing handler: Mark match completed and put permanent OBS overlay on Standby
-  const handleSetMatchCompleted = async (targetMatch?: MatchState) => {
-    const matchToComplete = targetMatch || match;
-    if (!matchToComplete || !matchToComplete.id) return;
-
-    try {
-      setIsTogglingLiveStatus(true);
-      await setMatchCompletedForManager(matchToComplete.id, currentManagerId, matchToComplete);
-
-      setMatch(prev => ({
-        ...prev,
-        status: 'completed',
-        updatedAt: Date.now()
-      }));
-
-      showNotification('✅ Match marked as COMPLETED. Your Permanent OBS Overlay is now in Standby mode.', 'info');
-    } catch (err) {
-      console.error('Failed to complete match:', err);
-      showNotification('Failed to set match completed.', 'alert');
-    } finally {
-      setIsTogglingLiveStatus(false);
-    }
-  };
-
   // Innings break timer states
   const [inningsBreakTimeLeft, setInningsBreakTimeLeft] = useState<number>(300); // 5 min
   const [isInningsBreakTimerRunning, setIsInningsBreakTimerRunning] = useState<boolean>(true);
@@ -891,6 +869,8 @@ export const CricketScoreboard: React.FC = () => {
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [livePreviewTab, setLivePreviewTab] = useState<'spectator' | 'overlay'>('spectator');
   const [showBroadcastCenter, setShowBroadcastCenter] = useState(false);
+  const [showObsModal, setShowObsModal] = useState(false);
+  const [obsModalTab, setObsModalTab] = useState<'permanent' | 'single' | 'guide'>('permanent');
 
   // Inline confirmation states to replace window.confirm inside sandboxed iframe
   const [activeLiveMatchDeleteConfirmId, setActiveLiveMatchDeleteConfirmId] = useState<string | null>(null);
@@ -1173,6 +1153,8 @@ export const CricketScoreboard: React.FC = () => {
 
   // Copy Overlay Link state
   const [copiedOverlayLink, setCopiedOverlayLink] = useState(false);
+  const [copiedPermanentOverlayLink, setCopiedPermanentOverlayLink] = useState(false);
+  const [isActivatingLiveMatch, setIsActivatingLiveMatch] = useState(false);
 
   // Bulk Player adding states for setup roster builder
   const [showBulkAddTeamA, setShowBulkAddTeamA] = useState(false);
@@ -2579,6 +2561,45 @@ export const CricketScoreboard: React.FC = () => {
     try {
       localStorage.setItem('cricket_active_match', JSON.stringify(newMatch));
     } catch (e) {}
+
+    // Synchronize active match pointer for permanent OBS link
+    if (currentManagerId) {
+      const managerDocRef = doc(db, 'score_managers', currentManagerId);
+      safeSetDoc(managerDocRef, {
+        managerId: currentManagerId,
+        managerName: currentManagerName,
+        streamKey: streamKey,
+        activeMatchId: newMatch.id,
+        status: 'live',
+        activeMatchSummary: {
+          id: newMatch.id,
+          teamA: newMatch.teamA,
+          teamB: newMatch.teamB,
+          oversLimit: newMatch.oversLimit
+        },
+        updatedAt: Date.now()
+      }, { merge: true }).catch(() => {});
+
+      if (streamKey) {
+        safeSetDoc(doc(db, 'score_managers', streamKey), {
+          managerId: currentManagerId,
+          streamKey: streamKey,
+          activeMatchId: newMatch.id,
+          status: 'live',
+          updatedAt: Date.now()
+        }, { merge: true }).catch(() => {});
+      }
+
+      fetch('/api/cricket/set-active-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          managerId: currentManagerId,
+          matchId: newMatch.id,
+          streamKey: streamKey
+        })
+      }).catch(() => {});
+    }
 
     // Set parameters and trigger Firestore write with safe fallback
     setSearchParams({ matchId: newMatch.id });
@@ -4372,6 +4393,166 @@ export const CricketScoreboard: React.FC = () => {
     showNotification(`Resumed Match Draft: ${m.teamA} vs ${m.teamB}!`, 'success');
   };
 
+  // Active Match Routing System: Set a specific match as the ONE ACTIVE LIVE MATCH for this manager
+  const handleSetActiveLiveMatch = async (targetMatch: MatchState) => {
+    try {
+      const matchIdToActivate = targetMatch.id;
+      if (!matchIdToActivate) return;
+      setIsActivatingLiveMatch(true);
+
+      // 1. Prepare updated target match state
+      const updatedMatch: MatchState = {
+        ...targetMatch,
+        status: 'live',
+        managerId: currentManagerId,
+        streamKey: streamKey,
+        updatedAt: Date.now()
+      };
+
+      // 2. Update local React state, registry, and active match cache
+      unmarkMatchDeleted(matchIdToActivate);
+      saveMatchToRegistry(updatedMatch);
+      setActiveMatch(updatedMatch);
+      latestStateToSaveRef.current = updatedMatch;
+      setMatch(updatedMatch);
+      setSearchParams({ matchId: matchIdToActivate });
+
+      // 3. Mark old live matches in local state as completed (only 1 match active per user)
+      setActiveLiveMatches(prev => {
+        const others = prev.filter(m => m.id !== matchIdToActivate).map(m => ({
+          ...m,
+          status: 'completed' as const,
+          updatedAt: Date.now()
+        }));
+        return [updatedMatch, ...others];
+      });
+
+      // 4. Update Firestore directly
+      if (!isFirestoreQuotaExhausted()) {
+        try {
+          // A) Save target match as 'live'
+          await safeSetDoc(doc(db, 'cricket_matches', matchIdToActivate), sanitizeForFirestore(updatedMatch));
+
+          // B) Update manager active pointer document in score_managers
+          const managerDocRef = doc(db, 'score_managers', currentManagerId);
+          await safeSetDoc(managerDocRef, {
+            managerId: currentManagerId,
+            managerName: currentManagerName,
+            streamKey: streamKey,
+            activeMatchId: matchIdToActivate,
+            status: 'live',
+            activeMatchSummary: {
+              id: matchIdToActivate,
+              teamA: updatedMatch.teamA,
+              teamB: updatedMatch.teamB,
+              oversLimit: updatedMatch.oversLimit
+            },
+            updatedAt: Date.now()
+          }, { merge: true });
+
+          // C) If there is also a streamKey, write pointer under streamKey as well
+          if (streamKey) {
+            safeSetDoc(doc(db, 'score_managers', streamKey), {
+              managerId: currentManagerId,
+              streamKey: streamKey,
+              activeMatchId: matchIdToActivate,
+              status: 'live',
+              updatedAt: Date.now()
+            }, { merge: true }).catch(() => {});
+          }
+
+          // D) Retire any existing matches in Firestore for this manager that were 'live'
+          if (activeLiveMatches && activeLiveMatches.length > 0) {
+            for (const oldM of activeLiveMatches) {
+              if (oldM.id !== matchIdToActivate && oldM.status === 'live') {
+                safeUpdateDoc(doc(db, 'cricket_matches', oldM.id), {
+                  status: 'completed',
+                  updatedAt: Date.now()
+                }).catch(() => {});
+              }
+            }
+          }
+        } catch (fErr) {
+          console.warn('[Active Match] Firestore direct write error:', fErr);
+        }
+      }
+
+      // 5. Call backend reconciliation endpoint /api/cricket/set-active-match
+      try {
+        fetch('/api/cricket/set-active-match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            managerId: currentManagerId,
+            matchId: matchIdToActivate,
+            streamKey: streamKey
+          })
+        }).catch(() => {});
+      } catch (_) {}
+
+      showNotification(`🔴 Match "${updatedMatch.teamA} vs ${updatedMatch.teamB}" is now LIVE on your permanent OBS overlay!`, 'success');
+    } catch (err: any) {
+      console.error('Failed to set active live match:', err);
+      showNotification('Error activating live match: ' + (err.message || 'Unknown error'), 'alert');
+    } finally {
+      setIsActivatingLiveMatch(false);
+    }
+  };
+
+  // Complete a match and put permanent overlay on standby
+  const handleSetMatchCompleted = async (matchIdToComplete: string) => {
+    try {
+      // 1. Update in local React state
+      setMatch(prev => {
+        if (prev.id === matchIdToComplete) {
+          const completed: MatchState = {
+            ...prev,
+            status: 'completed',
+            updatedAt: Date.now()
+          };
+          saveMatchToRegistry(completed);
+          saveMatchToHistory(completed);
+          return completed;
+        }
+        return prev;
+      });
+
+      // 2. Remove from activeLiveMatches list
+      setActiveLiveMatches(prev => prev.filter(m => m.id !== matchIdToComplete));
+
+      // 3. Update Firestore
+      if (!isFirestoreQuotaExhausted()) {
+        safeUpdateDoc(doc(db, 'cricket_matches', matchIdToComplete), {
+          status: 'completed',
+          updatedAt: Date.now()
+        }).catch(() => {});
+
+        const managerDocRef = doc(db, 'score_managers', currentManagerId);
+        safeUpdateDoc(managerDocRef, {
+          activeMatchId: null,
+          status: 'completed',
+          updatedAt: Date.now()
+        }).catch(() => {});
+      }
+
+      // 4. Call server endpoint
+      try {
+        fetch('/api/cricket/complete-match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            managerId: currentManagerId,
+            matchId: matchIdToComplete
+          })
+        }).catch(() => {});
+      } catch (_) {}
+
+      showNotification('Match marked as COMPLETED. Permanent OBS overlay is now on standby mode.', 'info');
+    } catch (err: any) {
+      console.error('Failed to mark match completed:', err);
+    }
+  };
+
   // Save current setup configuration as draft
   const handleSaveDraftFromSetup = async () => {
     if (!teamA.trim() || !teamB.trim()) {
@@ -4630,8 +4811,11 @@ export const CricketScoreboard: React.FC = () => {
     const newTeam: CricketTeam = {
       id: teamId,
       name: newTeamName.trim(),
+      captainName: newTeamCaptainName.trim(),
       players: playersList,
-      createdAt: new Date().toISOString()
+      status: 'ready',
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now()
     };
 
     if (isFirestoreQuotaExhausted()) {
@@ -4642,6 +4826,7 @@ export const CricketScoreboard: React.FC = () => {
       });
       showNotification(`Team "${newTeam.name}" saved locally!`, 'success');
       setNewTeamName('');
+      setNewTeamCaptainName('');
       setNewTeamPlayersText('');
       setEditingTeamId(null);
       return;
@@ -4651,6 +4836,7 @@ export const CricketScoreboard: React.FC = () => {
       await safeSetDoc(doc(db, 'cricket_teams', teamId), newTeam);
       showNotification(`Team "${newTeam.name}" ${editingTeamId ? 'updated' : 'saved'} successfully!`, 'success');
       setNewTeamName('');
+      setNewTeamCaptainName('');
       setNewTeamPlayersText('');
       setEditingTeamId(null);
     } catch (err) {
@@ -4663,11 +4849,77 @@ export const CricketScoreboard: React.FC = () => {
         });
         showNotification(`Team "${newTeam.name}" saved locally!`, 'success');
         setNewTeamName('');
+        setNewTeamCaptainName('');
         setNewTeamPlayersText('');
         setEditingTeamId(null);
       } else {
         handleFirestoreError(err, OperationType.WRITE, `cricket_teams/${teamId}`);
       }
+    }
+  };
+
+  // Generate a shareable link for captain to submit 15-player squad
+  const handleGenerateCaptainInvite = async () => {
+    if (!captainInviteTeamName.trim()) {
+      showNotification('Please enter a Team Name to generate a Captain Squad link!', 'alert');
+      return;
+    }
+    const teamId = `team-${Date.now()}`;
+    const newTeam: CricketTeam = {
+      id: teamId,
+      name: captainInviteTeamName.trim(),
+      captainName: captainInviteCaptainName.trim(),
+      captainPhone: captainInvitePhone.trim(),
+      players: [],
+      status: 'pending_squad',
+      createdAt: new Date().toISOString(),
+      updatedAt: Date.now()
+    };
+
+    try {
+      if (!isFirestoreQuotaExhausted()) {
+        await safeSetDoc(doc(db, 'cricket_teams', teamId), newTeam);
+      }
+      setSavedTeams(prev => [newTeam, ...prev.filter(t => t.id !== teamId)]);
+    } catch (e) {
+      console.warn('Saved captain team locally:', e);
+      setSavedTeams(prev => [newTeam, ...prev.filter(t => t.id !== teamId)]);
+    }
+
+    const link = `${window.location.origin}${window.location.pathname}#/cricket-captain-squad/${teamId}`;
+    setGeneratedCaptainLink(link);
+    showNotification(`Captain link created for "${newTeam.name}"! Share via WhatsApp or Copy.`, 'success');
+  };
+
+  const getCaptainSquadLink = (tId: string) => {
+    return `${window.location.origin}${window.location.pathname}#/cricket-captain-squad/${tId}`;
+  };
+
+  const handleShareCaptainWhatsApp = (t: CricketTeam) => {
+    const link = getCaptainSquadLink(t.id);
+    const text = encodeURIComponent(
+      `🏏 *Gully Score Live Match Squad Invitation*\n` +
+      `Team: *${t.name}*\n` +
+      `Hey Captain! Please submit your 15-player match squad here so we can load your team onto the live scoreboard in 1-click:\n\n` +
+      `${link}`
+    );
+    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  };
+
+  // One-click load a team's roster into Team A or Team B
+  const handleOneClickLoadTeam = (team: CricketTeam, target: 'A' | 'B') => {
+    if (target === 'A') {
+      setTeamA(team.name);
+      if (team.players && team.players.length > 0) {
+        setSelectedTeamARoster(team.players);
+      }
+      showNotification(`⚡ Loaded "${team.name}" (${team.players?.length || 0} players) for Team A!`, 'success');
+    } else {
+      setTeamB(team.name);
+      if (team.players && team.players.length > 0) {
+        setSelectedTeamBRoster(team.players);
+      }
+      showNotification(`⚡ Loaded "${team.name}" (${team.players?.length || 0} players) for Team B!`, 'success');
     }
   };
 
@@ -5166,23 +5418,6 @@ export const CricketScoreboard: React.FC = () => {
 
             {match.id && match.status !== 'setup' && (
               <>
-                <button
-                  onClick={() => {
-                    const overlayUrl = getPublicOverlayUrl(match.id);
-                    copyToClipboard(overlayUrl).then(() => {
-                      setCopiedOverlayLink(true);
-                      setTimeout(() => setCopiedOverlayLink(false), 2500);
-                      showNotification('OBS Studio Overlay link copied! Paste as Browser Source (1920x1080) in OBS.', 'success');
-                    });
-                  }}
-                  className="h-8 sm:h-9 px-2 sm:px-2.5 bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-rose-300 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
-                  title="Copy OBS Studio Overlay Link (1920x1080 transparent)"
-                  id="btn-copy-obs-overlay-top"
-                >
-                  {copiedOverlayLink ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
-                  <span className="hidden sm:inline">{copiedOverlayLink ? 'Copied' : 'Overlay'}</span>
-                </button>
-
                 <button
                   onClick={handleExportMatchPDF}
                   className="h-8 sm:h-9 px-1.5 sm:px-3 bg-slate-800 hover:bg-slate-750 text-slate-200 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-0.5 transition-all text-white shrink-0"
@@ -8641,53 +8876,7 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Active Live Match Broadcast Status & Controller */}
-            {match.status === 'live' ? (
-              <div className="flex items-center gap-1.5 bg-rose-950/80 border border-rose-500/40 px-3 py-1.5 rounded-xl shadow-[0_0_15px_rgba(244,63,94,0.3)]">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
-                <span className="text-[10px] sm:text-xs font-black text-rose-300 uppercase tracking-widest flex items-center gap-1">
-                  <Radio size={12} className="text-rose-400 animate-pulse" />
-                  LIVE ON OBS
-                </span>
-                <button
-                  onClick={() => handleSetMatchCompleted()}
-                  disabled={isTogglingLiveStatus}
-                  className="ml-1 px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[9px] font-black rounded uppercase transition-all cursor-pointer border border-slate-700"
-                  title="Mark match completed and put permanent OBS overlay in Standby"
-                >
-                  End Match
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleSetMatchActiveLive()}
-                disabled={isTogglingLiveStatus}
-                className="px-3 py-2 bg-rose-600 hover:bg-rose-500 text-slate-950 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-md shadow-rose-600/20 active:scale-95"
-                title="Broadcast this match on your permanent OBS Overlay link"
-              >
-                <Radio size={13} className="text-slate-950" />
-                <span>Go Live On OBS</span>
-              </button>
-            )}
 
-            {/* ONE Single, Permanent OBS Overlay Link Copy Button */}
-            <button
-              onClick={() => {
-                const permUrl = getPermanentOverlayUrl(currentManagerId);
-                copyToClipboard(permUrl).then(() => {
-                  setCopiedPermanentOverlayLink(true);
-                  setTimeout(() => setCopiedPermanentOverlayLink(false), 2500);
-                  showNotification('Permanent OBS Overlay link copied! Paste once in OBS Studio - never changes across matches.', 'success');
-                });
-              }}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-sm"
-              title="Copy ONE single, permanent OBS Overlay link that never changes"
-              id="btn-copy-permanent-obs-header"
-            >
-              {copiedPermanentOverlayLink ? <Check size={13} className="text-emerald-300" /> : <Link2 size={13} />}
-              <span className="hidden md:inline">{copiedPermanentOverlayLink ? 'Copied' : 'Permanent OBS Link'}</span>
-              <span className="md:hidden">{copiedPermanentOverlayLink ? 'Copied' : 'OBS Link'}</span>
-            </button>
 
             {match.innings1 && (
               <button
@@ -8705,6 +8894,36 @@ export const CricketScoreboard: React.FC = () => {
             >
               <Clock size={13} />
               {showHistory ? 'Close Logs' : 'Past Matches'}
+            </button>
+
+            {/* Small Permanent OBS Overlay Link Icon near Past Matches */}
+            <button
+              type="button"
+              onClick={() => {
+                const overlayUrl = getPermanentOverlayUrl(currentManagerId, streamKey);
+                copyToClipboard(overlayUrl).then(() => {
+                  setCopiedOverlayLink(true);
+                  setTimeout(() => setCopiedOverlayLink(false), 2500);
+                  showNotification('Overlay link copied!', 'success');
+                });
+              }}
+              className={`p-2 rounded-xl transition-all cursor-pointer border-none text-white relative shadow-sm flex items-center justify-center ${
+                copiedOverlayLink 
+                  ? 'bg-amber-400 text-slate-950 font-bold shadow-md' 
+                  : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
+              title={copiedOverlayLink ? "Copied overlay link!" : "Copy overlay link"}
+              id="btn-top-bar-obs-link-icon"
+              aria-label="Copy overlay link"
+            >
+              {copiedOverlayLink ? (
+                <Check size={18} className="text-slate-950 font-bold" />
+              ) : (
+                <div className="relative flex items-center justify-center">
+                  <Link2 size={18} />
+                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-400 animate-pulse ring-1 ring-emerald-900" />
+                </div>
+              )}
             </button>
 
             <button
@@ -9206,21 +9425,6 @@ export const CricketScoreboard: React.FC = () => {
                                 Restore on Scoreboard
                               </button>
                               <button
-                                onClick={async () => {
-                                  handleLoadPastMatch(past);
-                                  await handleSetMatchActiveLive(past);
-                                }}
-                                className={`px-2.5 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border flex items-center justify-center gap-1 shrink-0 ${
-                                  match.id === past.id && match.status === 'live'
-                                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 font-black'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-500 border-slate-200 dark:border-slate-700'
-                                }`}
-                                title="Broadcast this match live to your permanent OBS overlay"
-                              >
-                                <Radio size={11} className={match.id === past.id && match.status === 'live' ? "text-rose-400 animate-pulse" : "text-slate-400"} />
-                                <span>{match.id === past.id && match.status === 'live' ? 'On OBS' : 'Go Live'}</span>
-                              </button>
-                              <button
                                 onClick={() => setExpandedKeyMomentsId(expandedKeyMomentsId === past.id ? null : past.id)}
                                 className={`px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border-none flex items-center justify-center gap-1 shrink-0 ${
                                   expandedKeyMomentsId === past.id
@@ -9409,6 +9613,43 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
 
                           <div className="flex flex-col gap-2 mt-4 pt-2 border-t border-slate-100 dark:border-slate-800/40 w-full">
+                            {/* ACTIVE MATCH ROUTING CONTROLS */}
+                            <div className="flex items-center justify-between gap-2 p-2 bg-slate-100/80 dark:bg-slate-900/80 rounded-xl border border-slate-200/50 dark:border-white/5">
+                              {match.id === past.id && match.status === 'live' ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                                  <span className="text-[9px] font-black text-emerald-500 dark:text-emerald-400 uppercase tracking-wider">
+                                    Live on Permanent OBS
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                  OBS: {past.status === 'live' ? 'Live' : 'Standby'}
+                                </span>
+                              )}
+
+                              <div className="flex items-center gap-1">
+                                {match.id === past.id && match.status === 'live' ? (
+                                  <button
+                                    onClick={() => handleSetMatchCompleted(past.id)}
+                                    className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 rounded-lg text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all"
+                                    title="Mark match completed (Permanent OBS enters standby)"
+                                  >
+                                    Set Completed
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleSetActiveLiveMatch(past)}
+                                    className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-lg text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center gap-1"
+                                    title="Switch permanent OBS overlay to stream this match"
+                                  >
+                                    <Radio size={9} className="text-emerald-400 animate-pulse" />
+                                    <span>Stream on OBS</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleLoadDraftMatch(past)}
@@ -9416,21 +9657,6 @@ export const CricketScoreboard: React.FC = () => {
                               >
                                 <Play size={10} />
                                 Open Live Panel
-                              </button>
-                              <button
-                                onClick={async () => {
-                                  handleLoadDraftMatch(past);
-                                  await handleSetMatchActiveLive(past);
-                                }}
-                                className={`px-2.5 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border flex items-center justify-center gap-1 shrink-0 ${
-                                  match.id === past.id && match.status === 'live'
-                                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 font-black'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-rose-500 border-slate-200 dark:border-slate-700'
-                                }`}
-                                title="Broadcast this match live to your permanent OBS overlay"
-                              >
-                                <Radio size={11} className={match.id === past.id && match.status === 'live' ? "text-rose-400 animate-pulse" : "text-slate-400"} />
-                                <span>{match.id === past.id && match.status === 'live' ? 'On OBS' : 'Go Live'}</span>
                               </button>
                               <a
                                 href={`${window.location.origin}${window.location.pathname}#/live/cricket-details?matchId=${past.id}`}
@@ -9941,23 +10167,135 @@ export const CricketScoreboard: React.FC = () => {
 
             <div className="space-y-6">
               {/* Presets and Team Management Section */}
-              <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider flex items-center gap-1.5">
-                    <Users size={14} />
-                    Saved Team Rosters Presets
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowTeamModal(true)}
-                    className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-1.5 rounded-full transition-all flex items-center gap-1 cursor-pointer border-none"
-                  >
-                    <PlusCircle size={12} />
-                    Manage Rosters
-                  </button>
+              <div className="bg-slate-50 dark:bg-slate-950 p-4 sm:p-5 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200 dark:border-slate-800/80">
+                  <div>
+                    <h3 className="text-xs font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider flex items-center gap-1.5">
+                      <Users size={15} />
+                      Local Cricket Teams & 1-Click Setup
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                      Send a link to team captains to submit their 15-player squad, or add teams directly for instant 1-click live scoreboard setup.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamModalTab('invite_captain');
+                        setShowTeamModal(true);
+                      }}
+                      className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm hover:scale-105 active:scale-95"
+                    >
+                      <Smartphone size={12} />
+                      📲 Send Captain Link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingTeamId(null);
+                        setNewTeamName('');
+                        setNewTeamCaptainName('');
+                        setNewTeamPlayersText('');
+                        setTeamModalTab('direct_add');
+                        setShowTeamModal(true);
+                      }}
+                      className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm hover:scale-105 active:scale-95"
+                    >
+                      <PlusCircle size={12} />
+                      + Add Team Directly
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTeamModalTab('presets');
+                        setShowTeamModal(true);
+                      }}
+                      className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 bg-slate-200/60 dark:bg-slate-800 hover:bg-slate-300 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer border-none"
+                    >
+                      <Users size={12} />
+                      Manage All ({savedTeams.length})
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 1-Click Quick Setup Roster Cards */}
+                {savedTeams.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                      <Zap size={12} className="text-amber-500" />
+                      ⚡ 1-Click Match Setup: Click to load squad into Team A or Team B
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {savedTeams.map(t => {
+                        const isCaptainPending = t.status === 'pending_squad' && (!t.players || t.players.length === 0);
+                        return (
+                          <div 
+                            key={t.id} 
+                            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl shadow-sm hover:border-emerald-500/40 transition-all flex flex-col justify-between gap-2"
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div className="min-w-0 flex-1">
+                                <strong className="text-xs font-black text-slate-850 dark:text-white truncate block">
+                                  {t.name}
+                                </strong>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  {t.captainName && (
+                                    <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 truncate">
+                                      C: {t.captainName}
+                                    </span>
+                                  )}
+                                  <span className={`text-[8.5px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
+                                    isCaptainPending
+                                      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                      : t.players?.length >= 11
+                                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                                  }`}>
+                                    {isCaptainPending ? '⏳ Waiting Captain' : `${t.players?.length || 0} Players ✓`}
+                                  </span>
+                                </div>
+                              </div>
+                              {isCaptainPending && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleShareCaptainWhatsApp(t)}
+                                  className="text-[9px] font-black uppercase text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-1 rounded-lg border-none cursor-pointer flex items-center gap-1 shrink-0"
+                                  title="Share link with Captain on WhatsApp"
+                                >
+                                  📲 Invite
+                                </button>
+                              )}
+                            </div>
+
+                            {/* 1-Click Load Buttons */}
+                            <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800">
+                              <button
+                                type="button"
+                                onClick={() => handleOneClickLoadTeam(t, 'A')}
+                                className="py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-xl text-[9.5px] font-black uppercase tracking-wider border border-emerald-500/20 cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95 shadow-xs"
+                              >
+                                <Zap size={11} className="text-emerald-500" />
+                                ⚡ Team A
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOneClickLoadTeam(t, 'B')}
+                                className="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-xl text-[9.5px] font-black uppercase tracking-wider border border-indigo-500/20 cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95 shadow-xs"
+                              >
+                                <Zap size={11} className="text-indigo-500" />
+                                ⚡ Team B
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dropdowns for quick selection */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div>
                     <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">Load Team A Preset</label>
                     <select
@@ -9965,17 +10303,17 @@ export const CricketScoreboard: React.FC = () => {
                         const sel = savedTeams.find(t => t.id === e.target.value);
                         if (sel) {
                           setTeamA(sel.name);
-                          setSelectedTeamARoster(sel.players);
-                          showNotification(`Loaded ${sel.name} roster (${sel.players.length} players) for Team A!`, 'success');
+                          setSelectedTeamARoster(sel.players || []);
+                          showNotification(`Loaded ${sel.name} roster (${sel.players?.length || 0} players) for Team A!`, 'success');
                         } else {
                           setSelectedTeamARoster([]);
                         }
                       }}
                       className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20"
                     >
-                      <option value="">-- No preset (Manual) --</option>
+                      <option value="">-- No preset (Manual Entry) --</option>
                       {savedTeams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} ({t.players.length} players)</option>
+                        <option key={t.id} value={t.id}>{t.name} ({t.players?.length || 0} players)</option>
                       ))}
                     </select>
                   </div>
@@ -9986,17 +10324,17 @@ export const CricketScoreboard: React.FC = () => {
                         const sel = savedTeams.find(t => t.id === e.target.value);
                         if (sel) {
                           setTeamB(sel.name);
-                          setSelectedTeamBRoster(sel.players);
-                          showNotification(`Loaded ${sel.name} roster (${sel.players.length} players) for Team B!`, 'success');
+                          setSelectedTeamBRoster(sel.players || []);
+                          showNotification(`Loaded ${sel.name} roster (${sel.players?.length || 0} players) for Team B!`, 'success');
                         } else {
                           setSelectedTeamBRoster([]);
                         }
                       }}
                       className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20"
                     >
-                      <option value="">-- No preset (Manual) --</option>
+                      <option value="">-- No preset (Manual Entry) --</option>
                       {savedTeams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} ({t.players.length} players)</option>
+                        <option key={t.id} value={t.id}>{t.name} ({t.players?.length || 0} players)</option>
                       ))}
                     </select>
                   </div>
@@ -11200,6 +11538,24 @@ export const CricketScoreboard: React.FC = () => {
                     </button>
 
                     <button
+                      type="button"
+                      onClick={() => {
+                        const permUrl = getPermanentOverlayUrl(currentManagerId, streamKey);
+                        copyToClipboard(permUrl).then(() => {
+                          setCopiedPermanentOverlayLink(true);
+                          setTimeout(() => setCopiedPermanentOverlayLink(false), 2500);
+                          showNotification('🔥 Permanent OBS Link Copied! Add once to OBS (1920x1080); updates across all matches!', 'success');
+                        });
+                      }}
+                      className="px-3 py-2 bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 text-emerald-400 border border-emerald-500/40 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
+                      title="Copy Permanent OBS Link (Single link active for all matches, 1920x1080 transparent)"
+                      id="btn-copy-permanent-obs-toolbar"
+                    >
+                      {copiedPermanentOverlayLink ? <Check size={12} className="text-emerald-300" /> : <Radio size={12} className="text-emerald-400 animate-pulse" />}
+                      <span>{copiedPermanentOverlayLink ? 'Permanent Copied!' : '🔥 Permanent OBS'}</span>
+                    </button>
+
+                    <button
                       onClick={() => setShowBroadcastCenter(prev => !prev)}
                       className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border flex items-center gap-1.5 shadow-sm active:scale-95 ${
                         showBroadcastCenter 
@@ -11213,19 +11569,19 @@ export const CricketScoreboard: React.FC = () => {
 
                     <button
                       onClick={() => {
-                        const permUrl = getPermanentOverlayUrl(currentManagerId);
-                        copyToClipboard(permUrl).then(() => {
+                        const overlayUrl = getPublicOverlayUrl(match.id);
+                        copyToClipboard(overlayUrl).then(() => {
                           setCopiedOverlayLink(true);
                           setTimeout(() => setCopiedOverlayLink(false), 2500);
-                          showNotification('Permanent OBS Overlay link copied! Paste once in OBS - never changes across matches.', 'success');
+                          showNotification('OBS Studio Overlay link copied! Paste as transparent 1920x1080 Browser Source in OBS.', 'success');
                         });
                       }}
                       className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/25 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm active:scale-95"
-                      title="Copy Permanent OBS Studio Overlay Link (never changes across matches)"
+                      title="Copy OBS Studio Overlay Link (1920x1080) for OBS Studio Browser Source"
                       id="btn-copy-obs-overlay-management"
                     >
                       {copiedOverlayLink ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
-                      <span>{copiedOverlayLink ? 'Copied' : 'Permanent OBS Link'}</span>
+                      <span>{copiedOverlayLink ? 'Copied' : 'Copy Overlay'}</span>
                     </button>
 
                     <button
@@ -11344,78 +11700,94 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                         </div>
 
-                      {/* PERMANENT OBS BROADCAST CONTROLLER & LINK */}
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
-                        {/* Active Match Status Switch */}
-                        {match.status === 'live' ? (
-                          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-rose-950/80 border border-rose-500/40 rounded-xl shadow-[0_0_15px_rgba(244,63,94,0.25)]">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
-                              <span className="text-[10px] font-black text-rose-300 uppercase tracking-wider">
-                                ON-AIR
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => handleSetMatchCompleted()}
-                              disabled={isTogglingLiveStatus}
-                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border border-slate-700"
-                              title="End match and return permanent OBS overlay to standby"
-                            >
-                              End / Standby
-                            </button>
-                          </div>
-                        ) : (
+                      {/* PERMANENT OBS STUDIO OVERLAY LINK & ACTIVE MATCH ROUTING */}
+                      <div className="flex flex-col gap-3 w-full lg:w-auto">
+                        <div className="flex flex-wrap gap-2 items-center">
+                          {/* Main Permanent OBS Link Copy Button */}
                           <button
-                            onClick={() => handleSetMatchActiveLive()}
-                            disabled={isTogglingLiveStatus}
-                            className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-slate-950 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md shadow-rose-600/20 flex items-center justify-center gap-1.5 cursor-pointer border-none active:scale-95"
-                            title="Switch your permanent OBS overlay to broadcast this match live"
+                            onClick={() => {
+                              const link = getPermanentOverlayUrl(currentManagerId, streamKey);
+                              copyToClipboard(link).then(() => {
+                                setCopiedPermanentOverlayLink(true);
+                                setTimeout(() => setCopiedPermanentOverlayLink(false), 2500);
+                                showNotification('🔥 Permanent OBS Link Copied! Add once to OBS (1920x1080); it stays active forever across all matches!', 'success');
+                              });
+                            }}
+                            className="px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer border-none"
+                            title="Copy your permanent OBS Browser Source link. You never have to change OBS again between matches!"
+                            id="btn-copy-permanent-obs-overlay"
                           >
-                            <Radio size={13} className="text-slate-950" />
-                            <span>Go Live On OBS</span>
+                            {copiedPermanentOverlayLink ? <Check size={16} className="text-slate-950" /> : <Radio size={16} className="text-slate-950 animate-pulse" />}
+                            <span>{copiedPermanentOverlayLink ? 'Permanent OBS Link Copied!' : 'Copy Permanent OBS Link (Single Link)'}</span>
                           </button>
-                        )}
 
-                        {/* Permanent OBS Browser Source Link */}
-                        <button
-                          onClick={() => {
-                            const permLink = getPermanentOverlayUrl(currentManagerId);
-                            copyToClipboard(permLink).then(() => {
-                              showNotification('Permanent OBS URL Copied! Paste once into OBS Browser Source (1920x1080) — never changes across matches.', 'success');
-                            });
-                          }}
-                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-md flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer border-none"
-                          title="Copy ONE single, permanent OBS Browser Source link that never changes"
-                          id="btn-copy-permanent-obs-broadcast-center"
-                        >
-                          <Check size={14} className="text-white" />
-                          <span>Copy Permanent OBS URL</span>
-                        </button>
+                          {/* Preview Permanent Overlay in New Tab */}
+                          <a
+                            href={getPermanentOverlayUrl(currentManagerId, streamKey, true)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-white/10 flex items-center justify-center gap-1.5 no-underline"
+                            title="Open permanent overlay in a new browser tab"
+                          >
+                            <Eye size={14} />
+                            <span>Preview</span>
+                          </a>
 
-                        <a
-                          href={getPermanentOverlayUrl(currentManagerId)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all border border-white/5 flex items-center justify-center gap-1.5"
-                          title="Preview the permanent OBS overlay feed in a new tab"
-                        >
-                          <Eye size={14} />
-                          <span>Preview</span>
-                        </a>
+                          {/* Toggle Current Match as LIVE / COMPLETED on Permanent OBS Overlay */}
+                          {match.id && (
+                            match.status === 'live' ? (
+                              <button
+                                onClick={() => handleSetMatchCompleted(match.id)}
+                                className="px-3.5 py-3 bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                                title="End match and set to Completed (Permanent overlay enters standby mode)"
+                              >
+                                <span className="h-2 w-2 rounded-full bg-rose-500 animate-ping inline-block" />
+                                <span>End Match / Set Completed</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleSetActiveLiveMatch(match)}
+                                disabled={isActivatingLiveMatch}
+                                className="px-3.5 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                title="Set this match as LIVE on your permanent OBS overlay"
+                              >
+                                <Play size={12} className="text-emerald-400 fill-emerald-400" />
+                                <span>{isActivatingLiveMatch ? 'Activating...' : '🔴 Broadcast as LIVE Match'}</span>
+                              </button>
+                            )
+                          )}
+                        </div>
 
-                        {/* Fallback Match-Specific URL option */}
-                        <button
-                          onClick={() => {
-                            const link = getPublicOverlayUrl(match.id);
-                            copyToClipboard(link).then(() => {
-                              showNotification('Match-Specific URL Copied! (Note: Permanent URL above is recommended so you never need to recopy).', 'info');
-                            });
-                          }}
-                          className="px-2.5 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all border border-slate-800 flex items-center justify-center gap-1"
-                          title="Copy single match URL (legacy)"
-                        >
-                          <span>Match URL</span>
-                        </button>
+                        {/* Informational routing status pill */}
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 flex-wrap bg-slate-950/60 border border-white/5 px-3 py-1.5 rounded-lg">
+                          <span className="font-bold text-slate-300">OBS Stream Status:</span>
+                          {match.status === 'live' ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-400 font-extrabold uppercase">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                              Match is LIVE on OBS ({match.teamA} vs {match.teamB})
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-amber-400 font-bold uppercase">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 inline-block" />
+                              Standby (No match currently live)
+                            </span>
+                          )}
+                          <span className="text-slate-600">|</span>
+                          <span className="font-mono text-slate-400">Manager: @{currentManagerId}</span>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            onClick={() => {
+                              const link = getPublicOverlayUrl(match.id);
+                              copyToClipboard(link).then(() => {
+                                showNotification('Match-specific OBS link copied.', 'success');
+                              });
+                            }}
+                            className="text-[9px] text-slate-400 hover:text-white underline cursor-pointer bg-transparent border-none p-0"
+                            title="Copy legacy match-specific URL"
+                          >
+                            Copy match-specific URL
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -13729,170 +14101,828 @@ export const CricketScoreboard: React.FC = () => {
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-150 dark:border-slate-800 max-w-lg w-full p-8 shadow-2xl relative z-20 max-h-[90vh] overflow-y-auto"
             >
-              <div className="text-center mb-6">
-                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-605 rounded-full font-black text-[9px] uppercase tracking-widest">
-                  Preset Configuration Board
+              <div className="text-center mb-5">
+                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full font-black text-[9px] uppercase tracking-widest">
+                  Match Teams & Squad Management
                 </span>
                 <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 dark:text-white mt-2">
-                  Team Management
+                  Local Cricket Team Suite
                 </h3>
+                <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                  Send captain squad links, manually enter teams, or load squads into live scoreboard in 1-click.
+                </p>
+
+                {/* Tab Navigation */}
+                <div className="flex p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl mt-4 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setTeamModalTab('presets')}
+                    className={`flex-1 py-2 px-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 ${
+                      teamModalTab === 'presets'
+                        ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
+                    }`}
+                  >
+                    <Users size={12} />
+                    Saved Teams ({savedTeams.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTeamModalTab('invite_captain')}
+                    className={`flex-1 py-2 px-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 ${
+                      teamModalTab === 'invite_captain'
+                        ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
+                    }`}
+                  >
+                    <Smartphone size={12} />
+                    📲 Captain Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingTeamId(null);
+                      setNewTeamName('');
+                      setNewTeamCaptainName('');
+                      setNewTeamPlayersText('');
+                      setTeamModalTab('direct_add');
+                    }}
+                    className={`flex-1 py-2 px-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 ${
+                      teamModalTab === 'direct_add'
+                        ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
+                    }`}
+                  >
+                    <PlusCircle size={12} />
+                    ➕ Direct Add
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-6">
-                {/* Save Team Form */}
-                <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      {editingTeamId ? 'Edit Preset Roster' : 'Add New Preset'}
-                    </h4>
-                    {editingTeamId && (
+              <div className="space-y-5">
+                {/* TAB 1: SAVED TEAMS & 1-CLICK ACTIONS */}
+                {teamModalTab === 'presets' && (
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                        <Shield size={13} className="text-emerald-500" />
+                        Available Match Teams ({savedTeams.length})
+                      </h4>
                       <button
+                        type="button"
                         onClick={() => {
                           setEditingTeamId(null);
                           setNewTeamName('');
+                          setNewTeamCaptainName('');
                           setNewTeamPlayersText('');
+                          setTeamModalTab('direct_add');
                         }}
-                        className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-600 bg-transparent border-none cursor-pointer"
+                        className="text-[9.5px] font-black uppercase text-emerald-600 hover:underline bg-transparent border-none cursor-pointer"
                       >
-                        Cancel Edit
+                        + Add Another
                       </button>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Team Name</label>
-                    <input
-                      type="text"
-                      placeholder="E.g. Gully Gladiators"
-                      value={newTeamName}
-                      onChange={(e) => setNewTeamName(e.target.value)}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Players (One per line)</label>
-                    <textarea
-                      placeholder="Virat&#10;Sachin&#10;Dhoni&#10;Boomrah"
-                      value={newTeamPlayersText}
-                      onChange={(e) => setNewTeamPlayersText(e.target.value)}
-                      rows={4}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none font-mono"
-                    />
-                  </div>
+                    </div>
 
-                  {/* Approved players quick insert list for scoreboard presets */}
-                  {approvedPlayers.length > 0 && (
-                    <div className="space-y-1.5 text-left">
-                      <span className="text-[9px] font-black uppercase text-slate-400 block tracking-wider">Approved Players Quick Picker</span>
-                      <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1 py-1">
-                        {approvedPlayers.map(p => {
-                          const currentNames = newTeamPlayersText.split('\n').map(x => x.trim().toLowerCase());
-                          const isSelected = currentNames.includes(p.fullName.trim().toLowerCase());
+                    {savedTeams.length === 0 ? (
+                      <div className="text-center py-8 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-6 space-y-3">
+                        <Users size={32} className="mx-auto text-slate-400" />
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-300">No teams added yet!</p>
+                        <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                          You can send a link to team captains so they enter their 15-player squad, or manually add a team right away.
+                        </p>
+                        <div className="flex justify-center gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setTeamModalTab('invite_captain')}
+                            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider border-none cursor-pointer"
+                          >
+                            📲 Send Captain Link
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setTeamModalTab('direct_add')}
+                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider border-none cursor-pointer"
+                          >
+                            ➕ Add Team Direct
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                        {savedTeams.map((t) => {
+                          const isCaptainPending = t.status === 'pending_squad' && (!t.players || t.players.length === 0);
                           return (
-                            <button
-                              key={p.id}
-                              type="button"
-                              onClick={() => {
-                                const trimName = p.fullName.trim();
-                                if (isSelected) {
-                                  // Remove player
-                                  const lines = newTeamPlayersText.split('\n').filter(x => x.trim().toLowerCase() !== trimName.toLowerCase());
-                                  setNewTeamPlayersText(lines.join('\n'));
-                                } else {
-                                  // Add player
-                                  const list = newTeamPlayersText.split('\n').map(x => x.trim()).filter(x => x.length > 0);
-                                  list.push(trimName);
-                                  setNewTeamPlayersText(list.join('\n'));
-                                }
-                              }}
-                              className={`px-2 py-1 text-[8px] font-extrabold uppercase rounded-lg border-none cursor-pointer transition-all ${
-                                isSelected 
-                                  ? 'bg-emerald-500 text-white shadow-sm' 
-                                  : 'bg-white hover:bg-slate-100 text-slate-655 dark:bg-slate-800 dark:text-slate-350 hover:text-emerald-500 border border-slate-150 dark:border-slate-700'
-                              }`}
-                            >
-                              {isSelected ? `✓ ${p.fullName}` : `+ ${p.fullName}`}
-                            </button>
+                            <div key={t.id} className="p-3.5 bg-slate-50 dark:bg-slate-850/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5 hover:border-emerald-500/30 transition-all">
+                              <div className="flex justify-between items-start gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <strong className="font-black text-slate-850 dark:text-white block text-sm truncate">
+                                      {t.name}
+                                    </strong>
+                                    <span className={`text-[8.5px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shrink-0 ${
+                                      isCaptainPending
+                                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                        : (t.players?.length >= 11)
+                                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                                    }`}>
+                                      {isCaptainPending ? '⏳ Awaiting Captain' : `${t.players?.length || 0} Players`}
+                                    </span>
+                                  </div>
+                                  {t.captainName && (
+                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold mt-0.5">
+                                      Captain: <span className="text-slate-700 dark:text-slate-200">{t.captainName}</span>
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] text-slate-400 font-mono truncate mt-0.5">
+                                    {t.players && t.players.length > 0 ? t.players.join(', ') : 'No squad members submitted yet'}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingTeamId(t.id);
+                                      setNewTeamName(t.name);
+                                      setNewTeamCaptainName(t.captainName || '');
+                                      setNewTeamPlayersText(t.players ? t.players.join('\n') : '');
+                                      setTeamModalTab('direct_add');
+                                    }}
+                                    className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-500/10 rounded-lg border-none cursor-pointer transition-colors"
+                                    title="Edit team"
+                                  >
+                                    <Edit size={13} />
+                                  </button>
+                                  {teamDeleteConfirmId === t.id ? (
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleDeleteTeam(t.id, t.name);
+                                          setTeamDeleteConfirmId(null);
+                                        }}
+                                        className="px-2 py-1 text-white bg-rose-500 rounded text-[9px] font-black uppercase border-none cursor-pointer"
+                                      >
+                                        Yes
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setTeamDeleteConfirmId(null)}
+                                        className="px-1.5 py-1 text-slate-400 bg-slate-200 dark:bg-slate-700 rounded text-[9px] font-black uppercase border-none cursor-pointer"
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setTeamDeleteConfirmId(t.id)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 rounded-lg border-none cursor-pointer transition-colors"
+                                      title="Delete team"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Action Buttons Row */}
+                              <div className="flex flex-wrap items-center justify-between gap-1.5 pt-2 border-t border-slate-150 dark:border-slate-800">
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleOneClickLoadTeam(t, 'A');
+                                      setShowTeamModal(false);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider border-none cursor-pointer flex items-center gap-1 transition-transform active:scale-95 shadow-sm"
+                                  >
+                                    <Zap size={10} />
+                                    1-Click Team A
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleOneClickLoadTeam(t, 'B');
+                                      setShowTeamModal(false);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider border-none cursor-pointer flex items-center gap-1 transition-transform active:scale-95 shadow-sm"
+                                  >
+                                    <Zap size={10} />
+                                    1-Click Team B
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleShareCaptainWhatsApp(t)}
+                                    className="px-2 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded-lg text-[9px] font-bold uppercase tracking-wider border border-emerald-500/30 cursor-pointer flex items-center gap-1"
+                                    title="Send link to Captain on WhatsApp"
+                                  >
+                                    📲 WhatsApp
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const link = getCaptainSquadLink(t.id);
+                                      navigator.clipboard.writeText(link);
+                                      showNotification('Captain squad submission link copied!', 'success');
+                                    }}
+                                    className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-lg text-[9px] font-bold uppercase tracking-wider border-none cursor-pointer flex items-center gap-1"
+                                    title="Copy Captain link"
+                                  >
+                                    <Copy size={10} />
+                                    Copy Link
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
                           );
                         })}
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB 2: SEND CAPTAIN SQUAD LINK */}
+                {teamModalTab === 'invite_captain' && (
+                  <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                        <Smartphone size={14} />
+                        Send 15-Player Squad Submission Link to Captain
+                      </h4>
+                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        Enter the team name and send the generated link to the team captain via WhatsApp or SMS. The captain can easily input all 15 players (with roles like C, VC, WK) on their phone. Once submitted, you can load the squad into your live scoreboard in <strong>just one click</strong>!
+                      </p>
                     </div>
-                  )}
 
-                  <button
-                    onClick={handleSaveTeam}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider border-none cursor-pointer transition-all"
-                  >
-                    {editingTeamId ? 'Update Preset' : 'Save Team Preset'}
-                  </button>
-                </div>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                          Team Name <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Royal Challengers Bangalore"
+                          value={captainInviteTeamName}
+                          onChange={(e) => setCaptainInviteTeamName(e.target.value)}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        />
+                      </div>
 
-                {/* List of Saved Teams */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-705 dark:text-slate-300">Preserved Presets ({savedTeams.length})</h4>
-                  {savedTeams.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic text-center py-4">No pre-saved team presets yet. Build one above!</p>
-                  ) : (
-                    <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
-                      {savedTeams.map((t) => (
-                        <div key={t.id} className="p-3 bg-slate-50 dark:bg-slate-850/60 rounded-xl border border-slate-105 dark:border-slate-800 flex justify-between items-center text-xs">
-                          <div className="flex-1 mr-4 overflow-hidden">
-                            <strong className="font-extrabold text-slate-850 dark:text-white block truncate">{t.name}</strong>
-                            <p className="text-[10px] text-slate-450 dark:text-slate-500 font-bold truncate mt-0.5">
-                              {t.players.join(', ')}
-                            </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Captain Name (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Virat Kohli"
+                            value={captainInviteCaptainName}
+                            onChange={(e) => setCaptainInviteCaptainName(e.target.value)}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Captain WhatsApp / Phone (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 9876543210"
+                            value={captainInvitePhone}
+                            onChange={(e) => setCaptainInvitePhone(e.target.value)}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleGenerateCaptainInvite}
+                        className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider border-none cursor-pointer transition-all shadow-md hover:shadow-indigo-500/20 flex items-center justify-center gap-1.5"
+                      >
+                        <Zap size={13} />
+                        Generate Captain Squad Link
+                      </button>
+
+                      {/* Generated Link Display Box */}
+                      {generatedCaptainLink && (
+                        <div className="p-3.5 bg-indigo-50/80 dark:bg-indigo-950/40 rounded-xl border border-indigo-200 dark:border-indigo-800/80 space-y-2.5 animate-fadeIn">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block">
+                            ✓ Captain Squad Link Ready to Share
+                          </span>
+                          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-[10px] font-mono text-slate-700 dark:text-slate-300 break-all select-all">
+                            <span className="truncate flex-1">{generatedCaptainLink}</span>
                           </div>
-                          <div className="flex gap-2 shrink-0">
+
+                          <div className="grid grid-cols-2 gap-2">
                             <button
+                              type="button"
                               onClick={() => {
-                                setEditingTeamId(t.id);
-                                setNewTeamName(t.name);
-                                setNewTeamPlayersText(t.players.join('\n'));
+                                navigator.clipboard.writeText(generatedCaptainLink);
+                                setCopiedCaptainLink(true);
+                                setTimeout(() => setCopiedCaptainLink(false), 2500);
+                                showNotification('Captain link copied to clipboard!', 'success');
                               }}
-                              className="px-2.5 py-1 text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 border-none rounded-md text-[9px] font-black uppercase tracking-wider cursor-pointer transition-all"
+                              className="py-2 px-3 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-[9.5px] font-black uppercase tracking-wider border border-slate-200 dark:border-slate-700 cursor-pointer flex items-center justify-center gap-1.5 transition-colors"
                             >
-                              Edit
+                              {copiedCaptainLink ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                              {copiedCaptainLink ? 'Copied!' : 'Copy Link'}
                             </button>
-                            {teamDeleteConfirmId === t.id ? (
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => {
-                                    handleDeleteTeam(t.id, t.name);
-                                    setTeamDeleteConfirmId(null);
-                                  }}
-                                  className="px-2.5 py-1 text-white bg-rose-500 hover:bg-rose-600 border-none rounded-md text-[9px] font-black uppercase tracking-wider cursor-pointer"
-                                >
-                                  Confirm
-                                </button>
-                                <button
-                                  onClick={() => setTeamDeleteConfirmId(null)}
-                                  className="px-2 py-1 text-slate-500 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 rounded-md text-[9px] font-black uppercase tracking-wider cursor-pointer border-none"
-                                >
-                                  No
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => setTeamDeleteConfirmId(t.id)}
-                                className="px-2.5 py-1 text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 border-none rounded-md text-[9px] font-black uppercase tracking-wider cursor-pointer transition-all"
-                              >
-                                Delete
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const msg = encodeURIComponent(
+                                  `🏏 *Gully Score Live Match Squad Invitation*\n` +
+                                  `Team: *${captainInviteTeamName.trim()}*\n` +
+                                  `Hey Captain! Please submit your 15-player squad using this link so we can load your team onto the live scoreboard in 1-click:\n\n` +
+                                  `${generatedCaptainLink}`
+                                );
+                                window.open(`https://api.whatsapp.com/send?text=${msg}`, '_blank');
+                              }}
+                              className="py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9.5px] font-black uppercase tracking-wider border-none cursor-pointer flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                            >
+                              📲 WhatsApp Captain
+                            </button>
+                          </div>
+
+                          <div className="pt-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setTeamModalTab('presets')}
+                              className="text-[9.5px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              View all teams in Saved Teams tab →
+                            </button>
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {/* TAB 3: DIRECT ADD TEAM & PLAYERS (MANUAL ENTRY) */}
+                {teamModalTab === 'direct_add' && (
+                  <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                          {editingTeamId ? 'Edit Team Preset' : 'Directly Add Team & Squad'}
+                        </h4>
+                        <p className="text-[10px] text-slate-400">
+                          Score managers can manually enter the team and all players here.
+                        </p>
+                      </div>
+                      {editingTeamId && (
+                        <button
+                          onClick={() => {
+                            setEditingTeamId(null);
+                            setNewTeamName('');
+                            setNewTeamCaptainName('');
+                            setNewTeamPlayersText('');
+                          }}
+                          className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-600 bg-transparent border-none cursor-pointer"
+                        >
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                          Team Name <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="E.g. Gully Gladiators"
+                          value={newTeamName}
+                          onChange={(e) => setNewTeamName(e.target.value)}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Captain Name (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="E.g. Rohit Sharma"
+                          value={newTeamCaptainName}
+                          onChange={(e) => setNewTeamCaptainName(e.target.value)}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-[9px] font-black uppercase text-slate-400 block">
+                          Players (Up to 15, one per line)
+                        </label>
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const sample15 = [
+                                'Rohit Sharma (C)', 'Shubman Gill', 'Virat Kohli', 'Shreyas Iyer', 'KL Rahul (WK)',
+                                'Hardik Pandya (VC)', 'Ravindra Jadeja', 'Axar Patel', 'Kuldeep Yadav', 'Jasprit Bumrah',
+                                'Mohammed Siraj', 'Mohammed Shami', 'Suryakumar Yadav', 'Ishan Kishan', 'Prasidh Krishna'
+                              ];
+                              setNewTeamPlayersText(sample15.join('\n'));
+                              if (!newTeamName) setNewTeamName('India XI');
+                              if (!newTeamCaptainName) setNewTeamCaptainName('Rohit Sharma');
+                              showNotification('Loaded 15 sample players!', 'info');
+                            }}
+                            className="text-[8.5px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded border-none cursor-pointer hover:bg-emerald-500/20"
+                          >
+                            ⚡ Sample 15 Squad
+                          </button>
+                        </div>
+                      </div>
+                      <textarea
+                        placeholder="Player 1&#10;Player 2&#10;Player 3&#10;...up to 15 players"
+                        value={newTeamPlayersText}
+                        onChange={(e) => setNewTeamPlayersText(e.target.value)}
+                        rows={5}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none font-mono"
+                      />
+                    </div>
+
+                    {/* Approved players quick insert list */}
+                    {approvedPlayers.length > 0 && (
+                      <div className="space-y-1.5 text-left">
+                        <span className="text-[9px] font-black uppercase text-slate-400 block tracking-wider">
+                          Approved Players Quick Picker ({approvedPlayers.length})
+                        </span>
+                        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1 py-1">
+                          {approvedPlayers.map(p => {
+                            const currentNames = newTeamPlayersText.split('\n').map(x => x.trim().toLowerCase());
+                            const isSelected = currentNames.includes(p.fullName.trim().toLowerCase());
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  const trimName = p.fullName.trim();
+                                  if (isSelected) {
+                                    const lines = newTeamPlayersText.split('\n').filter(x => x.trim().toLowerCase() !== trimName.toLowerCase());
+                                    setNewTeamPlayersText(lines.join('\n'));
+                                  } else {
+                                    const list = newTeamPlayersText.split('\n').map(x => x.trim()).filter(x => x.length > 0);
+                                    list.push(trimName);
+                                    setNewTeamPlayersText(list.join('\n'));
+                                  }
+                                }}
+                                className={`px-2 py-1 text-[8px] font-extrabold uppercase rounded-lg border-none cursor-pointer transition-all ${
+                                  isSelected 
+                                    ? 'bg-emerald-500 text-white shadow-sm' 
+                                    : 'bg-white hover:bg-slate-100 text-slate-655 dark:bg-slate-800 dark:text-slate-350 hover:text-emerald-500 border border-slate-150 dark:border-slate-700'
+                                }`}
+                              >
+                                {isSelected ? `✓ ${p.fullName}` : `+ ${p.fullName}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleSaveTeam}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider border-none cursor-pointer transition-all shadow-sm"
+                    >
+                      {editingTeamId ? 'Update Team Preset' : 'Save Team Preset'}
+                    </button>
+                  </div>
+                )}
 
                 <div className="pt-2">
                   <button
+                    type="button"
                     onClick={() => setShowTeamModal(false)}
                     className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400 rounded-xl text-xs font-bold uppercase tracking-widest cursor-pointer border-none"
                   >
-                    Close presets panel
+                    Close
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* ==================== 8. MODAL DIALOG: PERMANENT OBS OVERLAY HUB ==================== */}
+        {showObsModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.75 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowObsModal(false)}
+              className="fixed inset-0 bg-black/80 backdrop-blur-md"
+            />
+
+            {/* Modal Card */}
+            <motion.div
+              initial={{ scale: 0.94, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.94, opacity: 0, y: 16 }}
+              className="relative w-full max-w-2xl bg-slate-900 border border-emerald-500/40 rounded-3xl shadow-2xl overflow-hidden z-10 my-6 text-white"
+            >
+              {/* Header */}
+              <div className="px-5 py-4 bg-gradient-to-r from-slate-900 via-slate-850 to-emerald-950/80 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
+                    <Tv size={18} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-mono text-[9px] font-black uppercase tracking-wider border border-rose-500/40">
+                        1920×1080 FULL HD
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-300 font-bold">
+                        @{currentManagerId}
+                      </span>
+                    </div>
+                    <h3 className="text-base font-black uppercase tracking-tight text-white mt-0.5">
+                      OBS Studio Overlay Desk
+                    </h3>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowObsModal(false)}
+                  className="p-2 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all cursor-pointer border-none"
+                  title="Close Modal"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Navigation Tabs */}
+              <div className="flex border-b border-white/10 bg-slate-950/60 p-1.5 gap-1 text-[11px] font-black uppercase tracking-wider">
+                <button
+                  type="button"
+                  onClick={() => setObsModalTab('permanent')}
+                  className={`flex-1 py-2 rounded-xl transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 ${
+                    obsModalTab === 'permanent'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Radio size={13} className={obsModalTab === 'permanent' ? 'animate-pulse' : ''} />
+                  <span>Permanent OBS Link</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setObsModalTab('single')}
+                  className={`flex-1 py-2 rounded-xl transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 ${
+                    obsModalTab === 'single'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Link2 size={13} />
+                  <span>Match-Specific Link</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setObsModalTab('guide')}
+                  className={`flex-1 py-2 rounded-xl transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 ${
+                    obsModalTab === 'guide'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <BookOpen size={13} />
+                  <span>Setup Guide</span>
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                {obsModalTab === 'permanent' && (
+                  <div className="space-y-4">
+                    <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl flex items-start gap-3">
+                      <Sparkles size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <strong className="text-emerald-300 font-extrabold uppercase tracking-wider block mb-0.5">
+                          Recommended: Single Link for All Matches
+                        </strong>
+                        <p className="text-slate-300 leading-relaxed">
+                          Add this browser source link to OBS Studio once. Whether you are scoring match 1 or match 50, you never need to update OBS settings again! All score bugs, player banners, and boundary animations update live.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Broadcast Status Pill */}
+                    <div className="flex items-center justify-between p-3 bg-slate-950 rounded-2xl border border-white/10">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2.5 h-2.5 rounded-full ${
+                          match.status === 'live' || activeLiveMatches.length > 0 ? 'bg-rose-400 animate-ping' : 'bg-amber-400'
+                        }`} />
+                        <span className="text-xs font-bold text-slate-200">
+                          {match.status === 'live'
+                            ? `Active Match: ${match.teamA} vs ${match.teamB}`
+                            : activeLiveMatches.length > 0
+                            ? `Active Stream: ${activeLiveMatches[0].teamA} vs ${activeLiveMatches[0].teamB}`
+                            : 'Broadcast Standby (Ready for Next Match)'}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                        1920×1080 @ 60 FPS
+                      </span>
+                    </div>
+
+                    {/* The Permanent URL Box */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                        Permanent OBS Browser Source URL
+                      </label>
+                      <div className="p-3 bg-black/60 border border-emerald-500/30 rounded-2xl font-mono text-xs text-emerald-300 select-all break-all shadow-inner">
+                        {getPermanentOverlayUrl(currentManagerId, streamKey)}
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const permUrl = getPermanentOverlayUrl(currentManagerId, streamKey);
+                          copyToClipboard(permUrl).then(() => {
+                            setCopiedPermanentOverlayLink(true);
+                            setTimeout(() => setCopiedPermanentOverlayLink(false), 2500);
+                            showNotification('🔥 Permanent OBS Link Copied! Add once to OBS (1920x1080 transparent).', 'success');
+                          });
+                        }}
+                        className="py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+                        id="btn-copy-perm-obs-modal"
+                      >
+                        {copiedPermanentOverlayLink ? <Check size={16} className="text-slate-950" /> : <Copy size={16} className="text-slate-950" />}
+                        <span>{copiedPermanentOverlayLink ? 'Copied Permanent Link!' : 'Copy Permanent OBS Link'}</span>
+                      </button>
+
+                      <a
+                        href={getPermanentOverlayUrl(currentManagerId, streamKey, true)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border border-white/10 transition-all flex items-center justify-center gap-2 no-underline text-center"
+                      >
+                        <ExternalLink size={15} />
+                        <span>Preview Overlay (New Tab)</span>
+                      </a>
+                    </div>
+
+                    {/* Stream Key / Identity settings */}
+                    <div className="p-4 bg-slate-950/80 rounded-2xl border border-white/10 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                          <Settings size={12} className="text-emerald-400" />
+                          Scorer Broadcast Identity
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newKey = prompt('Enter a custom Stream Key (or leave empty to clear):', streamKey);
+                            if (newKey !== null) {
+                              setStreamKey(newKey.trim());
+                              showNotification(newKey.trim() ? `Stream key set to: ${newKey.trim()}` : 'Stream key cleared', 'info');
+                            }
+                          }}
+                          className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 uppercase tracking-wider bg-transparent border-none cursor-pointer"
+                        >
+                          Change Stream Key
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                        <div className="p-2.5 bg-black/40 rounded-xl border border-white/5">
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Manager ID</span>
+                          <span className="text-emerald-300 font-bold truncate block">@{currentManagerId}</span>
+                        </div>
+                        <div className="p-2.5 bg-black/40 rounded-xl border border-white/5">
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Stream Key</span>
+                          <span className="text-amber-300 font-bold truncate block">{streamKey || 'None (Default)'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {obsModalTab === 'single' && (
+                  <div className="space-y-4">
+                    <div className="p-3.5 bg-indigo-500/10 border border-indigo-500/25 rounded-2xl flex items-start gap-3">
+                      <Info size={18} className="text-indigo-400 shrink-0 mt-0.5" />
+                      <div className="text-xs">
+                        <strong className="text-indigo-300 font-extrabold uppercase tracking-wider block mb-0.5">
+                          Match-Specific Link
+                        </strong>
+                        <p className="text-slate-300 leading-relaxed">
+                          This URL is bound specifically to match ID <code className="text-emerald-300">{match.id || 'N/A'}</code>. Use this if you only want to stream this single fixture.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                        Match-Specific OBS URL
+                      </label>
+                      <div className="p-3 bg-black/60 border border-indigo-500/30 rounded-2xl font-mono text-xs text-indigo-300 select-all break-all shadow-inner">
+                        {getPublicOverlayUrl(match.id || 'current')}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const singleUrl = getPublicOverlayUrl(match.id || 'current');
+                          copyToClipboard(singleUrl).then(() => {
+                            showNotification('Match-specific OBS Link Copied (1920x1080 transparent)', 'success');
+                          });
+                        }}
+                        className="py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-indigo-600/20 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Copy size={16} />
+                        <span>Copy Match-Specific Link</span>
+                      </button>
+
+                      <a
+                        href={getPublicOverlayUrl(match.id || 'current', true)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border border-white/10 transition-all flex items-center justify-center gap-2 no-underline text-center"
+                      >
+                        <ExternalLink size={15} />
+                        <span>Preview in New Tab</span>
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {obsModalTab === 'guide' && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <BookOpen size={14} />
+                      How to setup in OBS Studio (3 Simple Steps)
+                    </h4>
+
+                    <div className="space-y-2.5">
+                      <div className="p-3.5 bg-slate-950 rounded-2xl border border-white/10 flex items-start gap-3">
+                        <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-black text-xs flex items-center justify-center shrink-0">
+                          1
+                        </div>
+                        <div>
+                          <strong className="text-xs font-extrabold text-white block">Add Browser Source</strong>
+                          <p className="text-[11px] text-slate-300 mt-0.5">
+                            Open <strong className="text-white">OBS Studio</strong>. In the <strong>Sources</strong> dock at the bottom, click the <strong>+</strong> icon and choose <strong>Browser</strong>.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 bg-slate-950 rounded-2xl border border-white/10 flex items-start gap-3">
+                        <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-black text-xs flex items-center justify-center shrink-0">
+                          2
+                        </div>
+                        <div>
+                          <strong className="text-xs font-extrabold text-white block">Configure 1920 × 1080 Canvas</strong>
+                          <p className="text-[11px] text-slate-300 mt-0.5">
+                            Set Width to <strong className="text-white font-mono">1920</strong> and Height to <strong className="text-white font-mono">1080</strong>. Check <strong>"Shutdown source when not visible"</strong> for smooth performance.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 bg-slate-950 rounded-2xl border border-white/10 flex items-start gap-3">
+                        <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 font-black text-xs flex items-center justify-center shrink-0">
+                          3
+                        </div>
+                        <div>
+                          <strong className="text-xs font-extrabold text-white block">Paste the Permanent OBS Link & Done!</strong>
+                          <p className="text-[11px] text-slate-300 mt-0.5">
+                            Paste the Permanent OBS Link into the <strong>URL</strong> field and click <strong>OK</strong>. The scoreboard bug will render crisply with transparency over your live camera or screen capture!
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 bg-slate-950 border-t border-white/10 flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">
+                  Transparent background enabled by default
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowObsModal(false)}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer border-none"
+                >
+                  Close Desk
+                </button>
               </div>
             </motion.div>
           </div>
@@ -13926,6 +14956,27 @@ export const CricketScoreboard: React.FC = () => {
             >
               <Clock size={11} />
               {showHistory ? 'Close Logs' : 'Past Matches'}
+            </button>
+
+            {/* Small Permanent OBS Overlay Link Icon near Past Matches (Footer) */}
+            <button
+              type="button"
+              onClick={() => {
+                const overlayUrl = getPermanentOverlayUrl(currentManagerId, streamKey);
+                copyToClipboard(overlayUrl).then(() => {
+                  setCopiedOverlayLink(true);
+                  setTimeout(() => setCopiedOverlayLink(false), 2500);
+                  showNotification('Overlay link copied!', 'success');
+                });
+              }}
+              className={`p-2 rounded-lg transition-all cursor-pointer border-none text-white shadow-sm flex items-center justify-center ${
+                copiedOverlayLink ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
+              title={copiedOverlayLink ? "Copied overlay link!" : "Copy overlay link"}
+              id="btn-footer-obs-link-icon"
+              aria-label="Copy overlay link"
+            >
+              {copiedOverlayLink ? <Check size={14} className="text-slate-950 font-bold" /> : <Link2 size={14} />}
             </button>
 
             <div className="relative">

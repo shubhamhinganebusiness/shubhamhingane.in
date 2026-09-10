@@ -70,8 +70,11 @@ const PhotographyPortfolio = lazy(() => import('./components/photography/Photogr
 const ElectionCommandCenter = lazy(() => import('./components/election/ElectionCommandCenter').then(m => ({ default: m.ElectionCommandCenter })));
 const GanpatiMandalApp = lazy(() => import('./components/ganpati/GanpatiMandalApp').then(m => ({ default: m.GanpatiMandalApp })));
 const CricketDigitalToss = lazy(() => import('./components/cricket/CricketDigitalToss').then(m => ({ default: m.CricketDigitalToss })));
+const CaptainSquadSubmission = lazy(() => import('./components/cricket/CaptainSquadSubmission').then(m => ({ default: m.CaptainSquadSubmission })));
 
 const hideOnRoutes = [
+  '/live/cricket-captain-squad',
+  '/cricket-captain-squad',
   '/live/cricket-toss',
   '/cricket-toss',
   '/live/ganpati-mandal',
@@ -326,6 +329,10 @@ function AppContent() {
           />
           <Route path="/live/school-erp" element={<SchoolERPApp />} />
           <Route path="/live/cricket-scoreboard" element={<CricketScoreboard />} />
+          <Route path="/live/cricket-captain-squad" element={<CaptainSquadSubmission />} />
+          <Route path="/live/cricket-captain-squad/:teamId" element={<CaptainSquadSubmission />} />
+          <Route path="/cricket-captain-squad" element={<CaptainSquadSubmission />} />
+          <Route path="/cricket-captain-squad/:teamId" element={<CaptainSquadSubmission />} />
           <Route path="/live/cricket-toss" element={<CricketDigitalToss />} />
           <Route path="/cricket-toss" element={<CricketDigitalToss />} />
           <Route path="/live/cricket-details" element={<SpectatorScoreboardSection />} />
