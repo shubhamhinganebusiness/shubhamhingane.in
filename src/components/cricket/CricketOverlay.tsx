@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Trophy, TrendingUp, Zap, Radio, ChevronRight, Play, Flame, Award, Skull, Star, Check 
+  Trophy, TrendingUp, Zap, Radio, ChevronRight, Play, Flame, Award, Skull, Star, Check, X 
 } from 'lucide-react';
 import { useSearchParams, useParams } from 'react-router-dom';
 import { CricketOverlayAnimations } from './CricketOverlayAnimations';
@@ -258,6 +258,11 @@ export const CricketOverlay: React.FC = () => {
   const [selectedUmpireSignal, setSelectedUmpireSignal] = useState<'out' | 'noball' | 'freehit' | 'deadball' | 'wide'>('out');
   const [customMilestone, setCustomMilestone] = useState<{ name: string; type: 'fifty' | 'hundred' | '5wkt'; value: number } | null>(null);
   const [teamCompMode, setTeamCompMode] = useState<'lineup' | 'h2h'>('lineup');
+
+  // Auto-dismiss state tracking for banners and wicket popups
+  const [localBannerDismissed, setLocalBannerDismissed] = useState<boolean>(false);
+  const [localWicketDismissed, setLocalWicketDismissed] = useState<boolean>(false);
+  const [localOutsDismissed, setLocalOutsDismissed] = useState<boolean>(false);
 
   // Keep track of the last processed synced alert to prevent double triggering
   const lastProcessedAlertRef = useRef<number>(0);
@@ -662,6 +667,57 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [activeConfig.manualAlertTrigger]);
 
+  // Auto-dismiss custom banners after 5.0 seconds so they never get stuck on screen
+  useEffect(() => {
+    if (activeConfig.customBanner && activeConfig.customBanner !== 'none') {
+      setLocalBannerDismissed(false);
+      const timer = setTimeout(() => {
+        setLocalBannerDismissed(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeConfig.customBanner, activeConfig.customBannerText]);
+
+  // Auto-dismiss manual wicket triggers after 5.0 seconds
+  useEffect(() => {
+    if (activeConfig.manualWicketTrigger) {
+      setLocalWicketDismissed(false);
+      const timer = setTimeout(() => {
+        setLocalWicketDismissed(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeConfig.manualWicketTrigger]);
+
+  // Auto-dismiss manual outs display after 5.0 seconds
+  useEffect(() => {
+    if (activeConfig.manualOutsDisplay && activeConfig.manualOutsDisplay !== 'none') {
+      setLocalOutsDismissed(false);
+      const timer = setTimeout(() => {
+        setLocalOutsDismissed(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeConfig.manualOutsDisplay]);
+
+  // Dynamic bottom positioning to ensure batsman stats, bowler stats, partnership stats, and lower third bar
+  // NEVER obscure the main scoreboard bug
+  const statsBottomClass = useMemo(() => {
+    if (!activeConfig.showScoreBug) return 'bottom-12';
+    if (activeConfig.template === 'slanted-pro-design') return 'bottom-[140px]';
+    if (activeConfig.template === 'score-bug-1900-200') return 'bottom-[240px]';
+    // Standard left score bug (height ~270px + bottom-16 (64px) = 334px)
+    return 'bottom-[350px]';
+  }, [activeConfig.showScoreBug, activeConfig.template]);
+
+  const lowerThirdBottomClass = useMemo(() => {
+    if (!activeConfig.showScoreBug) return 'bottom-16 left-16';
+    if (activeConfig.template === 'slanted-pro-design') return 'bottom-[140px] left-16';
+    if (activeConfig.template === 'score-bug-1900-200') return 'bottom-[240px] left-16';
+    // Position stacked right above the standard score bug
+    return 'bottom-[350px] left-16';
+  }, [activeConfig.showScoreBug, activeConfig.template]);
+
 
 
   // Extract variables for current active innings
@@ -1026,9 +1082,11 @@ export const CricketOverlay: React.FC = () => {
     'innings_scorecard', 'full_scorecard', 
     'match_presentation', 'potm_card', 'presentation', 
     'tournament_standings', 'points_table', 'standings',
-    'prematch_matchup', 'matchup_card', 'matchup',
-    'toss_result', 'toss_card', 'toss',
-    'pitch_weather_report', 'pitch_report', 'pitch_weather'
+    'prematch_matchup', 'matchup_card', 'matchup', 'match_card',
+    'toss_result', 'toss_card', 'toss', 'toss_report',
+    'pitch_weather_report', 'pitch_report', 'pitch_weather', 'weather_report', 'pitch_and_weather',
+    'batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro',
+    'player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'
   ].includes(activeGraphic);
 
   // Standby Slate for Permanent OBS Links when waiting or between matches
@@ -1356,16 +1414,16 @@ export const CricketOverlay: React.FC = () => {
           1. WICKET FALL POPUP OVERLAY
           ========================================================================= */}
       <AnimatePresence>
-        {(wicketPopup?.visible || activeConfig.manualWicketTrigger) && (
-          <div className="absolute inset-x-0 top-32 flex justify-center z-50">
+        {((wicketPopup?.visible && !localWicketDismissed) || (activeConfig.manualWicketTrigger && !localWicketDismissed)) && (
+          <div className="absolute inset-x-0 top-32 flex justify-center z-50 pointer-events-auto">
             <motion.div
               initial={{ y: -100, opacity: 0, scale: 0.9 }}
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: -80, opacity: 0, scale: 0.9 }}
               transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              className="bg-slate-950 border border-red-500/60 p-6 rounded-[2.5rem] flex items-center gap-6 shadow-[0_0_50px_rgba(220,38,38,0.7)]"
+              className="bg-slate-950 border border-red-500/60 p-6 rounded-[2.5rem] flex items-center gap-6 shadow-[0_0_50px_rgba(220,38,38,0.7)] relative"
             >
-              <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center text-white animate-bounce">
+              <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center text-white animate-bounce shrink-0">
                 <Skull size={32} />
               </div>
               <div className="border-l border-white/10 pl-6 pr-4">
@@ -1378,21 +1436,34 @@ export const CricketOverlay: React.FC = () => {
                 </p>
                 <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded-lg py-1 px-3 inline-block">
                   <span className="text-xs text-red-300 font-mono font-bold uppercase">
-                    Score at Fall: {wicketPopup?.scoreAtFall || `${currentInnings.runs}/${currentInnings.wickets}`}
+                    Score at Fall: {wicketPopup?.scoreAtFall || `${currentInnings?.runs}/${currentInnings?.wickets}`}
                   </span>
                 </div>
               </div>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setWicketPopup(prev => prev ? { ...prev, visible: false } : null);
+                  setLocalWicketDismissed(true);
+                }}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-rose-500/40 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer ml-4 shrink-0"
+                title="Dismiss Wicket Popup"
+              >
+                <X size={16} />
+              </button>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
       {/* =========================================================================
-          1B. CORNER BANNER PROJECTION OVERLAY (TOP-RIGHT CORNER)
+          1B. CORNER BANNER PROJECTION OVERLAY (CORNER PROJECTION)
           ========================================================================= */}
       <AnimatePresence>
-        {activeConfig.customBanner && activeConfig.customBanner !== 'none' && (
-          <div className="absolute top-16 right-16 z-55 pointer-events-none" id="corner-banner-projection">
+        {activeConfig.customBanner && activeConfig.customBanner !== 'none' && !localBannerDismissed && (
+          <div className="absolute top-16 right-16 z-55 pointer-events-auto" id="corner-banner-projection">
             <motion.div
               initial={{ x: 100, opacity: 0, scale: 0.9 }}
               animate={{ x: 0, opacity: 1, scale: 1 }}
@@ -1452,7 +1523,7 @@ export const CricketOverlay: React.FC = () => {
               </div>
 
               {/* Text Information */}
-              <div className="flex flex-col text-left gap-0.5">
+              <div className="flex flex-col text-left gap-0.5 flex-1 min-w-0">
                 <span className={`text-[9px] font-black tracking-widest uppercase block 
                   ${activeConfig.customBanner === 'out' ? 'text-red-400' :
                     activeConfig.customBanner === 'four' ? 'text-emerald-400' :
@@ -1475,7 +1546,7 @@ export const CricketOverlay: React.FC = () => {
                    activeConfig.customBanner === 'free_hit' ? 'FREE HIT' :
                    'BROADCAST BANNER'}
                 </span>
-                <h4 className="text-base font-black text-white leading-tight uppercase flex-wrap">
+                <h4 className="text-base font-black text-white leading-tight uppercase truncate">
                   {activeConfig.customBannerText || (
                     activeConfig.customBanner === 'out' ? 'Wicket Dismissal' :
                     activeConfig.customBanner === 'four' ? '4 Runs! Classy Placement.' :
@@ -1489,6 +1560,16 @@ export const CricketOverlay: React.FC = () => {
                   )}
                 </h4>
               </div>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => setLocalBannerDismissed(true)}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/25 flex items-center justify-center text-white/70 hover:text-white transition-all cursor-pointer shrink-0 ml-2"
+                title="Dismiss Banner"
+              >
+                <X size={14} />
+              </button>
             </motion.div>
           </div>
         )}
@@ -1500,7 +1581,7 @@ export const CricketOverlay: React.FC = () => {
       {/* FREE HIT DISPLAY */}
       <AnimatePresence>
         {(match.freeHitNext || activeConfig.manualFreeHitTrigger) && (
-          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40">
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 pointer-events-auto">
             <motion.div
               initial={{ y: -50, scale: 0.8, opacity: 0 }}
               animate={{ y: 0, scale: 1, opacity: 1 }}
@@ -1517,22 +1598,30 @@ export const CricketOverlay: React.FC = () => {
 
       {/* OUTS SPECIAL OVERLAY (FULLSCREEN OR CORNER BUG SELECTABLE) */}
       <AnimatePresence>
-        {activeConfig.manualOutsDisplay !== 'none' && (
+        {activeConfig.manualOutsDisplay !== 'none' && !localOutsDismissed && (
           <div className={
             activeConfig.manualOutsDisplay === 'fullscreen' 
-              ? "absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-[100]"
-              : "absolute top-12 right-12 w-96 z-40"
+              ? "absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-[100] pointer-events-auto"
+              : "absolute top-12 right-12 w-96 z-40 pointer-events-auto"
           }>
             <motion.div
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 50, opacity: 0 }}
-              className={`p-10 rounded-[3rem] text-center border ${
+              className={`p-10 rounded-[3rem] text-center border relative ${
                 activeConfig.manualOutsDisplay === 'fullscreen' 
                   ? "bg-slate-900 border-emerald-500/20 max-w-2xl w-full shadow-[0_0_50px_rgba(16,185,129,0.2)]"
                   : "bg-slate-950 border-red-500/20 shadow-2xl"
               }`}
             >
+              <button
+                type="button"
+                onClick={() => setLocalOutsDismissed(true)}
+                className="absolute top-6 right-6 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                title="Dismiss"
+              >
+                <X size={16} />
+              </button>
               <div className="w-20 h-20 bg-red-600 text-white rounded-full flex items-center justify-center mx-auto mb-6">
                 <Skull size={40} />
               </div>
@@ -2319,11 +2408,21 @@ export const CricketOverlay: React.FC = () => {
           ========================================================================= */}
       <AnimatePresence>
         {activeGraphic === 'batsman_stats' && battingStats && (
-          <div className="absolute inset-x-0 bottom-12 flex justify-center z-50 pointer-events-none">
+          <div className={`absolute inset-x-0 ${statsBottomClass} flex justify-center z-50 pointer-events-auto`}>
             <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-[1000px] bg-slate-950/95 border border-amber-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" style={{ borderLeft: `6px solid ${activeTeamColor}` }}>
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4">
                 <span className="text-xs font-black tracking-widest text-slate-400 uppercase font-mono">BATSMEN STATISTICS</span>
-                <span className="text-xs font-mono text-amber-400 font-bold">Partnership: {matchStats?.activePartnership || 0} runs</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-amber-400 font-bold">Partnership: {matchStats?.activePartnership || 0} runs</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveGraphic('none')}
+                    className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                    title="Close Overlay"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-6 text-left">
                 <div className="bg-white/5 border border-white/5 rounded-xl p-4 flex gap-4 items-center">
@@ -2382,11 +2481,21 @@ export const CricketOverlay: React.FC = () => {
         )}
 
         {activeGraphic === 'bowler_stats' && bowlingStats && (
-          <div className="absolute inset-x-0 bottom-12 flex justify-center z-50 pointer-events-none">
+          <div className={`absolute inset-x-0 ${statsBottomClass} flex justify-center z-50 pointer-events-auto`}>
             <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-[900px] bg-slate-950/95 border border-sky-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" style={{ borderLeft: `6px solid ${activeTeamColor === activeConfig.teamAColor ? activeConfig.teamBColor : activeConfig.teamAColor}` }}>
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4">
                 <span className="text-xs font-black tracking-widest text-slate-400 uppercase font-mono">ACTIVE BOWLER SPELL</span>
-                <span className="text-xs font-mono text-sky-400 font-bold">Dot ball percentage: {bowlingStats.dotBallPct}%</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-sky-400 font-bold">Dot ball percentage: {bowlingStats.dotBallPct}%</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveGraphic('none')}
+                    className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                    title="Close Overlay"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-12 gap-6 items-center text-left">
                 <div className="col-span-5 flex gap-4 items-center">
@@ -2433,7 +2542,7 @@ export const CricketOverlay: React.FC = () => {
         )}
 
         {activeGraphic === 'lower_third' && (
-          <div className="absolute bottom-16 left-16 z-50 pointer-events-none text-left">
+          <div className={`absolute ${lowerThirdBottomClass} z-50 pointer-events-auto text-left`}>
             <motion.div initial={{ x: -100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -80, opacity: 0 }} className="w-[750px] bg-slate-950/95 border border-white/10 rounded-2xl p-5 shadow-2xl flex items-center justify-between" style={{ borderLeft: `6px solid ${activeTeamColor}` }}>
               {lowerThirdMode === 'intro' && (
                 <div className="w-full flex items-center justify-between">
@@ -2442,9 +2551,19 @@ export const CricketOverlay: React.FC = () => {
                     <h2 className="text-2xl font-black text-white mt-1 uppercase leading-none">{battingStats?.striker.name || 'ACTIVE BATTER'}</h2>
                     <span className="text-[10px] text-indigo-300 font-mono mt-1.5 block leading-none">Matches: 42 • Run-rate Peak: 142.1</span>
                   </div>
-                  <div className="flex gap-4 border-l border-white/10 pl-5 font-mono text-xs text-center shrink-0">
-                    <div><span className="text-[8px] text-slate-500 block">Runs</span><strong className="text-white text-sm">1,540</strong></div>
-                    <div><span className="text-[8px] text-slate-500 block">Avg</span><strong className="text-white text-sm">38.5</strong></div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex gap-4 border-l border-white/10 pl-5 font-mono text-xs text-center shrink-0">
+                      <div><span className="text-[8px] text-slate-500 block">Runs</span><strong className="text-white text-sm">1,540</strong></div>
+                      <div><span className="text-[8px] text-slate-500 block">Avg</span><strong className="text-white text-sm">38.5</strong></div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveGraphic('none')}
+                      className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0 ml-2"
+                      title="Close Lower Third"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
                 </div>
               )}
@@ -2456,8 +2575,18 @@ export const CricketOverlay: React.FC = () => {
                       {inningsNum === 1 ? 'Batting team setting baseline target' : `NEED ${match.targetRuns ? match.targetRuns - currentInnings.runs : 0} RUNS FROM ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)} DELIVERIES`}
                     </h3>
                   </div>
-                  <div className="px-4 py-1.5 bg-rose-500/10 rounded-lg text-xs font-mono font-bold text-rose-400 border border-rose-500/20 uppercase shrink-0">
-                    Pressure 82%
+                  <div className="flex items-center gap-3">
+                    <div className="px-4 py-1.5 bg-rose-500/10 rounded-lg text-xs font-mono font-bold text-rose-400 border border-rose-500/20 uppercase shrink-0">
+                      Pressure 82%
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveGraphic('none')}
+                      className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                      title="Close Lower Third"
+                    >
+                      <X size={14} />
+                    </button>
                   </div>
                 </div>
               )}
@@ -2467,7 +2596,17 @@ export const CricketOverlay: React.FC = () => {
                     <span className="text-[9px] text-purple-400 font-bold uppercase tracking-wider block">OFFICIAL SIGNAL CALL</span>
                     <h3 className="text-xl font-black text-white mt-0.5 uppercase">UMPIRE CALL: {selectedUmpireSignal.toUpperCase()}</h3>
                   </div>
-                  <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Studio Decision</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">Studio Decision</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveGraphic('none')}
+                      className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                      title="Close Lower Third"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
                 </div>
               )}
             </motion.div>
@@ -2509,11 +2648,21 @@ export const CricketOverlay: React.FC = () => {
 
         {/* 6. PARTNERSHIP STATS */}
         {activeGraphic === 'partnership' && (
-          <div className="absolute inset-x-0 bottom-12 flex justify-center z-50 pointer-events-none">
+          <div className={`absolute inset-x-0 ${statsBottomClass} flex justify-center z-50 pointer-events-auto`}>
             <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-[1000px] bg-slate-950/95 border border-teal-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" id="graphic-partnership">
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4 text-left">
                 <span className="text-xs font-black tracking-widest text-teal-400">PARTNERSHIP PROFILE</span>
-                <span className="text-xs font-mono text-white">BATTING FOR {currentInnings.battingTeam}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-mono text-white">BATTING FOR {currentInnings.battingTeam}</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveGraphic('none')}
+                    className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                    title="Close Overlay"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-12 gap-6 items-center">
                 <div className="col-span-3 text-left">
@@ -2724,27 +2873,45 @@ export const CricketOverlay: React.FC = () => {
         <div className="bg-slate-950/90 border border-white/10 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-1.5 text-xs font-mono flex-wrap justify-center">
           <span className="text-amber-400 font-bold uppercase text-[10px] mr-1">TV Transitions:</span>
           <button
-            onClick={() => setActiveGraphic(activeGraphic === 'prematch_matchup' ? 'none' : 'prematch_matchup')}
+            onClick={() => setActiveGraphic(['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(activeGraphic) ? 'none' : 'batsman_bowler_brush')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
-              activeGraphic === 'prematch_matchup' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+              ['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(activeGraphic) ? 'bg-amber-400 text-slate-950 font-black shadow-lg' : 'bg-white/5 hover:bg-white/10 text-amber-300'
+            }`}
+            title="Batsman & Bowler Brush Card (Image 1): Slanted stats, team crest & bowler paint stroke name banner"
+          >
+            🏏 Batter & Bowler Pro
+          </button>
+          <button
+            onClick={() => setActiveGraphic(['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(activeGraphic) ? 'none' : 'player_profile_card')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(activeGraphic) ? 'bg-cyan-400 text-slate-950 font-black shadow-lg' : 'bg-white/5 hover:bg-white/10 text-cyan-300'
+            }`}
+            title="Player Profile Pro Card (Image 2): Virat Kohli style profile with giant typography & 5 icon stat rows"
+          >
+            ⭐ Player Profile Pro
+          </button>
+          <button
+            onClick={() => setActiveGraphic(['prematch_matchup', 'matchup_card', 'matchup', 'match_card'].includes(activeGraphic) ? 'none' : 'prematch_matchup')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              ['prematch_matchup', 'matchup_card', 'matchup', 'match_card'].includes(activeGraphic) ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
             }`}
             title="The Matchup Card: Split full-screen or large lower-third"
           >
             ⚔️ Matchup
           </button>
           <button
-            onClick={() => setActiveGraphic(activeGraphic === 'toss_result' ? 'none' : 'toss_result')}
+            onClick={() => setActiveGraphic(['toss_result', 'toss_card', 'toss', 'toss_report'].includes(activeGraphic) ? 'none' : 'toss_result')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
-              activeGraphic === 'toss_result' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+              ['toss_result', 'toss_card', 'toss', 'toss_report'].includes(activeGraphic) ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
             }`}
             title="Toss Result Card: Official Toss decision"
           >
             🪙 Toss Result
           </button>
           <button
-            onClick={() => setActiveGraphic(activeGraphic === 'pitch_weather_report' ? 'none' : 'pitch_weather_report')}
+            onClick={() => setActiveGraphic(['pitch_weather_report', 'pitch_report', 'pitch_weather', 'weather_report', 'pitch_and_weather'].includes(activeGraphic) ? 'none' : 'pitch_weather_report')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
-              activeGraphic === 'pitch_weather_report' ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+              ['pitch_weather_report', 'pitch_report', 'pitch_weather', 'weather_report', 'pitch_and_weather'].includes(activeGraphic) ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
             }`}
             title="Pitch & Weather Report: Pitch analysis and atmospheric conditions"
           >

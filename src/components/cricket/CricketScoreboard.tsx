@@ -3860,6 +3860,25 @@ export const CricketScoreboard: React.FC = () => {
     nextMatchState = checkMatchEndCondition(nextMatchState);
     syncMatch(nextMatchState);
 
+    // Auto-clear wicket banner in overlayConfig after 5 seconds so it doesn't stay permanently stuck
+    setTimeout(() => {
+      syncMatch(prev => {
+        if (!prev) return prev;
+        const latest = prev.overlayConfig;
+        if (latest && (latest.customBanner === 'out' || latest.manualAlertTrigger?.type === 'wicket')) {
+          return {
+            ...prev,
+            overlayConfig: {
+              ...latest,
+              customBanner: 'none',
+              customBannerText: ''
+            }
+          };
+        }
+        return prev;
+      });
+    }, 5000);
+
     // AI Commentary trigger in background if enabled
     if (aiCommentaryEnabled && !isSpectator) {
       generateAICommentary(
@@ -5955,6 +5974,8 @@ export const CricketScoreboard: React.FC = () => {
               {(() => {
                 const AVAILABLE_QUEUE_GRAPHICS = [
                   { id: 'score_bug', label: 'Main Scoreboard' },
+                  { id: 'batsman_bowler_brush', label: 'Batter & Bowler Pro' },
+                  { id: 'player_profile_card', label: 'Player Profile Pro' },
                   { id: 'batsman_stats', label: 'Batsman Stats' },
                   { id: 'bowler_stats', label: 'Bowler Stats' },
                   { id: 'partnership', label: 'Partnership Card' },
@@ -6265,6 +6286,20 @@ export const CricketScoreboard: React.FC = () => {
                                   desc: 'Live score bug overlay in corner',
                                   isActive: activeOverlayConfig.showScoreBug !== false,
                                   onToggle: () => updateOverlayProp({ showScoreBug: activeOverlayConfig.showScoreBug === false })
+                                },
+                                {
+                                  id: 'batsman_bowler_brush',
+                                  label: 'Batter & Bowler Pro (Image 1)',
+                                  desc: 'Slanted stats, paint brush splatter, team crest & bowler banner',
+                                  isActive: ['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(currentActiveGraphic) ? 'none' : 'batsman_bowler_brush' })
+                                },
+                                {
+                                  id: 'player_profile_card',
+                                  label: 'Player Profile Pro (Image 2)',
+                                  desc: 'Virat Kohli style star profile with giant typography & icon stats',
+                                  isActive: ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(currentActiveGraphic) ? 'none' : 'player_profile_card' })
                                 },
                                 {
                                   id: 'batsman_stats',

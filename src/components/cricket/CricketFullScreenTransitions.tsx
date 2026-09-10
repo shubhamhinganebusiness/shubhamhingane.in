@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { BothSquadsImageOverlay } from './BothSquadsImageOverlay';
+import { BatsmanBowlerBrushOverlay, PlayerProfileCardOverlay } from './CricketBroadcastPlayerCards';
 import { 
   Trophy, Award, Star, Shield, Users, 
   TrendingUp, CheckCircle2, ChevronRight,
@@ -1543,17 +1544,15 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      className="absolute inset-0 bg-gradient-to-b from-slate-950/95 via-slate-900/95 to-slate-950/95 text-white flex flex-col justify-between p-8 z-50 pointer-events-auto backdrop-blur-xl font-sans"
+      className="absolute inset-0 bg-transparent text-white flex flex-col justify-between p-8 z-50 pointer-events-auto font-sans"
     >
-      {/* Dynamic Stadium Lights Ambient Background */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30">
-        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-blue-600/30 blur-[120px]" />
-        <div className="absolute -bottom-32 -right-32 w-96 h-96 rounded-full bg-amber-600/30 blur-[120px]" />
+      {/* Dynamic Stadium Lights Ambient Background - Subtle on transparent canvas */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-64 bg-amber-500/10 blur-[140px]" />
       </div>
 
       {/* Top Broadcast Branding Strip */}
-      <div className="relative z-10 flex items-center justify-between pb-4 border-b border-white/10">
+      <div className="relative z-10 flex items-center justify-between px-6 py-3 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-white/15 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-lg">
             <Trophy size={20} />
@@ -1604,7 +1603,7 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
           initial={{ x: -40, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.4 }}
-          className="bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-blue-950/40 border border-blue-500/30 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-xl group hover:border-blue-400/60 transition-all"
+          className="bg-slate-950/80 border border-blue-500/30 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-md group hover:border-blue-400/60 transition-all"
         >
           <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-500" />
           
@@ -1687,7 +1686,7 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
           initial={{ x: 40, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.4 }}
-          className="bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-rose-950/40 border border-amber-500/30 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-xl group hover:border-amber-400/60 transition-all"
+          className="bg-slate-950/80 border border-amber-500/30 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-md group hover:border-amber-400/60 transition-all"
         >
           <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-500 via-orange-400 to-rose-500" />
           
@@ -1741,10 +1740,10 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
       </div>
 
       {/* Bottom Live Match Status Strip */}
-      <div className="relative z-10 flex items-center justify-between pt-4 border-t border-white/10 text-xs font-mono text-slate-400">
+      <div className="relative z-10 flex items-center justify-between px-6 py-2.5 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-white/15 text-xs font-mono text-slate-300 shadow-xl">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <span className="text-slate-300 uppercase font-black tracking-wider">OFFICIAL FIXTURE</span>
+          <span className="text-slate-200 uppercase font-black tracking-wider">OFFICIAL FIXTURE</span>
           <span className="text-slate-500">•</span>
           <span>Pitch Inspection Passed</span>
         </div>
@@ -1778,15 +1777,15 @@ const TossResultCardOverlay: React.FC<{ match: MatchState; onClose?: () => void 
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
-      className="absolute inset-0 bg-gradient-to-b from-slate-950/95 via-slate-900/95 to-slate-950/95 text-white flex flex-col justify-center items-center p-8 z-50 pointer-events-auto backdrop-blur-2xl font-sans"
+      className="absolute inset-0 bg-transparent text-white flex flex-col justify-center items-center p-8 z-50 pointer-events-auto font-sans"
     >
-      {/* Background Spotlight */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-30">
+      {/* Subtle Ambient Glow on transparent canvas */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-amber-500/20 blur-[130px] rounded-full" />
       </div>
 
       {/* Main Center Card */}
-      <div className="relative z-10 w-full max-w-4xl bg-gradient-to-b from-slate-900/95 to-slate-950/95 border-2 border-amber-500/40 rounded-[2.5rem] p-8 md:p-10 shadow-2xl backdrop-blur-2xl text-center">
+      <div className="relative z-10 w-full max-w-4xl bg-slate-950/80 border-2 border-amber-500/40 rounded-[2.5rem] p-8 md:p-10 shadow-2xl backdrop-blur-md text-center">
         
         {/* Top Toss Icon Badge */}
         <div className="flex items-center justify-between pb-6 border-b border-white/10">
@@ -1911,16 +1910,16 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      className="absolute inset-0 bg-gradient-to-b from-slate-950/95 via-slate-900/95 to-slate-950/95 text-white flex flex-col justify-between p-8 z-50 pointer-events-auto backdrop-blur-2xl font-sans"
+      className="absolute inset-0 bg-transparent text-white flex flex-col justify-between p-8 z-50 pointer-events-auto font-sans"
     >
-      {/* Ambient Lighting */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-25">
+      {/* Subtle ambient lighting on transparent canvas */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
         <div className="absolute top-10 left-10 w-96 h-96 bg-emerald-600/20 blur-[130px] rounded-full" />
         <div className="absolute bottom-10 right-10 w-96 h-96 bg-amber-500/20 blur-[130px] rounded-full" />
       </div>
 
       {/* Header Bar */}
-      <div className="relative z-10 flex items-center justify-between pb-4 border-b border-white/10">
+      <div className="relative z-10 flex items-center justify-between px-6 py-3 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-white/15 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-lg">
             <Layers size={20} />
@@ -1955,7 +1954,7 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
       <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-8 my-auto max-w-6xl mx-auto w-full">
         
         {/* CARD 1: PITCH CONDITIONS */}
-        <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-slate-950/90 border border-emerald-500/30 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div className="bg-slate-950/80 border border-emerald-500/30 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
           <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-600" />
 
           <div className="flex items-center justify-between mb-5">
@@ -1971,7 +1970,7 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
           </div>
 
           {/* Graphical Pitch Strip Representation */}
-          <div className="mb-6 p-4 rounded-2xl bg-slate-950 border border-white/10 relative overflow-hidden">
+          <div className="mb-6 p-4 rounded-2xl bg-slate-950/90 border border-white/10 relative overflow-hidden">
             <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-2">
               <span>Bowling End</span>
               <span className="text-amber-400 font-bold uppercase">22 Yards Match Strip</span>
@@ -2022,7 +2021,7 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
         </div>
 
         {/* CARD 2: WEATHER & OVERHEAD CONDITIONS */}
-        <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/70 to-slate-950/90 border border-sky-500/30 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div className="bg-slate-950/80 border border-sky-500/30 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-md relative overflow-hidden">
           <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-500" />
 
           <div className="flex items-center justify-between mb-5">
@@ -2038,7 +2037,7 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
           </div>
 
           {/* Big Temperature Display */}
-          <div className="mb-6 p-4 rounded-2xl bg-slate-950 border border-white/10 flex items-center justify-between">
+          <div className="mb-6 p-4 rounded-2xl bg-slate-950/90 border border-white/10 flex items-center justify-between">
             <div>
               <span className="text-[10px] font-mono text-slate-400 uppercase block">Overhead Temperature</span>
               <div className="text-3xl font-black text-white flex items-center gap-2 mt-0.5">
@@ -2099,10 +2098,10 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
       </div>
 
       {/* Footer Info Strip */}
-      <div className="relative z-10 flex items-center justify-between pt-4 border-t border-white/10 text-xs font-mono text-slate-400">
+      <div className="relative z-10 flex items-center justify-between px-6 py-2.5 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-white/15 text-xs font-mono text-slate-300 shadow-xl">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-slate-300 uppercase font-bold">Live Pitch Sensor Diagnostics</span>
+          <span className="text-slate-200 uppercase font-bold">Live Pitch Sensor Diagnostics</span>
         </div>
         <div className="text-emerald-400 font-bold uppercase tracking-wider">
           OFFICIAL WEATHER DATA BY METEOROLOGICAL SERVICE
@@ -2120,18 +2119,40 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({ activeGraphic, m
     return null;
   }
 
+  // Pro Broadcast Card 1: Batsman & Bowler Brush Overlay (Image 1 Exact)
+  if (
+    activeGraphic === 'batsman_bowler_brush' ||
+    activeGraphic === 'batsman_bowler_broadcast' ||
+    activeGraphic === 'brush_batsman_bowler' ||
+    activeGraphic === 'image_batsman_bowler' ||
+    activeGraphic === 'batsman_bowler_pro'
+  ) {
+    return <BatsmanBowlerBrushOverlay match={match} onClose={onClose} />;
+  }
+
+  // Pro Broadcast Card 2: Star Player Profile Card (Image 2 Exact)
+  if (
+    activeGraphic === 'player_profile_card' ||
+    activeGraphic === 'player_profile_pro' ||
+    activeGraphic === 'player_profile_kohli' ||
+    activeGraphic === 'virat_profile' ||
+    activeGraphic === 'player_profile'
+  ) {
+    return <PlayerProfileCardOverlay match={match} onClose={onClose} />;
+  }
+
   // Pre-Match Build-Up 1: The Matchup Card
-  if (activeGraphic === 'prematch_matchup' || activeGraphic === 'matchup_card' || activeGraphic === 'matchup') {
+  if (activeGraphic === 'prematch_matchup' || activeGraphic === 'matchup_card' || activeGraphic === 'matchup' || activeGraphic === 'match_card') {
     return <MatchupCardOverlay match={match} onClose={onClose} />;
   }
 
   // Pre-Match Build-Up 2: Toss Result Card
-  if (activeGraphic === 'toss_result' || activeGraphic === 'toss_card' || activeGraphic === 'toss') {
+  if (activeGraphic === 'toss_result' || activeGraphic === 'toss_card' || activeGraphic === 'toss' || activeGraphic === 'toss_report') {
     return <TossResultCardOverlay match={match} onClose={onClose} />;
   }
 
   // Pre-Match Build-Up 3: Pitch & Weather Report
-  if (activeGraphic === 'pitch_weather_report' || activeGraphic === 'pitch_report' || activeGraphic === 'pitch_weather') {
+  if (activeGraphic === 'pitch_weather_report' || activeGraphic === 'pitch_report' || activeGraphic === 'pitch_weather' || activeGraphic === 'weather_report' || activeGraphic === 'pitch_and_weather') {
     return <PitchWeatherReportOverlay match={match} onClose={onClose} />;
   }
 
