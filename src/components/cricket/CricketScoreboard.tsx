@@ -23,7 +23,9 @@ import {
   safeSetDoc,
   safeDeleteDoc,
   syncScoreToRealtimeDB,
-  subscribeToRealtimeDBMatch
+  subscribeToRealtimeDBMatch,
+  subscribeToCricketMatchesCollection,
+  subscribeToCricketMatchDoc
 } from '../../lib/firebase';
 import { doc, setDoc, getDoc, onSnapshot, collection, deleteDoc } from 'firebase/firestore';
 
@@ -47,7 +49,8 @@ import {
   getLocalMatchById,
   pruneDeletedMatchesFromStorage,
   sanitizeForFirestore,
-  compressImageFile
+  compressImageFile,
+  isDemoOrAIMatch
 } from './cricketStorage';
 import {
   CommentaryLanguage,
@@ -59,6 +62,13 @@ import {
   getMatchContextualTone,
   createBatsmanAnnouncement,
   createBowlerAnnouncement,
+  createOverFinishedAndBowlerChangeAnnouncement,
+  createInningsSummaryCommentary,
+  createRunChaseEquationCommentary,
+  createMatchWinningCommentary,
+  getOrdinalWordEn,
+  getOrdinalWordHi,
+  getOrdinalWordMr,
   interceptSpecialEvent,
   ContextualToneShifterBadge,
   MatchContextualTone,
@@ -255,6 +265,14 @@ export interface MatchState {
   groundName?: string;
   isHidden?: boolean;
   isBlocked?: boolean;
+  playerOfTheMatch?: {
+    name: string;
+    runs: number;
+    balls: number;
+    wickets: number;
+    runsConceded: number;
+    points: number;
+  };
 }
 
 const copyToClipboard = (text: string): Promise<void> => {
@@ -927,20 +945,25 @@ export const CricketScoreboard: React.FC = () => {
   const [pastDateInput, setPastDateInput] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  // Load Past Matches from localStorage with seed data
+  // Load Past Matches from localStorage without seed data, purging any legacy bot/demo entries
   useEffect(() => {
     try {
       const saved = localStorage.getItem('cricket_custom_past_matches');
       if (saved) {
-        setPastMatches(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const sanitized = parsed.filter(
+            (m: any) => !isDemoOrAIMatch(m) && !String(m?.id || '').startsWith('custom-')
+          );
+          setPastMatches(sanitized);
+          localStorage.setItem('cricket_custom_past_matches', JSON.stringify(sanitized));
+        } else {
+          setPastMatches([]);
+          localStorage.setItem('cricket_custom_past_matches', JSON.stringify([]));
+        }
       } else {
-        const initial: PastMatchItem[] = [
-          { id: 'custom-1', title: 'Adelaide Strikers vs Sydney Sixers', date: '2026-05-12', isHidden: false },
-          { id: 'custom-2', title: 'Melbourne Stars vs Brisbane Heat', date: '2026-05-08', isHidden: false },
-          { id: 'custom-3', title: 'Hobart Hurricanes vs Perth Scorchers', date: '2026-05-01', isHidden: true }
-        ];
-        setPastMatches(initial);
-        localStorage.setItem('cricket_custom_past_matches', JSON.stringify(initial));
+        setPastMatches([]);
+        localStorage.setItem('cricket_custom_past_matches', JSON.stringify([]));
       }
     } catch (e) {
       console.error('Error loading custom past matches:', e);
@@ -1907,18 +1930,18 @@ export const CricketScoreboard: React.FC = () => {
 
   // Sync complete matches list (history) from Firestore
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'cricket_matches'), (snap) => {
+    const unsub = subscribeToCricketMatchesCollection((snap) => {
       const historyList: MatchState[] = [];
       const draftList: MatchState[] = [];
       const liveList: MatchState[] = [];
       const remoteIds = new Set<string>();
 
-      snap.forEach((docSnap) => {
+      snap.forEach((docSnap: any) => {
         const data = docSnap.data();
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
         
-        // Permanently filter out matches that were deleted
-        if (isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted') {
+        // Permanently filter out matches that were deleted or are AI bot / demo matches
+        if (isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted' || isDemoOrAIMatch(m)) {
           markMatchDeleted(m.id);
           return;
         }
@@ -1993,7 +2016,7 @@ export const CricketScoreboard: React.FC = () => {
           const parsed = JSON.parse(rawLocal);
           if (Array.isArray(parsed)) {
             parsed.forEach((lm: any) => {
-              if (lm && lm.status === 'draft' && !isMatchDeleted(lm.id)) {
+              if (lm && lm.status === 'draft' && !isMatchDeleted(lm.id) && !isDemoOrAIMatch(lm)) {
                 if (isScoreManager && !isMatchOwnedByCurrentManager(lm)) {
                   return;
                 }
@@ -2011,9 +2034,14 @@ export const CricketScoreboard: React.FC = () => {
       historyList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
       draftList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
       liveList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
-      setMatchHistory(historyList);
-      setSavedDrafts(draftList);
-      setActiveLiveMatches(liveList);
+
+      const cleanHistory = historyList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
+      const cleanDrafts = draftList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
+      const cleanLive = liveList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
+
+      setMatchHistory(cleanHistory);
+      setSavedDrafts(cleanDrafts);
+      setActiveLiveMatches(cleanLive);
     }, (error) => {
       console.warn("Realtime subscription notice for cricket_matches:", error?.message || error);
     });
@@ -2097,7 +2125,8 @@ export const CricketScoreboard: React.FC = () => {
       return;
     }
 
-    const unsub = onSnapshot(doc(db, 'cricket_matches', activeMatchId), (docSnap) => {
+    const unsub = subscribeToCricketMatchDoc(activeMatchId, (docSnap) => {
+      if (!docSnap || !docSnap.exists || !docSnap.exists()) return;
       if (isMatchDeleted(activeMatchId)) {
         setMatch({
           id: '',
@@ -2964,6 +2993,7 @@ export const CricketScoreboard: React.FC = () => {
       isNewBatsmanOnCrease?: boolean;
       newBatsmanName?: string;
       isOverStart?: boolean;
+      isCrucialTime?: boolean;
       specialTrigger?: {
         type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick' | 'retire_hurt';
         batterName?: string;
@@ -3017,10 +3047,11 @@ export const CricketScoreboard: React.FC = () => {
           isNewBatsmanOnCrease: additionalContext?.isNewBatsmanOnCrease || false,
           newBatsmanName: additionalContext?.newBatsmanName || '',
           isOverStart: additionalContext?.isOverStart || false,
+          isCrucialTime: additionalContext?.isCrucialTime,
           language: userCommentaryLang,
           contextualTone: toneInfo.tone,
           specialTrigger: additionalContext?.specialTrigger,
-          winProbability: winProbData
+          winProbability: additionalContext?.isCrucialTime ? winProbData : undefined
         })
       });
       const data = await res.json();
@@ -3080,20 +3111,34 @@ export const CricketScoreboard: React.FC = () => {
     const strikerBatter = currentInnings.batsmen?.[currentInnings.strikerIndex];
     const nonStrikerBatter = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
     const overStr = formatOvers(currentInnings.ballsBowled);
-    const commEntry = createBowlerAnnouncement(
-      newBowlerName,
-      overStr,
-      {
-        isNewOver: true,
-        facingBatsmanName: strikerBatter?.name
-      }
-    );
+    const isOverBoundary = currentInnings.ballsBowled > 0 && currentInnings.ballsBowled % 6 === 0;
+    let commEntry: any;
+
+    if (isOverBoundary) {
+      const completedOverNo = Math.floor(currentInnings.ballsBowled / 6);
+      commEntry = createOverFinishedAndBowlerChangeAnnouncement(
+        completedOverNo,
+        newBowlerName,
+        overStr
+      );
+    } else {
+      commEntry = createBowlerAnnouncement(
+        newBowlerName,
+        overStr,
+        {
+          isNewOver: currentInnings.ballsBowled === 0,
+          facingBatsmanName: strikerBatter?.name
+        }
+      );
+    }
     const bowlingChangeDesc = commEntry.description;
 
-    const updatedCommList = [
-      commEntry,
-      ...(currentInnings.commentaryList || [])
-    ];
+    let updatedCommList = [...(currentInnings.commentaryList || [])];
+    if (isOverBoundary && updatedCommList.length > 0 && updatedCommList[0].id?.startsWith('comm-over-finish-')) {
+      updatedCommList[0] = commEntry;
+    } else {
+      updatedCommList = [commEntry, ...updatedCommList];
+    }
 
     const updatedInnings = {
       ...currentInnings,
@@ -3573,13 +3618,25 @@ export const CricketScoreboard: React.FC = () => {
       // non-fatal
     }
 
+    // Requirement 4: Win probability shown only at crucial times, not on every ball
+    const isCrucialMoment = Boolean(
+      (eventType === 'boundary' && runsOffBatFromDelivery === 6) ||
+      milestoneSpecial ||
+      (isCalculatedOverBall && inn.ballsBowled > 0 && inn.ballsBowled % 6 === 0) ||
+      nextMatchState.isSuperOver ||
+      (nextMatchState.currentInningsNum === 2 && nextMatchState.targetRuns && (
+        (nextMatchState.oversLimit * 6 - inn.ballsBowled <= 18) ||
+        (nextMatchState.targetRuns - inn.runs <= 25)
+      ))
+    );
+
     const generatedHi = generateLocalizedCricketCommentary(
       localizedEventCat,
       runsOffBatFromDelivery,
       striker.name,
       bowler.name,
       'hi',
-      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb }
+      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
     );
     const generatedMr = generateLocalizedCricketCommentary(
       localizedEventCat,
@@ -3587,11 +3644,11 @@ export const CricketScoreboard: React.FC = () => {
       striker.name,
       bowler.name,
       'mr',
-      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb }
+      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
     );
 
     let localizedEnWithProb = ballDesc;
-    if (deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
+    if (isCrucialMoment && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
       const pA = Math.round(deliveryWinProb.probA ?? 50);
       const pB = Math.round(deliveryWinProb.probB ?? 50);
       localizedEnWithProb += ` [AI Win Probability: ${deliveryWinProb.teamA} ${pA}% | ${deliveryWinProb.teamB} ${pB}%]`;
@@ -3642,6 +3699,43 @@ export const CricketScoreboard: React.FC = () => {
 
     // Check if max overs finished or check win condition
     nextMatchState = checkMatchEndCondition(nextMatchState);
+
+    // Requirement 5: Over finished and bowling change commentary
+    if (
+      isCalculatedOverBall &&
+      inn.ballsBowled > 0 &&
+      inn.ballsBowled % 6 === 0 &&
+      nextMatchState.status !== 'completed' &&
+      nextMatchState.currentInningsNum === (match.currentInningsNum || 1)
+    ) {
+      const completedOverNo = Math.floor(inn.ballsBowled / 6);
+      let nextBowlerCandidate = '';
+      if (inn.bowlers.length > 1) {
+        const nextBwIdx = (inn.currentBowlerIndex + 1) % inn.bowlers.length;
+        nextBowlerCandidate = inn.bowlers[nextBwIdx]?.name || '';
+      }
+      if (!nextBowlerCandidate) {
+        const bowlSquad = (inn.bowlingTeam === nextMatchState.teamA ? selectedTeamARoster : selectedTeamBRoster) || [];
+        if (bowlSquad.length > 1) {
+          nextBowlerCandidate = bowlSquad[1];
+        } else {
+          nextBowlerCandidate = `Bowler ${inn.bowlers.length + 1}`;
+        }
+      }
+      const overFinishComm = createOverFinishedAndBowlerChangeAnnouncement(
+        completedOverNo,
+        nextBowlerCandidate,
+        formatOvers(inn.ballsBowled)
+      );
+      const activeInningsKey = nextMatchState.currentInningsNum === 1 ? 'innings1' : 'innings2';
+      if (nextMatchState[activeInningsKey]) {
+        nextMatchState[activeInningsKey] = {
+          ...nextMatchState[activeInningsKey]!,
+          commentaryList: [overFinishComm, ...(nextMatchState[activeInningsKey]!.commentaryList || [])]
+        };
+      }
+    }
+
     syncMatch(nextMatchState);
 
     // Trigger Server-side AI Commentary in the background if enabled
@@ -3659,6 +3753,7 @@ export const CricketScoreboard: React.FC = () => {
           isBowlerChanged: false,
           isNewBatsmanOnCrease: false,
           isOverStart: (inn.ballsBowled % 6 === 1),
+          isCrucialTime: isCrucialMoment,
           specialTrigger: milestoneSpecial ? {
             type: milestoneSpecial.commentary.specialEvent,
             batterName: striker.name,
@@ -4125,6 +4220,43 @@ export const CricketScoreboard: React.FC = () => {
     }
 
     nextMatchState = checkMatchEndCondition(nextMatchState);
+
+    // Requirement 5: Over finished and bowling change commentary after wicket delivery completing an over
+    if (
+      !isRetiredHurt &&
+      inn.ballsBowled > 0 &&
+      inn.ballsBowled % 6 === 0 &&
+      nextMatchState.status !== 'completed' &&
+      nextMatchState.currentInningsNum === (match.currentInningsNum || 1)
+    ) {
+      const completedOverNo = Math.floor(inn.ballsBowled / 6);
+      let nextBowlerCandidate = '';
+      if (inn.bowlers.length > 1) {
+        const nextBwIdx = (inn.currentBowlerIndex + 1) % inn.bowlers.length;
+        nextBowlerCandidate = inn.bowlers[nextBwIdx]?.name || '';
+      }
+      if (!nextBowlerCandidate) {
+        const bowlSquad = (inn.bowlingTeam === nextMatchState.teamA ? selectedTeamARoster : selectedTeamBRoster) || [];
+        if (bowlSquad.length > 1) {
+          nextBowlerCandidate = bowlSquad[1];
+        } else {
+          nextBowlerCandidate = `Bowler ${inn.bowlers.length + 1}`;
+        }
+      }
+      const overFinishComm = createOverFinishedAndBowlerChangeAnnouncement(
+        completedOverNo,
+        nextBowlerCandidate,
+        formatOvers(inn.ballsBowled)
+      );
+      const activeInningsKey = nextMatchState.currentInningsNum === 1 ? 'innings1' : 'innings2';
+      if (nextMatchState[activeInningsKey]) {
+        nextMatchState[activeInningsKey] = {
+          ...nextMatchState[activeInningsKey]!,
+          commentaryList: [overFinishComm, ...(nextMatchState[activeInningsKey]!.commentaryList || [])]
+        };
+      }
+    }
+
     syncMatch(nextMatchState);
 
     // Auto-clear wicket banner in overlayConfig after 5 seconds so it doesn't stay permanently stuck
@@ -4182,6 +4314,73 @@ export const CricketScoreboard: React.FC = () => {
     );
   };
 
+  // Helper to compute Player of the Match from state
+  const computeMatchPlayerOfTheMatch = (matchState: MatchState) => {
+    if (!matchState || (!matchState.innings1 && !matchState.innings2)) return null;
+
+    const statsMap: { [key: string]: { name: string; runs: number; balls: number; wickets: number; runsConceded: number; fours: number; sixes: number; maidens: number; ballsBowled: number } } = {};
+
+    const getOrCreatePlayer = (name: string) => {
+      const key = name.trim().toLowerCase();
+      if (!statsMap[key]) {
+        statsMap[key] = { name: name.trim(), runs: 0, balls: 0, wickets: 0, runsConceded: 0, fours: 0, sixes: 0, maidens: 0, ballsBowled: 0 };
+      }
+      return statsMap[key];
+    };
+
+    const processInnings = (inn: Innings | null) => {
+      if (!inn) return;
+      inn.batsmen?.forEach(b => {
+        if (!b.name) return;
+        const p = getOrCreatePlayer(b.name);
+        p.runs += (b.runs || 0);
+        p.balls += (b.balls || 0);
+        p.fours += (b.fours || 0);
+        p.sixes += (b.sixes || 0);
+      });
+      inn.bowlers?.forEach(bw => {
+        if (!bw.name) return;
+        const p = getOrCreatePlayer(bw.name);
+        p.wickets += (bw.wickets || 0);
+        p.runsConceded += (bw.runsConceded || 0);
+        p.maidens += (bw.maidens || 0);
+        p.ballsBowled += (bw.ballsBowled || 0);
+      });
+    };
+
+    processInnings(matchState.innings1);
+    processInnings(matchState.innings2);
+
+    let bestPlayer = null;
+    let maxPoints = -1;
+
+    for (const key in statsMap) {
+      const p = statsMap[key];
+      const points = p.runs + (p.wickets * 25);
+
+      if (points > maxPoints) {
+        maxPoints = points;
+        bestPlayer = p;
+      } else if (points === maxPoints && points > 0) {
+        if (bestPlayer && p.wickets > bestPlayer.wickets) {
+          bestPlayer = p;
+        } else if (bestPlayer && p.wickets === bestPlayer.wickets && p.runsConceded < bestPlayer.runsConceded) {
+          bestPlayer = p;
+        } else if (bestPlayer && p.wickets === bestPlayer.wickets && p.runsConceded === bestPlayer.runsConceded && p.runs > bestPlayer.runs) {
+          bestPlayer = p;
+        }
+      }
+    }
+
+    if (bestPlayer && (bestPlayer.runs > 0 || bestPlayer.wickets > 0)) {
+      return {
+        ...bestPlayer,
+        points: Math.round(maxPoints)
+      };
+    }
+    return null;
+  };
+
   // Evaluates Match Statuses & switches innings automatically
   const checkMatchEndCondition = (state: MatchState): MatchState => {
     let modifiedState = { ...state };
@@ -4197,6 +4396,22 @@ export const CricketScoreboard: React.FC = () => {
         // Automatic complete Innings 1, set target
         const targetRunsValue = inn1.runs + 1;
         modifiedState.targetRuns = targetRunsValue;
+        
+        // Requirement 6: after inning finish add inning summary in ai commentary
+        const innSummaryComm = createInningsSummaryCommentary(inn1, modifiedState.oversLimit);
+        // Requirement 7: after inning finish add inning run chase equation in ai commentary
+        const chaseEquationComm = createRunChaseEquationCommentary(
+          inn1.bowlingTeam,
+          inn1.battingTeam,
+          targetRunsValue,
+          modifiedState.oversLimit
+        );
+
+        inn1.commentaryList = [
+          chaseEquationComm,
+          innSummaryComm,
+          ...(inn1.commentaryList || [])
+        ];
         modifiedState.innings1 = inn1;
         
         const innTitle = modifiedState.isSuperOver
@@ -4239,7 +4454,9 @@ export const CricketScoreboard: React.FC = () => {
                 ? `⚡ Super Over ${modifiedState.superOverNumber || 1} Chase! ${chBatsman1Name} & ${chBatsman2Name} open chase for ${inn1.bowlingTeam}. Target: ${targetRunsValue} runs in 6 balls.`
                 : `Innings 2 Started! ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs in ${modifiedState.oversLimit} overs.`, 
               type: 'milestone' 
-            }
+            },
+            chaseEquationComm,
+            innSummaryComm
           ],
           history: [
             { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -4265,6 +4482,8 @@ export const CricketScoreboard: React.FC = () => {
       const chaseSuccessful = inn2.runs >= target;
       const batInningsEnded = inn2.ballsBowled >= maxBalls || inn2.wickets >= maxWickets;
 
+      let isMatchFinished = false;
+
       if (chaseSuccessful) {
         modifiedState.status = 'completed';
         modifiedState.winner = inn2.battingTeam;
@@ -4272,9 +4491,7 @@ export const CricketScoreboard: React.FC = () => {
         modifiedState.winReason = modifiedState.isSuperOver
           ? `won in Super Over ${modifiedState.superOverNumber || 1} by ${wicketsMargin} wicket${wicketsMargin > 1 ? 's' : ''}`
           : `won by ${wicketsMargin} wicket${wicketsMargin > 1 ? 's' : ''}`;
-        
-        // Push to local match history
-        saveMatchToHistory(modifiedState);
+        isMatchFinished = true;
       } else if (batInningsEnded && inn2.runs < target - 1) {
         modifiedState.status = 'completed';
         modifiedState.winner = inn2.bowlingTeam;
@@ -4282,15 +4499,38 @@ export const CricketScoreboard: React.FC = () => {
         modifiedState.winReason = modifiedState.isSuperOver
           ? `won in Super Over ${modifiedState.superOverNumber || 1} by ${runsMargin} run${runsMargin > 1 ? 's' : ''}`
           : `won by ${runsMargin} run${runsMargin > 1 ? 's' : ''}`;
-        
-        saveMatchToHistory(modifiedState);
+        isMatchFinished = true;
       } else if (batInningsEnded && inn2.runs === target - 1) {
         modifiedState.status = 'completed';
         modifiedState.winner = 'Tie';
         modifiedState.winReason = modifiedState.isSuperOver 
           ? `Super Over ${modifiedState.superOverNumber || 1} ended in a thrilling Tie!`
           : 'The match ended in a thrilling Tie!';
-        
+        isMatchFinished = true;
+      }
+
+      if (isMatchFinished) {
+        // Compute Player of the Match & store in match state
+        const potm = computeMatchPlayerOfTheMatch(modifiedState);
+        if (potm) {
+          modifiedState.playerOfTheMatch = {
+            name: potm.name,
+            runs: potm.runs,
+            balls: potm.balls,
+            wickets: potm.wickets,
+            runsConceded: potm.runsConceded,
+            points: potm.points
+          };
+        }
+
+        // Requirement 1: after match winning add match result in ai commentary and also add the player of the match name in the ai commentary.also add their match summary
+        const matchWinComm = createMatchWinningCommentary(modifiedState, potm);
+        inn2.commentaryList = [
+          matchWinComm,
+          ...(inn2.commentaryList || [])
+        ];
+        modifiedState.innings2 = inn2;
+
         saveMatchToHistory(modifiedState);
       }
     }
@@ -4451,6 +4691,21 @@ export const CricketScoreboard: React.FC = () => {
       const chBatsman2Name = (chasedBatRoster && chasedBatRoster.length > 1) ? chasedBatRoster[1] : 'Chasing Batter 2';
       const chBowler1Name = (chasedBowlRoster && chasedBowlRoster.length > 0) ? chasedBowlRoster[0] : 'Defender Bowler 1';
 
+      const innSummaryComm = createInningsSummaryCommentary(inn1, nextMatchState.oversLimit);
+      const chaseEquationComm = createRunChaseEquationCommentary(
+        inn1.bowlingTeam,
+        inn1.battingTeam,
+        targetRunsValue,
+        nextMatchState.oversLimit
+      );
+
+      inn1.commentaryList = [
+        chaseEquationComm,
+        innSummaryComm,
+        ...(inn1.commentaryList || [])
+      ];
+      nextMatchState.innings1 = inn1;
+
       const initialInnings2: Innings = {
         battingTeam: inn1.bowlingTeam,
         bowlingTeam: inn1.battingTeam,
@@ -4470,7 +4725,9 @@ export const CricketScoreboard: React.FC = () => {
         currentBowlerIndex: 0,
         fallOfWickets: [],
         commentaryList: [
-          { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs.`, type: 'milestone' }
+          { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs.`, type: 'milestone' },
+          chaseEquationComm,
+          innSummaryComm
         ],
         history: [
           { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -4504,6 +4761,22 @@ export const CricketScoreboard: React.FC = () => {
           ? `won in Super Over ${nextMatchState.superOverNumber || 1}!` 
           : `won by declaration forfeit (Margin: ${target - 1 - inn2.runs} runs)`;
       }
+
+      const potm = computeMatchPlayerOfTheMatch(nextMatchState);
+      if (potm) {
+        nextMatchState.playerOfTheMatch = {
+          name: potm.name,
+          runs: potm.runs,
+          balls: potm.balls,
+          wickets: potm.wickets,
+          runsConceded: potm.runsConceded,
+          points: potm.points
+        };
+      }
+      const matchWinComm = createMatchWinningCommentary(nextMatchState, potm);
+      inn2.commentaryList = [matchWinComm, ...(inn2.commentaryList || [])];
+      nextMatchState.innings2 = inn2;
+
       saveMatchToHistory(nextMatchState);
     }
   };

@@ -9,10 +9,11 @@ export interface CommentaryTranslations {
 }
 
 export interface CommentaryWithTranslations {
-  id?: string;
-  overBall?: string;
+  id: string;
+  overBall: string;
   description: string;
-  type?: string;
+  type: 'wicket' | 'boundary' | 'extra' | 'milestone' | 'normal' | any;
+  soundWave?: boolean;
   translations?: CommentaryTranslations;
   [key: string]: any;
 }
@@ -339,6 +340,7 @@ export function generateLocalizedCricketCommentary(
     howOut?: string;
     runsOffBat?: number;
     winProbability?: any;
+    isCrucialTime?: boolean;
   }
 ): string {
   const bat = striker?.trim() || 'फलंदाज';
@@ -347,6 +349,8 @@ export function generateLocalizedCricketCommentary(
 
   const appendWinProb = (text: string): string => {
     if (text.includes('[AI')) return text;
+    // CRITICAL USER DIRECTIVE: Do not show win probability on every delivery! Only show at crucial moments.
+    if (!options?.isCrucialTime) return text;
     const wp = options?.winProbability;
     if (!wp || !wp.teamA || !wp.teamB) return text;
     const pA = Math.round(wp.probA ?? 50);
@@ -1013,6 +1017,221 @@ export function createBowlerAnnouncement(
     type: 'extra',
     announcementType: 'new_bowler',
     playerName: name,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Number ordinals for commentary announcements
+ */
+export function getOrdinalWordEn(n: number): string {
+  const ordinals = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth'];
+  return ordinals[n] || `${n}th`;
+}
+
+export function getOrdinalWordHi(n: number): string {
+  const ordinals = ['', 'पहला', 'दूसरा', 'तीसरा', 'चौथा', 'पांचवां', 'छठा', 'सातवां', 'आठवां', 'नौवां', 'दसवां', 'ग्यारहवां', 'बारहवां', 'तेरहवां', 'चौदहवां', 'पंद्रहवां', 'सोलहवां', 'सत्रहवां', 'अठारहवां', 'उन्नीसवां', 'बीसवां'];
+  return ordinals[n] || `${n}वां`;
+}
+
+export function getOrdinalWordMr(n: number): string {
+  const ordinals = ['', 'पहिले', 'दुसरे', 'तिसरे', 'चौथे', 'पाचवे', 'सहावे', 'सातवे', 'आठवे', 'नववे', 'दहावे', 'अकरावे', 'बारावे', 'तेरावे', 'चौदावे', 'पंधरावे', 'सोळावे', 'सतरावे', 'अठरावे', 'एकोणिसावे', 'विसावे'];
+  return ordinals[n] || `${n} वे`;
+}
+
+/**
+ * Creates an over finish and bowling change announcement
+ * Example: "First over finished and Umesh will bowl second over."
+ */
+export function createOverFinishedAndBowlerChangeAnnouncement(
+  completedOverNo: number,
+  nextBowlerName: string,
+  overBallStr?: string
+): CommentaryWithTranslations {
+  const bwl = nextBowlerName?.trim() || 'Bowler';
+  const overN = Math.max(1, completedOverNo);
+  const nextN = overN + 1;
+
+  // English: "First over finished and Umesh will bowl second over."
+  const ordEnCurr = getOrdinalWordEn(overN);
+  const ordEnNext = getOrdinalWordEn(nextN);
+  const capitalizedOrdEnCurr = ordEnCurr.charAt(0).toUpperCase() + ordEnCurr.slice(1);
+  const en = `${capitalizedOrdEnCurr} over finished and ${bwl} will bowl ${ordEnNext} over.`;
+
+  // Hindi: "पहला ओवर समाप्त हुआ और Umesh दूसरा ओवर फेंकेंगे."
+  const ordHiCurr = getOrdinalWordHi(overN);
+  const ordHiNext = getOrdinalWordHi(nextN);
+  const hi = `${ordHiCurr} ओवर समाप्त हुआ और ${bwl} ${ordHiNext} ओवर फेंकेंगे.`;
+
+  // Marathi: "पहिले षटक संपले आणि Umesh दुसरे षटक टाकणार आहे."
+  const ordMrCurr = getOrdinalWordMr(overN);
+  const ordMrNext = getOrdinalWordMr(nextN);
+  const mr = `${ordMrCurr} षटक संपले आणि ${bwl} ${ordMrNext} षटक टाकणार आहे.`;
+
+  return {
+    id: `comm-over-finish-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    overBall: overBallStr || `${overN}.0`,
+    description: en,
+    type: 'milestone',
+    announcementType: 'new_bowler',
+    playerName: bwl,
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates an Inning 1 Summary commentary record
+ */
+export function createInningsSummaryCommentary(
+  inn1: any,
+  oversLimit?: number
+): CommentaryWithTranslations {
+  const batTeam = inn1?.battingTeam || 'Batting Team';
+  const runs = inn1?.runs || 0;
+  const wickets = inn1?.wickets || 0;
+  const ballsBowled = inn1?.ballsBowled || 0;
+  const oversStr = `${Math.floor(ballsBowled / 6)}.${ballsBowled % 6}`;
+  const rr = ballsBowled > 0 ? ((runs / ballsBowled) * 6).toFixed(2) : '0.00';
+
+  let topBat = { name: '', runs: -1, balls: 0 };
+  (inn1?.batsmen || []).forEach((b: any) => {
+    if (b.runs > topBat.runs) {
+      topBat = { name: b.name, runs: b.runs, balls: b.balls };
+    }
+  });
+  if (!topBat.name && (inn1?.batsmen || []).length > 0) {
+    topBat = { name: inn1.batsmen[0].name, runs: inn1.batsmen[0].runs, balls: inn1.batsmen[0].balls };
+  }
+
+  let bestBowl = { name: '', wickets: -1, runsConceded: 999 };
+  (inn1?.bowlers || []).forEach((bw: any) => {
+    if (bw.wickets > bestBowl.wickets || (bw.wickets === bestBowl.wickets && bw.runsConceded < bestBowl.runsConceded)) {
+      bestBowl = { name: bw.name, wickets: bw.wickets, runsConceded: bw.runsConceded };
+    }
+  });
+  if (!bestBowl.name && (inn1?.bowlers || []).length > 0) {
+    bestBowl = { name: inn1.bowlers[0].name, wickets: inn1.bowlers[0].wickets, runsConceded: inn1.bowlers[0].runsConceded };
+  }
+
+  let totalFours = 0;
+  let totalSixes = 0;
+  (inn1?.batsmen || []).forEach((b: any) => {
+    totalFours += (b.fours || 0);
+    totalSixes += (b.sixes || 0);
+  });
+
+  const extrasTotal = (inn1?.extras?.wides || 0) + (inn1?.extras?.noBalls || 0) + (inn1?.extras?.byes || 0) + (inn1?.extras?.legByes || 0) + (inn1?.extras?.penalty || 0);
+
+  const topBatTextEn = topBat.name ? `Top Scorer: ${topBat.name} (${topBat.runs} runs off ${topBat.balls}b). ` : '';
+  const topBatTextHi = topBat.name ? `शीर्ष स्कोरर: ${topBat.name} (${topBat.balls} गेंदों में ${topBat.runs} रन). ` : '';
+  const topBatTextMr = topBat.name ? `सर्वोच्च धावसंख्या: ${topBat.name} (${topBat.balls} चेंडूत ${topBat.runs} धावा). ` : '';
+
+  const bestBowlTextEn = bestBowl.name ? `Best Bowler: ${bestBowl.name} (${bestBowl.wickets}/${bestBowl.runsConceded}). ` : '';
+  const bestBowlTextHi = bestBowl.name ? `सर्वश्रेष्ठ गेंदबाज: ${bestBowl.name} (${bestBowl.runsConceded} रन देकर ${bestBowl.wickets} विकेट). ` : '';
+  const bestBowlTextMr = bestBowl.name ? `सर्वोत्तम गोलंदाज: ${bestBowl.name} (${bestBowl.runsConceded} धावांत ${bestBowl.wickets} बळी). ` : '';
+
+  const en = `📊 INNINGS 1 SUMMARY: ${batTeam} finished at ${runs}/${wickets} in ${oversStr} overs (Run Rate: ${rr}). ${topBatTextEn}${bestBowlTextEn}Boundaries: ${totalFours}x4s, ${totalSixes}x6s. Extras: ${extrasTotal}.`;
+  const hi = `📊 पहली पारी का सारांश: ${batTeam} ने ${oversStr} ओवर में ${runs}/${wickets} रन बनाए (रन रेट: ${rr}). ${topBatTextHi}${bestBowlTextHi}बाउंड्री: ${totalFours} चौके, ${totalSixes} छक्के. अतिरिक्त: ${extrasTotal}.`;
+  const mr = `📊 पहिल्या डावाचा सारांश: ${batTeam} ने ${oversStr} षटकांत ${runs}/${wickets} धावा केल्या (धावगती: ${rr}). ${topBatTextMr}${bestBowlTextMr}चौकार/षटकार: ${totalFours} चौकार, ${totalSixes} षटकार. अवांतर धावा: ${extrasTotal}.`;
+
+  return {
+    id: `comm-inn-summary-${Date.now()}`,
+    overBall: oversStr,
+    description: en,
+    type: 'milestone',
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates an Inning Run Chase Equation commentary record
+ */
+export function createRunChaseEquationCommentary(
+  chasingTeam: string,
+  defendingTeam: string,
+  targetRuns: number,
+  oversLimit: number
+): CommentaryWithTranslations {
+  const totalBalls = Math.max(1, oversLimit * 6);
+  const rrr = ((targetRuns / totalBalls) * 6).toFixed(2);
+
+  const en = `🎯 INNINGS RUN CHASE EQUATION: ${chasingTeam} need ${targetRuns} runs to win off ${totalBalls} balls (${oversLimit} overs) at a Required Run Rate (RRR) of ${rrr} runs per over against ${defendingTeam}.`;
+  const hi = `🎯 पारी रन चेज समीकरण: जीत के लिए ${chasingTeam} को ${oversLimit} ओवर (${totalBalls} गेंदों) में ${targetRuns} रन की आवश्यकता है (जरूरी रन रेट: ${rrr} प्रति ओवर).`;
+  const mr = `🎯 डावातील लक्ष्याचा पाठलाग (Run Chase Equation): विजयासाठी ${chasingTeam} ला ${oversLimit} षटकांत (${totalBalls} चेंडू) ${targetRuns} धावांची आवश्यकता आहे (आवश्यक धावगती: ${rrr} प्रति षटक).`;
+
+  return {
+    id: `comm-chase-equation-${Date.now()}`,
+    overBall: '0.0',
+    description: en,
+    type: 'milestone',
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates Match Winning, Player of the Match, and Match Summary commentary record
+ */
+export function createMatchWinningCommentary(
+  matchState: any,
+  potm: any
+): CommentaryWithTranslations {
+  const winner = matchState?.winner || 'Tie';
+  const winReason = matchState?.winReason || 'Match concluded';
+  const inn1 = matchState?.innings1;
+  const inn2 = matchState?.innings2;
+
+  const inn1Desc = inn1 ? `${inn1.battingTeam} ${inn1.runs}/${inn1.wickets} (${Math.floor(inn1.ballsBowled / 6)}.${inn1.ballsBowled % 6} ov)` : '';
+  const inn2Desc = inn2 ? `${inn2.battingTeam} ${inn2.runs}/${inn2.wickets} (${Math.floor(inn2.ballsBowled / 6)}.${inn2.ballsBowled % 6} ov)` : '';
+
+  let potmDetailsEn = 'Outstanding all-round contribution';
+  let potmDetailsHi = 'शानदार ऑलराउंड प्रदर्शन';
+  let potmDetailsMr = 'उत्कृष्ट अष्टपैलू कामगिरी';
+
+  if (potm) {
+    const batPartEn = potm.runs > 0 ? `${potm.runs} runs (${potm.balls || 0}b)` : '';
+    const bowlPartEn = potm.wickets > 0 ? `${potm.wickets} wkts (${potm.runsConceded || 0} runs)` : '';
+    const partsEn = [batPartEn, bowlPartEn].filter(Boolean);
+    if (partsEn.length > 0) potmDetailsEn = partsEn.join(' & ');
+
+    const batPartHi = potm.runs > 0 ? `${potm.runs} रन (${potm.balls || 0} गेंद)` : '';
+    const bowlPartHi = potm.wickets > 0 ? `${potm.wickets} विकेट (${potm.runsConceded || 0} रन)` : '';
+    const partsHi = [batPartHi, bowlPartHi].filter(Boolean);
+    if (partsHi.length > 0) potmDetailsHi = partsHi.join(' व ');
+
+    const batPartMr = potm.runs > 0 ? `${potm.runs} धावा (${potm.balls || 0} चेंडू)` : '';
+    const bowlPartMr = potm.wickets > 0 ? `${potm.wickets} बळी (${potm.runsConceded || 0} धावा)` : '';
+    const partsMr = [batPartMr, bowlPartMr].filter(Boolean);
+    if (partsMr.length > 0) potmDetailsMr = partsMr.join(' आणि ');
+  }
+
+  const potmName = potm?.name || 'Star Player';
+
+  let en = '';
+  let hi = '';
+  let mr = '';
+
+  if (winner === 'Tie') {
+    en = `🏆 MATCH RESULT: MATCH TIED! ${winReason}. 🌟 Player of the Match: ${potmName} (${potmDetailsEn}). 📋 Match Summary: ${inn1Desc} vs ${inn2Desc}. An unforgettable thrilling battle!`;
+    hi = `🏆 मैच परिणाम: मैच टाई रहा! ${winReason}. 🌟 प्लेयर ऑफ द मैच: ${potmName} (${potmDetailsHi}). 📋 मैच सारांश: ${inn1Desc} बनाम ${inn2Desc}. एक यादगार और रोमांचक मुकाबला!`;
+    mr = `🏆 सामन्याचा निकाल: सामना बरोबरीत (Tie) सुटला! ${winReason}. 🌟 सामन्याचा मानकरी (Player of the Match): ${potmName} (${potmDetailsMr}). 📋 सामना सारांश: ${inn1Desc} विरुद्ध ${inn2Desc}. एक थरारक व ऐतिहासिक लढत!`;
+  } else {
+    en = `🏆 MATCH RESULT: ${winner} won the match (${winReason})! 🌟 Player of the Match: ${potmName} (${potmDetailsEn}). 📋 Match Summary: ${inn1Desc} vs ${inn2Desc}. Heartiest congratulations to ${winner}!`;
+    hi = `🏆 मैच परिणाम: ${winner} ने मैच जीत लिया (${winReason})! 🌟 प्लेयर ऑफ द मैच: ${potmName} (${potmDetailsHi}). 📋 मैच सारांश: ${inn1Desc} बनाम ${inn2Desc}. ${winner} को हार्दिक बधाई!`;
+    mr = `🏆 सामन्याचा निकाल: ${winner} ने सामना जिंकला (${winReason})! 🌟 सामन्याचा मानकरी (Player of the Match): ${potmName} (${potmDetailsMr}). 📋 सामना सारांश: ${inn1Desc} विरुद्ध ${inn2Desc}. ${winner} संघाचे मनःपूर्वक अभिनंदन!`;
+  }
+
+  const lastBalls = inn2?.ballsBowled || inn1?.ballsBowled || 0;
+  const overBallStr = `${Math.floor(lastBalls / 6)}.${lastBalls % 6}`;
+
+  return {
+    id: `comm-match-won-${Date.now()}`,
+    overBall: overBallStr,
+    description: en,
+    type: 'milestone',
+    soundWave: true,
     translations: { en, hi, mr }
   };
 }

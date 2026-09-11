@@ -19,7 +19,9 @@ import {
   OperationType, 
   subscribeToRealtimeDBMatch,
   subscribeToRealtimeDBMatchesList,
-  subscribeToRealtimeDBCompletedMatch 
+  subscribeToRealtimeDBCompletedMatch,
+  subscribeToCricketMatchesCollection,
+  subscribeToCricketMatchDoc
 } from '../../lib/firebase';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 
@@ -161,6 +163,14 @@ interface MatchState {
   venue?: string | null;
   isHidden?: boolean;
   isBlocked?: boolean;
+  playerOfTheMatch?: {
+    name: string;
+    runs: number;
+    balls: number;
+    wickets: number;
+    runsConceded: number;
+    points: number;
+  };
 }
 
 const copyToClipboard = (text: string): Promise<void> => {
@@ -433,10 +443,10 @@ export const LiveMatchGlobalBanner = () => {
       }
     } catch (_) {}
 
-    const unsub = onSnapshot(collection(db, 'cricket_matches'), (snapshot) => {
+    const unsub = subscribeToCricketMatchesCollection((snapshot) => {
       const active: MatchState[] = [];
       const remoteIds = new Set<string>();
-      snapshot.forEach((docSnap) => {
+      snapshot.forEach((docSnap: any) => {
         const data = docSnap.data() as MatchState;
         const m = { ...data, id: data.id || docSnap.id };
         if (m.status === 'deleted' || (m as any).isDeleted === true || isMatchDeleted(m.id)) {
@@ -831,6 +841,19 @@ export const SpectatorScoreboardSection = ({
   const [toastNotification, setToastNotification] = useState<string | null>(null);
   const [prevPredA, setPrevPredA] = useState<number | null>(null);
   const [showPlayerRegistration, setShowPlayerRegistration] = useState(false);
+  const [showMatchResultModal, setShowMatchResultModal] = useState(false);
+  const [hasDismissedResultModal, setHasDismissedResultModal] = useState<string | null>(null);
+
+  // Automatically show match result popup modal when a match is completed
+  useEffect(() => {
+    if (selectedMatch && selectedMatch.status === 'completed') {
+      if (hasDismissedResultModal !== selectedMatch.id) {
+        setShowMatchResultModal(true);
+      }
+    } else {
+      setShowMatchResultModal(false);
+    }
+  }, [selectedMatch?.id, selectedMatch?.status, hasDismissedResultModal]);
 
   // States for live connections and auto-refresh indicators
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -1091,13 +1114,13 @@ export const SpectatorScoreboardSection = ({
     }
 
     setConnectionStatus('reconnecting');
-    const unsub = onSnapshot(collection(db, 'cricket_matches'), (snap) => {
+    const unsub = subscribeToCricketMatchesCollection((snap) => {
       setConnectionStatus('online');
       setLastRefreshed(new Date());
       const remoteMatches: MatchState[] = [];
       const remoteIds = new Set<string>();
 
-      snap.forEach((docSnap) => {
+      snap.forEach((docSnap: any) => {
         const data = docSnap.data();
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
         if (!m || !m.id) return;
@@ -1305,10 +1328,10 @@ export const SpectatorScoreboardSection = ({
     }
 
     setConnectionStatus('reconnecting');
-    const unsub = onSnapshot(doc(db, 'cricket_matches', targetMatchId), (docSnap) => {
+    const unsub = subscribeToCricketMatchDoc(targetMatchId, (docSnap) => {
       setConnectionStatus('online');
       setLastRefreshed(new Date());
-      if (docSnap.exists()) {
+      if (docSnap && docSnap.exists && docSnap.exists()) {
         const data = docSnap.data();
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
         if ((m as any).isDeleted === true || m.status === 'deleted') {
@@ -3664,6 +3687,17 @@ export const SpectatorScoreboardSection = ({
                   <RefreshCw size={13} />
                   <span className="truncate">Refresh</span>
                 </button>
+                {selectedMatch.status === 'completed' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMatchResultModal(true)}
+                    className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-md shadow-amber-500/20 min-h-[38px]"
+                    title="View Match Result Details Popup"
+                  >
+                    <Trophy size={13} />
+                    <span className="truncate">Match Result</span>
+                  </button>
+                )}
                 {selectedMatch.matchBannerUrl && (
                   <button
                     type="button"
@@ -3716,28 +3750,71 @@ export const SpectatorScoreboardSection = ({
                           {currentInnings.battingTeam} <span className="text-xs text-slate-400 normal-case font-medium">Innings {selectedMatch.currentInningsNum}</span>
                         </h4>
 
-                        {/* Run Chase Equation - Identical to scoreboard management page innings card */}
-                        {selectedMatch.currentInningsNum === 2 && selectedMatch.targetRuns && (
-                          <div className="mt-2.5 inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-black/40 border border-amber-400/40 rounded-xl text-xs font-bold text-amber-200 shadow-sm backdrop-blur-xs">
-                            <span className="text-[8.5px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1">
-                              ⚡ Run Chase Equation
-                            </span>
-                            {selectedMatch.targetRuns - currentInnings.runs > 0 ? (
-                              <span className="font-mono text-white text-xs sm:text-sm">
-                                Need <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{selectedMatch.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{Math.max(0, (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls
-                                {(() => {
-                                  const ballsLeft = Math.max(0, (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled);
-                                  const runsToGet = selectedMatch.targetRuns - currentInnings.runs;
-                                  if (ballsLeft <= 0) return ' (Req: ∞)';
-                                  return ` (RRR: ${((runsToGet / ballsLeft) * 6).toFixed(2)})`;
-                                })()}
-                              </span>
-                            ) : (
-                              <span className="text-emerald-400 font-black uppercase tracking-wider animate-pulse">
-                                🎉 Target Achieved!
-                              </span>
+                        {/* Requirement 2: Spectator Scoreboard details in after match finish show the match result in current batting team card */}
+                        {selectedMatch.status === 'completed' ? (
+                          <div className="mt-3 p-3.5 sm:p-4 bg-gradient-to-r from-amber-500/25 via-yellow-500/15 to-emerald-500/20 border border-amber-400/50 rounded-2xl shadow-lg backdrop-blur-xs">
+                            <div className="flex items-center gap-2 mb-1.5 flex-wrap justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2.5 py-0.5 bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-widest rounded-md shadow-xs flex items-center gap-1">
+                                  🏆 Match Result
+                                </span>
+                                <span className="text-xs font-bold text-amber-300">
+                                  Match Concluded
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setShowMatchResultModal(true)}
+                                className="text-[10px] text-amber-300 hover:text-amber-200 underline font-black cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
+                              >
+                                View Pop-up ↗
+                              </button>
+                            </div>
+                            <div className="text-base sm:text-lg md:text-xl font-black text-white tracking-tight flex items-center gap-2 flex-wrap">
+                              {selectedMatch.winner === 'Tie' ? (
+                                <span className="text-yellow-300">Match Ended in a Thrilling Tie!</span>
+                              ) : (
+                                <>
+                                  <span className="text-amber-400 font-black">{selectedMatch.winner}</span>
+                                  <span className="text-white font-extrabold">{selectedMatch.winReason || 'Won the match!'}</span>
+                                </>
+                              )}
+                            </div>
+                            {playerOfTheMatch && (
+                              <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center gap-2 text-xs font-semibold text-slate-300 flex-wrap">
+                                <span className="text-amber-400 text-sm">🌟</span>
+                                <span className="text-slate-400">Player of the Match:</span>
+                                <strong className="text-amber-300 font-bold">{playerOfTheMatch.name}</strong>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  ({playerOfTheMatch.runs} runs{playerOfTheMatch.wickets > 0 ? `, ${playerOfTheMatch.wickets} wkts` : ''})
+                                </span>
+                              </div>
                             )}
                           </div>
+                        ) : (
+                          /* Run Chase Equation - Identical to scoreboard management page innings card */
+                          selectedMatch.currentInningsNum === 2 && selectedMatch.targetRuns && (
+                            <div className="mt-2.5 inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-black/40 border border-amber-400/40 rounded-xl text-xs font-bold text-amber-200 shadow-sm backdrop-blur-xs">
+                              <span className="text-[8.5px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1">
+                                ⚡ Run Chase Equation
+                              </span>
+                              {selectedMatch.targetRuns - currentInnings.runs > 0 ? (
+                                <span className="font-mono text-white text-xs sm:text-sm">
+                                  Need <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{selectedMatch.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{Math.max(0, (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls
+                                  {(() => {
+                                    const ballsLeft = Math.max(0, (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled);
+                                    const runsToGet = selectedMatch.targetRuns - currentInnings.runs;
+                                    if (ballsLeft <= 0) return ' (Req: ∞)';
+                                    return ` (RRR: ${((runsToGet / ballsLeft) * 6).toFixed(2)})`;
+                                  })()}
+                                </span>
+                              ) : (
+                                <span className="text-emerald-400 font-black uppercase tracking-wider animate-pulse">
+                                  🎉 Target Achieved!
+                                </span>
+                              )}
+                            </div>
+                          )
                         )}
                       </div>
                       {selectedMatch.lastBallResult && (
@@ -5822,6 +5899,156 @@ export const SpectatorScoreboardSection = ({
             >
               <Sparkles className="text-emerald-400 shrink-0" size={18} />
               <p className="text-xs font-black tracking-tight leading-relaxed">{toastNotification}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Match Result Pop-up Modal (Requirement 3) */}
+        <AnimatePresence>
+          {showMatchResultModal && selectedMatch && selectedMatch.status === 'completed' && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[140] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
+              onClick={() => {
+                setHasDismissedResultModal(selectedMatch.id);
+                setShowMatchResultModal(false);
+              }}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-slate-900 border border-amber-500/40 text-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative overflow-hidden my-8"
+              >
+                {/* Decorative background glow */}
+                <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-0 left-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+                {/* Close Button */}
+                <button
+                  onClick={() => {
+                    setHasDismissedResultModal(selectedMatch.id);
+                    setShowMatchResultModal(false);
+                  }}
+                  className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer border-none"
+                  aria-label="Close match result"
+                >
+                  <X size={18} />
+                </button>
+
+                {/* Header Badge */}
+                <div className="text-center space-y-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-widest">
+                    <Trophy size={14} className="text-amber-400" />
+                    <span>Official Match Result</span>
+                  </div>
+                  <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                    {selectedMatch.teamA} vs {selectedMatch.teamB}
+                  </h3>
+                  <p className="text-[11px] font-semibold text-slate-400">
+                    {selectedMatch.oversLimit} Overs • {selectedMatch.venue || 'Cricket Arena'}
+                  </p>
+                </div>
+
+                {/* Winner Announcement Card */}
+                <div className="mt-5 p-5 bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-amber-600/20 border border-amber-500/40 rounded-2xl text-center space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block">
+                    {selectedMatch.winner === 'Tie' ? 'MATCH CONCLUDED' : 'CHAMPIONS'}
+                  </span>
+                  <div className="text-2xl sm:text-3xl font-black text-amber-300 tracking-tight">
+                    {selectedMatch.winner === 'Tie' ? 'Match Tied!' : selectedMatch.winner}
+                  </div>
+                  <p className="text-sm font-bold text-slate-200">
+                    {selectedMatch.winReason || (selectedMatch.winner === 'Tie' ? 'The match ended in a thrilling Tie!' : 'Won the match!')}
+                  </p>
+                </div>
+
+                {/* Innings Scores Summary */}
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  {selectedMatch.innings1 && (
+                    <div className="p-3.5 bg-white/5 border border-white/10 rounded-2xl text-center space-y-1">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block truncate">
+                        1st Innings: {selectedMatch.innings1.battingTeam}
+                      </span>
+                      <span className="text-xl sm:text-2xl font-black font-mono text-white block">
+                        {selectedMatch.innings1.runs}/{selectedMatch.innings1.wickets}
+                      </span>
+                      <span className="text-[10px] text-emerald-400 font-mono font-medium block">
+                        {Math.floor(selectedMatch.innings1.ballsBowled / 6)}.{selectedMatch.innings1.ballsBowled % 6} / {selectedMatch.oversLimit} ov
+                      </span>
+                    </div>
+                  )}
+
+                  {selectedMatch.innings2 && (
+                    <div className="p-3.5 bg-white/5 border border-white/10 rounded-2xl text-center space-y-1">
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block truncate">
+                        2nd Innings: {selectedMatch.innings2.battingTeam}
+                      </span>
+                      <span className="text-xl sm:text-2xl font-black font-mono text-white block">
+                        {selectedMatch.innings2.runs}/{selectedMatch.innings2.wickets}
+                      </span>
+                      <span className="text-[10px] text-emerald-400 font-mono font-medium block">
+                        {Math.floor(selectedMatch.innings2.ballsBowled / 6)}.{selectedMatch.innings2.ballsBowled % 6} / {selectedMatch.oversLimit} ov
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Player of the Match Card */}
+                {playerOfTheMatch && (
+                  <div className="mt-4 p-4 bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border border-amber-400/40 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/30 border border-amber-400/50 flex items-center justify-center shrink-0 text-amber-300">
+                        <Award size={20} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-amber-300 block">
+                          Player of the Match
+                        </span>
+                        <h5 className="text-base font-black text-white truncate">
+                          {playerOfTheMatch.name}
+                        </h5>
+                        <p className="text-[11px] text-slate-300 font-mono">
+                          {playerOfTheMatch.runs > 0 ? `${playerOfTheMatch.runs} runs` : ''}
+                          {playerOfTheMatch.runs > 0 && playerOfTheMatch.wickets > 0 ? ' • ' : ''}
+                          {playerOfTheMatch.wickets > 0 ? `${playerOfTheMatch.wickets} wickets (${playerOfTheMatch.runsConceded} runs)` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    {playerOfTheMatch.points && (
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-xs shrink-0 font-mono">
+                        {playerOfTheMatch.points} pts
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="mt-6 flex flex-col sm:flex-row items-center gap-3">
+                  <button
+                    onClick={() => {
+                      handleExportMatchPDF(selectedMatch);
+                    }}
+                    className="w-full sm:flex-1 py-3 px-4 bg-white/10 hover:bg-white/20 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer border border-white/10"
+                  >
+                    <Download size={14} />
+                    <span>Download PDF</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHasDismissedResultModal(selectedMatch.id);
+                      setShowMatchResultModal(false);
+                    }}
+                    className="w-full sm:flex-1 py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer border-none shadow-lg shadow-amber-500/25"
+                  >
+                    <span>Got it</span>
+                  </button>
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
