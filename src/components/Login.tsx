@@ -318,7 +318,7 @@ export const Login: React.FC = () => {
             <div className="flex justify-between items-center ml-1">
               <label className="text-sm font-black text-gray-700 dark:text-gray-300 uppercase tracking-wider">Username</label>
               {username.length > 0 && !isUsernameValid && (
-                <span className="text-[10px] font-bold text-red-500 uppercase">Digits only (min 4)</span>
+                <span className="text-[10px] font-bold text-red-500 uppercase">Min 4 characters</span>
               )}
             </div>
             <div className="relative group">
@@ -326,7 +326,7 @@ export const Login: React.FC = () => {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)} 
-                placeholder="Ex: 771999595 or email"
+                placeholder="Enter your username"
                 maxLength={50}
                 autoComplete="username"
                 className={`w-full pl-12 pr-4 py-4 bg-main-bg border-2 rounded-2xl focus:ring-4 focus:ring-primary/5 transition-all font-bold text-main-text ${

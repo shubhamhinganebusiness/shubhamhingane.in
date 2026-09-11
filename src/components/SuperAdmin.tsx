@@ -759,7 +759,7 @@ export const SuperAdmin: React.FC = () => {
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Mobile Number (Login ID)</label>
                       <input
                         type="tel"
-                        placeholder="Ex: 771999595"
+                        placeholder="Enter mobile number"
                         value={inviteMobile}
                         onChange={(e) => setInviteMobile(e.target.value)}
                         className="w-full px-5 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-primary/10 font-bold text-sm"

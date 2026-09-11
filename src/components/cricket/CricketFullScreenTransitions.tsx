@@ -78,6 +78,7 @@ export interface MatchState {
   targetRuns?: number;
   teamALogo?: string;
   teamBLogo?: string;
+  matchBannerUrl?: string;
   playerPhotos?: Record<string, string>;
   tournamentName?: string;
   seriesName?: string;

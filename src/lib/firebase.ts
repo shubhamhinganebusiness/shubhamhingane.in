@@ -345,6 +345,38 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+function pruneDocSize(obj: any): any {
+  if (!obj || typeof obj !== 'object') return obj;
+  try {
+    const clone = Array.isArray(obj) ? [...obj] : { ...obj };
+    const imageKeys = ['teamALogo', 'teamBLogo', 'matchBannerUrl', 'customOverlayImg'];
+    for (const k of imageKeys) {
+      if (typeof clone[k] === 'string' && clone[k].length > 20000) clone[k] = '';
+      if (clone.overlayConfig && typeof clone.overlayConfig[k] === 'string' && clone.overlayConfig[k].length > 20000) {
+        clone.overlayConfig[k] = '';
+      }
+    }
+    if (clone.playerPhotos && typeof clone.playerPhotos === 'object') {
+      clone.playerPhotos = {};
+    }
+    if (Array.isArray(clone.teamASquad)) {
+      clone.teamASquad = clone.teamASquad.map((p: any) => (p && typeof p === 'object' && p.photo ? { ...p, photo: undefined } : p));
+    }
+    if (Array.isArray(clone.teamBSquad)) {
+      clone.teamBSquad = clone.teamBSquad.map((p: any) => (p && typeof p === 'object' && p.photo ? { ...p, photo: undefined } : p));
+    }
+    if (clone.innings1?.commentaryList && clone.innings1.commentaryList.length > 50) {
+      clone.innings1 = { ...clone.innings1, commentaryList: clone.innings1.commentaryList.slice(-50) };
+    }
+    if (clone.innings2?.commentaryList && clone.innings2.commentaryList.length > 50) {
+      clone.innings2 = { ...clone.innings2, commentaryList: clone.innings2.commentaryList.slice(-50) };
+    }
+    return clone;
+  } catch {
+    return obj;
+  }
+}
+
 /**
  * Safe write wrapper for setDoc that writes reliably with a timeout guard
  */
@@ -355,10 +387,26 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
       writePromise,
       new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore write timeout')), 9000))
     ]);
-  } catch (error) {
+  } catch (error: any) {
     if (isQuotaError(error)) {
       recordFirestoreQuotaExhaustion(2);
       return;
+    }
+    const errMsg = String(error?.message || error || '').toLowerCase();
+    if (errMsg.includes('exceeds the maximum allowed size') || errMsg.includes('1,048,576 bytes') || errMsg.includes('cannot be written because its size')) {
+      console.warn('[Firestore Size Guard] Document size exceeds 1MB limit. Pruning media payloads and retrying...', docRef?.id);
+      try {
+        const pruned = pruneDocSize(data);
+        const retryPromise = options !== undefined ? setDoc(docRef, pruned, options) : setDoc(docRef, pruned);
+        await Promise.race([
+          retryPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore write timeout')), 9000))
+        ]);
+        return;
+      } catch (retryErr) {
+        console.warn('[Firestore Size Guard] Write failed after pruning. Maintained in local cache:', retryErr);
+        return;
+      }
     }
     throw error;
   }
@@ -374,10 +422,21 @@ export async function safeUpdateDoc(docRef: any, ...args: any[]) {
       writePromise,
       new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore update timeout')), 9000))
     ]);
-  } catch (error) {
+  } catch (error: any) {
     if (isQuotaError(error)) {
       recordFirestoreQuotaExhaustion(2);
       return;
+    }
+    const errMsg = String(error?.message || error || '').toLowerCase();
+    if (errMsg.includes('not_found') || errMsg.includes('no document to update') || errMsg.includes('not-found')) {
+      try {
+        if (args.length === 1 && typeof args[0] === 'object') {
+          await setDoc(docRef, args[0], { merge: true });
+          return;
+        }
+      } catch (fallbackErr) {
+        console.warn('[safeUpdateDoc fallback note]:', fallbackErr);
+      }
     }
     throw error;
   }

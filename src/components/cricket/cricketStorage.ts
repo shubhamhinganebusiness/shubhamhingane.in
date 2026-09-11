@@ -17,8 +17,204 @@ try {
 }
 
 /**
+ * Compresses an image file in the browser using HTML5 Canvas.
+ * Produces a lightweight JPEG data URL guaranteed to be compact (typically 10-35KB).
+ */
+export function compressImageFile(
+  file: File,
+  maxWidth = 256,
+  maxHeight = 256,
+  quality = 0.75
+): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.FileReader) {
+      resolve('');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const src = e.target?.result;
+      if (typeof src !== 'string') {
+        resolve('');
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          if (width > maxWidth || height > maxHeight) {
+            const ratio = Math.min(maxWidth / width, maxHeight / height);
+            width = Math.round(width * ratio);
+            height = Math.round(height * ratio);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', quality);
+            resolve(dataUrl);
+            return;
+          }
+        } catch (canvasErr) {
+          console.warn('[Image Compression] Canvas error:', canvasErr);
+        }
+        resolve(src.length < 50000 ? src : '');
+      };
+      img.onerror = () => {
+        resolve(src.length < 50000 ? src : '');
+      };
+      img.src = src;
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Prunes oversized assets (like raw base64 photos/logos or long commentary history)
+ * so that the serialized document remains strictly under Firestore's 1,048,576 bytes limit.
+ */
+export function pruneOversizedDataForFirestore(data: any, maxByteSize = 820000): any {
+  if (data === undefined) return null;
+  if (data === null || typeof data !== 'object') return data;
+
+  let clone: any = Array.isArray(data) ? [...data] : { ...data };
+
+  const getByteLength = (val: any): number => {
+    try {
+      const str = JSON.stringify(val);
+      return typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(str).length : str.length;
+    } catch {
+      return 0;
+    }
+  };
+
+  let currentSize = getByteLength(clone);
+  if (currentSize <= maxByteSize) {
+    return clone;
+  }
+
+  console.warn(`[Firestore Pruner] Document payload (${currentSize} bytes) exceeds limit (${maxByteSize} bytes). Pruning...`);
+
+  // Step 1: Strip large base64 strings (> 25KB) from standard image keys
+  const imageKeys = ['teamALogo', 'teamBLogo', 'matchBannerUrl', 'customOverlayImg'];
+  for (const k of imageKeys) {
+    if (typeof clone[k] === 'string' && clone[k].length > 25000) {
+      clone[k] = '';
+    }
+  }
+
+  // Check overlayConfig
+  if (clone.overlayConfig && typeof clone.overlayConfig === 'object') {
+    clone.overlayConfig = { ...clone.overlayConfig };
+    for (const k of imageKeys) {
+      if (typeof clone.overlayConfig[k] === 'string' && clone.overlayConfig[k].length > 25000) {
+        clone.overlayConfig[k] = '';
+      }
+    }
+  }
+
+  // Step 2: Prune large player photos in playerPhotos record
+  if (clone.playerPhotos && typeof clone.playerPhotos === 'object') {
+    const photos: Record<string, string> = { ...clone.playerPhotos };
+    for (const [pk, pv] of Object.entries(photos)) {
+      if (typeof pv === 'string' && pv.length > 20000) {
+        delete photos[pk];
+      }
+    }
+    clone.playerPhotos = photos;
+  }
+
+  // Step 3: Prune player photos in squad lists
+  if (Array.isArray(clone.teamASquad)) {
+    clone.teamASquad = clone.teamASquad.map((p: any) => {
+      if (p && typeof p === 'object' && typeof p.photo === 'string' && p.photo.length > 20000) {
+        const { photo, ...rest } = p;
+        return rest;
+      }
+      return p;
+    });
+  }
+  if (Array.isArray(clone.teamBSquad)) {
+    clone.teamBSquad = clone.teamBSquad.map((p: any) => {
+      if (p && typeof p === 'object' && typeof p.photo === 'string' && p.photo.length > 20000) {
+        const { photo, ...rest } = p;
+        return rest;
+      }
+      return p;
+    });
+  }
+
+  currentSize = getByteLength(clone);
+  if (currentSize <= maxByteSize) {
+    return clone;
+  }
+
+  // Step 4: If still too large, remove all player photos and media images
+  if (clone.playerPhotos) {
+    clone.playerPhotos = {};
+  }
+  for (const k of imageKeys) {
+    clone[k] = '';
+  }
+
+  currentSize = getByteLength(clone);
+  if (currentSize <= maxByteSize) {
+    return clone;
+  }
+
+  // Step 5: Trim commentary and history in innings1 and innings2
+  if (clone.innings1 && typeof clone.innings1 === 'object') {
+    clone.innings1 = { ...clone.innings1 };
+    if (Array.isArray(clone.innings1.commentaryList) && clone.innings1.commentaryList.length > 75) {
+      clone.innings1.commentaryList = clone.innings1.commentaryList.slice(-75);
+    }
+    if (Array.isArray(clone.innings1.history) && clone.innings1.history.length > 100) {
+      clone.innings1.history = clone.innings1.history.slice(-100);
+    }
+  }
+  if (clone.innings2 && typeof clone.innings2 === 'object') {
+    clone.innings2 = { ...clone.innings2 };
+    if (Array.isArray(clone.innings2.commentaryList) && clone.innings2.commentaryList.length > 75) {
+      clone.innings2.commentaryList = clone.innings2.commentaryList.slice(-75);
+    }
+    if (Array.isArray(clone.innings2.history) && clone.innings2.history.length > 100) {
+      clone.innings2.history = clone.innings2.history.slice(-100);
+    }
+  }
+
+  currentSize = getByteLength(clone);
+  if (currentSize <= maxByteSize) {
+    return clone;
+  }
+
+  // Step 6: Deep search for any remaining strings > 10,000 chars
+  const deepStrip = (obj: any): any => {
+    if (obj === null || typeof obj !== 'object') {
+      if (typeof obj === 'string' && obj.length > 10000) {
+        return '';
+      }
+      return obj;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(deepStrip);
+    }
+    const res: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      res[k] = deepStrip(v);
+    }
+    return res;
+  };
+
+  return deepStrip(clone);
+}
+
+/**
  * Recursively cleans an object for Firestore by omitting any keys with `undefined` values.
  * Firestore strictly forbids `undefined` values in document data.
+ * Also enforces Firestore's 1MB document size limit by auto-pruning oversized media payloads.
  */
 export function sanitizeForFirestore<T = any>(obj: T): T {
   if (obj === undefined) return null as any;
@@ -32,6 +228,12 @@ export function sanitizeForFirestore<T = any>(obj: T): T {
       result[key] = sanitizeForFirestore(val);
     }
   }
+
+  // If top-level object is a cricket match or container with potential size limit issues, prune
+  if (result.id && (result.teamA !== undefined || result.innings1 !== undefined || result.status !== undefined)) {
+    return pruneOversizedDataForFirestore(result) as T;
+  }
+
   return result as T;
 }
 

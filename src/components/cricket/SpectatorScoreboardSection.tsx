@@ -141,6 +141,12 @@ interface MatchState {
   winReason?: string;
   targetRuns?: number;
   lastBallResult?: string;
+  isSuperOver?: boolean;
+  superOverNumber?: number;
+  superOverWicketLimit?: number;
+  tieResolution?: 'declared_tie' | 'super_over';
+  mainMatchState?: any;
+  superOversHistory?: any[];
   updatedAt?: number;
   tournamentId?: string | null;
   tournamentMatchId?: string | null;
@@ -149,6 +155,7 @@ interface MatchState {
   teamBId?: string | null;
   teamALogo?: string | null;
   teamBLogo?: string | null;
+  matchBannerUrl?: string | null;
   seriesName?: string | null;
   groundName?: string | null;
   venue?: string | null;
@@ -497,10 +504,17 @@ export const LiveMatchGlobalBanner = () => {
       <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5">
         {/* Left: Live indicator and Match Info */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 font-black text-[10px] tracking-widest uppercase">
-            <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
-            LIVE MATCH
-          </div>
+          {activeMatch.isSuperOver ? (
+            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black text-[10px] tracking-widest uppercase">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block" />
+              ⚡ SUPER OVER {activeMatch.superOverNumber || 1}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 font-black text-[10px] tracking-widest uppercase">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
+              LIVE MATCH
+            </div>
+          )}
 
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-100">
@@ -954,7 +968,16 @@ export const SpectatorScoreboardSection = ({
     if (!comm) return { label: '', color: 'hidden' };
     
     // Explicitly reject non-delivery commentary
-    if (comm.overBall === '0.0' || comm.type === 'milestone' || comm.type === 'announcement') {
+    if (
+      comm.overBall === '0.0' || 
+      comm.type === 'milestone' || 
+      comm.type === 'announcement' ||
+      comm.type === 'break' ||
+      comm.type === 'info' ||
+      comm.specialEvent === 'retire_hurt' ||
+      comm.announcementType === 'new_batsman' ||
+      comm.announcementType === 'new_bowler'
+    ) {
       return { label: '', color: 'hidden' };
     }
 
@@ -966,7 +989,10 @@ export const SpectatorScoreboardSection = ({
       desc.includes('declared') || 
       desc.includes('bulletin') || 
       desc.includes('match launched') ||
-      desc.includes('draft match')
+      desc.includes('draft match') ||
+      desc.includes('retired hurt') ||
+      desc.includes('new batsman on crease') ||
+      desc.includes('bowler into the attack')
     ) {
       return { label: '', color: 'hidden' };
     }
@@ -974,6 +1000,50 @@ export const SpectatorScoreboardSection = ({
     if (comm.type === 'wicket' || desc.includes('wicket') || desc.includes('out!')) {
       return { label: 'W', color: 'bg-rose-600 text-white border-rose-600 font-extrabold shadow-inner' };
     }
+
+    // Check for No Ball (including taken runs)
+    const isNoBallDelivery = comm.isNoBall || (comm.type === 'extra' && (desc.includes('no ball') || desc.includes('no-ball') || (desc.includes('no') && desc.includes('ball')) || desc.includes('nb'))) || (comm.ballScore && /nb/i.test(comm.ballScore));
+    if (isNoBallDelivery) {
+      let batRuns = comm.runsOffBat !== undefined ? Number(comm.runsOffBat) : 0;
+      if (!batRuns && comm.ballScore) {
+        const m = comm.ballScore.match(/(\d+)/);
+        if (m) batRuns = parseInt(m[1], 10);
+      }
+      if (!batRuns) {
+        const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken)/i) || desc.match(/(\d+)\s*(?:runs?|धावा|रन)/i);
+        if (m) batRuns = parseInt(m[1], 10);
+      }
+      if (batRuns > 0) {
+        const isSix = batRuns >= 6;
+        const isFour = batRuns >= 4 && batRuns < 6;
+        const color = isSix 
+          ? 'bg-gradient-to-r from-pink-500 to-amber-500 text-slate-950 border-amber-400 font-black shadow shadow-pink-500/50 animate-pulse'
+          : isFour
+          ? 'bg-gradient-to-r from-pink-500 to-emerald-500 text-white border-emerald-400 font-black shadow-sm'
+          : 'bg-pink-600 text-white border-pink-400 dark:bg-pink-700 font-extrabold shadow-sm';
+        return { label: `NB+${batRuns}`, color };
+      }
+      return { label: 'NB', color: 'bg-pink-100 text-pink-850 border-pink-205 dark:bg-pink-950/40 dark:text-pink-300 font-bold' };
+    }
+
+    // Check for Wide (including extra runs taken)
+    const isWideDelivery = (comm.type === 'extra' && desc.includes('wide')) || (comm.ballScore && /wd/i.test(comm.ballScore));
+    if (isWideDelivery) {
+      let extraRuns = comm.runsOffBat !== undefined ? Number(comm.runsOffBat) : 0;
+      if (!extraRuns && comm.ballScore) {
+        const m = comm.ballScore.match(/(\d+)/);
+        if (m) extraRuns = parseInt(m[1], 10);
+      }
+      if (!extraRuns) {
+        const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*extra\s*runs?/i);
+        if (m) extraRuns = parseInt(m[1], 10);
+      }
+      if (extraRuns > 0) {
+        return { label: `WD+${extraRuns}`, color: 'bg-blue-600 text-white border-blue-400 dark:bg-blue-700 font-black shadow-sm' };
+      }
+      return { label: 'WD', color: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 font-bold' };
+    }
+
     if (comm.type === 'boundary') {
       const isSix = desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum');
       return isSix 
@@ -981,10 +1051,8 @@ export const SpectatorScoreboardSection = ({
         : { label: '4', color: 'bg-emerald-600 text-white border-emerald-600 font-extrabold shadow-sm' };
     }
     if (comm.type === 'extra') {
-      if (desc.includes('wide')) return { label: 'Wd', color: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 font-bold' };
-      if (desc.includes('no') && desc.includes('ball')) return { label: 'Nb', color: 'bg-pink-100 text-pink-850 border-pink-205 dark:bg-pink-950/40 dark:text-pink-300 font-bold' };
-      if (desc.includes('leg bye')) return { label: 'Lb', color: 'bg-sky-100 text-sky-850 border-sky-205 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
-      if (desc.includes('bye')) return { label: 'By', color: 'bg-sky-100 text-sky-850 border-sky-105 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
+      if (desc.includes('leg bye')) return { label: 'LB', color: 'bg-sky-100 text-sky-850 border-sky-205 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
+      if (desc.includes('bye')) return { label: 'B', color: 'bg-sky-100 text-sky-850 border-sky-105 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
       return { label: 'Ex', color: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-450' };
     }
     // Default runs parsing
@@ -1486,24 +1554,50 @@ export const SpectatorScoreboardSection = ({
     const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
     const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
     const currentOverBalls = hasBowled
-      ? (currentInnings.commentaryList || [])
-          .filter((c: any) => {
-            if (!c || !c.overBall || c.overBall === '0.0') return false;
-            if (c.type === 'milestone' || c.type === 'announcement') return false;
-            const desc = (c.description || '').toLowerCase();
-            if (
-              desc.includes('started') || 
-              desc.includes('created') || 
-              desc.includes('toss') || 
-              desc.includes('declared') || 
-              desc.includes('bulletin') || 
-              desc.includes('match launched') ||
-              desc.includes('draft match')
-            ) return false;
-            return isBallInOver(c.overBall, currentOverNo);
-          })
-          .slice(0, 12)
-          .reverse()
+      ? (() => {
+          const raw = (currentInnings.commentaryList || [])
+            .filter((c: any) => {
+              if (!c || !c.overBall || c.overBall === '0.0') return false;
+              if (
+                c.type === 'milestone' || 
+                c.type === 'announcement' || 
+                c.type === 'break' || 
+                c.type === 'info' || 
+                c.specialEvent === 'retire_hurt' ||
+                c.announcementType === 'new_batsman' ||
+                c.announcementType === 'new_bowler'
+              ) return false;
+              const desc = (c.description || '').toLowerCase();
+              if (
+                desc.includes('started') || 
+                desc.includes('created') || 
+                desc.includes('toss') || 
+                desc.includes('declared') || 
+                desc.includes('bulletin') || 
+                desc.includes('match launched') ||
+                desc.includes('draft match') ||
+                desc.includes('retired hurt') ||
+                desc.includes('new batsman on crease') ||
+                desc.includes('bowler into the attack')
+              ) return false;
+              return isBallInOver(c.overBall, currentOverNo);
+            });
+
+          // Deduplicate so only one entry per overBall delivery is kept (prevents WWW duplicate pills)
+          const deduped: any[] = [];
+          const seenIds = new Set<string>();
+          const seenWickets = new Set<string>();
+          for (const b of raw) {
+            if (b.id && seenIds.has(b.id)) continue;
+            if (b.id) seenIds.add(b.id);
+            if (b.type === 'wicket') {
+              if (seenWickets.has(b.overBall)) continue;
+              seenWickets.add(b.overBall);
+            }
+            deduped.push(b);
+          }
+          return deduped.slice(0, 12).reverse();
+        })()
       : [];
 
     return { striker, nonStriker, bowler, currentOverNo, currentOverBalls };
@@ -1585,12 +1679,13 @@ export const SpectatorScoreboardSection = ({
     return { bestBatter, bestBowler };
   }, [selectedMatch]);
 
-  // Compute Player of the Match rating points (Runs + Wickets * 25)
-  const playerOfTheMatch = useMemo(() => {
-    if (!selectedMatch || (!selectedMatch.innings1 && !selectedMatch.innings2)) return null;
-
+  // Helper to compute Player / Man of the Match for any match item
+  const getMatchPotm = (mItem: any) => {
+    if (!mItem) return null;
+    if (mItem.playerOfTheMatch && mItem.playerOfTheMatch.name) {
+      return mItem.playerOfTheMatch;
+    }
     const statsMap: { [key: string]: { name: string; runs: number; balls: number; wickets: number; runsConceded: number } } = {};
-
     const getOrCreatePlayer = (name: string) => {
       const key = name.trim().toLowerCase();
       if (!statsMap[key]) {
@@ -1598,7 +1693,6 @@ export const SpectatorScoreboardSection = ({
       }
       return statsMap[key];
     };
-
     const processInnings = (inn: Innings | null) => {
       if (!inn) return;
       (inn.batsmen || []).forEach(b => {
@@ -1614,13 +1708,15 @@ export const SpectatorScoreboardSection = ({
         p.runsConceded += bw.runsConceded;
       });
     };
-
-    processInnings(selectedMatch.innings1);
-    processInnings(selectedMatch.innings2);
+    if (mItem.mainMatchState) {
+      processInnings(mItem.mainMatchState.innings1);
+      processInnings(mItem.mainMatchState.innings2);
+    }
+    processInnings(mItem.innings1);
+    processInnings(mItem.innings2);
 
     let bestPlayer = null;
     let maxPoints = -1;
-
     for (const key in statsMap) {
       const p = statsMap[key];
       const points = p.runs + (p.wickets * 25);
@@ -1635,7 +1731,6 @@ export const SpectatorScoreboardSection = ({
         }
       }
     }
-
     if (bestPlayer && (bestPlayer.runs > 0 || bestPlayer.wickets > 0)) {
       return {
         ...bestPlayer,
@@ -1643,7 +1738,10 @@ export const SpectatorScoreboardSection = ({
       };
     }
     return null;
-  }, [selectedMatch]);
+  };
+
+  // Compute Player of the Match rating points (Runs + Wickets * 25)
+  const playerOfTheMatch = useMemo(() => getMatchPotm(selectedMatch), [selectedMatch]);
 
   const selectMatch = (id: string) => {
     if (!id) {
@@ -1711,6 +1809,73 @@ export const SpectatorScoreboardSection = ({
       });
   };
 
+  const [downloadingBanner, setDownloadingBanner] = useState(false);
+
+  const handleDownloadBanner = async (bannerUrl: string, teamA?: string, teamB?: string) => {
+    if (!bannerUrl) {
+      showToast('No match banner available to download.');
+      return;
+    }
+    try {
+      setDownloadingBanner(true);
+      showToast('Downloading match banner...');
+      const cleanA = (teamA || 'TeamA').replace(/[^a-zA-Z0-9]/g, '_');
+      const cleanB = (teamB || 'TeamB').replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `${cleanA}_vs_${cleanB}_Match_Banner.png`;
+
+      // 1. Data URL (Base64) direct download
+      if (bannerUrl.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = bannerUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('Banner downloaded successfully!');
+        setDownloadingBanner(false);
+        return;
+      }
+
+      // 2. Fetch as blob to force browser download
+      try {
+        const res = await fetch(bannerUrl, { mode: 'cors' });
+        if (res.ok) {
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
+          showToast('Banner downloaded successfully!');
+          setDownloadingBanner(false);
+          return;
+        }
+      } catch (fetchErr) {
+        // Fallback below
+      }
+
+      // 3. Fallback anchor tag download
+      const link = document.createElement('a');
+      link.href = bannerUrl;
+      link.download = filename;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('Banner download initiated!');
+    } catch (err) {
+      console.warn('Banner download error:', err);
+      window.open(bannerUrl, '_blank');
+      showToast('Opened banner in new tab.');
+    } finally {
+      setTimeout(() => setDownloadingBanner(false), 1200);
+    }
+  };
+
   const handleExportMatchPDF = (matchParam?: any) => {
     // Safely distinguish between a MatchState object and a React click event
     const isSyntheticEvent = matchParam && (matchParam.nativeEvent || matchParam.target || matchParam.preventDefault || (!matchParam.teamA && !matchParam.innings1));
@@ -1726,16 +1891,16 @@ export const SpectatorScoreboardSection = ({
 
   const generateLedgerPDF = (selectedMatch: any) => {
     try {
-      showToast('Generating PDF Match Ledger...');
+      showToast('Generating Scoreboard PDF...');
       const doc = new jsPDF();
       
       // Set PDF properties to make it read-only and secured
       doc.setProperties({
-        title: "Official Secure Match Ledger",
+        title: "Official Secure Match Scoreboard",
         subject: "Read-Only Scorecard Summary Records",
         author: "shubhamhingane.in",
         creator: "Developed By shubhamhingane.in +91-7719959593",
-        keywords: "read-only, secured, cricket ledger"
+        keywords: "read-only, secured, cricket scoreboard"
       });
       
       // Compute Player of the Match and dynamic metrics
@@ -2113,8 +2278,8 @@ export const SpectatorScoreboardSection = ({
         doc.text(`Page ${i} of ${pageCount} | SECURED READ-ONLY PDF DOCUMENT`, 122, 287);
       }
       
-      doc.save(`gully_scorepad_ledger_${selectedMatch.id || Date.now()}.pdf`);
-      showToast('PDF Match Ledger downloaded successfully!');
+      doc.save(`gully_scoreboard_${selectedMatch.id || Date.now()}.pdf`);
+      showToast('Scoreboard PDF downloaded successfully!');
     } catch (err) {
       console.error('PDF export crashed:', err);
       showToast('Failed to compile PDF sheet. Check parameters.');
@@ -2389,6 +2554,22 @@ export const SpectatorScoreboardSection = ({
                                     </div>
                                   </div>
 
+                                  {/* Match Banner (1280x720 16:9 ratio) */}
+                                  {m.matchBannerUrl && (
+                                    <div className="mb-3.5 rounded-xl sm:rounded-2xl overflow-hidden aspect-[16/9] w-full bg-slate-950 border border-slate-800 shadow-md relative group/banner">
+                                      <img 
+                                        src={m.matchBannerUrl} 
+                                        alt={`${m.teamA} vs ${m.teamB} Banner`} 
+                                        className="w-full h-full object-cover group-hover/banner:scale-105 transition-transform duration-500" 
+                                        referrerPolicy="no-referrer" 
+                                      />
+                                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
+                                      <span className="absolute bottom-1.5 left-2 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[8px] font-mono font-bold text-amber-300 border border-white/10 uppercase tracking-widest">
+                                        1280 × 720
+                                      </span>
+                                    </div>
+                                  )}
+
                                   {/* Team Battle Scoreboard Grid */}
                                   <div className="flex items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 mt-1">
                                     {/* Team A Details */}
@@ -2469,6 +2650,29 @@ export const SpectatorScoreboardSection = ({
                                         </div>
                                       </div>
 
+                                      {/* Run Chase Equation in Match List Card */}
+                                      {m.currentInningsNum === 2 && m.targetRuns && (
+                                        <div className="mt-1.5 px-2.5 py-1 bg-black/40 border border-amber-400/30 rounded-lg text-[10px] font-bold text-amber-200 flex items-center gap-1.5 flex-wrap">
+                                          <span className="text-[7.5px] font-black uppercase tracking-wider text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                            ⚡ Chase
+                                          </span>
+                                          {m.targetRuns - currentInnings.runs > 0 ? (
+                                            <span className="font-mono text-white text-[10px]">
+                                              Need <strong className="text-yellow-300 font-black">{m.targetRuns - currentInnings.runs}</strong> runs off <strong className="text-yellow-300 font-black">{Math.max(0, (m.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls
+                                              {(() => {
+                                                const bl = Math.max(0, (m.oversLimit * 6) - currentInnings.ballsBowled);
+                                                const rg = m.targetRuns - currentInnings.runs;
+                                                return bl > 0 ? ` (RRR: ${((rg / bl) * 6).toFixed(1)})` : '';
+                                              })()}
+                                            </span>
+                                          ) : (
+                                            <span className="text-emerald-400 font-black uppercase text-[10px]">
+                                              🎉 Target Achieved!
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+
                                       {/* Progress bar of overs & CRR indicator */}
                                       <div className="space-y-1 pt-1 border-t border-white/[0.04]">
                                         <div className="flex justify-between text-[8px] font-mono text-slate-400">
@@ -2495,24 +2699,50 @@ export const SpectatorScoreboardSection = ({
                                     const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
                                     const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
                                     const currentOverBalls = hasBowled
-                                      ? (currentInnings.commentaryList || [])
-                                          .filter(c => {
-                                            if (!c || !c.overBall || c.overBall === '0.0') return false;
-                                            if (c.type === 'milestone' || c.type === 'announcement') return false;
-                                            const desc = (c.description || '').toLowerCase();
-                                            if (
-                                              desc.includes('started') || 
-                                              desc.includes('created') || 
-                                              desc.includes('toss') || 
-                                              desc.includes('declared') || 
-                                              desc.includes('bulletin') || 
-                                              desc.includes('match launched') ||
-                                              desc.includes('draft match')
-                                            ) return false;
-                                            return isBallInOver(c.overBall, currentOverNo);
-                                          })
-                                          .slice(0, 12)
-                                          .reverse()
+                                      ? (() => {
+                                          const raw = (currentInnings.commentaryList || [])
+                                            .filter(c => {
+                                              if (!c || !c.overBall || c.overBall === '0.0') return false;
+                                              if (
+                                                c.type === 'milestone' || 
+                                                c.type === 'announcement' || 
+                                                c.type === 'break' || 
+                                                c.type === 'info' || 
+                                                c.specialEvent === 'retire_hurt' ||
+                                                c.announcementType === 'new_batsman' ||
+                                                c.announcementType === 'new_bowler'
+                                              ) return false;
+                                              const desc = (c.description || '').toLowerCase();
+                                              if (
+                                                desc.includes('started') || 
+                                                desc.includes('created') || 
+                                                desc.includes('toss') || 
+                                                desc.includes('declared') || 
+                                                desc.includes('bulletin') || 
+                                                desc.includes('match launched') ||
+                                                desc.includes('draft match') ||
+                                                desc.includes('retired hurt') ||
+                                                desc.includes('new batsman on crease') ||
+                                                desc.includes('bowler into the attack')
+                                              ) return false;
+                                              return isBallInOver(c.overBall, currentOverNo);
+                                            });
+
+                                          // Deduplicate so only one entry per overBall delivery is kept (prevents WWW duplicate pills)
+                                          const deduped: any[] = [];
+                                          const seenIds = new Set<string>();
+                                          const seenWickets = new Set<string>();
+                                          for (const b of raw) {
+                                            if (b.id && seenIds.has(b.id)) continue;
+                                            if (b.id) seenIds.add(b.id);
+                                            if (b.type === 'wicket') {
+                                              if (seenWickets.has(b.overBall)) continue;
+                                              seenWickets.add(b.overBall);
+                                            }
+                                            deduped.push(b);
+                                          }
+                                          return deduped.slice(0, 12).reverse();
+                                        })()
                                       : [];
 
                                     return (
@@ -2633,10 +2863,10 @@ export const SpectatorScoreboardSection = ({
                                         handleExportMatchPDF(m);
                                       }}
                                       className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border-none shadow-[0_2px_4px_rgba(16,185,129,0.2)]"
-                                      title="Export PDF Ledger"
+                                      title="Download Scoreboard PDF"
                                     >
                                       <Download size={9} />
-                                      <span>Ledger</span>
+                                      <span>Scoreboard</span>
                                     </button>
                                     
                                     {m.lastBallResult ? (
@@ -2717,6 +2947,21 @@ export const SpectatorScoreboardSection = ({
                               UPCOMING
                             </span>
                           </div>
+
+                          {m.matchBannerUrl && (
+                            <div className="mb-3 rounded-xl overflow-hidden aspect-[16/9] w-full bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-sm relative">
+                              <img 
+                                src={m.matchBannerUrl} 
+                                alt={`${m.teamA} vs ${m.teamB} Banner`} 
+                                className="w-full h-full object-cover" 
+                                referrerPolicy="no-referrer" 
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+                              <span className="absolute bottom-1.5 left-2 px-1.5 py-0.5 rounded bg-black/60 text-[8px] font-mono font-bold text-amber-300">
+                                1280 × 720
+                              </span>
+                            </div>
+                          )}
 
                           <div className="flex items-center justify-between gap-3 mb-4">
                             <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -2830,16 +3075,147 @@ export const SpectatorScoreboardSection = ({
                       <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
                         {m.date || 'Past Match'}
                       </span>
+
+                      {m.matchBannerUrl && (
+                        <div className="mb-3.5 rounded-2xl overflow-hidden w-full bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-md relative group/banner flex items-center justify-center min-h-[160px] sm:min-h-[200px]">
+                          {/* Ambient backdrop glow so banner is fully visible without empty black voids */}
+                          <div 
+                            className="absolute inset-0 bg-cover bg-center blur-md opacity-25 scale-105 pointer-events-none"
+                            style={{ backgroundImage: `url(${m.matchBannerUrl})` }}
+                          />
+                          {/* Uncropped, 100% visible match banner */}
+                          <img 
+                            src={m.matchBannerUrl} 
+                            alt={`${m.teamA} vs ${m.teamB} Banner`} 
+                            className="relative z-10 w-full h-auto max-h-[360px] object-contain rounded-xl transition-transform duration-300 group-hover/banner:scale-[1.01]" 
+                            referrerPolicy="no-referrer" 
+                          />
+                          <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 to-transparent pointer-events-none z-10" />
+                          <span className="absolute bottom-2 left-2.5 z-20 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-xs text-[8.5px] font-mono font-bold text-amber-300 border border-white/10 shadow-xs">
+                            Match Banner (16:9)
+                          </span>
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-3 text-lg font-black tracking-tight mb-2 group-hover:text-amber-500 transition-colors">
                         <span>{m.teamA}</span>
                         <span className="text-slate-455 dark:text-slate-650 text-xs font-normal">vs</span>
                         <span>{m.teamB}</span>
                       </div>
-                      
-                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-black mb-3">
-                        🏆 {m.winner === 'Tie' ? 'Match Tied!' : `${m.winner} Match Winner`}
-                        {m.winReason && <span className="text-slate-450 font-medium font-sans ml-1">({m.winReason})</span>}
-                      </p>
+
+                      {/* Main Match Scores breakdown if available */}
+                      {((m.innings1 && m.innings1.runs !== undefined) || (m.mainMatchState && m.mainMatchState.innings1)) && (
+                        <div className="flex flex-wrap items-center gap-2 mb-2.5 text-xs font-mono font-bold text-slate-600 dark:text-slate-300">
+                          {(() => {
+                            const inn1 = m.mainMatchState?.innings1 || m.innings1;
+                            const inn2 = m.mainMatchState?.innings2 || m.innings2;
+                            return (
+                              <>
+                                {inn1 && inn1.battingTeam && (
+                                  <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                                    {inn1.battingTeam}: <strong className="text-slate-900 dark:text-white">{inn1.runs}/{inn1.wickets}</strong> ({Math.floor((inn1.ballsBowled || 0) / 6)}.{(inn1.ballsBowled || 0) % 6} ov)
+                                  </span>
+                                )}
+                                {inn2 && inn2.battingTeam && (
+                                  <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                                    {inn2.battingTeam}: <strong className="text-slate-900 dark:text-white">{inn2.runs}/{inn2.wickets}</strong> ({Math.floor((inn2.ballsBowled || 0) / 6)}.{(inn2.ballsBowled || 0) % 6} ov)
+                                  </span>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Match Result & Tie / Super Over breakdown */}
+                      {(() => {
+                        const isTie = m.winner === 'Tie' || m.winReason?.toLowerCase().includes('tie') || m.isSuperOver || m.mainMatchState || (m.superOverNumber && m.superOverNumber > 0);
+                        const isSuperOver = m.isSuperOver || m.mainMatchState || (m.superOverNumber && m.superOverNumber > 0) || m.winReason?.toLowerCase().includes('super over');
+
+                        if (isTie) {
+                          return (
+                            <div className="mb-3 space-y-1.5">
+                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 border border-amber-500/30 rounded-lg text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                                <span>🤝 MATCH TIED!</span>
+                                <span className="font-normal font-sans text-slate-500 dark:text-slate-400">
+                                  (Scores Level{m.mainMatchState?.innings1 ? `: ${m.mainMatchState.innings1.runs} vs ${m.mainMatchState.innings2?.runs || m.mainMatchState.innings1.runs}` : ''})
+                                </span>
+                              </div>
+
+                              {isSuperOver && (
+                                <div className="p-2.5 bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-transparent border border-amber-500/30 rounded-xl text-[10px] font-black text-amber-700 dark:text-amber-300 flex flex-wrap items-center gap-2">
+                                  <span className="px-2 py-0.5 bg-amber-400 text-slate-950 font-black rounded text-[9px] uppercase tracking-wider flex items-center gap-1">
+                                    <Zap size={10} className="fill-slate-950" /> Super Over Result
+                                  </span>
+                                  <span>
+                                    {m.winner === 'Tie'
+                                      ? 'Super Over also Ended in a Tie!'
+                                      : `🏆 ${m.winner} won in Super Over!`}
+                                  </span>
+                                  {m.winReason && (
+                                    <span className="text-slate-500 dark:text-slate-400 font-sans font-medium">
+                                      ({m.winReason})
+                                    </span>
+                                  )}
+                                  {m.mainMatchState && m.innings1 && m.innings2 && (
+                                    <span className="font-mono text-[9px] text-slate-600 dark:text-slate-300 block w-full">
+                                      SO Scores: {m.innings1.battingTeam} {m.innings1.runs}/{m.innings1.wickets} vs {m.innings2.battingTeam} {m.innings2.runs}/{m.innings2.wickets}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+
+                              {!isSuperOver && m.winReason && (
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium font-sans">
+                                  Resolution: {m.winReason}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 font-black mb-3">
+                            🏆 {`${m.winner} Match Winner`}
+                            {m.winReason && <span className="text-slate-450 font-medium font-sans ml-1">({m.winReason})</span>}
+                          </p>
+                        );
+                      })()}
+
+                      {/* Man of the Match (Player of the Match) on the card */}
+                      {(() => {
+                        const potm = getMatchPotm(m);
+                        if (!potm) return null;
+                        return (
+                          <div className="mb-3 px-3 py-2 bg-gradient-to-r from-amber-500/10 via-yellow-500/5 to-transparent border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 shadow-xs">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 flex items-center justify-center shrink-0 shadow-xs">
+                                <Award size={14} className="text-slate-950 stroke-[2.5]" />
+                              </div>
+                              <div className="min-w-0">
+                                <span className="text-[8.5px] uppercase font-black tracking-wider text-amber-600 dark:text-amber-400 block leading-tight">
+                                  Man of the Match (POTM)
+                                </span>
+                                <strong className="text-xs sm:text-sm font-black text-slate-900 dark:text-white truncate block leading-tight">
+                                  {potm.name}
+                                </strong>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-[10px] font-mono font-black text-amber-600 dark:text-amber-400 block">
+                                {potm.runs > 0 ? `${potm.runs} Runs` : ''}
+                                {potm.runs > 0 && potm.wickets > 0 ? ' • ' : ''}
+                                {potm.wickets > 0 ? `${potm.wickets} Wkts` : ''}
+                              </span>
+                              {potm.points && (
+                                <span className="text-[8.5px] font-mono font-bold text-slate-400 dark:text-slate-500 block">
+                                  {potm.points} Rating pts
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       <div className="pt-3 border-t border-slate-50 dark:border-slate-850 text-[10px] font-bold text-slate-400 flex justify-between items-center">
                         <span className="group-hover:text-amber-600 transition-colors">See Detailed scorecard & Commentary →</span>
@@ -2851,10 +3227,10 @@ export const SpectatorScoreboardSection = ({
                               handleExportMatchPDF(m);
                             }}
                             className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border-none shadow-sm"
-                            title="Export PDF Ledger"
+                            title="Download Scoreboard PDF"
                           >
                             <Download size={9} />
-                            <span>Export Ledger</span>
+                            <span>Download Scoreboard</span>
                           </button>
                           <span className="text-[9px] font-mono text-slate-400 dark:text-slate-650">ID: {m.id.substring(0,8)}...</span>
                         </div>
@@ -3147,17 +3523,31 @@ export const SpectatorScoreboardSection = ({
                     <Trophy size={24} className="animate-bounce" />
                   </div>
                   <div>
-                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-100 block">Match Completed • Official Result</span>
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-100 block">
+                      {(selectedMatch.winner === 'Tie' || selectedMatch.isSuperOver || selectedMatch.mainMatchState || (selectedMatch.superOverNumber && selectedMatch.superOverNumber > 0)) ? 'Match Tied • Official Result' : 'Match Completed • Official Result'}
+                    </span>
                     <h4 className="text-xl font-black tracking-tight mt-0.5">
-                      {selectedMatch.winner === 'Tie' ? 'Match Tied!' : `${selectedMatch.winner} ${selectedMatch.winReason || 'wins the match'}`}
+                      {(selectedMatch.winner === 'Tie' || selectedMatch.isSuperOver || selectedMatch.mainMatchState || (selectedMatch.superOverNumber && selectedMatch.superOverNumber > 0))
+                        ? 'Scores Level — Match Ended in a Tie!' 
+                        : `${selectedMatch.winner} ${selectedMatch.winReason || 'wins the match'}`}
                     </h4>
+                    {(selectedMatch.isSuperOver || selectedMatch.mainMatchState || (selectedMatch.superOverNumber && selectedMatch.superOverNumber > 0) || selectedMatch.winReason?.toLowerCase().includes('super over')) && (
+                      <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-black/40 border border-amber-300/40 text-xs font-black text-amber-200 shadow-sm">
+                        <Zap size={13} className="text-amber-400 fill-amber-400 animate-pulse" />
+                        <span>
+                          Super Over Result: {selectedMatch.winner === 'Tie'
+                            ? 'Super Over also Ended in a Tie!'
+                            : `${selectedMatch.winner} won in Super Over! (${selectedMatch.winReason || 'Super Over Victory'})`}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 
                 {playerOfTheMatch && (
                   <div className="bg-white/10 px-5 py-2.5 rounded-2xl border border-white/10 text-center md:text-right">
-                    <span className="text-[8px] uppercase tracking-widest font-black text-amber-100 block">⭐ MVP POTM</span>
-                    <p className="text-xs font-black tracking-tight">{playerOfTheMatch.name}</p>
+                    <span className="text-[8px] uppercase tracking-widest font-black text-amber-100 block">⭐ Man of the Match (POTM)</span>
+                    <p className="text-sm font-black tracking-tight">{playerOfTheMatch.name}</p>
                     <p className="text-[9px] font-mono text-amber-100 font-bold mt-0.5">
                       {playerOfTheMatch.runs > 0 ? `${playerOfTheMatch.runs} Runs` : ''} 
                       {playerOfTheMatch.runs > 0 && playerOfTheMatch.wickets > 0 ? ' • ' : ''}
@@ -3167,6 +3557,60 @@ export const SpectatorScoreboardSection = ({
                 )}
               </motion.div>
               </>
+            )}
+
+            {/* Match Banner in Spectator Full Details Page - Fully Visible (No Cutting) with Download Option */}
+            {selectedMatch.matchBannerUrl && (
+              <div className="w-full rounded-2xl sm:rounded-3xl overflow-hidden relative shadow-2xl border border-slate-200 dark:border-slate-800 bg-slate-950 flex flex-col items-center justify-center group mb-6">
+                {/* Ambient Blurred Backdrop - smooth full bleed without cropping foreground content */}
+                <img
+                  src={selectedMatch.matchBannerUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-35 scale-110 pointer-events-none select-none"
+                />
+
+                {/* Fully visible, uncropped Match Banner graphic */}
+                <div className="relative z-10 w-full flex items-center justify-center p-1 sm:p-2">
+                  <img
+                    src={selectedMatch.matchBannerUrl}
+                    alt={`${selectedMatch.teamA} vs ${selectedMatch.teamB} Match Banner`}
+                    className="w-full h-auto max-h-[580px] object-contain rounded-xl sm:rounded-2xl block mx-auto transition-transform duration-300 shadow-md"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+
+                {/* Top Overlay Badges and Small Download Button */}
+                <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[9px] font-mono font-black text-amber-300 border border-white/10 uppercase tracking-widest hidden sm:inline-flex shadow-sm">
+                    1280 × 720 HD
+                  </span>
+                  {selectedMatch.status === 'live' && (
+                    <span className="px-2.5 py-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-lg animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                      LIVE
+                    </span>
+                  )}
+                  {/* Small Download Button for viewers */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDownloadBanner(selectedMatch.matchBannerUrl!, selectedMatch.teamA, selectedMatch.teamB);
+                    }}
+                    id="btn-download-spectator-banner"
+                    className="px-3 py-1.5 rounded-full bg-black/80 hover:bg-black text-white font-bold text-[10px] tracking-wider uppercase border border-white/25 hover:border-amber-400/80 shadow-lg flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md active:scale-95"
+                    title="Download full match banner image"
+                  >
+                    {downloadingBanner ? (
+                      <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Download size={12} className="text-amber-300" />
+                    )}
+                    <span>{downloadingBanner ? 'Saving...' : 'Download Banner'}</span>
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* Top Match Bar Header */}
@@ -3220,12 +3664,25 @@ export const SpectatorScoreboardSection = ({
                   <RefreshCw size={13} />
                   <span className="truncate">Refresh</span>
                 </button>
+                {selectedMatch.matchBannerUrl && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadBanner(selectedMatch.matchBannerUrl!, selectedMatch.teamA, selectedMatch.teamB)}
+                    id="btn-download-banner-action-bar"
+                    className="flex-1 sm:flex-initial px-3 py-2 sm:px-3.5 sm:py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 shadow-sm min-h-[38px]"
+                    title="Download full match banner image"
+                  >
+                    <Download size={13} className="text-amber-500" />
+                    <span className="truncate">Download Banner</span>
+                  </button>
+                )}
                 <button
                   onClick={() => handleExportMatchPDF(selectedMatch)}
                   className="flex-1 sm:flex-initial px-3 py-2 sm:px-3.5 sm:py-2.5 bg-emerald-500 hover:bg-emerald-400 text-white rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm min-h-[38px]"
+                  title="Download Scoreboard PDF"
                 >
                   <Download size={13} />
-                  <span className="truncate">Download Ledger</span>
+                  <span className="truncate">Download Scoreboard</span>
                 </button>
                 <button
                   onClick={handleCopyLink}
@@ -3258,6 +3715,30 @@ export const SpectatorScoreboardSection = ({
                         <h4 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-white mt-1 truncate">
                           {currentInnings.battingTeam} <span className="text-xs text-slate-400 normal-case font-medium">Innings {selectedMatch.currentInningsNum}</span>
                         </h4>
+
+                        {/* Run Chase Equation - Identical to scoreboard management page innings card */}
+                        {selectedMatch.currentInningsNum === 2 && selectedMatch.targetRuns && (
+                          <div className="mt-2.5 inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-black/40 border border-amber-400/40 rounded-xl text-xs font-bold text-amber-200 shadow-sm backdrop-blur-xs">
+                            <span className="text-[8.5px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1">
+                              ⚡ Run Chase Equation
+                            </span>
+                            {selectedMatch.targetRuns - currentInnings.runs > 0 ? (
+                              <span className="font-mono text-white text-xs sm:text-sm">
+                                Need <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{selectedMatch.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{Math.max(0, (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls
+                                {(() => {
+                                  const ballsLeft = Math.max(0, (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled);
+                                  const runsToGet = selectedMatch.targetRuns - currentInnings.runs;
+                                  if (ballsLeft <= 0) return ' (Req: ∞)';
+                                  return ` (RRR: ${((runsToGet / ballsLeft) * 6).toFixed(2)})`;
+                                })()}
+                              </span>
+                            ) : (
+                              <span className="text-emerald-400 font-black uppercase tracking-wider animate-pulse">
+                                🎉 Target Achieved!
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {selectedMatch.lastBallResult && (
                         <div className="bg-white/10 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl border border-white/10 text-center shrink-0">
@@ -3610,12 +4091,6 @@ export const SpectatorScoreboardSection = ({
                 {/* ===================== TAB 1: LIVE ARENA ===================== */}
                 {activeTab === 'arena' && (
                   <div className="space-y-6">
-                    
-                    {/* Predictive Win Probability AI Commentary Card */}
-                    <WinProbabilityCard
-                      match={selectedMatch}
-                      userLanguage={spectatorCommentaryLang}
-                    />
 
                     {/* Active On-Crease Batsmen details */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -4771,6 +5246,12 @@ export const SpectatorScoreboardSection = ({
 
                     </div>
 
+                    {/* Predictive Win Probability Commentary inside AI Commentary */}
+                    <WinProbabilityCard
+                      match={selectedMatch}
+                      userLanguage={spectatorCommentaryLang}
+                    />
+
                     {/*🎙️ AI Commentary Booth & CricBrain Analyst Desk */}
                     <div className="bg-gradient-to-br from-emerald-650 to-emerald-800 dark:from-slate-900 dark:to-emerald-950/40 text-white rounded-[2.5rem] p-6 lg:p-8 shadow-xl space-y-6">
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10 dark:border-slate-800/80">
@@ -5248,12 +5729,6 @@ export const SpectatorScoreboardSection = ({
                 {/* ===================== TAB 6: CRICKET NEWS & VIDEOS DESK ===================== */}
                 {activeTab === 'media' && (
                   <div className="space-y-6 animate-fade-in">
-                    
-                    {/* Live Win Prediction & Predictive AI Commentary */}
-                    <WinProbabilityCard
-                      match={selectedMatch}
-                      userLanguage={spectatorCommentaryLang}
-                    />
 
                     {/* Action Match Highlights Simulated Videos Deck */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

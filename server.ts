@@ -239,7 +239,23 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // Gracefully catch body-parser PayloadTooLargeError or malformed JSON
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && (err.type === "entity.too.large" || err.status === 413)) {
+      console.warn(`[Server] Request entity too large (${req.method} ${req.path}):`, err.message);
+      return res.status(413).json({
+        error: "Request entity too large",
+        message: "The payload exceeds the maximum allowed limit of 50MB."
+      });
+    }
+    if (err instanceof SyntaxError && "status" in err && (err as any).status === 400) {
+      return res.status(400).json({ error: "Invalid JSON format", message: (err as any).message });
+    }
+    next(err);
+  });
 
   // API routes go here FIRST
   app.get(["/api/health", "/health", "/healthz"], (req, res) => {
@@ -373,10 +389,78 @@ async function startServer() {
     }
   });
 
+function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
+  if (!payload || typeof payload !== "object") return payload;
+  let clone: any = Array.isArray(payload) ? [...payload] : { ...payload };
+
+  const getByteLength = (val: any): number => {
+    try {
+      return Buffer.byteLength(JSON.stringify(val), "utf8");
+    } catch {
+      return 0;
+    }
+  };
+
+  let currentSize = getByteLength(clone);
+  if (currentSize <= maxBytes) return clone;
+
+  console.warn(`[Cricket Server Pruner] Match payload (${currentSize} bytes) exceeds limit (${maxBytes} bytes). Pruning...`);
+
+  const imageKeys = ["teamALogo", "teamBLogo", "matchBannerUrl", "customOverlayImg"];
+  for (const k of imageKeys) {
+    if (typeof clone[k] === "string" && clone[k].length > 25000) {
+      clone[k] = "";
+    }
+    if (clone.overlayConfig && typeof clone.overlayConfig[k] === "string" && clone.overlayConfig[k].length > 25000) {
+      clone.overlayConfig[k] = "";
+    }
+  }
+
+  if (clone.playerPhotos && typeof clone.playerPhotos === "object") {
+    const photos: Record<string, string> = { ...clone.playerPhotos };
+    for (const [pk, pv] of Object.entries(photos)) {
+      if (typeof pv === "string" && pv.length > 20000) {
+        delete photos[pk];
+      }
+    }
+    clone.playerPhotos = photos;
+  }
+
+  currentSize = getByteLength(clone);
+  if (currentSize <= maxBytes) return clone;
+
+  delete clone.playerPhotos;
+  for (const k of imageKeys) clone[k] = "";
+
+  currentSize = getByteLength(clone);
+  if (currentSize <= maxBytes) return clone;
+
+  if (clone.innings1 && typeof clone.innings1 === "object") {
+    clone.innings1 = { ...clone.innings1 };
+    if (Array.isArray(clone.innings1.commentaryList) && clone.innings1.commentaryList.length > 75) {
+      clone.innings1.commentaryList = clone.innings1.commentaryList.slice(-75);
+    }
+    if (Array.isArray(clone.innings1.history) && clone.innings1.history.length > 100) {
+      clone.innings1.history = clone.innings1.history.slice(-100);
+    }
+  }
+  if (clone.innings2 && typeof clone.innings2 === "object") {
+    clone.innings2 = { ...clone.innings2 };
+    if (Array.isArray(clone.innings2.commentaryList) && clone.innings2.commentaryList.length > 75) {
+      clone.innings2.commentaryList = clone.innings2.commentaryList.slice(-75);
+    }
+    if (Array.isArray(clone.innings2.history) && clone.innings2.history.length > 100) {
+      clone.innings2.history = clone.innings2.history.slice(-100);
+    }
+  }
+
+  return clone;
+}
+
   // Set Active Match endpoint (switches match to 'live' and retires previous matches to 'completed')
   app.post("/api/cricket/set-active-match", async (req, res) => {
     try {
-      const { managerId, matchId, streamKey } = req.body || {};
+      const { managerId, matchId, streamKey, matchData } = req.body || {};
       if (!managerId || !matchId) {
         return res.status(400).json({ error: "managerId and matchId are required" });
       }
@@ -386,16 +470,48 @@ async function startServer() {
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const { doc, setDoc, updateDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+      const { doc, setDoc, collection, query, where, getDocs } = await import("firebase/firestore");
 
-      // 1. Mark target match as 'live' and assign managerId
+      // 1. Mark target match as 'live' and assign managerId using setDoc with merge: true
+      // This guarantees no '5 NOT_FOUND: No document to update' error even if client Firestore write is still pending
       const targetMatchRef = doc(db, "cricket_matches", matchId);
-      await updateDoc(targetMatchRef, {
+      const matchUpdatePayload: Record<string, any> = {
+        id: matchId,
         status: "live",
         managerId,
         streamKey: streamKey || null,
         updatedAt: Date.now()
-      });
+      };
+      if (matchData && typeof matchData === "object") {
+        Object.assign(matchUpdatePayload, matchData, {
+          id: matchId,
+          status: "live",
+          managerId,
+          streamKey: streamKey || null,
+          updatedAt: Date.now()
+        });
+      }
+
+      // Enforce Firestore 1MB document limit by pruning oversized media before persistence
+      const prunedPayload = pruneServerMatchPayload(matchUpdatePayload, 800000);
+
+      try {
+        await setDoc(targetMatchRef, prunedPayload, { merge: true });
+      } catch (writeErr: any) {
+        console.warn("[Cricket API] Full match setDoc failed, attempting minimal core fallback:", writeErr.message);
+        const fallbackCore: Record<string, any> = {
+          id: matchId,
+          status: "live",
+          managerId,
+          streamKey: streamKey || null,
+          teamA: matchData?.teamA || "Team A",
+          teamB: matchData?.teamB || "Team B",
+          currentInningsNum: matchData?.currentInningsNum || 1,
+          oversLimit: matchData?.oversLimit || 10,
+          updatedAt: Date.now()
+        };
+        await setDoc(targetMatchRef, fallbackCore, { merge: true });
+      }
 
       // 2. Retire any previously 'live' matches for this manager to 'completed'
       try {
@@ -407,10 +523,10 @@ async function startServer() {
         const oldSnaps = await getDocs(oldMatchesQ);
         for (const oldDoc of oldSnaps.docs) {
           if (oldDoc.id !== matchId) {
-            await updateDoc(doc(db, "cricket_matches", oldDoc.id), {
+            await setDoc(doc(db, "cricket_matches", oldDoc.id), {
               status: "completed",
               updatedAt: Date.now()
-            });
+            }, { merge: true });
           }
         }
       } catch (retireErr) {
@@ -426,6 +542,16 @@ async function startServer() {
         status: "live",
         updatedAt: Date.now()
       }, { merge: true });
+
+      if (streamKey) {
+        await setDoc(doc(db, "score_managers", streamKey), {
+          managerId,
+          streamKey,
+          activeMatchId: matchId,
+          status: "live",
+          updatedAt: Date.now()
+        }, { merge: true }).catch(() => {});
+      }
 
       return res.json({
         success: true,
@@ -453,19 +579,19 @@ async function startServer() {
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const { doc, updateDoc } = await import("firebase/firestore");
-      await updateDoc(doc(db, "cricket_matches", matchId), {
+      const { doc, setDoc } = await import("firebase/firestore");
+      await setDoc(doc(db, "cricket_matches", matchId), {
         status: "completed",
         updatedAt: Date.now()
-      });
+      }, { merge: true });
 
       if (managerId) {
         const managerRef = doc(db, "score_managers", managerId);
-        await updateDoc(managerRef, {
+        await setDoc(managerRef, {
           activeMatchId: null,
           status: "completed",
           updatedAt: Date.now()
-        }).catch(() => {});
+        }, { merge: true }).catch(() => {});
       }
 
       return res.json({ success: true, matchId, status: "completed" });
@@ -537,13 +663,53 @@ async function startServer() {
     originalDesc: string,
     newBatsmanName?: string,
     contextualTone?: string,
-    specialTrigger?: any
+    specialTrigger?: any,
+    winProbability?: any
   ): { en: string; hi: string; mr: string } {
     const bats = batsmanName || 'The batsman';
     const bowl = bowlerName || 'The bowler';
     const type = event?.type || 'unknown';
     const val = event?.val ?? 0;
     const extraType = event?.extraType || '';
+    const oLower = (originalDesc || '').toLowerCase();
+
+    function appendWinProb(result: { en: string; hi: string; mr: string }): { en: string; hi: string; mr: string } {
+      if (!winProbability || !winProbability.teamA || !winProbability.teamB) return result;
+      const pA = Math.round(winProbability.probA ?? 50);
+      const pB = Math.round(winProbability.probB ?? 50);
+      const tagEn = ` [AI Win Probability: ${winProbability.teamA} ${pA}% | ${winProbability.teamB} ${pB}%]`;
+      const tagHi = ` [AI जीत की संभावना: ${winProbability.teamA} ${pA}% | ${winProbability.teamB} ${pB}%]`;
+      const tagMr = ` [AI विजयाची शक्यता: ${winProbability.teamA} ${pA}% | ${winProbability.teamB} ${pB}%]`;
+
+      return {
+        en: result.en.includes('[AI') ? result.en : `${result.en}${tagEn}`,
+        hi: result.hi.includes('[AI') ? result.hi : `${result.hi}${tagHi}`,
+        mr: result.mr.includes('[AI') ? result.mr : `${result.mr}${tagMr}`
+      };
+    }
+
+    // Special check for No-Ball with taken runs
+    const isNoBallDelivery = type === 'noball' || extraType === 'noball' || oLower.includes('no-ball') || oLower.includes('no ball');
+    if (isNoBallDelivery) {
+      let batRuns = (val !== undefined && val !== null && !isNaN(val)) ? Number(val) : 0;
+      if (!batRuns && originalDesc) {
+        const m = originalDesc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken)/i) || originalDesc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i);
+        if (m) batRuns = parseInt(m[1], 10);
+      }
+      if (batRuns > 0) {
+        return appendWinProb({
+          en: `🚨 NO-BALL PLUS ${batRuns} RUN${batRuns > 1 ? 'S' : ''}! ${bowl} oversteps the bowling crease, and ${bats} punishes it taking ${batRuns} run${batRuns > 1 ? 's' : ''}! Free-hit awarded on the very next ball!`,
+          hi: `🚨 नो-बॉल और ${batRuns} अतिरिक्त रन! ${bowl} का पैर क्रीज से बाहर और ${bats} ने शानदार तरीके से ${batRuns} रन बटोरे! अगली गेंद पर फ्री-हिट का मौका!`,
+          mr: `🚨 नो-बॉल आणि ${batRuns} धावा! ${bowl} चा पाय क्रीजच्या रेषेबाहेर गेला आणि ${bats} ने सुरेख फटका मारून ${batRuns} धावा वसूल केल्या! पुढील चेंडूवर फ्री-हिट!`
+        });
+      } else {
+        return appendWinProb({
+          en: `🚨 NO-BALL CALLED! ${bowl} steps over the front bowling crease line! 1 extra run conceded and Free-hit awarded to ${bats}!`,
+          hi: `🚨 नो-बॉल! ${bowl} ने क्रीज ओवरस्टेप की! १ अतिरिक्त रन और अगली गेंद पर ${bats} को फ्री-हिट!`,
+          mr: `🚨 नो-बॉल! ${bowl} चा पाय क्रीज रेषेबाहेर! १ अतिरिक्त धाव आणि ${bats} ला पुढील चेंडूवर फ्री-हिट!`
+        });
+      }
+    }
 
     // If a special milestone/wicket trigger is present, deliver an enthusiastic breakdown
     if (specialTrigger) {
@@ -575,6 +741,21 @@ async function startServer() {
           en: `🔥 HAT-TRICK BREAKDOWN: A historic moment! ${bw} claims 3 wickets in 3 consecutive deliveries! Absolute pandemonium in the street, fireworks and non-stop cheering!`,
           hi: `🔥 हैट्रिक विश्लेषण: ऐतिहासिक पल! ${bw} ने लगातार ३ गेंदों पर ३ विकेट चटकाकर रचा इतिहास! मैदान में गूंज उठी तालियां, अद्भुत गेंदबाजी का मुजाहिरा!`,
           mr: `🔥 हॅटट्रिक विश्लेषण: ऐतिहासिक पराक्रम! ${bw} ने सलग ३ चेंडूत ३ बळी घेत रचला महाइतिहास! मैदानात एकच जल्लोष, तुफानी गोलंदाजी!`
+        };
+      }
+      if (specialTrigger.type === 'retire_hurt' && specialTrigger.batterName) {
+        const b = specialTrigger.batterName;
+        const r = specialTrigger.batterRuns ?? 0;
+        const balls = specialTrigger.batterBalls ?? 0;
+        const sr = specialTrigger.strikeRate || (balls > 0 ? ((r / balls) * 100).toFixed(1) : '0.0');
+        const nextPhrase = newBatsmanName ? ` Due to injury, ${b} is retired hurt. ${newBatsmanName} takes the crease.` : '';
+        const nextPhraseHi = newBatsmanName ? ` चोट के कारण ${b} रिटायर्ड हर्ट हुए, अब ${newBatsmanName} क्रीज पर आए हैं.` : '';
+        const nextPhraseMr = newBatsmanName ? ` दुखापतीमुळे ${b} रिटायर्ड हर्ट झाले, आता ${newBatsmanName} मैदानात आले आहेत.` : '';
+
+        return {
+          en: `🩹 RETIRED HURT: ${b} unfortunately suffers an injury and retires hurt on ${r} runs (${balls}b, SR: ${sr}). Wishing them a swift recovery!${nextPhrase}`,
+          hi: `🩹 रिटायर्ड हर्ट: दुर्भाग्यवश चोट के चलते ${b} को ${r} रन (${balls} गेंदें, स्ट्राइक रेट: ${sr}) बनाकर मैदान छोड़ना पड़ा! उनके जल्द स्वस्थ होने की कामना!${nextPhraseHi}`,
+          mr: `🩹 रिटायर्ड हर्ट: दुर्दैवाने दुखापतीमुळे ${b} यांना ${r} धावांवर (${balls} चेंडू, स्ट्राईक रेट: ${sr}) मैदान सोडावे लागले! ते लवकरात लवकर बरे व्हावेत ही सदिच्छा!${nextPhraseMr}`
         };
       }
       if (specialTrigger.type === 'wicket' && specialTrigger.batterName) {
@@ -792,43 +973,59 @@ async function startServer() {
 
     const pick = (arr: any[]) => arr[Math.floor(Math.random() * arr.length)];
 
-    const oLower = (originalDesc || '').toLowerCase();
+    if (type === 'retire_hurt' || oLower.includes('retire') || oLower.includes('injured')) {
+      const incoming = newBatsmanName ? ` ${newBatsmanName} walks out to take guard on the crease.` : '';
+      const incomingHi = newBatsmanName ? ` उनकी जगह ${newBatsmanName} बल्लेबाजी के लिए क्रीज पर आए हैं.` : '';
+      const incomingMr = newBatsmanName ? ` त्यांच्या जागी ${newBatsmanName} फलंदाजीसाठी मैदानात दाखल झाले आहेत.` : '';
+      return {
+        en: `Injury alert! ${bats} has retired hurt and leaves the field.${incoming}`,
+        hi: `चोट के कारण ${bats} रिटायर्ड हर्ट होकर मैदान से बाहर गए हैं!${incomingHi}`,
+        mr: `दुखापतीमुळे ${bats} रिटायर्ड हर्ट होऊन मैदानाबाहेर गेले आहेत!${incomingMr}`
+      };
+    }
+    if (type === 'batsman_update' || oLower.includes('batsman name updated') || oLower.includes('new batsman come on crease')) {
+      return {
+        en: `Player update: ${bats} is now batting at the crease.`,
+        hi: `खिलाड़ी अपडेट: ${bats} अब क्रीज पर बल्लेबाजी कर रहे हैं!`,
+        mr: `खेळाडू अपडेट: ${bats} आता क्रीजवर फलंदाजी करत आहेत!`
+      };
+    }
     if (type === 'wicket' || oLower.includes('out') || oLower.includes('wkt') || oLower.includes('gone') || oLower.includes('bowled')) {
       const base = pick(wickets);
       if (newBatsmanName) {
-        return {
+        return appendWinProb({
           en: `${base.en} After wicket fell, ${newBatsmanName} new batsman come on crease.`,
           hi: `${base.hi} विकेट गिरने के बाद, ${newBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`,
           mr: `${base.mr} विकेट पडल्यानंतर, ${newBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
-        };
+        });
       }
-      return base;
+      return appendWinProb(base);
     }
     if (type === 'boundary' || val === 4 || oLower.includes('four') || oLower.includes('boundary')) {
-      return pick(boundaries);
+      return appendWinProb(pick(boundaries));
     }
     if (val === 6 || oLower.includes('six')) {
-      return pick(sixes);
+      return appendWinProb(pick(sixes));
     }
     if (val === 1) {
-      return pick(singles);
+      return appendWinProb(pick(singles));
     }
     if (val === 2) {
-      return pick(doubles);
+      return appendWinProb(pick(doubles));
     }
     if (type === 'extra' || extraType || oLower.includes('wide') || oLower.includes('no ball') || oLower.includes('free hit')) {
-      return pick(extras);
+      return appendWinProb(pick(extras));
     }
     if (val === 0) {
-      return pick(dots);
+      return appendWinProb(pick(dots));
     }
 
     const defaultEn = originalDesc || "A beautiful ball delivered, keeping the tension sky-high!";
-    return {
+    return appendWinProb({
       en: defaultEn,
       hi: `${bowl} ने ${bats} को गेंद फेंकी, रोमांच अपने चरम पर!`,
       mr: `${bowl} ने ${bats} ला सुरेख चेंडू टाकला, मैदानात सामना रंगतदार स्थितीत!`
-    };
+    });
   }
 
   function getGullyCommentaryFallback(
@@ -859,12 +1056,26 @@ async function startServer() {
       newBatsmanName: reqNewBat, 
       language,
       contextualTone,
-      specialTrigger 
+      specialTrigger,
+      winProbability 
     } = req.body;
 
     const incomingNewBatsman = reqNewBat || additionalContext?.newBatsmanName || '';
     const userPreferredLang = (language === 'mr' || language === 'hi' || language === 'en') ? language : 'en';
     const activeTone = contextualTone || additionalContext?.contextualTone || 'BALANCED_CRICKET';
+
+    // Format AI win probability badges for commentary
+    const wp = winProbability;
+    let probTagEn = "";
+    let probTagHi = "";
+    let probTagMr = "";
+    if (wp && wp.teamA && wp.teamB) {
+      const pA = Math.round(wp.probA ?? 50);
+      const pB = Math.round(wp.probB ?? 50);
+      probTagEn = ` [AI Win Probability: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+      probTagHi = ` [AI जीत की संभावना: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+      probTagMr = ` [AI विजयाची शक्यता: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+    }
 
     // Auction event commentary handling
     if (eventType) {
@@ -942,7 +1153,7 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         console.warn("GEMINI_API_KEY missing. Handing over to local multilingual gully commentator.");
-        const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger);
+        const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger, winProbability);
         return res.json({
           text: fallback[userPreferredLang] || fallback.en,
           translations: fallback
@@ -987,9 +1198,28 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         toneDirective = `CONTEXTUAL TONE: BALANCED & VIBRANT gully cricket commentary.`;
       }
 
-      // Special Trigger Directive (Wicket, 50, 100, Hat-trick)
+      // No Ball with Taken Runs Directive
+      let noBallDirective = "";
+      const isNoBallDelivery = event?.type === 'noball' || event?.extraType === 'noball' || (originalDescription && /no-ball|no ball/i.test(originalDescription));
+      const takenRuns = (event?.val !== undefined && event?.val !== null) ? Number(event.val) : 0;
+      if (isNoBallDelivery) {
+        noBallDirective = `CRITICAL MATCH DELIVERY EVENT: NO-BALL WITH ${takenRuns} RUN${takenRuns === 1 ? '' : 'S'} SCORED!
+- Delivery Type: NO-BALL (Illegal delivery, 1 run conceded + Free Hit on next ball)
+- Runs hit/taken off the bat by batsman ${batsman?.name || 'Striker'}: ${takenRuns} runs
+- Total runs added to score on this ball: ${1 + takenRuns} runs
+- MANDATORY COMMENTARY DIRECTIVE: You MUST explicitly mention that the bowler overstepped / bowled a NO-BALL, emphasize that ${takenRuns > 0 ? `${takenRuns} runs were taken by ${batsman?.name || 'the batsman'}` : '1 extra run was conceded'}, and announce that the next ball is a FREE HIT!`;
+      }
+
+      // Special Trigger Directive (Wicket, Retire Hurt, 50, 100, Hat-trick)
       let specialDirective = "";
-      if (specialTrigger) {
+      if (specialTrigger?.type === 'retire_hurt') {
+        specialDirective = `MAJOR MATCH EVENT: RETIRED HURT!
+- Type: Retired Hurt (Injury Stoppage)
+- Details: ${JSON.stringify(specialTrigger)}
+- CRITICAL: Batter ${specialTrigger.batterName || batsman?.name} has suffered an injury and has retired hurt after scoring ${specialTrigger.batterRuns ?? 0} runs off ${specialTrigger.batterBalls ?? 0} balls.
+- NOTE: This is an injury retirement, NOT an out/dismissal! The bowler did NOT get a wicket, and this was not a counted delivery ball.
+- DIRECTIVE: Express genuine sportsmanship and empathy for the injured batter, wish them a speedy recovery, mention their runs and balls faced, and introduce incoming new batsman ${incomingNewBatsman || 'taking the crease'}.`;
+      } else if (specialTrigger) {
         specialDirective = `MAJOR ACHIEVEMENT SPECIAL TRIGGER:
 - Type: ${specialTrigger.type}
 - Details: ${JSON.stringify(specialTrigger)}
@@ -1001,6 +1231,7 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         Generate live commentary for the ongoing ball delivery in THREE languages: English, Hindi, and Marathi.
 
         ${toneDirective}
+        ${noBallDirective}
         ${specialDirective}
 
         MATCH EVENT SUMMARY:
@@ -1010,12 +1241,20 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         - Batsman facing delivery: ${batsman?.name || 'Batsman'}
         - Bowler delivering: ${bowler?.name || 'Bowler'}
         - Basic description: "${originalDescription || ''}"
-        ${incomingNewBatsman ? `- Incoming new batsman: ${incomingNewBatsman} (Crucial note: announce: "After wicket fell, ${incomingNewBatsman} new batsman come on crease" / हिंदी: "विकेट गिरने के बाद, ${incomingNewBatsman} नए बल्लेबाज क्रीज पर आए हैं." / मराठी: "विकेट पडल्यानंतर, ${incomingNewBatsman} नवीन फलंदाज क्रीजवर आले आहेत.")` : ''}
+        ${incomingNewBatsman ? `- Incoming new batsman: ${incomingNewBatsman} (${specialTrigger?.type === 'retire_hurt' ? `Announce: "Due to injury, ${specialTrigger.batterName || batsman?.name} is retired hurt. ${incomingNewBatsman} takes the crease." / हिंदी: "चोट के कारण ${specialTrigger.batterName || batsman?.name} रिटायर्ड हर्ट हुए, अब ${incomingNewBatsman} क्रीज पर आए हैं." / मराठी: "दुखापतीमुळे ${specialTrigger.batterName || batsman?.name} रिटायर्ड हर्ट झाले, आता ${incomingNewBatsman} मैदानात आले आहेत."` : `Crucial note: announce: "After wicket fell, ${incomingNewBatsman} new batsman come on crease" / हिंदी: "विकेट गिरने के बाद, ${incomingNewBatsman} नए बल्लेबाज क्रीज पर आए हैं." / मराठी: "विकेट पडल्यानंतर, ${incomingNewBatsman} नवीन फलंदाज क्रीजवर आले आहेत."`})` : ''}
 
         CURRENT INNINGS STATE:
         - Score: ${matchState?.runs ?? 0}/${matchState?.wickets ?? 0}
         - Balls Bowled: ${matchState?.ballsBowled ?? 0}
         - Target Score: ${matchState?.targetRuns ?? 'N/A'}
+
+        ${wp && wp.teamA && wp.teamB ? `LIVE MATCH AI WIN PROBABILITY METRICS:
+        - ${wp.teamA}: ${Math.round(wp.probA)}% vs ${wp.teamB}: ${Math.round(wp.probB)}%
+        - Favored side: ${wp.favoredTeam || wp.teamA} (${Math.round(wp.favoredProbability || 50)}%)
+        - MANDATORY RULE: At the very end of your commentary in each language, include the win probability tag:
+          * English end tag: "${probTagEn}"
+          * Hindi end tag: "${probTagHi}"
+          * Marathi end tag: "${probTagMr}"` : ''}
 
         RECENT PREVIOUS DELIVERIES COMMENTARY:
         ${previousCommentariesText}
@@ -1040,12 +1279,16 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         try {
           const parsed = JSON.parse(matchJson[0]);
           if (parsed.en && parsed.hi && parsed.mr) {
+            const finalEn = (probTagEn && !parsed.en.includes('[AI')) ? `${parsed.en.trim()}${probTagEn}` : parsed.en.trim();
+            const finalHi = (probTagHi && !parsed.hi.includes('[AI')) ? `${parsed.hi.trim()}${probTagHi}` : parsed.hi.trim();
+            const finalMr = (probTagMr && !parsed.mr.includes('[AI')) ? `${parsed.mr.trim()}${probTagMr}` : parsed.mr.trim();
+
             return res.json({
-              text: parsed[userPreferredLang] || parsed.en,
+              text: userPreferredLang === 'mr' ? finalMr : userPreferredLang === 'hi' ? finalHi : finalEn,
               translations: {
-                en: parsed.en.trim(),
-                hi: parsed.hi.trim(),
-                mr: parsed.mr.trim()
+                en: finalEn,
+                hi: finalHi,
+                mr: finalMr
               }
             });
           }
@@ -1056,18 +1299,19 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
 
       // If single language returned or couldn't parse JSON
       const plainText = raw.replace(/^\{|\}$/g, '').trim();
-      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger);
+      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger, winProbability);
+      const plainEn = (probTagEn && plainText && !plainText.includes('[AI')) ? `${plainText}${probTagEn}` : (plainText || fallback.en);
       res.json({
-        text: plainText || fallback[userPreferredLang] || fallback.en,
+        text: userPreferredLang === 'mr' ? fallback.mr : userPreferredLang === 'hi' ? fallback.hi : plainEn,
         translations: {
-          en: plainText || fallback.en,
+          en: plainEn,
           hi: fallback.hi,
           mr: fallback.mr
         }
       });
     } catch (error: any) {
       console.warn("Gemini Commentary API Quota limit or error triggered. Reverting to local gully commentator:", error.message || error);
-      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger);
+      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger, winProbability);
       res.json({
         text: fallback[userPreferredLang] || fallback.en,
         translations: fallback

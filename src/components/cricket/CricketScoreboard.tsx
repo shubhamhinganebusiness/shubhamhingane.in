@@ -5,7 +5,8 @@ import {
   ArrowRight, Users, Play, Undo, Calendar, Trash2, ArrowLeftRight, Check,
   ChevronRight, Smile, Settings, Volume2, VolumeX, Edit, Edit3, ChevronDown, ChevronUp, Sun, Moon, Info, HelpCircle,
   Share2, FileDown, PlusCircle, BarChart3, Radio, Flame, ShieldAlert, Award, Zap, Lock, UserPlus,
-  Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2, Copy, ExternalLink, Send, Smartphone, Shield, Tv
+  Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2, Copy, ExternalLink, Send, Smartphone, Shield, Tv,
+  Camera, Image as ImageIcon
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
@@ -20,12 +21,11 @@ import {
   isQuotaError, 
   recordFirestoreQuotaExhaustion,
   safeSetDoc,
-  safeUpdateDoc,
   safeDeleteDoc,
   syncScoreToRealtimeDB,
   subscribeToRealtimeDBMatch
 } from '../../lib/firebase';
-import { doc, setDoc, getDoc, onSnapshot, collection, deleteDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, onSnapshot, collection, deleteDoc } from 'firebase/firestore';
 
 // Recharts imports
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, Cell } from 'recharts';
@@ -46,7 +46,8 @@ import {
   setActiveMatch, 
   getLocalMatchById,
   pruneDeletedMatchesFromStorage,
-  sanitizeForFirestore
+  sanitizeForFirestore,
+  compressImageFile
 } from './cricketStorage';
 import {
   CommentaryLanguage,
@@ -63,6 +64,8 @@ import {
   MatchContextualTone,
   ContextualToneInfo
 } from './modules/commentaryLanguage';
+import { WinProbabilityCard } from './modules/WinProbabilityCard';
+import { calculateWinProbabilityDetails } from './modules/winProbabilityEngine';
 
 // Types & Interfaces
 export interface Batsman {
@@ -207,11 +210,33 @@ export interface MatchState {
   targetRuns?: number; // target score to win for innings 2 (Runs score by innings 1 + 1)
   freeHitNext: boolean;
   lastBallResult?: string;
+  isSuperOver?: boolean;
+  superOverNumber?: number;
+  superOverWicketLimit?: number;
+  tieResolution?: 'declared_tie' | 'super_over';
+  mainMatchState?: {
+    innings1: Innings;
+    innings2: Innings;
+    oversLimit: number;
+    targetRuns?: number;
+    status: 'completed';
+    winner: string;
+    winReason: string;
+  };
+  superOversHistory?: {
+    superOverNumber: number;
+    innings1: Innings;
+    innings2: Innings | null;
+    targetRuns?: number;
+    winner?: string;
+    winReason?: string;
+  }[];
   updatedAt?: number;
   version?: number;
   overlayConfig?: OverlayConfig;
   teamALogo?: string;
   teamBLogo?: string;
+  matchBannerUrl?: string;
   teamASquad?: (string | { name: string; isCaptain?: boolean; isWicketKeeper?: boolean; role?: string; photo?: string })[];
   teamBSquad?: (string | { name: string; isCaptain?: boolean; isWicketKeeper?: boolean; role?: string; photo?: string })[];
   teamACaptain?: string;
@@ -654,11 +679,11 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
       }
 
       if (!isFirestoreQuotaExhausted()) {
-        await safeUpdateDoc(tournamentDocRef, {
+        await safeSetDoc(tournamentDocRef, {
           matches: nextMatches,
           status: tournamentCompleted ? 'completed' : tournament.status,
           winnerTeamName: tournamentCompleted ? mainWinner : tournament.winnerTeamName
-        });
+        }, { merge: true });
       }
     }
   } catch (err) {
@@ -996,6 +1021,8 @@ export const CricketScoreboard: React.FC = () => {
   const [teamALogoUrl, setTeamALogoUrl] = useState('');
   const [teamB, setTeamB] = useState('Mumbai Challengers');
   const [teamBLogoUrl, setTeamBLogoUrl] = useState('');
+  const [matchBannerUrl, setMatchBannerUrl] = useState('');
+  const [editModalMatchBannerUrl, setEditModalMatchBannerUrl] = useState('');
   const [oversLimit, setOversLimit] = useState(5);
   const [tossWinner, setTossWinner] = useState('Team A');
   const [tossChoice, setTossChoice] = useState<'bat' | 'bowl'>('bat');
@@ -1005,6 +1032,23 @@ export const CricketScoreboard: React.FC = () => {
   const [setupOpeningBatsman1, setSetupOpeningBatsman1] = useState('');
   const [setupOpeningBatsman2, setSetupOpeningBatsman2] = useState('');
   const [setupOpeningBowler, setSetupOpeningBowler] = useState('');
+
+  // Process and scale match banner compactly
+  const processMatchBannerFile = (file: File, callback: (result: string) => void) => {
+    compressImageFile(file, 800, 450, 0.72).then((compressed) => {
+      if (compressed) {
+        callback(compressed);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (typeof event.target?.result === 'string' && event.target.result.length < 60000) {
+            callback(event.target.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  };
 
   // GullyScore: Cricket Digital Toss Simulator Integration State
   const [connectedTossInfo, setConnectedTossInfo] = useState<{
@@ -1103,6 +1147,17 @@ export const CricketScoreboard: React.FC = () => {
   const [activeMobileTab, setActiveMobileTab] = useState<'scorer' | 'stats' | 'feed'>('scorer');
   const [activeScorecardTab, setActiveScorecardTab] = useState<'bat' | 'bowl' | 'fow' | 'comm'>('bat');
 
+  // Tie Resolution & Super Over State
+  const [showTieResolutionModal, setShowTieResolutionModal] = useState<boolean>(false);
+  const [superOverBatFirstOverride, setSuperOverBatFirstOverride] = useState<string>('');
+  const [viewScorecardMode, setViewScorecardMode] = useState<'superOver' | 'main'>('superOver');
+
+  useEffect(() => {
+    if (match.winner === 'Tie' && match.tieResolution !== 'declared_tie') {
+      setShowTieResolutionModal(true);
+    }
+  }, [match.winner, match.tieResolution]);
+
   // Manual Fall of Wickets entry/adjustment modal state
   const [showManualFoWModal, setShowManualFoWModal] = useState(false);
   const [manualFoWData, setManualFoWData] = useState<{
@@ -1131,7 +1186,7 @@ export const CricketScoreboard: React.FC = () => {
 
   // Modal Wicket properties
   const [showWicketModal, setShowWicketModal] = useState(false);
-  const [wicketType, setWicketType] = useState<'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW'>('Bowled');
+  const [wicketType, setWicketType] = useState<'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW' | 'Retired Hurt'>('Bowled');
   const [outBatsmanWho, setOutBatsmanWho] = useState<'striker' | 'non-striker'>('striker');
   const [newBatsmanName, setNewBatsmanName] = useState('');
   const [wicketHowOutDetails, setWicketHowOutDetails] = useState('Bowled');
@@ -1254,7 +1309,7 @@ export const CricketScoreboard: React.FC = () => {
   const [pendingWicketReplay, setPendingWicketReplay] = useState<{
     batsmanName: string;
     bowlerName: string;
-    wicketType: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW';
+    wicketType: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW' | 'Retired Hurt';
     howOutDetails: string;
     incomingBatsmanName: string;
     who: 'striker' | 'non-striker';
@@ -1264,7 +1319,7 @@ export const CricketScoreboard: React.FC = () => {
   const [fallOfWicketModal, setFallOfWicketModal] = useState<{
     batsmanName: string;
     bowlerName: string;
-    wicketType: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW';
+    wicketType: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW' | 'Retired Hurt';
     howOutDetails: string;
     incomingBatsmanName: string;
     who: 'striker' | 'non-striker';
@@ -1384,6 +1439,10 @@ export const CricketScoreboard: React.FC = () => {
     setTeamA(newTeamA);
     setTeamB(newTeamB);
     setOversLimit(newOversLimit);
+    if (editModalMatchBannerUrl !== undefined) {
+      updated.matchBannerUrl = editModalMatchBannerUrl;
+      setMatchBannerUrl(editModalMatchBannerUrl);
+    }
 
     syncMatch(updated);
     setShowEditMatchModal(false);
@@ -1629,31 +1688,14 @@ export const CricketScoreboard: React.FC = () => {
       if (updated.id && !isSpectator) {
         // Instant synchronous backup to localStorage & local registry for instant persistence
         try {
-          localStorage.setItem('cricket_active_match', JSON.stringify(updated));
-          // Import/use saveMatchToRegistry to ensure local registry & live query stay immediately up to date
-          const raw = localStorage.getItem('cricket_matches_local_registry');
-          const currentList = raw ? JSON.parse(raw) : [];
-          if (Array.isArray(currentList)) {
-            const idx = currentList.findIndex((m: any) => m && m.id === updated.id);
-            if (idx >= 0) {
-              currentList[idx] = updated;
-            } else {
-              currentList.unshift(updated);
-            }
-            localStorage.setItem('cricket_matches_local_registry', JSON.stringify(currentList.slice(0, 50)));
-          }
+          saveMatchToRegistry(updated);
+          setActiveMatch(updated);
         } catch (e) {
           console.warn('Writing local match cache failed:', e);
         }
 
-        // Broadcast to same-origin windows/tabs/frames immediately
-        try {
-          window.dispatchEvent(
-            new CustomEvent('cricket_match_updated', {
-              detail: { match: updated, eventType: 'update', timestamp: Date.now() }
-            })
-          );
-        } catch (_) {}
+        // Instant Realtime DB broadcast across all visitor devices
+        syncScoreToRealtimeDB(updated.id, sanitizeForFirestore(updated)).catch(() => {});
 
         // Persist the updated match scores directly to Firestore so all connected devices update in real-time
         queueDebouncedSave(updated, immediate);
@@ -1858,12 +1900,7 @@ export const CricketScoreboard: React.FC = () => {
       });
       setSavedTeams(teams);
     }, (error) => {
-      console.warn("Failed to subscribe to cricket_teams:", error);
-      try {
-        handleFirestoreError(error, OperationType.GET, 'cricket_teams');
-      } catch (e) {
-        // Fallback gracefully to prevent unhandled asynchronous crash
-      }
+      console.warn("Realtime subscription notice for cricket_teams:", error?.message || error);
     });
     return () => unsub();
   }, []);
@@ -1978,12 +2015,7 @@ export const CricketScoreboard: React.FC = () => {
       setSavedDrafts(draftList);
       setActiveLiveMatches(liveList);
     }, (error) => {
-      console.warn("Failed to subscribe to cricket_matches:", error);
-      try {
-        handleFirestoreError(error, OperationType.GET, 'cricket_matches');
-      } catch (e) {
-        // Fallback gracefully to prevent unhandled asynchronous crash
-      }
+      console.warn("Realtime subscription notice for cricket_matches:", error?.message || error);
     });
 
     const handleMatchDeletedEvent = (e: any) => {
@@ -2546,6 +2578,7 @@ export const CricketScoreboard: React.FC = () => {
       freeHitNext: false,
       teamALogo: teamALogoUrl || match?.teamALogo || null,
       teamBLogo: teamBLogoUrl || match?.teamBLogo || null,
+      matchBannerUrl: matchBannerUrl || match?.matchBannerUrl || undefined,
       teamASquad: selectedTeamARoster,
       teamBSquad: selectedTeamBRoster,
       playerPhotos: match?.playerPhotos || {},
@@ -2607,7 +2640,8 @@ export const CricketScoreboard: React.FC = () => {
         body: JSON.stringify({
           managerId: currentManagerId,
           matchId: newMatch.id,
-          streamKey: streamKey
+          streamKey: streamKey,
+          matchData: sanitizeForFirestore(newMatch)
         })
       }).catch(() => {});
     }
@@ -2678,7 +2712,10 @@ export const CricketScoreboard: React.FC = () => {
   const handleUpdateBatsmanName = (index: number, name: string) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
+    const oldBatsman = currentInnings.batsmen[index];
+    const oldName = oldBatsman?.name;
     const trimmedName = name.trim() || `Batsman ${index + 1}`;
+
     const updatedBatsmen = currentInnings.batsmen.map((b, idx) => {
       if (idx === index) return { ...b, name: trimmedName };
       return b;
@@ -2688,23 +2725,92 @@ export const CricketScoreboard: React.FC = () => {
     const isNonStriker = index === currentInnings.nonStrikerIndex;
     const isCrease = isStriker || isNonStriker;
 
+    // Update Fall of Wickets entries if old name was logged
+    const updatedFoW = (currentInnings.fallOfWickets || []).map(fw => {
+      if (oldName && fw.batsmanName && fw.batsmanName.toLowerCase().trim() === oldName.toLowerCase().trim()) {
+        return { ...fw, batsmanName: trimmedName };
+      }
+      return fw;
+    });
+
+    // Update old commentary entries mentioning previous name so scorecard commentary stays accurate
+    const updatedOldCommentary = (currentInnings.commentaryList || []).map(comm => {
+      if (!oldName || oldName === trimmedName) return comm;
+      let newDesc = comm.description;
+      if (newDesc && newDesc.includes(oldName)) {
+        newDesc = newDesc.replaceAll(oldName, trimmedName);
+      }
+      let newTranslations = comm.translations ? { ...comm.translations } : undefined;
+      if (newTranslations) {
+        if (newTranslations.en && newTranslations.en.includes(oldName)) {
+          newTranslations.en = newTranslations.en.replaceAll(oldName, trimmedName);
+        }
+        if (newTranslations.hi && newTranslations.hi.includes(oldName)) {
+          newTranslations.hi = newTranslations.hi.replaceAll(oldName, trimmedName);
+        }
+        if (newTranslations.mr && newTranslations.mr.includes(oldName)) {
+          newTranslations.mr = newTranslations.mr.replaceAll(oldName, trimmedName);
+        }
+      }
+      return {
+        ...comm,
+        description: newDesc,
+        translations: newTranslations
+      };
+    });
+
+    const commDesc = `${trimmedName} new batsman come on crease.`;
     const commEntry = {
       id: `comm-bat-upd-${Date.now()}`,
       overBall: formatOvers(currentInnings.ballsBowled),
-      description: `${trimmedName} new batsman come on crease.`,
-      type: 'normal' as const
+      description: commDesc,
+      type: 'normal' as const,
+      translations: {
+        en: commDesc,
+        hi: `${trimmedName} नए बल्लेबाज क्रीज पर आए हैं.`,
+        mr: `${trimmedName} नवीन फलंदाज क्रीजवर आले आहेत.`
+      }
     };
 
     const updatedInnings = { 
       ...currentInnings, 
       batsmen: updatedBatsmen,
-      commentaryList: isCrease ? [commEntry, ...(currentInnings.commentaryList || [])] : (currentInnings.commentaryList || [])
+      fallOfWickets: updatedFoW,
+      commentaryList: isCrease ? [commEntry, ...updatedOldCommentary] : updatedOldCommentary
     };
-    syncMatch(prev => ({
-      ...prev,
-      innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
-      innings2: prev.currentInningsNum === 2 ? updatedInnings : prev.innings2
-    }));
+
+    const nextMatchState: MatchState = {
+      ...match,
+      version: (match.version || 0) + 1,
+      updatedAt: Date.now(),
+      innings1: match.currentInningsNum === 1 ? updatedInnings : match.innings1,
+      innings2: match.currentInningsNum === 2 ? updatedInnings : match.innings2
+    };
+
+    syncMatch(nextMatchState, true);
+    saveMatchToRegistry(nextMatchState);
+    setActiveMatch(nextMatchState);
+
+    // Trigger AI Commentary for the updated batsman so commentary stays alive
+    if (aiCommentaryEnabled && !isSpectator) {
+      const activeBowler = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name || 'Bowler';
+      const otherBatsmanName = currentInnings.batsmen[isStriker ? currentInnings.nonStrikerIndex : currentInnings.strikerIndex]?.name || '';
+      generateAICommentary(
+        nextMatchState,
+        { type: 'batsman_update' },
+        trimmedName,
+        activeBowler,
+        commDesc,
+        match.currentInningsNum,
+        {
+          nonStrikerName: otherBatsmanName,
+          isNewBatsmanOnCrease: true,
+          newBatsmanName: trimmedName
+        },
+        isCrease ? commEntry.id : undefined
+      );
+    }
+
     setEditStrikerIndex(null);
     setEditNonStrikerIndex(null);
     showNotification(`${trimmedName} updated on crease.`, 'success');
@@ -2859,19 +2965,43 @@ export const CricketScoreboard: React.FC = () => {
       newBatsmanName?: string;
       isOverStart?: boolean;
       specialTrigger?: {
-        type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick';
+        type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick' | 'retire_hurt';
         batterName?: string;
         batterRuns?: number;
         batterBalls?: number;
         bowlerName?: string;
         howOut?: string;
       };
-    }
+    },
+    targetCommentaryId?: string
   ) => {
     try {
       setIsAiCommentaryLoading(true);
       const activeInnings = inningsNum === 1 ? matchState.innings1 : matchState.innings2;
       const toneInfo = getMatchContextualTone(matchState, activeInnings);
+
+      let winProbData: any = undefined;
+      try {
+        const metrics = calculateWinProbabilityDetails(matchState);
+        if (metrics) {
+          winProbData = {
+            teamA: metrics.teamAName,
+            teamB: metrics.teamBName,
+            probA: metrics.probA,
+            probB: metrics.probB,
+            favoredTeam: metrics.favoredTeamName,
+            favoredProbability: metrics.favoredProbability,
+            battingTeam: metrics.battingTeamName,
+            battingProb: metrics.battingTeamProb,
+            bowlingTeam: metrics.bowlingTeamName,
+            bowlingProb: metrics.bowlingTeamProb,
+            equationText: metrics.equationText
+          };
+        }
+      } catch (err) {
+        console.warn('Could not calculate win probability for AI commentary:', err);
+      }
+
       const res = await fetch('/api/cricket/commentary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2889,7 +3019,8 @@ export const CricketScoreboard: React.FC = () => {
           isOverStart: additionalContext?.isOverStart || false,
           language: userCommentaryLang,
           contextualTone: toneInfo.tone,
-          specialTrigger: additionalContext?.specialTrigger
+          specialTrigger: additionalContext?.specialTrigger,
+          winProbability: winProbData
         })
       });
       const data = await res.json();
@@ -2905,9 +3036,13 @@ export const CricketScoreboard: React.FC = () => {
               hi: data.translations?.hi,
               mr: data.translations?.mr
             };
-            updatedCommList[0] = {
-              ...updatedCommList[0],
-              description: data.text || updatedCommList[0].description,
+            const targetIdx = targetCommentaryId
+              ? updatedCommList.findIndex(c => c.id === targetCommentaryId)
+              : 0;
+            const validIdx = targetIdx !== -1 ? targetIdx : 0;
+            updatedCommList[validIdx] = {
+              ...updatedCommList[validIdx],
+              description: data.text || updatedCommList[validIdx].description,
               translations: translations
             };
           }
@@ -2987,7 +3122,8 @@ export const CricketScoreboard: React.FC = () => {
         {
           nonStrikerName: nonStrikerBatter?.name,
           isBowlerChanged: true
-        }
+        },
+        commEntry.id
       );
     }
   };
@@ -3289,7 +3425,9 @@ export const CricketScoreboard: React.FC = () => {
 
       striker.balls += 1; // Batsman faces a ball
       bowler.runsConceded += totalRunsFromBall;
-      outcomeDescription = `No-Ball called! ${batRuns > 0 ? `${batRuns} runs scored to batsman ${striker.name}.` : ''} Free hit awarded!`;
+      outcomeDescription = batRuns > 0 
+        ? `No-Ball called! Plus ${batRuns} run${batRuns > 1 ? 's' : ''} scored off the bat to batsman ${striker.name} (Total ${totalRunsFromBall} runs). Free hit awarded!`
+        : `No-Ball called! 1 extra run conceded. Free hit awarded!`;
       eventType = 'extra';
       setNextFreeHit = true;
 
@@ -3404,10 +3542,10 @@ export const CricketScoreboard: React.FC = () => {
     let ballLabel = '';
     if (event.type === 'dot') ballLabel = '0';
     else if (event.type === 'runs') ballLabel = String(event.val);
-    else if (event.type === 'wide') ballLabel = event.val ? `${event.val}Wd` : 'Wd';
-    else if (event.type === 'noball') ballLabel = event.val ? `${event.val}Nb` : 'Nb';
-    else if (event.type === 'bye') ballLabel = 'By';
-    else if (event.type === 'legbye') ballLabel = 'Lb';
+    else if (event.type === 'wide') ballLabel = (event.val && event.val > 0) ? `WD+${event.val}` : 'WD';
+    else if (event.type === 'noball') ballLabel = (event.val && event.val > 0) ? `NB+${event.val}` : 'NB';
+    else if (event.type === 'bye') ballLabel = event.val ? `${event.val}B` : 'B';
+    else if (event.type === 'legbye') ballLabel = event.val ? `${event.val}LB` : 'LB';
 
     const ballDesc = `${bowler.name} to ${striker.name}: ${outcomeDescription}`;
     const localizedEventCat: 'dot' | 'runs' | 'boundary' | 'wicket' | 'extra' = 
@@ -3415,30 +3553,60 @@ export const CricketScoreboard: React.FC = () => {
       eventType === 'extra' ? 'extra' : 
       (event.type === 'dot' ? 'dot' : 'runs');
 
+    const runsOffBatFromDelivery = (event.type === 'noball' || event.type === 'wide') ? (event.val || 0) : ballRuns;
+    const effectiveExtraType = event.type === 'noball' ? 'noball' : (event.type === 'wide' ? 'wide' : event.extraType);
+
+    let deliveryWinProb: any = undefined;
+    try {
+      const metrics = calculateWinProbabilityDetails(nextMatchState);
+      if (metrics) {
+        deliveryWinProb = {
+          teamA: metrics.teamAName,
+          teamB: metrics.teamBName,
+          probA: metrics.probA,
+          probB: metrics.probB,
+          favoredTeam: metrics.favoredTeamName,
+          favoredProbability: metrics.favoredProbability
+        };
+      }
+    } catch (err) {
+      // non-fatal
+    }
+
     const generatedHi = generateLocalizedCricketCommentary(
       localizedEventCat,
-      ballRuns,
+      runsOffBatFromDelivery,
       striker.name,
       bowler.name,
       'hi',
-      { extraType: event.extraType }
+      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb }
     );
     const generatedMr = generateLocalizedCricketCommentary(
       localizedEventCat,
-      ballRuns,
+      runsOffBatFromDelivery,
       striker.name,
       bowler.name,
       'mr',
-      { extraType: event.extraType }
+      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb }
     );
+
+    let localizedEnWithProb = ballDesc;
+    if (deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
+      const pA = Math.round(deliveryWinProb.probA ?? 50);
+      const pB = Math.round(deliveryWinProb.probB ?? 50);
+      localizedEnWithProb += ` [AI Win Probability: ${deliveryWinProb.teamA} ${pA}% | ${deliveryWinProb.teamB} ${pB}%]`;
+    }
 
     const ballCommEntry = {
       id: `c-${Date.now()}`,
       overBall: formatOvers(inn.ballsBowled),
-      description: ballDesc,
+      description: localizedEnWithProb,
       type: eventType,
+      isNoBall: event.type === 'noball',
+      runsOffBat: runsOffBatFromDelivery,
+      ballScore: ballLabel,
       translations: {
-        en: ballDesc,
+        en: localizedEnWithProb,
         hi: generatedHi,
         mr: generatedMr
       }
@@ -3497,7 +3665,8 @@ export const CricketScoreboard: React.FC = () => {
             batterRuns: striker.runs,
             batterBalls: striker.balls
           } : undefined
-        }
+        },
+        ballCommEntry.id
       );
     }
   };
@@ -3513,6 +3682,23 @@ export const CricketScoreboard: React.FC = () => {
       setWicketType('Bowled');
       setWicketFielderName('');
       setWicketAdditionalDetails('');
+      setNewBatsmanName('');
+      setWicketValidationErr('');
+    }
+    setShowWicketModal(true);
+  };
+
+  // Helper to cleanly open retire hurt dismissal
+  const openRetireHurtModal = (who: 'striker' | 'non-striker' = 'striker') => {
+    setActiveAnimation('wicket');
+    setOutBatsmanWho(who);
+    if (currentInnings) {
+      const activeBowlerName = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name || '';
+      setWicketBowlerName(activeBowlerName);
+      setWicketHowOutDetails('Retired Hurt');
+      setWicketType('Retired Hurt');
+      setWicketFielderName('');
+      setWicketAdditionalDetails('Retired Hurt (Injured)');
       setNewBatsmanName('');
       setWicketValidationErr('');
     }
@@ -3580,31 +3766,35 @@ export const CricketScoreboard: React.FC = () => {
   // Advanced Wicket Handler Modal Actions
   const handleWicketScore = () => {
     if (!currentInnings) return;
-
-    // Validate that if LBW is selected, Additional Notes is mandatory
-    if (wicketType === 'LBW' && !wicketAdditionalDetails.trim()) {
-      setWicketValidationErr(`Additional Notes are mandatory when 'LBW' is selected.`);
-      showNotification(`Additional Notes are required for 'LBW' dismissal.`, 'alert');
-      return;
-    }
     setWicketValidationErr('');
 
-    const batsmen = currentInnings.batsmen;
-    const bowler = currentInnings.bowlers[currentInnings.currentBowlerIndex];
+    const batsmen = currentInnings.batsmen || [];
+    const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings.bowlers?.[0] || {
+      name: 'Bowler',
+      ballsBowled: 0,
+      runsConceded: 0,
+      maidens: 0,
+      wickets: 0,
+      isCurrent: true
+    };
 
-    const currentStriker = batsmen[currentInnings.strikerIndex];
-    const currentNonStriker = batsmen[currentInnings.nonStrikerIndex];
+    const currentStriker = batsmen[currentInnings.strikerIndex] || {
+      name: 'Striker', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false
+    };
+    const currentNonStriker = batsmen[currentInnings.nonStrikerIndex] || {
+      name: 'Non-Striker', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false
+    };
 
     const dismissedBatter = outBatsmanWho === 'striker' ? currentStriker : currentNonStriker;
 
     // Check if free hit protects the batsman
-    if (match.freeHitNext && wicketType !== 'Run Out') {
+    if (match.freeHitNext && wicketType !== 'Run Out' && wicketType !== 'Retired Hurt') {
       showNotification(`Free Hit protects ${dismissedBatter.name} from being out (${wicketType})! No wicket recorded.`, 'info');
       setShowWicketModal(false);
       return;
     }
 
-    const detailedBowler = wicketBowlerName.trim() || bowler.name;
+    const detailedBowler = wicketBowlerName.trim() || bowler.name || 'Bowler';
     let baseHowOut = wicketHowOutDetails.trim() || wicketType;
     if (wicketType === 'Caught') {
       const catcher = wicketFielderName.trim();
@@ -3613,6 +3803,8 @@ export const CricketScoreboard: React.FC = () => {
       } else {
         baseHowOut = `c & b ${detailedBowler}`;
       }
+    } else if (wicketType === 'Retired Hurt') {
+      baseHowOut = 'Retired Hurt';
     }
 
     const detailedHowOut = baseHowOut + (wicketAdditionalDetails.trim() ? ` (${wicketAdditionalDetails.trim()})` : '');
@@ -3621,8 +3813,7 @@ export const CricketScoreboard: React.FC = () => {
     setShowWicketModal(false);
     playSoundEffect('click');
 
-    // Buffer the event details to display the Quick Wicket Replay card first
-    setPendingWicketReplay({
+    const replayData = {
       batsmanName: dismissedBatter.name,
       bowlerName: detailedBowler,
       wicketType: wicketType,
@@ -3630,13 +3821,18 @@ export const CricketScoreboard: React.FC = () => {
       incomingBatsmanName: finalBatsmanName,
       who: outBatsmanWho,
       fielderName: (wicketType === 'Caught' || wicketType === 'Run Out' || wicketType === 'Stumped') ? wicketFielderName.trim() : undefined
-    });
+    };
+
+    // Directly commit the wicket to ensure it takes immediately in both standard and cockpit views
+    commitWicketScore(replayData);
+    setFallOfWicketModal(replayData);
+    setPendingWicketReplay(null);
   };
 
   const commitWicketScore = (replay: {
     batsmanName: string;
     bowlerName: string;
-    wicketType: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW';
+    wicketType: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW' | 'Retired Hurt';
     howOutDetails: string;
     incomingBatsmanName: string;
     who: 'striker' | 'non-striker';
@@ -3648,33 +3844,36 @@ export const CricketScoreboard: React.FC = () => {
 
     let nextMatchState = { ...match };
     const inn = { ...currentInnings };
-    const batsmen = [...inn.batsmen];
-    const bowlers = [...inn.bowlers];
+    const batsmen = [...(inn.batsmen || [])];
+    const bowlers = [...(inn.bowlers || [])];
 
-    const currentStriker = { ...batsmen[inn.strikerIndex] };
-    const currentNonStriker = { ...batsmen[inn.nonStrikerIndex] };
-    const bowler = { ...bowlers[inn.currentBowlerIndex] };
+    const currentStriker = { ...(batsmen[inn.strikerIndex] || { name: 'Striker', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false }) };
+    const currentNonStriker = { ...(batsmen[inn.nonStrikerIndex] || { name: 'Non-Striker', runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false }) };
+    const bowler = { ...(bowlers[inn.currentBowlerIndex] || bowlers[0] || { name: 'Bowler', ballsBowled: 0, runsConceded: 0, maidens: 0, wickets: 0, isCurrent: true }) };
 
     const dismissedBatter = replay.who === 'striker' ? currentStriker : currentNonStriker;
 
     const detailedHowOut = replay.howOutDetails;
     const detailedBowler = replay.bowlerName;
+    const isRetiredHurt = replay.wicketType === 'Retired Hurt';
 
     dismissedBatter.isOut = true;
-    dismissedBatter.outMode = detailedHowOut;
-    dismissedBatter.dismissedBy = detailedBowler;
+    dismissedBatter.outMode = isRetiredHurt ? 'Retired Hurt' : detailedHowOut;
+    dismissedBatter.dismissedBy = isRetiredHurt ? 'Retired Hurt' : detailedBowler;
     if (replay.fielderName) {
       dismissedBatter.fielderName = replay.fielderName;
     }
 
-    // Increment over details
-    inn.wickets += 1;
-    inn.ballsBowled += 1;
-    bowler.ballsBowled += 1;
+    // Increment over details (Retire hurt does not count as a bowled ball or team wicket)
+    if (!isRetiredHurt) {
+      inn.wickets += 1;
+      inn.ballsBowled += 1;
+      bowler.ballsBowled += 1;
+    }
 
     // Wicket credit logic & Hat-trick tracking:
     let hatTrickSpecial: any = null;
-    if (replay.wicketType !== 'Run Out') {
+    if (replay.wicketType !== 'Run Out' && !isRetiredHurt) {
       let activeBowler;
       if (detailedBowler.toLowerCase() === bowler.name.toLowerCase()) {
         bowler.wickets += 1;
@@ -3721,36 +3920,51 @@ export const CricketScoreboard: React.FC = () => {
       }
     }
 
-    // Add Fall of wicket
-    inn.fallOfWickets.push({
-      wicketNo: inn.wickets,
-      score: inn.runs,
-      batsmanName: dismissedBatter.name,
-      oversList: formatOvers(inn.ballsBowled)
-    });
+    // Add Fall of wicket safely (only for actual dismissals, not Retired Hurt)
+    if (!isRetiredHurt) {
+      inn.fallOfWickets = inn.fallOfWickets || [];
+      inn.fallOfWickets.push({
+        wicketNo: inn.wickets,
+        score: inn.runs,
+        batsmanName: dismissedBatter.name,
+        oversList: formatOvers(inn.ballsBowled)
+      });
+    }
 
-    const finalBatsmanName = replay.incomingBatsmanName.trim() || `Batsman ${batsmen.length + 1}`;
-    batsmen.push({
-      name: finalBatsmanName,
-      runs: 0,
-      balls: 0,
-      fours: 0,
-      sixes: 0,
-      isOut: false
-    });
+    const maxAllowedWickets = nextMatchState.isSuperOver ? (nextMatchState.superOverWicketLimit || 2) : 10;
+    const isSuperOverInningsEnded = nextMatchState.isSuperOver && inn.wickets >= maxAllowedWickets;
 
-    const newBatsmanIndex = batsmen.length - 1;
+    let finalBatsmanName = '';
+    if (!isSuperOverInningsEnded) {
+      finalBatsmanName = replay.incomingBatsmanName.trim() || `Batsman ${batsmen.length + 1}`;
+      batsmen.push({
+        name: finalBatsmanName,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        isOut: false
+      });
 
-    if (replay.who === 'striker') {
-      batsmen[inn.strikerIndex] = dismissedBatter;
-      inn.strikerIndex = newBatsmanIndex;
+      const newBatsmanIndex = batsmen.length - 1;
+
+      if (replay.who === 'striker') {
+        batsmen[inn.strikerIndex] = dismissedBatter;
+        inn.strikerIndex = newBatsmanIndex;
+      } else {
+        batsmen[inn.nonStrikerIndex] = dismissedBatter;
+        inn.nonStrikerIndex = newBatsmanIndex;
+      }
     } else {
-      batsmen[inn.nonStrikerIndex] = dismissedBatter;
-      inn.nonStrikerIndex = newBatsmanIndex;
+      if (replay.who === 'striker') {
+        batsmen[inn.strikerIndex] = dismissedBatter;
+      } else {
+        batsmen[inn.nonStrikerIndex] = dismissedBatter;
+      }
     }
 
     let overCompletionSuffix = '';
-    if (inn.ballsBowled % 6 === 0) {
+    if (!isRetiredHurt && inn.ballsBowled > 0 && inn.ballsBowled % 6 === 0) {
       const temp = inn.strikerIndex;
       inn.strikerIndex = inn.nonStrikerIndex;
       inn.nonStrikerIndex = temp;
@@ -3758,22 +3972,28 @@ export const CricketScoreboard: React.FC = () => {
     }
 
     inn.batsmen = batsmen;
-    bowlers[inn.currentBowlerIndex] = bowler;
+    if (bowlers[inn.currentBowlerIndex]) {
+      bowlers[inn.currentBowlerIndex] = bowler;
+    }
     inn.bowlers = bowlers;
 
     const dismissedSR = dismissedBatter.balls > 0 ? ((dismissedBatter.runs / dismissedBatter.balls) * 100).toFixed(1) : '0.0';
 
-    // 1. Intercept special event breakdown for wicket dismissal
-    const wicketSpecial = interceptSpecialEvent('wicket', formatOvers(inn.ballsBowled), {
-      batterName: dismissedBatter.name,
-      batterRuns: dismissedBatter.runs,
-      batterBalls: dismissedBatter.balls,
-      batterFours: dismissedBatter.fours,
-      batterSixes: dismissedBatter.sixes,
-      howOut: detailedHowOut,
-      bowlerName: detailedBowler,
-      strikeRate: dismissedSR
-    });
+    // 1. Intercept special event breakdown for wicket dismissal or retired hurt
+    const wicketSpecial = interceptSpecialEvent(
+      isRetiredHurt ? 'retire_hurt' : 'wicket',
+      formatOvers(inn.ballsBowled),
+      {
+        batterName: dismissedBatter.name,
+        batterRuns: dismissedBatter.runs,
+        batterBalls: dismissedBatter.balls,
+        batterFours: dismissedBatter.fours,
+        batterSixes: dismissedBatter.sixes,
+        howOut: isRetiredHurt ? 'Retired Hurt' : detailedHowOut,
+        bowlerName: detailedBowler,
+        strikeRate: dismissedSR
+      }
+    );
 
     // 2. Automatically announce incoming new batsman in commentary box
     const remainingPartner = batsmen.find(b => !b.isOut && b.name.toLowerCase() !== finalBatsmanName.toLowerCase() && b.name.toLowerCase() !== dismissedBatter.name.toLowerCase());
@@ -3783,7 +4003,8 @@ export const CricketScoreboard: React.FC = () => {
       {
         partnerName: remainingPartner?.name,
         dismissedBatterName: dismissedBatter.name,
-        isWicketFall: true
+        isWicketFall: !isRetiredHurt,
+        isRetiredHurt: isRetiredHurt
       }
     );
 
@@ -3796,27 +4017,61 @@ export const CricketScoreboard: React.FC = () => {
     const catchDetails = replay.wicketType === 'Caught' && replay.fielderName
       ? `c ${replay.fielderName} b ${detailedBowler} (Catch taken cleanly by ${replay.fielderName})`
       : `Dismissal style: ${detailedHowOut} (Bowler: ${detailedBowler})`;
-    const commentaryDescription = `OUT! ${dismissedBatter.name} has to walk back (${dismissedBatter.runs} off ${dismissedBatter.balls}b). ${catchDetails}. After wicket fell, ${finalBatsmanName} new batsman come on crease. ${rdWktReact}${overCompletionSuffix}`;
 
-    const wktHi = generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', { newBatsman: finalBatsmanName });
-    const wktMr = generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName });
+    let deliveryWinProb: any = undefined;
+    try {
+      const metrics = calculateWinProbabilityDetails(nextMatchState);
+      if (metrics) {
+        deliveryWinProb = {
+          teamA: metrics.teamAName,
+          teamB: metrics.teamBName,
+          probA: metrics.probA,
+          probB: metrics.probB,
+          favoredTeam: metrics.favoredTeamName,
+          favoredProbability: metrics.favoredProbability
+        };
+      }
+    } catch (e) {
+      console.warn('Win prob calculation skipped in wicket:', e);
+    }
+    
+    const commentaryDescription = isRetiredHurt
+      ? `RETIRED HURT: ${dismissedBatter.name} has retired hurt (${dismissedBatter.runs} off ${dismissedBatter.balls}b). ${finalBatsmanName} takes the crease.`
+      : `OUT! ${dismissedBatter.name} has to walk back (${dismissedBatter.runs} off ${dismissedBatter.balls}b). ${catchDetails}. After wicket fell, ${finalBatsmanName} new batsman come on crease. ${rdWktReact}${overCompletionSuffix}`;
 
+    const wktHi = isRetiredHurt
+      ? `रिटायर्ड हर्ट: ${dismissedBatter.name} चोटिल होकर मैदान से बाहर गए हैं (${dismissedBatter.runs} रन, ${dismissedBatter.balls} गेंद). ${finalBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`
+      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb });
+
+    const wktMr = isRetiredHurt
+      ? `रिटायर्ड हर्ट: ${dismissedBatter.name} दुखापतीमुळे मैदानाबाहेर गेले आहेत (${dismissedBatter.runs} धावा, ${dismissedBatter.balls} चेंडू). ${finalBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
+      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb });
+
+    let localizedEnWithProb = commentaryDescription;
+    if (!isRetiredHurt && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
+      const pA = Math.round(deliveryWinProb.probA ?? 50);
+      const pB = Math.round(deliveryWinProb.probB ?? 50);
+      localizedEnWithProb += ` [AI Win Probability: ${deliveryWinProb.teamA} ${pA}% | ${deliveryWinProb.teamB} ${pB}%]`;
+    }
+
+    const deliveryCommId = `c-${Date.now()}`;
     const normalWicketComm = {
-      id: `c-${Date.now()}`,
+      id: deliveryCommId,
       overBall: formatOvers(inn.ballsBowled),
-      description: commentaryDescription,
-      type: 'wicket',
+      description: localizedEnWithProb,
+      type: isRetiredHurt ? ('announcement' as const) : ('wicket' as const),
+      specialEvent: isRetiredHurt ? ('retire_hurt' as const) : undefined,
       translations: {
-        en: commentaryDescription,
+        en: localizedEnWithProb,
         hi: `${wktHi}${overCompletionSuffix}`,
         mr: `${wktMr}${overCompletionSuffix}`
       }
     };
 
+    // Exactly ONE delivery commentary item is added (no duplicate wicketSpecial.commentary)
     const newEntries = [
       incomingBatsmanAnnouncement,
       ...(hatTrickSpecial ? [hatTrickSpecial.commentary] : []),
-      wicketSpecial.commentary,
       normalWicketComm
     ];
 
@@ -3826,30 +4081,42 @@ export const CricketScoreboard: React.FC = () => {
     ];
 
     nextMatchState.freeHitNext = false;
-    nextMatchState.lastBallResult = 'W';
-
-    // Auto-trigger animated fullscreen wicket blast overlay
-    nextMatchState.overlayConfig = {
-      ...(nextMatchState.overlayConfig || {}),
-      manualAlertTrigger: {
-        type: 'wicket',
-        timestamp: Date.now()
-      },
-      customBanner: 'out',
-      customBannerText: wicketSpecial.bannerTitle
-    };
-
-    if (!inn.history) {
-      inn.history = [
-        { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
-      ];
+    if (!isRetiredHurt) {
+      nextMatchState.lastBallResult = 'W';
     }
-    inn.history.push({
-      over: inn.ballsBowled / 6,
-      overStr: formatOvers(inn.ballsBowled),
-      cumulativeRuns: inn.runs,
-      cumulativeWickets: inn.wickets
-    });
+
+    if (!isRetiredHurt) {
+      // Auto-trigger animated fullscreen wicket blast overlay
+      nextMatchState.overlayConfig = {
+        ...(nextMatchState.overlayConfig || {}),
+        manualAlertTrigger: {
+          type: 'wicket',
+          timestamp: Date.now()
+        },
+        customBanner: 'out',
+        customBannerText: wicketSpecial.bannerTitle
+      };
+    } else {
+      nextMatchState.overlayConfig = {
+        ...(nextMatchState.overlayConfig || {}),
+        customBanner: 'drinks',
+        customBannerText: wicketSpecial.bannerTitle
+      };
+    }
+
+    if (!isRetiredHurt) {
+      if (!inn.history) {
+        inn.history = [
+          { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
+        ];
+      }
+      inn.history.push({
+        over: inn.ballsBowled / 6,
+        overStr: formatOvers(inn.ballsBowled),
+        cumulativeRuns: inn.runs,
+        cumulativeWickets: inn.wickets
+      });
+    }
 
     if (match.currentInningsNum === 1) {
       nextMatchState.innings1 = inn;
@@ -3865,7 +4132,7 @@ export const CricketScoreboard: React.FC = () => {
       syncMatch(prev => {
         if (!prev) return prev;
         const latest = prev.overlayConfig;
-        if (latest && (latest.customBanner === 'out' || latest.manualAlertTrigger?.type === 'wicket')) {
+        if (latest && (latest.customBanner === 'out' || latest.customBanner === 'drinks' || latest.manualAlertTrigger?.type === 'wicket')) {
           return {
             ...prev,
             overlayConfig: {
@@ -3883,7 +4150,7 @@ export const CricketScoreboard: React.FC = () => {
     if (aiCommentaryEnabled && !isSpectator) {
       generateAICommentary(
         nextMatchState,
-        { type: 'wicket' },
+        { type: isRetiredHurt ? 'retire_hurt' : 'wicket' },
         finalBatsmanName,
         detailedBowler,
         commentaryDescription,
@@ -3893,20 +4160,26 @@ export const CricketScoreboard: React.FC = () => {
           isNewBatsmanOnCrease: true,
           newBatsmanName: finalBatsmanName,
           specialTrigger: {
-            type: 'wicket',
+            type: isRetiredHurt ? 'retire_hurt' : 'wicket',
             batterName: dismissedBatter.name,
             batterRuns: dismissedBatter.runs,
             batterBalls: dismissedBatter.balls,
             bowlerName: detailedBowler,
-            howOut: detailedHowOut
+            howOut: isRetiredHurt ? 'Retired Hurt' : detailedHowOut
           }
-        }
+        },
+        deliveryCommId
       );
     }
 
     setPendingWicketReplay(null);
     setNewBatsmanName('');
-    showNotification(`${dismissedBatter.name} dismissed via ${detailedHowOut}. Scoreboard updated!`, 'alert');
+    showNotification(
+      isRetiredHurt
+        ? `🩹 ${dismissedBatter.name} retired hurt. Scoreboard updated!`
+        : `🔴 ${dismissedBatter.name} dismissed via ${detailedHowOut}. Scoreboard updated!`,
+      isRetiredHurt ? 'info' : 'alert'
+    );
   };
 
   // Evaluates Match Statuses & switches innings automatically
@@ -3917,23 +4190,27 @@ export const CricketScoreboard: React.FC = () => {
       const inn1 = modifiedState.innings1;
       if (!inn1) return modifiedState;
 
-      // Innings 1 ends when max overs are bowled or all batsmen out (10 wickets)
+      // Innings 1 ends when max overs are bowled or all batsmen out (10 wickets, or 2 in Super Over)
       const maxBalls = modifiedState.oversLimit * 6;
-      if (inn1.ballsBowled >= maxBalls || inn1.wickets >= 10) {
+      const maxWickets = modifiedState.isSuperOver ? (modifiedState.superOverWicketLimit || 2) : 10;
+      if (inn1.ballsBowled >= maxBalls || inn1.wickets >= maxWickets) {
         // Automatic complete Innings 1, set target
         const targetRunsValue = inn1.runs + 1;
         modifiedState.targetRuns = targetRunsValue;
         modifiedState.innings1 = inn1;
         
-        showNotification(`Innings 1 Completed! ${inn1.battingTeam} scored ${inn1.runs}/${inn1.wickets}. Target for ${inn1.bowlingTeam}: ${targetRunsValue} runs.`, 'success');
+        const innTitle = modifiedState.isSuperOver
+          ? `⚡ Super Over ${modifiedState.superOverNumber || 1} Innings 1 Completed!`
+          : `Innings 1 Completed!`;
+        showNotification(`${innTitle} ${inn1.battingTeam} scored ${inn1.runs}/${inn1.wickets}. Target for ${inn1.bowlingTeam}: ${targetRunsValue} runs.`, 'success');
         
         // Load custom team rosters if they exist
         const chasedBatRoster = inn1.bowlingTeam === modifiedState.teamA ? selectedTeamARoster : selectedTeamBRoster;
         const chasedBowlRoster = inn1.battingTeam === modifiedState.teamA ? selectedTeamARoster : selectedTeamBRoster;
 
-        const chBatsman1Name = (chasedBatRoster && chasedBatRoster.length > 0) ? chasedBatRoster[0] : 'Chasing Batter 1';
-        const chBatsman2Name = (chasedBatRoster && chasedBatRoster.length > 1) ? chasedBatRoster[1] : 'Chasing Batter 2';
-        const chBowler1Name = (chasedBowlRoster && chasedBowlRoster.length > 0) ? chasedBowlRoster[0] : 'Defender Bowler 1';
+        const chBatsman1Name = (chasedBatRoster && chasedBatRoster.length > 0) ? chasedBatRoster[0] : `${inn1.bowlingTeam} Batter 1`;
+        const chBatsman2Name = (chasedBatRoster && chasedBatRoster.length > 1) ? chasedBatRoster[1] : `${inn1.bowlingTeam} Batter 2`;
+        const chBowler1Name = (chasedBowlRoster && chasedBowlRoster.length > 0) ? chasedBowlRoster[0] : `${inn1.battingTeam} Bowler 1`;
 
         // Trigger immediate set-up for Innings 2 automatically!
         const initialInnings2: Innings = {
@@ -3955,7 +4232,14 @@ export const CricketScoreboard: React.FC = () => {
           currentBowlerIndex: 0,
           fallOfWickets: [],
           commentaryList: [
-            { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings 2 Started! ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs in ${modifiedState.oversLimit} overs.`, type: 'milestone' }
+            { 
+              id: `c-${Date.now()}`, 
+              overBall: '0.0', 
+              description: modifiedState.isSuperOver 
+                ? `⚡ Super Over ${modifiedState.superOverNumber || 1} Chase! ${chBatsman1Name} & ${chBatsman2Name} open chase for ${inn1.bowlingTeam}. Target: ${targetRunsValue} runs in 6 balls.`
+                : `Innings 2 Started! ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs in ${modifiedState.oversLimit} overs.`, 
+              type: 'milestone' 
+            }
           ],
           history: [
             { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -3975,16 +4259,19 @@ export const CricketScoreboard: React.FC = () => {
       if (!inn1 || !inn2 || !target) return modifiedState;
 
       const maxBalls = modifiedState.oversLimit * 6;
+      const maxWickets = modifiedState.isSuperOver ? (modifiedState.superOverWicketLimit || 2) : 10;
 
       // Scenarios for chase completion
       const chaseSuccessful = inn2.runs >= target;
-      const batInningsEnded = inn2.ballsBowled >= maxBalls || inn2.wickets >= 10;
+      const batInningsEnded = inn2.ballsBowled >= maxBalls || inn2.wickets >= maxWickets;
 
       if (chaseSuccessful) {
         modifiedState.status = 'completed';
         modifiedState.winner = inn2.battingTeam;
-        const wicketsMargin = 10 - inn2.wickets;
-        modifiedState.winReason = `won by ${wicketsMargin} wicket${wicketsMargin > 1 ? 's' : ''}`;
+        const wicketsMargin = maxWickets - inn2.wickets;
+        modifiedState.winReason = modifiedState.isSuperOver
+          ? `won in Super Over ${modifiedState.superOverNumber || 1} by ${wicketsMargin} wicket${wicketsMargin > 1 ? 's' : ''}`
+          : `won by ${wicketsMargin} wicket${wicketsMargin > 1 ? 's' : ''}`;
         
         // Push to local match history
         saveMatchToHistory(modifiedState);
@@ -3992,19 +4279,153 @@ export const CricketScoreboard: React.FC = () => {
         modifiedState.status = 'completed';
         modifiedState.winner = inn2.bowlingTeam;
         const runsMargin = target - 1 - inn2.runs;
-        modifiedState.winReason = `won by ${runsMargin} run${runsMargin > 1 ? 's' : ''}`;
+        modifiedState.winReason = modifiedState.isSuperOver
+          ? `won in Super Over ${modifiedState.superOverNumber || 1} by ${runsMargin} run${runsMargin > 1 ? 's' : ''}`
+          : `won by ${runsMargin} run${runsMargin > 1 ? 's' : ''}`;
         
         saveMatchToHistory(modifiedState);
       } else if (batInningsEnded && inn2.runs === target - 1) {
         modifiedState.status = 'completed';
         modifiedState.winner = 'Tie';
-        modifiedState.winReason = 'The match ended in a thrilling Tie!';
+        modifiedState.winReason = modifiedState.isSuperOver 
+          ? `Super Over ${modifiedState.superOverNumber || 1} ended in a thrilling Tie!`
+          : 'The match ended in a thrilling Tie!';
         
         saveMatchToHistory(modifiedState);
       }
     }
 
     return modifiedState;
+  };
+
+  // --- SUPER OVER & TIE RESOLUTION HANDLERS ---
+  const handleStartSuperOver = (firstBattingTeamOverride?: string) => {
+    pushStateToUndoStack(match);
+
+    let nextMatchState: MatchState = { ...match };
+
+    // If starting the 1st Super Over, archive regular match innings
+    if (!nextMatchState.isSuperOver) {
+      if (nextMatchState.innings1 && nextMatchState.innings2) {
+        nextMatchState.mainMatchState = {
+          innings1: JSON.parse(JSON.stringify(nextMatchState.innings1)),
+          innings2: JSON.parse(JSON.stringify(nextMatchState.innings2)),
+          oversLimit: nextMatchState.oversLimit,
+          targetRuns: nextMatchState.targetRuns,
+          status: 'completed',
+          winner: 'Tie',
+          winReason: nextMatchState.winReason || 'Match tied in regular overs'
+        };
+      }
+    } else {
+      // If continuing from a tied Super Over, archive previous super over
+      const history = [...(nextMatchState.superOversHistory || [])];
+      if (nextMatchState.innings1) {
+        history.push({
+          superOverNumber: nextMatchState.superOverNumber || 1,
+          innings1: JSON.parse(JSON.stringify(nextMatchState.innings1)),
+          innings2: nextMatchState.innings2 ? JSON.parse(JSON.stringify(nextMatchState.innings2)) : null,
+          targetRuns: nextMatchState.targetRuns,
+          winner: 'Tie',
+          winReason: `Super Over ${nextMatchState.superOverNumber || 1} tied`
+        });
+      }
+      nextMatchState.superOversHistory = history;
+    }
+
+    const nextSuperOverNumber = (nextMatchState.superOverNumber || 0) + 1;
+
+    // Rule 3: Who Bats First: The team that batted second in the main match bats first in the Super Over.
+    // For subsequent super overs: The team that batted second in previous super over bats first.
+    let batFirstTeam = '';
+    if (firstBattingTeamOverride) {
+      batFirstTeam = firstBattingTeamOverride;
+    } else if (!nextMatchState.isSuperOver) {
+      // Team that batted second in main match
+      const mainInn2Batting = nextMatchState.innings2?.battingTeam;
+      batFirstTeam = mainInn2Batting || nextMatchState.teamB;
+    } else {
+      // Subsequent Super Over: team that batted second in previous super over bats first
+      const prevInn2Batting = nextMatchState.innings2?.battingTeam;
+      batFirstTeam = prevInn2Batting || (nextMatchState.innings1?.battingTeam === nextMatchState.teamA ? nextMatchState.teamB : nextMatchState.teamA);
+    }
+
+    const bowlFirstTeam = (batFirstTeam === nextMatchState.teamA) ? nextMatchState.teamB : nextMatchState.teamA;
+
+    // Rosters
+    const batRoster = batFirstTeam === nextMatchState.teamA ? selectedTeamARoster : selectedTeamBRoster;
+    const bowlRoster = bowlFirstTeam === nextMatchState.teamA ? selectedTeamARoster : selectedTeamBRoster;
+
+    const b1 = (batRoster && batRoster[0]) || `${batFirstTeam} Batter 1`;
+    const b2 = (batRoster && batRoster[1]) || `${batFirstTeam} Batter 2`;
+    const bw = (bowlRoster && bowlRoster[0]) || `${bowlFirstTeam} Bowler 1`;
+
+    const initialSuperOverInn1: Innings = {
+      battingTeam: batFirstTeam,
+      bowlingTeam: bowlFirstTeam,
+      runs: 0,
+      wickets: 0,
+      ballsBowled: 0,
+      extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 },
+      batsmen: [
+        { name: b1, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false },
+        { name: b2, runs: 0, balls: 0, fours: 0, sixes: 0, isOut: false }
+      ],
+      bowlers: [
+        { name: bw, ballsBowled: 0, maidens: 0, runsConceded: 0, wickets: 0, isCurrent: true }
+      ],
+      strikerIndex: 0,
+      nonStrikerIndex: 1,
+      currentBowlerIndex: 0,
+      fallOfWickets: [],
+      commentaryList: [
+        {
+          id: `so-${Date.now()}`,
+          overBall: '0.0',
+          description: `⚡ SUPER OVER ${nextSuperOverNumber} INITIATED! ${batFirstTeam} bats first against ${bowlFirstTeam}. Rules: 1 Over (6 legal deliveries), 2 Wickets Limit.`,
+          type: 'milestone'
+        }
+      ],
+      history: [
+        { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
+      ]
+    };
+
+    nextMatchState.isSuperOver = true;
+    nextMatchState.superOverNumber = nextSuperOverNumber;
+    nextMatchState.superOverWicketLimit = 2; // Rule 2: 2 wickets limit
+    nextMatchState.oversLimit = 1; // Rule 1: 1 over per side (6 legal deliveries)
+    nextMatchState.currentInningsNum = 1;
+    nextMatchState.innings1 = initialSuperOverInn1;
+    nextMatchState.innings2 = null;
+    nextMatchState.targetRuns = undefined;
+    nextMatchState.status = 'live';
+    nextMatchState.winner = undefined;
+    nextMatchState.winReason = undefined;
+    nextMatchState.tieResolution = 'super_over';
+    nextMatchState.freeHitNext = false;
+    nextMatchState.lastBallResult = undefined;
+
+    syncMatch(nextMatchState);
+    setShowTieResolutionModal(false);
+    showNotification(`⚡ Super Over ${nextSuperOverNumber} Started! ${batFirstTeam} batting first.`, 'success');
+  };
+
+  const handleDeclareOfficialTie = () => {
+    pushStateToUndoStack(match);
+    const nextMatchState: MatchState = {
+      ...match,
+      status: 'completed',
+      winner: 'Tie',
+      winReason: match.isSuperOver 
+        ? `Official Tie declared after Super Over ${match.superOverNumber || 1} tied.`
+        : 'Official Tie declared by Match Referee.',
+      tieResolution: 'declared_tie'
+    };
+    syncMatch(nextMatchState);
+    saveMatchToHistory(nextMatchState);
+    setShowTieResolutionModal(false);
+    showNotification('Official Tie declared and recorded in records.', 'alert');
   };
 
   // Explicitly End / Declare Innings manually
@@ -4069,10 +4490,19 @@ export const CricketScoreboard: React.FC = () => {
       nextMatchState.status = 'completed';
       if (inn2.runs > target - 1) {
         nextMatchState.winner = inn2.battingTeam;
-        nextMatchState.winReason = 'won in declared innings!';
+        nextMatchState.winReason = nextMatchState.isSuperOver 
+          ? `won in Super Over ${nextMatchState.superOverNumber || 1}!` 
+          : 'won in declared innings!';
+      } else if (inn2.runs === target - 1) {
+        nextMatchState.winner = 'Tie';
+        nextMatchState.winReason = nextMatchState.isSuperOver 
+          ? `Super Over ${nextMatchState.superOverNumber || 1} ended in a thrilling Tie!` 
+          : 'Match ended in a thrilling Tie!';
       } else {
         nextMatchState.winner = inn2.bowlingTeam;
-        nextMatchState.winReason = `won by declaration forfeit (Margin: ${target - 1 - inn2.runs} runs)`;
+        nextMatchState.winReason = nextMatchState.isSuperOver 
+          ? `won in Super Over ${nextMatchState.superOverNumber || 1}!` 
+          : `won by declaration forfeit (Margin: ${target - 1 - inn2.runs} runs)`;
       }
       saveMatchToHistory(nextMatchState);
     }
@@ -4495,10 +4925,10 @@ export const CricketScoreboard: React.FC = () => {
           if (activeLiveMatches && activeLiveMatches.length > 0) {
             for (const oldM of activeLiveMatches) {
               if (oldM.id !== matchIdToActivate && oldM.status === 'live') {
-                safeUpdateDoc(doc(db, 'cricket_matches', oldM.id), {
+                safeSetDoc(doc(db, 'cricket_matches', oldM.id), {
                   status: 'completed',
                   updatedAt: Date.now()
-                }).catch(() => {});
+                }, { merge: true }).catch(() => {});
               }
             }
           }
@@ -4515,7 +4945,8 @@ export const CricketScoreboard: React.FC = () => {
           body: JSON.stringify({
             managerId: currentManagerId,
             matchId: matchIdToActivate,
-            streamKey: streamKey
+            streamKey: streamKey,
+            matchData: updatedMatch ? sanitizeForFirestore(updatedMatch) : undefined
           })
         }).catch(() => {});
       } catch (_) {}
@@ -4552,17 +4983,17 @@ export const CricketScoreboard: React.FC = () => {
 
       // 3. Update Firestore
       if (!isFirestoreQuotaExhausted()) {
-        safeUpdateDoc(doc(db, 'cricket_matches', matchIdToComplete), {
+        safeSetDoc(doc(db, 'cricket_matches', matchIdToComplete), {
           status: 'completed',
           updatedAt: Date.now()
-        }).catch(() => {});
+        }, { merge: true }).catch(() => {});
 
         const managerDocRef = doc(db, 'score_managers', currentManagerId);
-        safeUpdateDoc(managerDocRef, {
+        safeSetDoc(managerDocRef, {
           activeMatchId: null,
           status: 'completed',
           updatedAt: Date.now()
-        }).catch(() => {});
+        }, { merge: true }).catch(() => {});
       }
 
       // 4. Call server endpoint
@@ -4643,6 +5074,7 @@ export const CricketScoreboard: React.FC = () => {
       freeHitNext: false,
       teamALogo: teamALogoUrl || match?.teamALogo || null,
       teamBLogo: teamBLogoUrl || match?.teamBLogo || null,
+      matchBannerUrl: matchBannerUrl || match?.matchBannerUrl || undefined,
       teamASquad: selectedTeamARoster,
       teamBSquad: selectedTeamBRoster,
       playerPhotos: match?.playerPhotos || {},
@@ -5377,10 +5809,216 @@ export const CricketScoreboard: React.FC = () => {
     }
   };
 
+  // Render Tie Resolution Modal (Option A: Super Over, Option B: Official Tie)
+  const renderTieResolutionModal = () => {
+    if (!showTieResolutionModal) return null;
+
+    const inn1 = match.mainMatchState?.innings1 || match.innings1;
+    const inn2 = match.mainMatchState?.innings2 || match.innings2;
+
+    // Rule 3: The team that batted second in the main match bats first in the Super Over
+    const teamBattedSecondInMain = match.mainMatchState?.innings2?.battingTeam || match.innings2?.battingTeam || match.teamB;
+    const otherTeamInMain = teamBattedSecondInMain === match.teamA ? match.teamB : match.teamA;
+
+    // For subsequent Super Overs: the team that chased in the previous Super Over bats first
+    const defaultBatFirstTeam = match.isSuperOver
+      ? (match.innings2?.battingTeam || otherTeamInMain)
+      : teamBattedSecondInMain;
+
+    const batFirstTeam = superOverBatFirstOverride || defaultBatFirstTeam;
+    const nextSuperOverNum = (match.superOverNumber || 0) + 1;
+
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md animate-fadeIn select-none">
+        <motion.div
+          initial={{ scale: 0.92, opacity: 0, y: 15 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.92, opacity: 0, y: 15 }}
+          className="bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-5 sm:p-7 w-full max-w-2xl shadow-2xl text-white relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar"
+        >
+          {/* Glowing background accents */}
+          <div className="absolute -right-20 -top-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -left-20 -bottom-20 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Close button */}
+          <button
+            type="button"
+            onClick={() => setShowTieResolutionModal(false)}
+            className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border-none cursor-pointer transition-colors z-10"
+            title="Close modal (Options remain accessible via header banner)"
+          >
+            ✕
+          </button>
+
+          {/* Header */}
+          <div className="text-center space-y-2 mb-6">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-500/40 rounded-full text-amber-300 text-[10px] sm:text-xs font-black uppercase tracking-widest">
+              <span className="animate-ping inline-block w-2 h-2 rounded-full bg-amber-400"></span>
+              {match.isSuperOver ? `⚡ Super Over ${match.superOverNumber || 1} Tied` : '🏆 Match Ended in a Tie'}
+            </div>
+            
+            <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-white">
+              {match.isSuperOver ? `Super Over ${match.superOverNumber || 1} Tied!` : 'Scores Are Level! Match Tied!'}
+            </h2>
+
+            {inn1 && inn2 && (
+              <div className="inline-flex items-center gap-3 px-4 py-1.5 bg-slate-950/80 rounded-2xl border border-slate-800 text-xs font-mono font-bold text-slate-300">
+                <span>{inn1.battingTeam}: <strong className="text-amber-400">{inn1.runs}/{inn1.wickets}</strong></span>
+                <span className="text-slate-600">vs</span>
+                <span>{inn2.battingTeam}: <strong className="text-emerald-400">{inn2.runs}/{inn2.wickets}</strong></span>
+              </div>
+            )}
+
+            <p className="text-xs sm:text-sm text-slate-300 font-medium max-w-lg mx-auto">
+              {match.isSuperOver
+                ? "Subsequent Super Overs are played consecutively until a definitive winner is found under ICC Men's T20 World Cup regulations."
+                : "Scores are level! Please select the official match resolution to proceed:"}
+            </p>
+          </div>
+
+          {/* Options Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            {/* OPTION A: SUPER OVER */}
+            <div className="bg-gradient-to-b from-amber-500/15 via-slate-850 to-slate-900 border-2 border-amber-500/60 hover:border-amber-400 rounded-2xl p-4 sm:p-5 flex flex-col justify-between space-y-4 shadow-xl relative transition-all">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-widest rounded-md">
+                    Option A • Decisive
+                  </span>
+                  <span className="text-amber-400 font-black text-xs">⚡ Eliminator</span>
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-black uppercase text-amber-300 flex items-center gap-2">
+                    <span>⚡</span> {match.isSuperOver ? `Play Super Over ${nextSuperOverNum}` : 'Super Over Option'}
+                  </h3>
+                  <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                    A decisive 1-over eliminator played under official ICC T20 World Cup Super Over rules.
+                  </p>
+                </div>
+
+                {/* 4 Official Rules */}
+                <div className="p-3 bg-slate-950/70 border border-amber-500/25 rounded-xl space-y-2 text-[10.5px]">
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold shrink-0">1.</span>
+                    <span className="text-slate-200">
+                      <strong>One Over Per Side:</strong> Each team faces exactly <strong>6 legal deliveries</strong>.
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold shrink-0">2.</span>
+                    <span className="text-slate-200">
+                      <strong>Wicket Limit:</strong> Each team can only lose <strong>2 wickets</strong>. Innings ends immediately upon 2nd wicket.
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold shrink-0">3.</span>
+                    <span className="text-slate-200">
+                      <strong>Who Bats First:</strong> The team that batted second in {match.isSuperOver ? 'previous Super Over' : 'main match'} (<strong className="text-amber-300">{batFirstTeam}</strong>) bats first.
+                    </span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-amber-400 font-bold shrink-0">4.</span>
+                    <span className="text-slate-200">
+                      <strong>Tied Super Over?</strong> Subsequent Super Overs are played consecutively until a definitive winner is found (boundary countback scrapped).
+                    </span>
+                  </div>
+                </div>
+
+                {/* Batting order confirmation */}
+                <div className="flex items-center justify-between p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 text-[11px]">
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-slate-400 block">Batting First:</span>
+                    <span className="font-extrabold text-amber-300">{batFirstTeam}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const switched = batFirstTeam === match.teamA ? match.teamB : match.teamA;
+                      setSuperOverBatFirstOverride(switched);
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-[9px] font-bold uppercase tracking-wider cursor-pointer border border-slate-700 transition-colors"
+                  >
+                    ⇄ Switch Order
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleStartSuperOver(batFirstTeam)}
+                className="w-full py-3.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-none flex items-center justify-center gap-2"
+              >
+                <span>⚡</span>
+                <span>{match.isSuperOver ? `Start Super Over ${nextSuperOverNum}` : 'Start Super Over (Option A)'}</span>
+              </button>
+            </div>
+
+            {/* OPTION B: DECLARED TIE */}
+            <div className="bg-gradient-to-b from-slate-800/40 via-slate-850 to-slate-900 border-2 border-slate-700/60 hover:border-slate-600 rounded-2xl p-4 sm:p-5 flex flex-col justify-between space-y-4 shadow-xl relative transition-all">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 bg-slate-800 text-slate-300 font-black text-[9px] uppercase tracking-widest rounded-md">
+                    Option B • Equal Split
+                  </span>
+                  <span className="text-slate-400 font-black text-xs">🤝 Shared Points</span>
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-black uppercase text-slate-200 flex items-center gap-2">
+                    <span>🤝</span> Declare Official Tie
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                    Conclude the match immediately as an official Tie without playing a Super Over.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2 text-[10.5px] text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Result officially registered as a <strong>Tie</strong>.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Points split equally between both teams.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Individual batting and bowling scorecards preserved.</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-emerald-400 font-bold">✓</span>
+                    <span>Match moves to completed past records.</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDeclareOfficialTie}
+                className="w-full py-3.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white border border-slate-700 font-black text-xs uppercase tracking-wider rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>🤝</span>
+                <span>Declare Official Tie (Option B)</span>
+              </button>
+            </div>
+
+          </div>
+
+          {/* Footer note */}
+          <div className="mt-4 text-center text-[10px] text-slate-400">
+            <span>ICC Men's T20 Playing Conditions • Boundary countback rule scrapped</span>
+          </div>
+        </motion.div>
+      </div>
+    );
+  };
+
   // early return for live cricket scoreboard scoring pad (100vh viewport constraint)
   const isScoringDisabled = isInningsLocked || match.status === 'completed';
 
-  if (match.status === 'live' && currentInnings && !isSpectator) {
+  if ((match.status === 'live' || (match.status === 'completed' && match.winner === 'Tie' && match.tieResolution !== 'declared_tie')) && currentInnings && !isSpectator) {
     const last5Commentaries = currentInnings.commentaryList 
       ? [...currentInnings.commentaryList].reverse().slice(0, 5) 
       : [];
@@ -5613,6 +6251,7 @@ export const CricketScoreboard: React.FC = () => {
                       setEditModalWickets(0);
                       setEditModalBallsBowled(0);
                     }
+                    setEditModalMatchBannerUrl(match.matchBannerUrl || '');
                     setShowEditMatchModal(true);
                   }}
                   className="h-8 sm:h-9 px-1.5 sm:px-3 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white font-extrabold border border-indigo-550/30 rounded-lg sm:rounded-xl text-[10px] uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
@@ -5645,6 +6284,63 @@ export const CricketScoreboard: React.FC = () => {
             )}
           </div>
         </header>
+
+        {/* Persistent Tie Resolution Alert Banner in Cockpit */}
+        {match.winner === 'Tie' && match.tieResolution !== 'declared_tie' && (
+          <div className="bg-gradient-to-r from-amber-600 via-yellow-500 to-amber-600 text-slate-950 px-3 py-2 flex items-center justify-between gap-2 shadow-lg shrink-0 select-none z-20 border-b border-amber-400">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-base sm:text-lg animate-bounce shrink-0">⚡</span>
+              <div className="min-w-0">
+                <span className="text-xs sm:text-sm font-black uppercase tracking-wider block leading-tight text-slate-950 truncate">
+                  {match.isSuperOver ? `Super Over ${match.superOverNumber || 1} Ended in a Tie!` : 'Scores Are Level! Match Ended in a Tie!'}
+                </span>
+                <span className="text-[10px] font-bold text-slate-900 block leading-tight">
+                  Choose resolution: Play Super Over {match.isSuperOver ? (match.superOverNumber || 1) + 1 : ''} (Option A) or Declare Official Tie (Option B)
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowTieResolutionModal(true)}
+                className="px-3 py-1.5 bg-slate-950 hover:bg-slate-900 text-amber-300 font-black text-[10px] uppercase tracking-wider rounded-xl shadow cursor-pointer border border-amber-400 transition-all"
+              >
+                ⚡ {match.isSuperOver ? `Super Over ${(match.superOverNumber || 1) + 1}` : 'Super Over (Opt A)'}
+              </button>
+              <button
+                type="button"
+                onClick={handleDeclareOfficialTie}
+                className="px-3 py-1.5 bg-white/40 hover:bg-white/60 text-slate-950 font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border border-black/20 transition-all"
+              >
+                🤝 Declare Tie (Opt B)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Super Over Active Status Bar in Cockpit */}
+        {match.isSuperOver && (
+          <div className="bg-slate-900 border-b border-amber-500/40 px-3 py-1.5 flex items-center justify-between text-[10px] text-amber-300 font-bold shrink-0 shadow-inner">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 font-black text-[8.5px] uppercase tracking-widest rounded-md shadow-xs animate-pulse">
+                ⚡ SUPER OVER {match.superOverNumber || 1}
+              </span>
+              <span className="text-slate-300 font-extrabold uppercase tracking-wide">
+                Innings {match.currentInningsNum} of 2
+              </span>
+              {match.targetRuns && (
+                <span className="px-2 py-0.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-black text-[9px] rounded-md">
+                  Target: {match.targetRuns} runs
+                </span>
+              )}
+            </div>
+            <div className="font-mono text-slate-300 flex items-center gap-3 text-[10px]">
+              <span>Balls: <strong className="text-white">{currentInnings.ballsBowled}/6</strong></span>
+              <span className="h-3 w-px bg-slate-700" />
+              <span>Wickets: <strong className="text-amber-400">{currentInnings.wickets}/2 Max</strong></span>
+            </div>
+          </div>
+        )}
 
         {/* VIEW DIVIDER CONTAINER wrapper for live preview split-pane layout */}
         <div className="flex-1 overflow-hidden min-h-0 flex flex-row relative">
@@ -5959,9 +6655,12 @@ export const CricketScoreboard: React.FC = () => {
               </div>
 
               {match.currentInningsNum === 2 && match.targetRuns && (
-                <div className="bg-amber-500/5 border border-amber-500/10 p-2 rounded-xl text-center text-[10px] font-bold text-amber-300">
+                <div className="bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl text-center text-[10px] font-bold text-amber-300 space-y-1">
+                  <div className="text-[7.5px] font-black uppercase tracking-wider text-amber-400 flex items-center justify-center gap-1">
+                    ⚡ Run Chase Equation
+                  </div>
                   {match.targetRuns - currentInnings.runs > 0 ? (
-                    <span>Need <strong className="font-black text-xs">{match.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="font-black text-xs">{(match.oversLimit * 6) - currentInnings.ballsBowled}</strong> deliveries</span>
+                    <div>Need <strong className="font-black text-xs text-white font-mono">{match.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="font-black text-xs text-white font-mono">{Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls</div>
                   ) : (
                     <span className="text-emerald-400 font-black uppercase tracking-wide animate-pulse">Target Achieved!</span>
                   )}
@@ -6300,6 +6999,13 @@ export const CricketScoreboard: React.FC = () => {
                                   desc: 'Virat Kohli style star profile with giant typography & icon stats',
                                   isActive: ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(currentActiveGraphic),
                                   onToggle: () => updateOverlayProp({ activeGraphic: ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(currentActiveGraphic) ? 'none' : 'player_profile_card' })
+                                },
+                                {
+                                  id: 'individual_stats',
+                                  label: 'Individual Batting & Bowling Stats',
+                                  desc: 'Live dynamic batting & bowling statistics alongside main scoreboard with timer auto-close',
+                                  isActive: ['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(currentActiveGraphic) ? 'none' : 'individual_stats' })
                                 },
                                 {
                                   id: 'batsman_stats',
@@ -6751,14 +7457,12 @@ export const CricketScoreboard: React.FC = () => {
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) {
-                                          const reader = new FileReader();
-                                          reader.onloadend = () => {
-                                            if (typeof reader.result === 'string') {
-                                              setMatch(prev => ({ ...prev, teamALogo: reader.result as string }));
+                                          compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+                                            if (compressed) {
+                                              setMatch(prev => ({ ...prev, teamALogo: compressed }));
                                               showNotification(`Saved ${match.teamA} logo branding!`, 'success');
                                             }
-                                          };
-                                          reader.readAsDataURL(file);
+                                          });
                                         }
                                       }}
                                       className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -6797,14 +7501,12 @@ export const CricketScoreboard: React.FC = () => {
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) {
-                                          const reader = new FileReader();
-                                          reader.onloadend = () => {
-                                            if (typeof reader.result === 'string') {
-                                              setMatch(prev => ({ ...prev, teamBLogo: reader.result as string }));
+                                          compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+                                            if (compressed) {
+                                              setMatch(prev => ({ ...prev, teamBLogo: compressed }));
                                               showNotification(`Saved ${match.teamB} logo branding!`, 'success');
                                             }
-                                          };
-                                          reader.readAsDataURL(file);
+                                          });
                                         }
                                       }}
                                       className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -6891,23 +7593,21 @@ export const CricketScoreboard: React.FC = () => {
                                               onChange={(e) => {
                                                 const file = e.target.files?.[0];
                                                 if (file) {
-                                                  const reader = new FileReader();
-                                                  reader.onloadend = () => {
-                                                    if (typeof reader.result === 'string') {
+                                                  compressImageFile(file, 180, 180, 0.72).then((compressed) => {
+                                                    if (compressed) {
                                                       setMatch(prev => {
                                                         const currentPhotos = prev.playerPhotos || {};
                                                         return {
                                                           ...prev,
                                                           playerPhotos: {
                                                             ...currentPhotos,
-                                                            [lookupKey]: reader.result as string
+                                                            [lookupKey]: compressed
                                                           }
                                                         };
                                                       });
                                                       showNotification(`Saved photo for ${playerName}`, 'success');
                                                     }
-                                                  };
-                                                  reader.readAsDataURL(file);
+                                                  });
                                                 }
                                               }}
                                               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -7024,16 +7724,27 @@ export const CricketScoreboard: React.FC = () => {
                             <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({st.balls}b)</span>
                           </div>
                           {!isSpectator && (
-                            <button
-                              type="button"
-                              disabled={isScoringDisabled}
-                              id="btn-striker-out-quick"
-                              onClick={() => openWicketModal('striker')}
-                              className="px-2 py-1 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
-                              title="Dismiss Striker (Wicket / Out)"
-                            >
-                              🔴 OUT
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isScoringDisabled}
+                                onClick={() => openRetireHurtModal('striker')}
+                                className="px-1.5 py-1 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[7.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                title="Retire Hurt (Injury)"
+                              >
+                                🩹 RETD
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isScoringDisabled}
+                                id="btn-striker-out-quick"
+                                onClick={() => openWicketModal('striker')}
+                                className="px-2 py-1 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                title="Dismiss Striker (Wicket / Out)"
+                              >
+                                🔴 OUT
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -7103,16 +7814,27 @@ export const CricketScoreboard: React.FC = () => {
                             <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({nst.balls}b)</span>
                           </div>
                           {!isSpectator && (
-                            <button
-                              type="button"
-                              disabled={isScoringDisabled}
-                              id="btn-nonstriker-out-quick"
-                              onClick={() => openWicketModal('non-striker')}
-                              className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
-                              title="Dismiss Non-Striker (Run Out / Mankad)"
-                            >
-                              🔴 OUT
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={isScoringDisabled}
+                                onClick={() => openRetireHurtModal('non-striker')}
+                                className="px-1.5 py-1 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[7.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                title="Retire Hurt (Injury)"
+                              >
+                                🩹 RETD
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isScoringDisabled}
+                                id="btn-nonstriker-out-quick"
+                                onClick={() => openWicketModal('non-striker')}
+                                className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                title="Dismiss Non-Striker (Run Out / Mankad)"
+                              >
+                                🔴 OUT
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -7751,6 +8473,13 @@ export const CricketScoreboard: React.FC = () => {
                       return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />;
                     })()}
 
+                    {/* Predictive Win Probability Commentary inside AI Commentary */}
+                    <WinProbabilityCard
+                      match={match}
+                      userLanguage={userCommentaryLang}
+                      className="border-slate-800 bg-slate-900/90 text-slate-100 my-1"
+                    />
+
                     <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin max-h-[300px]">
                       {(!currentInnings.commentaryList || currentInnings.commentaryList.length === 0) ? (
                         <p className="text-center text-xs text-slate-500 py-8 italic">No commentary yet for this innings.</p>
@@ -8258,8 +8987,8 @@ export const CricketScoreboard: React.FC = () => {
 
                   <div>
                     <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none">Dismissal Type</span>
-                    <div className="grid grid-cols-5 gap-1">
-                      {(['Bowled', 'Caught', 'Run Out', 'Stumped', 'LBW'] as const).map((mode) => (
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
+                      {(['Bowled', 'Caught', 'Run Out', 'Stumped', 'LBW', 'Retired Hurt'] as const).map((mode) => (
                         <button
                           key={mode}
                           type="button"
@@ -8269,15 +8998,18 @@ export const CricketScoreboard: React.FC = () => {
                               const bName = wicketBowlerName.trim() || (currentInnings?.bowlers?.[currentInnings.currentBowlerIndex]?.name || 'Bowler');
                               const cName = wicketFielderName.trim();
                               setWicketHowOutDetails(cName ? (cName.toLowerCase() === bName.toLowerCase() ? `c & b ${bName}` : `c ${cName} b ${bName}`) : `Caught`);
+                            } else if (mode === 'Retired Hurt') {
+                              setWicketHowOutDetails('Retired Hurt');
+                              setWicketAdditionalDetails('Retired Hurt (Injured)');
                             } else {
                               setWicketHowOutDetails(mode);
                             }
                           }}
                           className={`py-1.5 rounded text-[8.5px] font-black uppercase tracking-widest transition-all cursor-pointer border-none ${
-                            wicketType === mode ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                            wicketType === mode ? (mode === 'Retired Hurt' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white') : 'bg-slate-800 text-slate-400'
                           }`}
                         >
-                          {mode}
+                          {mode === 'Retired Hurt' ? '🩹 Retired' : mode}
                         </button>
                       ))}
                     </div>
@@ -8704,6 +9436,91 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Match Banner Option (1280x720) */}
+                  <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block">
+                        Match Banner (1280 × 720 HD)
+                      </label>
+                      <span className="text-[8px] font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                        16:9 Spectator Banner
+                      </span>
+                    </div>
+
+                    {editModalMatchBannerUrl ? (
+                      <div className="relative aspect-[16/9] w-full rounded-xl overflow-hidden border border-slate-800 bg-slate-950 shadow-md group">
+                        <img 
+                          src={editModalMatchBannerUrl} 
+                          alt="Match Banner" 
+                          className="w-full h-full object-cover" 
+                          referrerPolicy="no-referrer" 
+                        />
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditModalMatchBannerUrl('')}
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shadow-md"
+                          >
+                            Remove Banner
+                          </button>
+                        </div>
+                        <span className="absolute bottom-1.5 left-2 px-1.5 py-0.5 rounded bg-black/70 text-[8px] font-mono text-emerald-400">
+                          1280 × 720 Active
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="aspect-[16/9] w-full rounded-xl border border-dashed border-slate-800 bg-slate-950/60 flex flex-col items-center justify-center p-3 text-center">
+                        <span className="text-xl mb-1">🖼️</span>
+                        <span className="text-[10px] font-bold text-slate-400">No match banner set</span>
+                        <span className="text-[8px] text-slate-500 mt-0.5">Upload a 1280x720 banner for spectator screen</span>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col gap-2 pt-1">
+                      <div className="flex items-center gap-2">
+                        <div className="relative overflow-hidden inline-block flex-1">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="edit-modal-banner-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processMatchBannerFile(file, (dataUrl) => {
+                                  setEditModalMatchBannerUrl(dataUrl);
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label 
+                            htmlFor="edit-modal-banner-file"
+                            className="w-full block py-2 px-3 bg-slate-800 hover:bg-slate-750 text-slate-200 text-center font-bold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border border-slate-700/60 transition-colors"
+                          >
+                            📁 Upload Banner (1280×720)
+                          </label>
+                        </div>
+                        {editModalMatchBannerUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setEditModalMatchBannerUrl('')}
+                            className="px-2.5 py-2 bg-slate-850 hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 rounded-xl text-[10px] font-bold border border-slate-800 cursor-pointer"
+                            title="Clear Banner"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="url"
+                        placeholder="Or paste banner image URL (https://...)"
+                        value={editModalMatchBannerUrl}
+                        onChange={(e) => setEditModalMatchBannerUrl(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-[10px] font-medium text-slate-200 placeholder-slate-600 outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
                   <div className="flex gap-3 pt-4 font-sans">
                     <button
                       onClick={() => setShowEditMatchModal(false)}
@@ -8724,6 +9541,8 @@ export const CricketScoreboard: React.FC = () => {
           )}
         </AnimatePresence>
 
+        {/* Tie Resolution Modal (Option A: Super Over, Option B: Official Tie) */}
+        {renderTieResolutionModal()}
 
       </div>
     );
@@ -8944,15 +9763,17 @@ export const CricketScoreboard: React.FC = () => {
               </button>
             )}
 
-            <button 
-              onClick={() => setShowHistory(!showHistory)}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-sm"
-            >
-              <Clock size={13} />
-              {showHistory ? 'Close Logs' : 'Past Matches'}
-            </button>
+            {match.status !== 'setup' && (
+              <button 
+                onClick={() => setShowHistory(!showHistory)}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-sm"
+              >
+                <Clock size={13} />
+                {showHistory ? 'Close Logs' : 'Past Matches'}
+              </button>
+            )}
 
-            {/* Small Permanent OBS Overlay Link Icon near Past Matches */}
+            {/* Small Permanent OBS Overlay Link Icon near Past Matches - Always Available on all screens including Setup */}
             <button
               type="button"
               onClick={() => {
@@ -8982,47 +9803,51 @@ export const CricketScoreboard: React.FC = () => {
               )}
             </button>
 
-            <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2 rounded-xl transition-all cursor-pointer border-none text-white ${soundEnabled ? 'bg-emerald-600' : 'bg-emerald-800/40 opacity-60'}`}
-              title={soundEnabled ? "Mute audio" : "Enable sound"}
-            >
-              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} className="text-amber-200" />}
-            </button>
+            {match.status !== 'setup' && (
+              <>
+                <button
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  className={`p-2 rounded-xl transition-all cursor-pointer border-none text-white ${soundEnabled ? 'bg-emerald-600' : 'bg-emerald-800/40 opacity-60'}`}
+                  title={soundEnabled ? "Mute audio" : "Enable sound"}
+                >
+                  {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} className="text-amber-200" />}
+                </button>
 
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white transition-all cursor-pointer border-none"
-              title="Toggle theme mode"
-            >
-              {darkMode ? <Sun size={18} className="text-amber-300" /> : <Moon size={18} />}
-            </button>
+                <button
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white transition-all cursor-pointer border-none"
+                  title="Toggle theme mode"
+                >
+                  {darkMode ? <Sun size={18} className="text-amber-300" /> : <Moon size={18} />}
+                </button>
 
-            {isScoreManager ? (
-              <button
-                onClick={async () => {
-                  try {
-                    await logout();
-                    window.location.href = '/';
-                  } catch (err) {
-                    console.error('Logout error:', err);
-                  }
-                }}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
-                title="Sign out of scorekeeper session"
-              >
-                <ShieldIcon size={14} className="text-amber-300" />
-                <span>Logout Scorer</span>
-              </button>
-            ) : (
-              <Link
-                to="/cricket-login"
-                className="px-3 py-1.5 bg-amber-550 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-lg hover:shadow-amber-500/10 transition-all no-underline decoration-transparent"
-                title="Authenticate as Scorekeeper"
-              >
-                <LoginIcon size={14} />
-                <span>Scorer Login</span>
-              </Link>
+                {isScoreManager ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await logout();
+                        window.location.href = '/';
+                      } catch (err) {
+                        console.error('Logout error:', err);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                    title="Sign out of scorekeeper session"
+                  >
+                    <ShieldIcon size={14} className="text-amber-300" />
+                    <span>Logout Scorer</span>
+                  </button>
+                ) : (
+                  <Link
+                    to="/cricket-login"
+                    className="px-3 py-1.5 bg-amber-550 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-lg hover:shadow-amber-500/10 transition-all no-underline decoration-transparent"
+                    title="Authenticate as Scorekeeper"
+                  >
+                    <LoginIcon size={14} />
+                    <span>Scorer Login</span>
+                  </Link>
+                )}
+              </>
             )}
 
             <Link
@@ -9103,6 +9928,7 @@ export const CricketScoreboard: React.FC = () => {
         <AnimatePresence>
           {showHistory && (
             <motion.div
+              id="section-past-matches-registry"
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
@@ -10876,13 +11702,11 @@ export const CricketScoreboard: React.FC = () => {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (typeof reader.result === 'string') {
-                                  setTeamALogoUrl(reader.result);
+                              compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+                                if (compressed) {
+                                  setTeamALogoUrl(compressed);
                                 }
-                              };
-                              reader.readAsDataURL(file);
+                              });
                             }
                           }}
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -10932,13 +11756,11 @@ export const CricketScoreboard: React.FC = () => {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
-                                if (typeof reader.result === 'string') {
-                                  setTeamBLogoUrl(reader.result);
+                              compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+                                if (compressed) {
+                                  setTeamBLogoUrl(compressed);
                                 }
-                              };
-                              reader.readAsDataURL(file);
+                              });
                             }
                           }}
                           className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -11149,6 +11971,147 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
               </div>
 
+              {/* Match Banner Option (1280 x 720 Widescreen) */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-left space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🖼️</span>
+                      <h4 className="text-xs font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider">
+                        Match Banner (1280 × 720 HD)
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[8.5px] font-black uppercase tracking-wider">
+                        16:9 Widescreen
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                      This banner will be displayed in the spectator full details page and in the match card in the homepage spectator section.
+                    </p>
+                  </div>
+
+                  {matchBannerUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setMatchBannerUrl('')}
+                      className="self-start sm:self-auto px-3 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 size={11} /> Clear Banner
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                  {/* Left: Banner controls and uploaders */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="relative overflow-hidden inline-block flex-1">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          id="setup-match-banner-file"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              processMatchBannerFile(file, (dataUrl) => {
+                                setMatchBannerUrl(dataUrl);
+                                showNotification('Match banner (1280x720) loaded successfully!', 'success');
+                              });
+                            }
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                        <label
+                          htmlFor="setup-match-banner-file"
+                          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white text-center font-black text-xs uppercase tracking-wider rounded-2xl cursor-pointer shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                        >
+                          <Camera size={14} />
+                          Upload Banner (1280 × 720)
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                        Or Paste Banner Image URL
+                      </label>
+                      <input
+                        type="url"
+                        value={matchBannerUrl}
+                        onChange={(e) => setMatchBannerUrl(e.target.value)}
+                        placeholder="https://example.com/banner-1280x720.jpg"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-emerald-500 transition-all"
+                      />
+                    </div>
+
+                    {/* Quick Preset Stadium Banners */}
+                    <div>
+                      <span className="text-[8.5px] font-mono uppercase text-slate-400 font-bold block mb-1.5">
+                        Quick Preset Banners (1280 × 720 HD):
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setMatchBannerUrl('https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?auto=format&fit=crop&w=1280&h=720&q=80')}
+                          className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-400 text-slate-700 dark:text-slate-300 text-[9px] font-bold border border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
+                        >
+                          🏟️ Stadium Floodlights
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMatchBannerUrl('https://images.unsplash.com/photo-1531415074868-036b1c5f53ec?auto=format&fit=crop&w=1280&h=720&q=80')}
+                          className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-400 text-slate-700 dark:text-slate-300 text-[9px] font-bold border border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
+                        >
+                          🏏 Green Pitch Derby
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMatchBannerUrl('https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&w=1280&h=720&q=80')}
+                          className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 hover:bg-emerald-500/20 hover:text-emerald-400 text-slate-700 dark:text-slate-300 text-[9px] font-bold border border-slate-300 dark:border-slate-700 cursor-pointer transition-colors"
+                        >
+                          🏆 Final Championship
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: 16:9 Aspect Ratio Live Preview */}
+                  <div>
+                    {matchBannerUrl ? (
+                      <div className="aspect-[16/9] w-full rounded-2xl overflow-hidden bg-slate-900 border-2 border-emerald-500/40 shadow-lg relative group">
+                        <img
+                          src={matchBannerUrl}
+                          alt="Match Banner Preview"
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
+                        <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono text-[8.5px] font-black uppercase tracking-wider">
+                          1280 × 720 HD Ready
+                        </div>
+                        <div className="absolute bottom-2 left-3 right-3 text-white">
+                          <span className="text-[9px] font-mono text-emerald-400 font-bold block uppercase tracking-wider">
+                            Match Banner Preview
+                          </span>
+                          <span className="text-xs font-black text-white block truncate">
+                            {teamA || 'Team A'} vs {teamB || 'Team B'}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="aspect-[16/9] w-full rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/50 flex flex-col items-center justify-center p-4 text-center">
+                        <span className="text-2xl mb-1 opacity-60">🖼️</span>
+                        <span className="text-xs font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                          1280 × 720 Banner Preview
+                        </span>
+                        <span className="text-[9px] text-slate-400 dark:text-slate-500 mt-1 max-w-[200px]">
+                          Upload an image or pick a preset to preview the 16:9 spectator banner.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* Opening Batsmen & Opening Bowler Selection */}
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 text-left space-y-3">
                 <div className="flex justify-between items-center">
@@ -11264,6 +12227,125 @@ export const CricketScoreboard: React.FC = () => {
                   Save as Draft
                 </button>
               </div>
+
+              {/* Bottom Quick Controls: Past Matches, Audio Button, Toggle Theme Mode, Core Login */}
+              <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  {/* Left: Past Matches Button */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      id="btn-setup-past-matches"
+                      onClick={() => {
+                        setShowHistory(prev => !prev);
+                        if (!showHistory) {
+                          setTimeout(() => {
+                            const historyEl = document.getElementById('section-past-matches-registry');
+                            if (historyEl) {
+                              historyEl.scrollIntoView({ behavior: 'smooth' });
+                            } else {
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }
+                          }, 100);
+                        }
+                      }}
+                      className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border shadow-sm ${
+                        showHistory
+                          ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md'
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                      }`}
+                      title="View Past Matches and saved logs"
+                    >
+                      <Clock size={15} className={showHistory ? 'text-slate-950' : 'text-amber-500'} />
+                      <span>{showHistory ? 'Close Past Matches' : `Past Matches (${pastMatches.length})`}</span>
+                    </button>
+                  </div>
+
+                  {/* Right: Audio button, Toggle Theme Mode, Core Login button */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Audio Button */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        id="btn-setup-audio-toggle"
+                        onClick={() => {
+                          setSoundEnabled(prev => !prev);
+                          if (soundEnabled) {
+                            setShowAudioSettingsDropdown(false);
+                          }
+                        }}
+                        className={`px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer border shadow-sm ${
+                          soundEnabled
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                        }`}
+                        title={soundEnabled ? "Audio On (Click to Mute)" : "Audio Muted (Click to Enable)"}
+                      >
+                        {soundEnabled ? (
+                          <Volume2 size={16} className="text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                          <VolumeX size={16} className="text-rose-500" />
+                        )}
+                        <span>{soundEnabled ? 'Audio On' : 'Audio Muted'}</span>
+                      </button>
+                    </div>
+
+                    {/* Toggle Theme Mode Button */}
+                    <button
+                      type="button"
+                      id="btn-setup-theme-toggle"
+                      onClick={() => setDarkMode(prev => !prev)}
+                      className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-all flex items-center gap-2 cursor-pointer border border-slate-200 dark:border-slate-700 shadow-sm"
+                      title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                    >
+                      {darkMode ? (
+                        <>
+                          <Sun size={16} className="text-amber-400" />
+                          <span>Light</span>
+                        </>
+                      ) : (
+                        <>
+                          <Moon size={16} className="text-indigo-500" />
+                          <span>Dark</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Core Login Button */}
+                    {isScoreManager ? (
+                      <button
+                        type="button"
+                        id="btn-setup-core-logout"
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to log out from Core Scorer mode?')) {
+                            try {
+                              await logout();
+                              showNotification('Logged out from Core Scorer session.', 'info');
+                            } catch (err) {
+                              console.error('Logout error:', err);
+                            }
+                          }
+                        }}
+                        className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md border border-emerald-500"
+                        title="Core Scorer authenticated - Click to log out"
+                      >
+                        <ShieldIcon size={15} className="text-amber-300" />
+                        <span>Core: Logged In</span>
+                      </button>
+                    ) : (
+                      <Link
+                        to="/cricket-login"
+                        id="btn-setup-core-login"
+                        className="px-4 py-2.5 rounded-xl bg-amber-550 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md hover:shadow-amber-500/20 no-underline decoration-transparent"
+                        title="Authenticate with Core Scorer credentials"
+                      >
+                        <LoginIcon size={15} />
+                        <span>Core Login</span>
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </>)}
@@ -11285,11 +12367,33 @@ export const CricketScoreboard: React.FC = () => {
                     <Trophy className="text-yellow-200 animate-bounce" size={32} />
                   </div>
                   <h2 className="text-2xl sm:text-4xl font-extrabold uppercase tracking-widest text-white">
-                    {match.winner === 'Tie' ? 'MATCH TIE!' : `${match.winner} VICTORIOUS`}
+                    {match.winner === 'Tie' ? 'MATCH TIED!' : `${match.winner} VICTORIOUS`}
                   </h2>
                   <p className="text-sm font-bold uppercase tracking-widest bg-black/10 inline-block px-6 py-2 rounded-full">
                     {match.winReason}
                   </p>
+
+                  {/* Tie Resolution Options in Standard View Header */}
+                  {match.winner === 'Tie' && match.tieResolution !== 'declared_tie' && (
+                    <div className="pt-4 flex items-center justify-center gap-3 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setShowTieResolutionModal(true)}
+                        className="px-6 py-3 bg-slate-950 hover:bg-black text-amber-300 border-2 border-amber-400 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl shadow-xl transition-all transform hover:scale-105 cursor-pointer flex items-center gap-2"
+                      >
+                        <Zap size={16} className="text-amber-400 animate-pulse" />
+                        <span>{match.isSuperOver ? `Play Super Over ${(match.superOverNumber || 1) + 1} ⚡` : 'Play Super Over (Option A)'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeclareOfficialTie}
+                        className="px-5 py-3 bg-white/20 hover:bg-white/30 text-white border border-white/40 font-black text-xs sm:text-sm uppercase tracking-wider rounded-2xl shadow-lg transition-all cursor-pointer flex items-center gap-2"
+                      >
+                        <span>🤝</span>
+                        <span>Declare Official Tie (Option B)</span>
+                      </button>
+                    </div>
+                  )}
                   
                   {playerOfTheMatch && (
                     <motion.div
@@ -11342,9 +12446,20 @@ export const CricketScoreboard: React.FC = () => {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 sm:gap-6">
                   <div>
                     <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                      <span className="px-2.5 py-1 bg-amber-500 text-white text-[9px] font-black uppercase tracking-wider rounded-md animate-pulse">
-                        Innings {match.currentInningsNum} Active
-                      </span>
+                      {match.isSuperOver ? (
+                        <>
+                          <span className="px-2.5 py-1 bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 text-[9px] font-black uppercase tracking-wider rounded-md shadow-sm animate-pulse">
+                            ⚡ SUPER OVER {match.superOverNumber || 1} • Innings {match.currentInningsNum}/2
+                          </span>
+                          <span className="px-2.5 py-1 bg-black/30 text-amber-300 text-[9px] font-black uppercase tracking-wider rounded-md border border-amber-500/30">
+                            1 Over (6 Balls) • Max 2 Wickets
+                          </span>
+                        </>
+                      ) : (
+                        <span className="px-2.5 py-1 bg-amber-500 text-white text-[9px] font-black uppercase tracking-wider rounded-md animate-pulse">
+                          Innings {match.currentInningsNum} Active
+                        </span>
+                      )}
                       {match.targetRuns && (
                         <span className="px-2.5 py-1 bg-black/20 text-amber-200 text-[9px] font-black uppercase tracking-wider rounded-md">
                           Target: {match.targetRuns} Runs
@@ -11357,6 +12472,30 @@ export const CricketScoreboard: React.FC = () => {
                     <p className="text-[10px] text-emerald-200 font-bold uppercase tracking-widest mt-1.5 flex flex-wrap items-center gap-1">
                       Defending Bowling side: <strong className="text-white bg-emerald-900 px-2 py-0.5 rounded-md font-extrabold">{currentInnings.bowlingTeam}</strong>
                     </p>
+
+                    {/* Run Chase Equation */}
+                    {match.currentInningsNum === 2 && match.targetRuns && (
+                      <div className="mt-2.5 inline-flex flex-wrap items-center gap-2 px-3 py-1.5 bg-black/30 border border-amber-400/30 rounded-xl text-xs font-bold text-amber-200 shadow-sm backdrop-blur-xs">
+                        <span className="text-[8.5px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1">
+                          ⚡ Run Chase Equation
+                        </span>
+                        {match.targetRuns - currentInnings.runs > 0 ? (
+                          <span className="font-mono text-white text-xs sm:text-sm">
+                            Need <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{match.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="text-yellow-300 font-black text-sm sm:text-base font-mono">{Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls
+                            {(() => {
+                              const ballsLeft = Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled);
+                              const runsToGet = match.targetRuns - currentInnings.runs;
+                              if (ballsLeft <= 0) return ' (Req: ∞)';
+                              return ` (RRR: ${((runsToGet / ballsLeft) * 6).toFixed(2)})`;
+                            })()}
+                          </span>
+                        ) : (
+                          <span className="text-emerald-400 font-black uppercase tracking-wider animate-pulse">
+                            🎉 Target Achieved!
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* CRR & RRR statistics bar */}
@@ -11588,6 +12727,7 @@ export const CricketScoreboard: React.FC = () => {
                           setEditModalWickets(0);
                           setEditModalBallsBowled(0);
                         }
+                        setEditModalMatchBannerUrl(match.matchBannerUrl || '');
                         setShowEditMatchModal(true);
                       }}
                       className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1"
@@ -12620,14 +13760,23 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     </motion.div>
 
-                    {/* Meta match info */}
+                    {/* Run Chase Equation */}
                     {match.currentInningsNum === 2 && match.targetRuns && (
-                      <div className="p-3 bg-amber-500/10 border border-amber-500/15 rounded-xl space-y-1">
-                        <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest">
-                          Target: {match.targetRuns} Runs
-                        </p>
-                        <p className="text-[9px] font-bold text-slate-350 uppercase">
-                          Needs {Math.max(0, match.targetRuns - currentInnings.runs)} runs off {(match.oversLimit * 6) - currentInnings.ballsBowled} balls remaining
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl space-y-1.5 font-sans">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[8.5px] font-black uppercase tracking-widest text-amber-400 flex items-center gap-1">
+                            ⚡ Run Chase Equation
+                          </span>
+                          <span className="text-[9px] font-black font-mono text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded">
+                            Target: {match.targetRuns} Runs
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-amber-200 leading-snug">
+                          {match.targetRuns - currentInnings.runs > 0 ? (
+                            <span>Need <strong className="text-white font-mono font-black text-sm">{match.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="text-white font-mono font-black text-sm">{Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls remaining</span>
+                          ) : (
+                            <span className="text-emerald-400 font-black uppercase tracking-wider animate-pulse">🎉 Target Achieved!</span>
+                          )}
                         </p>
                       </div>
                     )}
@@ -12766,15 +13915,26 @@ export const CricketScoreboard: React.FC = () => {
                                       ({st.balls}b)
                                     </span>
                                     {!isSpectator && (
-                                      <button
-                                        type="button"
-                                        disabled={isScoringDisabled}
-                                        onClick={() => openWicketModal('striker')}
-                                        className="px-2 py-1 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0 ml-1"
-                                        title="Dismiss Striker (Wicket / Out)"
-                                      >
-                                        🔴 OUT
-                                      </button>
+                                      <div className="flex items-center gap-1 shrink-0 ml-1">
+                                        <button
+                                          type="button"
+                                          disabled={isScoringDisabled}
+                                          onClick={() => openRetireHurtModal('striker')}
+                                          className="px-1.5 py-1 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                          title="Retire Hurt (Injury)"
+                                        >
+                                          🩹 RETD
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isScoringDisabled}
+                                          onClick={() => openWicketModal('striker')}
+                                          className="px-2 py-1 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                          title="Dismiss Striker (Wicket / Out)"
+                                        >
+                                          🔴 OUT
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                   <p className="text-[7.5px] text-slate-400 font-bold uppercase tracking-wider">
@@ -12835,15 +13995,26 @@ export const CricketScoreboard: React.FC = () => {
                                       ({nst.balls}b)
                                     </span>
                                     {!isSpectator && (
-                                      <button
-                                        type="button"
-                                        disabled={isScoringDisabled}
-                                        onClick={() => openWicketModal('non-striker')}
-                                        className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0 ml-1"
-                                        title="Dismiss Non-Striker (Run Out)"
-                                      >
-                                        🔴 OUT
-                                      </button>
+                                      <div className="flex items-center gap-1 shrink-0 ml-1">
+                                        <button
+                                          type="button"
+                                          disabled={isScoringDisabled}
+                                          onClick={() => openRetireHurtModal('non-striker')}
+                                          className="px-1.5 py-1 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                          title="Retire Hurt (Injury)"
+                                        >
+                                          🩹 RETD
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isScoringDisabled}
+                                          onClick={() => openWicketModal('non-striker')}
+                                          className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
+                                          title="Dismiss Non-Striker (Run Out)"
+                                        >
+                                          🔴 OUT
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                   <p className="text-[7.5px] text-slate-450 mt-0.5 font-bold uppercase tracking-wider">
@@ -13798,21 +14969,26 @@ export const CricketScoreboard: React.FC = () => {
                 <div>
                   <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none">Dismissal Type</span>
                   <div className="grid grid-cols-3 gap-2">
-                    {(['Bowled', 'Caught', 'Run Out', 'Stumped', 'LBW'] as const).map((mode) => (
+                    {(['Bowled', 'Caught', 'Run Out', 'Stumped', 'LBW', 'Retired Hurt'] as const).map((mode) => (
                       <button
                         key={mode}
                         type="button"
                         onClick={() => {
                           setWicketType(mode);
-                          setWicketHowOutDetails(mode);
+                          if (mode === 'Retired Hurt') {
+                            setWicketHowOutDetails('Retired Hurt');
+                            setWicketAdditionalDetails('Retired Hurt (Injured)');
+                          } else {
+                            setWicketHowOutDetails(mode);
+                          }
                         }}
                         className={`py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer border-none ${
                           wicketType === mode
-                            ? 'bg-emerald-600 text-white'
+                            ? (mode === 'Retired Hurt' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white')
                             : 'bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-850 dark:text-slate-400'
                         }`}
                       >
-                        {mode}
+                        {mode === 'Retired Hurt' ? '🩹 Retired' : mode}
                       </button>
                     ))}
                   </div>
@@ -15443,6 +16619,9 @@ export const CricketScoreboard: React.FC = () => {
         onApplyToss={handleApplySpinCoinToss}
         soundEnabled={soundEnabled}
       />
+
+      {/* Tie Resolution Modal (Option A: Super Over, Option B: Official Tie) */}
+      {renderTieResolutionModal()}
     </div>
   );
 };

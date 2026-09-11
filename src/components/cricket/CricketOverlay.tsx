@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Trophy, TrendingUp, Zap, Radio, ChevronRight, Play, Flame, Award, Skull, Star, Check, X 
+  Trophy, TrendingUp, Zap, Radio, ChevronRight, Play, Flame, Award, Skull, Star, Check, X, Clock 
 } from 'lucide-react';
 import { useSearchParams, useParams } from 'react-router-dom';
 import { CricketOverlayAnimations } from './CricketOverlayAnimations';
+import { IndividualStatsOverlay } from './IndividualStatsOverlay';
 
 // Firestore imports
 import { db } from '../../lib/firebase';
@@ -127,11 +128,18 @@ interface MatchState {
   targetRuns?: number;
   freeHitNext: boolean;
   lastBallResult?: string;
+  isSuperOver?: boolean;
+  superOverNumber?: number;
+  superOverWicketLimit?: number;
+  tieResolution?: 'declared_tie' | 'super_over';
+  mainMatchState?: any;
+  superOversHistory?: any[];
   updatedAt?: number;
   version?: number;
   overlayConfig?: OverlayConfig;
   teamALogo?: string;
   teamBLogo?: string;
+  matchBannerUrl?: string;
   playerPhotos?: Record<string, string>;
   managerId?: string;
   managerName?: string;
@@ -263,6 +271,7 @@ export const CricketOverlay: React.FC = () => {
   const [localBannerDismissed, setLocalBannerDismissed] = useState<boolean>(false);
   const [localWicketDismissed, setLocalWicketDismissed] = useState<boolean>(false);
   const [localOutsDismissed, setLocalOutsDismissed] = useState<boolean>(false);
+  const [wicketSecondsRemaining, setWicketSecondsRemaining] = useState<number>(5);
 
   // Keep track of the last processed synced alert to prevent double triggering
   const lastProcessedAlertRef = useRef<number>(0);
@@ -678,16 +687,31 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [activeConfig.customBanner, activeConfig.customBannerText]);
 
-  // Auto-dismiss manual wicket triggers after 5.0 seconds
+  // Explicit handler to effectively close the wicket dismissal popup from the left corner
+  const handleCloseWicketPopup = useCallback(() => {
+    setWicketPopup(null);
+    setLocalWicketDismissed(true);
+    setWicketTriggerAlert(false);
+  }, []);
+
+  // Timer-based auto-close feature for wicket dismissal popup:
+  // Dynamically counts down from 5 to 0 seconds and auto-dismisses when finished
   useEffect(() => {
-    if (activeConfig.manualWicketTrigger) {
-      setLocalWicketDismissed(false);
-      const timer = setTimeout(() => {
-        setLocalWicketDismissed(true);
-      }, 5000);
-      return () => clearTimeout(timer);
+    const isWicketOpen = Boolean((wicketPopup?.visible && !localWicketDismissed) || (activeConfig.manualWicketTrigger && !localWicketDismissed));
+    if (isWicketOpen) {
+      setWicketSecondsRemaining(5);
+      const timer = setInterval(() => {
+        setWicketSecondsRemaining(prev => {
+          if (prev <= 1) {
+            handleCloseWicketPopup();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(timer);
     }
-  }, [activeConfig.manualWicketTrigger]);
+  }, [wicketPopup?.visible, activeConfig.manualWicketTrigger, localWicketDismissed, handleCloseWicketPopup]);
 
   // Auto-dismiss manual outs display after 5.0 seconds
   useEffect(() => {
@@ -700,22 +724,45 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [activeConfig.manualOutsDisplay]);
 
-  // Dynamic bottom positioning to ensure batsman stats, bowler stats, partnership stats, and lower third bar
-  // NEVER obscure the main scoreboard bug
+  // Dynamic positioning for side-by-side or stacked stats (batsman, bowler, partnership, etc.)
+  // Ensures components render ON TOP OF or ALONGSIDE, rather than hiding, the main scoreboard.
+  const sideStatsPositionClass = useMemo(() => {
+    if (!activeConfig.showScoreBug) {
+      return 'bottom-16 right-16 w-[880px]';
+    }
+    if (activeConfig.template === 'slanted-pro-design') {
+      return 'bottom-[130px] left-1/2 -translate-x-1/2 w-[980px]';
+    }
+    if (activeConfig.template === 'score-bug-1900-200') {
+      return 'bottom-12 right-16 w-[880px]';
+    }
+    // Standard left scoreboard (width 680px at bottom-16 left-16): render ALONGSIDE at bottom-16 right-16
+    return 'bottom-16 right-16 w-[880px]';
+  }, [activeConfig.showScoreBug, activeConfig.template]);
+
   const statsBottomClass = useMemo(() => {
     if (!activeConfig.showScoreBug) return 'bottom-12';
     if (activeConfig.template === 'slanted-pro-design') return 'bottom-[140px]';
     if (activeConfig.template === 'score-bug-1900-200') return 'bottom-[240px]';
-    // Standard left score bug (height ~270px + bottom-16 (64px) = 334px)
-    return 'bottom-[350px]';
+    return 'bottom-[380px]';
   }, [activeConfig.showScoreBug, activeConfig.template]);
 
+  // Lower-third ticker bar positioning: stacked cleanly ON TOP OF the main scoreboard with breathing room
   const lowerThirdBottomClass = useMemo(() => {
     if (!activeConfig.showScoreBug) return 'bottom-16 left-16';
-    if (activeConfig.template === 'slanted-pro-design') return 'bottom-[140px] left-16';
+    if (activeConfig.template === 'slanted-pro-design') return 'bottom-[130px] left-16';
     if (activeConfig.template === 'score-bug-1900-200') return 'bottom-[240px] left-16';
-    // Position stacked right above the standard score bug
-    return 'bottom-[350px] left-16';
+    // Position stacked right above the standard score bug (height ~270px + bottom-16 is 334px; at 380px it has 46px clearance)
+    return 'bottom-[380px] left-16';
+  }, [activeConfig.showScoreBug, activeConfig.template]);
+
+  // Left-side corner positioning for the wicket dismissal popup
+  const wicketPopupPositionClass = useMemo(() => {
+    if (!activeConfig.showScoreBug) return 'top-20 left-16';
+    if (activeConfig.template === 'slanted-pro-design') return 'bottom-[130px] left-16';
+    if (activeConfig.template === 'score-bug-1900-200') return 'top-20 left-16';
+    // Standard left scoreboard: docked in the left-side corner right above the score bug
+    return 'bottom-[380px] left-16';
   }, [activeConfig.showScoreBug, activeConfig.template]);
 
 
@@ -752,6 +799,8 @@ export const CricketOverlay: React.FC = () => {
 
     // Detect Wickets Fall popups
     if (prevWickets > 0 && currentInnings.wickets > prevWickets) {
+      setLocalWicketDismissed(false);
+      setWicketSecondsRemaining(5);
       setWicketTriggerAlert(true);
       setTimeout(() => {
         setWicketTriggerAlert(false);
@@ -773,11 +822,6 @@ export const CricketOverlay: React.FC = () => {
           scoreAtFall: `${fowEntry.score}/${latestWicketNum} (${fowEntry.oversList} ov)`,
           visible: true
         });
-
-        // Auto collapse popup after 6 seconds
-        setTimeout(() => {
-          setWicketPopup(prev => prev ? { ...prev, visible: false } : null);
-        }, 6000);
       }
     }
     setPrevWickets(currentInnings.wickets);
@@ -820,20 +864,70 @@ export const CricketOverlay: React.FC = () => {
       return overBallStr.endsWith('.0') ? Math.floor(num) - 1 : Math.floor(num);
     };
 
-    return (currentInnings.commentaryList || [])
-      .filter((c: any) => c.overBall && getOverIndex(c.overBall) === currentOverNo)
-      .slice(0, 12)
-      .reverse(); // oldest to newest
+    const raw = (currentInnings.commentaryList || [])
+      .filter((c: any) => {
+        if (!c || !c.overBall || c.overBall === '0.0') return false;
+        if (
+          c.type === 'milestone' || 
+          c.type === 'announcement' || 
+          c.type === 'break' || 
+          c.type === 'info' || 
+          c.specialEvent === 'retire_hurt' ||
+          c.announcementType === 'new_batsman' ||
+          c.announcementType === 'new_bowler'
+        ) return false;
+        const desc = (c.description || '').toLowerCase();
+        if (
+          desc.includes('retired hurt') ||
+          desc.includes('new batsman on crease') ||
+          desc.includes('bowler into the attack') ||
+          desc.includes('started') ||
+          desc.includes('toss')
+        ) return false;
+        return getOverIndex(c.overBall) === currentOverNo;
+      });
+
+    // Deduplicate deliveries so only ONE pill is shown per ball delivery (no multiple W pills)
+    const deduped: any[] = [];
+    const seenIds = new Set<string>();
+    const seenWickets = new Set<string>();
+    for (const item of raw) {
+      if (item.id && seenIds.has(item.id)) continue;
+      if (item.id) seenIds.add(item.id);
+      if (item.type === 'wicket') {
+        if (seenWickets.has(item.overBall)) continue;
+        seenWickets.add(item.overBall);
+      }
+      deduped.push(item);
+    }
+
+    return deduped.slice(0, 12).reverse(); // oldest to newest
   }, [currentInnings?.commentaryList, currentOverNo]);
 
   // Mini summary of last 3 overs
   const recentOversPills = useMemo(() => {
     if (!currentInnings) return [];
     
-    // Group commentary list by integer overs
+    // Group commentary list by integer overs, filtering out non-deliveries and deduplicating
     const overGroups: Record<number, CommentaryItem[]> = {};
+    const seenDeliveries = new Set<string>();
+
     (currentInnings.commentaryList || []).forEach(c => {
-      if (!c.overBall) return;
+      if (!c.overBall || c.overBall === '0.0') return;
+      if (
+        c.type === 'milestone' || 
+        c.type === 'announcement' || 
+        c.type === 'break' || 
+        c.type === 'info' || 
+        c.specialEvent === 'retire_hurt' ||
+        c.announcementType === 'new_batsman'
+      ) return;
+      const desc = (c.description || '').toLowerCase();
+      if (desc.includes('retired hurt') || desc.includes('new batsman on crease')) return;
+
+      if (seenDeliveries.has(c.overBall)) return;
+      seenDeliveries.add(c.overBall);
+
       const overInt = Math.floor(parseFloat(c.overBall));
       if (isNaN(overInt)) return;
       if (!overGroups[overInt]) overGroups[overInt] = [];
@@ -1035,7 +1129,30 @@ export const CricketOverlay: React.FC = () => {
 
   // Delivery Style Pill Resolver
   const getPillDetails = (b: CommentaryItem) => {
+    if (!b) return { label: '', style: 'hidden' };
+    if (
+      (b as any).type === 'milestone' || 
+      (b as any).type === 'announcement' || 
+      (b as any).type === 'break' || 
+      (b as any).type === 'info' || 
+      (b as any).specialEvent === 'retire_hurt' ||
+      (b as any).announcementType === 'new_batsman' ||
+      (b as any).announcementType === 'new_bowler'
+    ) {
+      return { label: '', style: 'hidden' };
+    }
+
     const desc = (b.description || '').toLowerCase();
+    if (
+      desc.includes('retired hurt') ||
+      desc.includes('new batsman on crease') ||
+      desc.includes('bowler into the attack') ||
+      desc.includes('started') ||
+      desc.includes('toss')
+    ) {
+      return { label: '', style: 'hidden' };
+    }
+
     let label = '•';
     let style = '';
 
@@ -1051,12 +1168,58 @@ export const CricketOverlay: React.FC = () => {
         label = '4';
         style = 'bg-sky-500 border-sky-500 font-bold text-white shadow-[0_0_10px_rgba(14,165,233,0.5)]';
       }
-    } else if (b.type === 'extra') {
-      if (desc.includes('wide')) { label = 'WD'; style = 'bg-orange-500 border-orange-500 text-white font-bold'; }
-      else if (desc.includes('no ball') || desc.includes('no-ball') || desc.includes('nb')) { label = 'NB'; style = 'bg-red-500 border-red-500 text-white font-bold animate-pulse-fast'; }
-      else if (desc.includes('leg bye')) { label = 'LB'; style = 'bg-emerald-600/30 border-emerald-600/50 text-emerald-300'; }
-      else if (desc.includes('bye')) { label = 'B'; style = 'bg-slate-700 border-slate-650 text-slate-300'; }
-      else { label = 'EX'; style = 'bg-slate-800 border-slate-700 text-slate-400'; }
+    } else if (b.type === 'extra' || (b as any).isNoBall || ((b as any).ballScore && /nb|wd/i.test((b as any).ballScore))) {
+      const isNoBallDelivery = (b as any).isNoBall || desc.includes('no ball') || desc.includes('no-ball') || desc.includes('nb') || ((b as any).ballScore && /nb/i.test((b as any).ballScore));
+      const isWideDelivery = desc.includes('wide') || ((b as any).ballScore && /wd/i.test((b as any).ballScore));
+
+      if (isNoBallDelivery) {
+        let batRuns = (b as any).runsOffBat !== undefined ? Number((b as any).runsOffBat) : 0;
+        if (!batRuns && (b as any).ballScore) {
+          const m = (b as any).ballScore.match(/(\d+)/);
+          if (m) batRuns = parseInt(m[1], 10);
+        }
+        if (!batRuns) {
+          const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken)/i);
+          if (m) batRuns = parseInt(m[1], 10);
+        }
+        if (batRuns > 0) {
+          label = `NB+${batRuns}`;
+          style = batRuns >= 6
+            ? 'bg-gradient-to-r from-pink-500 to-amber-500 border-amber-400 font-black text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-pulse-fast'
+            : batRuns >= 4
+            ? 'bg-gradient-to-r from-pink-500 to-emerald-500 border-emerald-400 font-black text-white shadow-[0_0_12px_rgba(16,185,129,0.6)] animate-pulse-fast'
+            : 'bg-pink-600 border-pink-400 text-white font-black shadow-sm';
+        } else {
+          label = 'NB';
+          style = 'bg-red-500 border-red-500 text-white font-bold animate-pulse-fast';
+        }
+      } else if (isWideDelivery) {
+        let extraRuns = (b as any).runsOffBat !== undefined ? Number((b as any).runsOffBat) : 0;
+        if (!extraRuns && (b as any).ballScore) {
+          const m = (b as any).ballScore.match(/(\d+)/);
+          if (m) extraRuns = parseInt(m[1], 10);
+        }
+        if (!extraRuns) {
+          const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*extra\s*runs?/i);
+          if (m) extraRuns = parseInt(m[1], 10);
+        }
+        if (extraRuns > 0) {
+          label = `WD+${extraRuns}`;
+          style = 'bg-orange-600 border-orange-400 text-white font-black shadow-sm';
+        } else {
+          label = 'WD';
+          style = 'bg-orange-500 border-orange-500 text-white font-bold';
+        }
+      } else if (desc.includes('leg bye')) { 
+        label = 'LB'; 
+        style = 'bg-emerald-600/30 border-emerald-600/50 text-emerald-300'; 
+      } else if (desc.includes('bye')) { 
+        label = 'B'; 
+        style = 'bg-slate-700 border-slate-650 text-slate-300'; 
+      } else { 
+        label = 'EX'; 
+        style = 'bg-slate-800 border-slate-700 text-slate-400'; 
+      }
     } else {
       const numMatch = desc.match(/\d+/);
       const runs = numMatch ? parseInt(numMatch[0]) : 0;
@@ -1067,11 +1230,6 @@ export const CricketOverlay: React.FC = () => {
         label = runs.toString();
         style = 'bg-emerald-500 border-emerald-500 font-bold text-white';
       }
-    }
-
-    if (match?.freeHitNext && label === 'NB') {
-      label = '★';
-      style = 'bg-purple-600 border-purple-500 text-white shadow-[0_0_10px_rgba(147,51,234,0.6)] animate-pulse-fast';
     }
 
     return { label, style };
@@ -1398,10 +1556,17 @@ export const CricketOverlay: React.FC = () => {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-80" />
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500 shadow-sm shadow-rose-500/80" />
           </span>
-          <span className="text-[11px] font-black uppercase tracking-widest text-white font-sans flex items-center gap-1.5">
-            <Radio size={12} className="text-rose-400 animate-pulse" />
-            LIVE
-          </span>
+          {match.isSuperOver ? (
+            <span className="text-[11px] font-black uppercase tracking-widest text-amber-300 font-sans flex items-center gap-1.5">
+              <span className="text-amber-400">⚡</span>
+              SUPER OVER {match.superOverNumber || 1}
+            </span>
+          ) : (
+            <span className="text-[11px] font-black uppercase tracking-widest text-white font-sans flex items-center gap-1.5">
+              <Radio size={12} className="text-rose-400 animate-pulse" />
+              LIVE
+            </span>
+          )}
           {match.tournamentName && (
             <span className="text-[10px] font-mono text-slate-300 font-bold border-l border-white/15 pl-2 uppercase tracking-wide">
               {match.tournamentName}
@@ -1411,48 +1576,79 @@ export const CricketOverlay: React.FC = () => {
       )}
 
       {/* =========================================================================
-          1. WICKET FALL POPUP OVERLAY
+          1. WICKET FALL POPUP OVERLAY (LEFT-SIDE CORNER DOCKED WITH TIMER & CLOSE)
           ========================================================================= */}
       <AnimatePresence>
         {((wicketPopup?.visible && !localWicketDismissed) || (activeConfig.manualWicketTrigger && !localWicketDismissed)) && (
-          <div className="absolute inset-x-0 top-32 flex justify-center z-50 pointer-events-auto">
+          <div 
+            className={`absolute ${wicketPopupPositionClass} z-50 pointer-events-auto max-w-xl`}
+            id="left-corner-wicket-dismissal-popup"
+          >
             <motion.div
-              initial={{ y: -100, opacity: 0, scale: 0.9 }}
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: -80, opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              className="bg-slate-950 border border-red-500/60 p-6 rounded-[2.5rem] flex items-center gap-6 shadow-[0_0_50px_rgba(220,38,38,0.7)] relative"
+              initial={{ x: -60, opacity: 0, scale: 0.95 }}
+              animate={{ x: 0, opacity: 1, scale: 1 }}
+              exit={{ x: -60, opacity: 0, scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 240, damping: 22 }}
+              className="bg-slate-950/98 border-2 border-red-500/70 p-5 rounded-[2rem] shadow-[0_0_50px_rgba(220,38,38,0.75)] backdrop-blur-xl relative overflow-hidden"
             >
-              <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center text-white animate-bounce shrink-0">
-                <Skull size={32} />
-              </div>
-              <div className="border-l border-white/10 pl-6 pr-4">
-                <span className="text-[10px] font-black uppercase tracking-widest text-red-500 block mb-1">OUT (WICKET FALL)</span>
-                <h3 className="text-3xl font-black text-white uppercase tracking-tight">
-                  {wicketPopup?.batterName || 'STRIKER BATSMAN'}
-                </h3>
-                <p className="text-sm font-bold text-slate-400 mt-1 uppercase">
-                  Dismissal Mode: <span className="text-red-400">{wicketPopup?.dismissalType || 'Bowled'}</span>
-                </p>
-                <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded-lg py-1 px-3 inline-block">
-                  <span className="text-xs text-red-300 font-mono font-bold uppercase">
-                    Score at Fall: {wicketPopup?.scoreAtFall || `${currentInnings?.runs}/${currentInnings?.wickets}`}
-                  </span>
+              {/* Dynamic red ambient gradient */}
+              <div className="absolute inset-0 bg-gradient-to-r from-red-600/10 via-transparent to-red-600/5 pointer-events-none" />
+
+              <div className="flex items-center justify-between gap-4 relative z-10">
+                {/* Wicket Icon & Pulse */}
+                <div className="w-14 h-14 bg-gradient-to-br from-red-600 to-rose-700 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-red-600/50 shrink-0 border border-red-400/40 animate-pulse">
+                  <Skull size={30} />
                 </div>
+
+                {/* Dismissal Details */}
+                <div className="flex-1 min-w-0 border-l border-white/10 pl-4 pr-2">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-red-400 font-mono bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
+                      OUT • WICKET FALL
+                    </span>
+                    {/* Auto-close Timer Badge */}
+                    <span className="flex items-center gap-1 text-[9px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-md border border-white/10">
+                      <Clock size={10} className="text-red-400 animate-spin" />
+                      Auto-close in {wicketSecondsRemaining}s
+                    </span>
+                  </div>
+
+                  <h3 className="text-2xl font-black text-white uppercase tracking-tight truncate">
+                    {wicketPopup?.batterName || battingStats?.striker?.name || 'STRIKER BATSMAN'}
+                  </h3>
+
+                  <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                    <span className="text-xs font-bold text-slate-300 uppercase">
+                      Method: <strong className="text-red-400 font-black">{wicketPopup?.dismissalType || 'Bowled'}</strong>
+                    </span>
+                    <span className="text-xs text-amber-300 font-mono font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                      FOW: {wicketPopup?.scoreAtFall || `${currentInnings?.runs}/${currentInnings?.wickets}`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Explicit Manual Close Button */}
+                <button
+                  type="button"
+                  onClick={handleCloseWicketPopup}
+                  className="w-9 h-9 rounded-xl bg-red-600/30 hover:bg-red-600 border border-red-500/50 hover:border-red-400 text-white flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-lg group ml-2"
+                  title="Close Wicket Popup Immediately"
+                  aria-label="Close Wicket Dismissal Popup"
+                >
+                  <X size={18} className="group-hover:scale-110 transition-transform" />
+                </button>
               </div>
 
-              {/* Close Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  setWicketPopup(prev => prev ? { ...prev, visible: false } : null);
-                  setLocalWicketDismissed(true);
-                }}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-rose-500/40 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer ml-4 shrink-0"
-                title="Dismiss Wicket Popup"
-              >
-                <X size={16} />
-              </button>
+              {/* Animated Linear Countdown Bar for Timer Auto-close */}
+              <div className="absolute bottom-0 inset-x-0 h-1 bg-white/10 overflow-hidden">
+                <motion.div
+                  key={wicketPopup?.scoreAtFall || 'wicket-timer'}
+                  initial={{ width: '100%' }}
+                  animate={{ width: '0%' }}
+                  transition={{ duration: 5, ease: 'linear' }}
+                  className="h-full bg-gradient-to-r from-red-500 via-rose-500 to-amber-500"
+                />
+              </div>
             </motion.div>
           </div>
         )}
@@ -1651,7 +1847,7 @@ export const CricketOverlay: React.FC = () => {
           3. MAIN SCORE BUG BLOCK (BOTTOM-LEFT STANDARD BROADCAST POSITION)
           ========================================================================= */}
       {activeConfig.showScoreBug && activeConfig.template !== 'score-bug-1900-200' && activeConfig.template !== 'slanted-pro-design' && (
-        <div className={`absolute bottom-16 left-16 w-[680px] rounded-[2rem] border overflow-hidden ${themeColors.cardBg} ${themeColors.headerGlow}`}>
+        <div className={`absolute bottom-16 left-16 w-[680px] rounded-[2rem] border overflow-hidden ${themeColors.cardBg} ${themeColors.headerGlow} z-30 shadow-2xl`}>
           
           {/* Dynamic Boundary Flash strip overlay */}
           {lastBdryFlash === '4' && (
@@ -2403,13 +2599,25 @@ export const CricketOverlay: React.FC = () => {
       )}
 
       {/* =========================================================================
-          4. CUSTOM DYNAMIC OVERLAY BANNER
-
+          4. CUSTOM DYNAMIC OVERLAY BANNER & INDIVIDUAL STATS MODULES
           ========================================================================= */}
       <AnimatePresence>
+        {/* NEW MODULE: INDIVIDUAL BATTING & BOWLING STATS (Positioned alongside main scoreboard) */}
+        {['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(activeGraphic) && (
+          <IndividualStatsOverlay
+            match={match}
+            currentInnings={currentInnings}
+            battingStats={battingStats}
+            bowlingStats={bowlingStats}
+            activeTeamColor={activeTeamColor}
+            activeConfig={activeConfig}
+            onClose={() => setActiveGraphic('none')}
+          />
+        )}
+
         {activeGraphic === 'batsman_stats' && battingStats && (
-          <div className={`absolute inset-x-0 ${statsBottomClass} flex justify-center z-50 pointer-events-auto`}>
-            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-[1000px] bg-slate-950/95 border border-amber-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" style={{ borderLeft: `6px solid ${activeTeamColor}` }}>
+          <div className={`absolute ${sideStatsPositionClass} z-40 pointer-events-auto text-left`} id="graphic-batsman-stats">
+            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-full bg-slate-950/95 border border-amber-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" style={{ borderLeft: `6px solid ${activeTeamColor}` }}>
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4">
                 <span className="text-xs font-black tracking-widest text-slate-400 uppercase font-mono">BATSMEN STATISTICS</span>
                 <div className="flex items-center gap-3">
@@ -2481,8 +2689,8 @@ export const CricketOverlay: React.FC = () => {
         )}
 
         {activeGraphic === 'bowler_stats' && bowlingStats && (
-          <div className={`absolute inset-x-0 ${statsBottomClass} flex justify-center z-50 pointer-events-auto`}>
-            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-[900px] bg-slate-950/95 border border-sky-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" style={{ borderLeft: `6px solid ${activeTeamColor === activeConfig.teamAColor ? activeConfig.teamBColor : activeConfig.teamAColor}` }}>
+          <div className={`absolute ${sideStatsPositionClass} z-40 pointer-events-auto text-left`} id="graphic-bowler-stats">
+            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-full bg-slate-950/95 border border-sky-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" style={{ borderLeft: `6px solid ${activeTeamColor === activeConfig.teamAColor ? activeConfig.teamBColor : activeConfig.teamAColor}` }}>
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4">
                 <span className="text-xs font-black tracking-widest text-slate-400 uppercase font-mono">ACTIVE BOWLER SPELL</span>
                 <div className="flex items-center gap-3">
@@ -2542,7 +2750,7 @@ export const CricketOverlay: React.FC = () => {
         )}
 
         {activeGraphic === 'lower_third' && (
-          <div className={`absolute ${lowerThirdBottomClass} z-50 pointer-events-auto text-left`}>
+          <div className={`absolute ${lowerThirdBottomClass} z-40 pointer-events-auto text-left`} id="graphic-lower-third">
             <motion.div initial={{ x: -100, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -80, opacity: 0 }} className="w-[750px] bg-slate-950/95 border border-white/10 rounded-2xl p-5 shadow-2xl flex items-center justify-between" style={{ borderLeft: `6px solid ${activeTeamColor}` }}>
               {lowerThirdMode === 'intro' && (
                 <div className="w-full flex items-center justify-between">
@@ -2648,8 +2856,8 @@ export const CricketOverlay: React.FC = () => {
 
         {/* 6. PARTNERSHIP STATS */}
         {activeGraphic === 'partnership' && (
-          <div className={`absolute inset-x-0 ${statsBottomClass} flex justify-center z-50 pointer-events-auto`}>
-            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-[1000px] bg-slate-950/95 border border-teal-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between" id="graphic-partnership">
+          <div className={`absolute ${sideStatsPositionClass} z-40 pointer-events-auto text-left`} id="graphic-partnership">
+            <motion.div initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="w-full bg-slate-950/95 border border-teal-500/20 rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4 text-left">
                 <span className="text-xs font-black tracking-widest text-teal-400">PARTNERSHIP PROFILE</span>
                 <div className="flex items-center gap-3">
@@ -2872,6 +3080,15 @@ export const CricketOverlay: React.FC = () => {
       <div className="absolute top-2 inset-x-0 flex justify-center z-[60] pointer-events-auto opacity-0 hover:opacity-100 transition-opacity duration-300">
         <div className="bg-slate-950/90 border border-white/10 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-1.5 text-xs font-mono flex-wrap justify-center">
           <span className="text-amber-400 font-bold uppercase text-[10px] mr-1">TV Transitions:</span>
+          <button
+            onClick={() => setActiveGraphic(['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(activeGraphic) ? 'none' : 'individual_stats')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              ['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(activeGraphic) ? 'bg-amber-400 text-slate-950 font-black shadow-lg' : 'bg-white/5 hover:bg-white/10 text-amber-300'
+            }`}
+            title="Individual Stats: Batting and bowling statistics positioned alongside the main scoreboard"
+          >
+            📊 Individual Stats
+          </button>
           <button
             onClick={() => setActiveGraphic(['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(activeGraphic) ? 'none' : 'batsman_bowler_brush')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${

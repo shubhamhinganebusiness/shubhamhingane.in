@@ -194,7 +194,7 @@ export const DairyLogin: React.FC = () => {
                       <input
                         type="text"
                         required
-                        placeholder="Ex: 771999595 or example@mail.com"
+                        placeholder="Enter your username or email"
                         value={identifier}
                         onChange={(e) => setIdentifier(e.target.value)}
                         className="w-full pl-12 pr-4 py-4 bg-main-bg border-2 border-transparent rounded-2xl focus:border-primary/20 transition-all font-bold text-main-text"

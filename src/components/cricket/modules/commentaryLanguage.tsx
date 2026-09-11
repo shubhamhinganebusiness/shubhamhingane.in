@@ -337,15 +337,28 @@ export function generateLocalizedCricketCommentary(
     extraType?: string;
     newBatsman?: string;
     howOut?: string;
+    runsOffBat?: number;
+    winProbability?: any;
   }
 ): string {
   const bat = striker?.trim() || 'फलंदाज';
   const bwl = bowler?.trim() || 'गोलंदाज';
   const targetLang = lang === 'mr' ? 'mr' : lang === 'hi' ? 'hi' : 'en';
 
+  const appendWinProb = (text: string): string => {
+    if (text.includes('[AI')) return text;
+    const wp = options?.winProbability;
+    if (!wp || !wp.teamA || !wp.teamB) return text;
+    const pA = Math.round(wp.probA ?? 50);
+    const pB = Math.round(wp.probB ?? 50);
+    if (targetLang === 'mr') return `${text} [AI विजयाची शक्यता: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+    if (targetLang === 'hi') return `${text} [AI जीत की संभावना: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+    return `${text} [AI Win Probability: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+  };
+
   if (type === 'dot' || val === 0) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.dots[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   if (type === 'wicket') {
@@ -361,52 +374,77 @@ export function generateLocalizedCricketCommentary(
         text += ` After wicket fell, ${newBat} new batsman come on crease.`;
       }
     }
-    return text;
+    return appendWinProb(text);
   }
 
   if (val === 4 || type === 'boundary' && val !== 6) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.fours[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   if (val === 6) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.sixes[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   if (val === 1) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.singles[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   if (val === 2) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.doubles[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   if (val === 3) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.threes[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   if (type === 'extra' || options?.extraType) {
-    const isNoBall = options?.extraType === 'noball' || (type === 'extra' && val > 0 && options?.extraType?.includes('no'));
+    const isNoBall = options?.extraType === 'noball' || (type === 'extra' && (options?.extraType?.includes('no') || options?.extraType === 'nb'));
     if (isNoBall) {
+      const batRuns = (options as any)?.runsOffBat ?? (val > 0 ? val : 0);
+      if (batRuns > 0) {
+        if (targetLang === 'mr') {
+          return appendWinProb(`🚨 नो-बॉल आणि सोबत ${batRuns} धावा! ${bwl} चा पाय रेषेबाहेर गेला आणि ${bat} ने सुरेख फटका मारून ${batRuns} धावा वसूल केल्या! पुढील चेंडूवर फ्री-हिटची सुवर्णसंधी!`);
+        }
+        if (targetLang === 'hi') {
+          return appendWinProb(`🚨 नो-बॉल और साथ में ${batRuns} रन! ${bwl} ने क्रीज से बाहर कदम रखा और ${bat} ने मौके का फायदा उठाकर ${batRuns} रन बटोरे! अगली गेंद पर फ्री-हिट!`);
+        }
+        return appendWinProb(`🚨 NO-BALL plus ${batRuns} run${batRuns > 1 ? 's' : ''} taken! ${bwl} oversteps the crease and ${bat} capitalizes taking ${batRuns} run${batRuns > 1 ? 's' : ''}! Free-hit loading next!`);
+      }
       const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.noball[targetLang]);
-      return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+      return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+    }
+    const isWide = options?.extraType === 'wide' || (type === 'extra' && options?.extraType?.includes('wide'));
+    if (isWide) {
+      const extraRuns = (options as any)?.runsOffBat ?? 0;
+      if (extraRuns > 0) {
+        if (targetLang === 'mr') {
+          return appendWinProb(`वाईड चेंडू आणि सोबत ${extraRuns} अतिरिक्त धावा! ${bwl} ची दिशा भरकटली आणि फलंदाजांनी ${extraRuns} धावा पळून पूर्ण केल्या!`);
+        }
+        if (targetLang === 'hi') {
+          return appendWinProb(`वाइड गेंद और साथ में ${extraRuns} अतिरिक्त रन! ${bwl} दिशा से भटके और बल्लेबाजों ने दौड़कर ${extraRuns} रन पूरे किए!`);
+        }
+        return appendWinProb(`Wide delivery plus ${extraRuns} extra run${extraRuns > 1 ? 's' : ''}! ${bwl} strays in line and the batsmen easily steal ${extraRuns} extra run${extraRuns > 1 ? 's' : ''}!`);
+      }
+      const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.wide[targetLang]);
+      return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
     }
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.wide[targetLang]);
-    return raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
   // Generic fallback for any other run counts
   if (targetLang === 'mr') {
-    return `${bwl} च्या चेंडूवर ${bat} ने सुरेख फटका मारून ${val} धावा पूर्ण केल्या!`;
+    return appendWinProb(`${bwl} च्या चेंडूवर ${bat} ने सुरेख फटका मारून ${val} धावा पूर्ण केल्या!`);
   }
   if (targetLang === 'hi') {
-    return `${bwl} की गेंद पर ${bat} ने बेहतरीन शॉट खेलकर ${val} रन बनाए!`;
+    return appendWinProb(`${bwl} की गेंद पर ${bat} ने बेहतरीन शॉट खेलकर ${val} रन बनाए!`);
   }
-  return `${bat} scores ${val} runs off ${bwl}'s delivery with good placement.`;
+  return appendWinProb(`${bat} scores ${val} runs off ${bwl}'s delivery with good placement.`);
 }
 
 /**
@@ -903,6 +941,7 @@ export function createBatsmanAnnouncement(
     partnerName?: string;
     dismissedBatterName?: string;
     isWicketFall?: boolean;
+    isRetiredHurt?: boolean;
     role?: 'striker' | 'non-striker';
   }
 ): CommentaryWithTranslations {
@@ -914,7 +953,11 @@ export function createBatsmanAnnouncement(
   let hi = '';
   let mr = '';
 
-  if (options?.isWicketFall && dismissed) {
+  if (options?.isRetiredHurt && dismissed) {
+    en = `📢 NEW BATSMAN ON CREASE: ${name} walks out to the middle following the injury retirement of ${dismissed}${partner ? ` to join ${partner}` : ''}. Wishing ${dismissed} a speedy recovery!`;
+    hi = `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के रिटायर्ड हर्ट होने के बाद ${name} मैदान पर आए हैं${partner ? ` और ${partner} का साथ निभाएंगे` : ''}. ${dismissed} के जल्द स्वस्थ होने की कामना!`;
+    mr = `📢 नवीन फलंदाज क्रीजवर: ${dismissed} दुखापतीमुळे रिटायर्ड हर्ट झाल्यानंतर ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ देतील` : ''}. ${dismissed} लवकरात लवकर बरे व्हावेत ही सदिच्छा!`;
+  } else if (options?.isWicketFall && dismissed) {
     en = `📢 NEW BATSMAN ON CREASE: ${name} walks out to the middle following the dismissal of ${dismissed}${partner ? ` to join ${partner}` : ''}. High expectations rest on this new pair!`;
     hi = `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के आउट होने के बाद ${name} मैदान पर आए हैं${partner ? ` और ${partner} का साथ निभाएंगे` : ''}. इस नई साझेदारी पर सभी की निगाहें!`;
     mr = `📢 नवीन फलंदाज क्रीजवर: ${dismissed} बाद झाल्यानंतर ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ देतील` : ''}. या नवीन जोडीकडून मोठ्या अपेक्षा!`;
@@ -928,7 +971,7 @@ export function createBatsmanAnnouncement(
     id: `comm-bat-announcement-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     overBall,
     description: en,
-    type: 'milestone',
+    type: 'announcement',
     announcementType: 'new_batsman',
     playerName: name,
     translations: { en, hi, mr }
@@ -996,7 +1039,7 @@ export interface SpecialEventBreakdownData {
  * detailed breakdown of the achievement, including the batter's total runs and balls faced.
  */
 export function interceptSpecialEvent(
-  type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick',
+  type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick' | 'retire_hurt',
   overBall: string,
   data: SpecialEventBreakdownData
 ): {
@@ -1013,6 +1056,26 @@ export function interceptSpecialEvent(
   const sr = data.strikeRate || (bBalls > 0 ? ((bRuns / bBalls) * 100).toFixed(1) : '0.0');
   const bowl = data.bowlerName || 'Bowler';
   const howOut = data.howOut || 'Out';
+
+  if (type === 'retire_hurt') {
+    const en = `🩹 RETIRED HURT: ${bName} is unable to continue due to injury and retires hurt on ${bRuns} runs off ${bBalls} balls (${b4s}x4, ${b6s}x6, SR: ${sr}). Wishing them a swift recovery!`;
+    const hi = `🩹 रिटायर्ड हर्ट: चोट के कारण ${bName} को ${bBalls} गेंदों में ${bRuns} रन बनाकर मैदान छोड़ना पड़ा (${b4s} चौके, ${b6s} छक्के, स्ट्राइक रेट: ${sr})। उनके शीघ्र स्वस्थ होने की कामना!`;
+    const mr = `🩹 रिटायर्ड हर्ट: दुखापतीमुळे ${bName} यांना ${bBalls} चेंडूत ${bRuns} धावांवर मैदान सोडावे लागले (${b4s} चौकार, ${b6s} षटकार, स्ट्राईक रेट: ${sr})। ते लवकरात लवकर बरे व्हावेत हीच प्रार्थना!`;
+
+    return {
+      commentary: {
+        id: `milestone-retire-${Date.now()}`,
+        overBall,
+        description: en,
+        type: 'announcement',
+        specialEvent: 'retire_hurt',
+        translations: { en, hi, mr }
+      },
+      bannerTitle: `🩹 RETIRED HURT: ${bName.toUpperCase()}`,
+      bannerSubtitle: `${bRuns} runs (${bBalls}b, ${b4s}x4, ${b6s}x6, SR: ${sr}) - Retired Injured`,
+      notification: `🩹 RETIRED HURT! ${bName} retires hurt on ${bRuns} (${bBalls}b).`
+    };
+  }
 
   if (type === 'fifty') {
     const en = `🌟 FIFTY BREAKDOWN: Sensational Half-Century for ${bName}! 50 runs completed in ${bBalls} balls with ${b4s} boundaries and ${b6s} sixes (Strike Rate: ${sr})! What a commanding gully cricket performance!`;

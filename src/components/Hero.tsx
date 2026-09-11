@@ -69,7 +69,7 @@ export const Hero = () => {
   };
 
   return (
-    <section id="home" className="relative min-h-[85vh] lg:min-h-[calc(100vh-5rem)] flex items-center py-12 lg:py-16 px-4 md:px-8 max-w-7xl mx-auto select-none">
+    <section id="home" className="relative min-h-[calc(100vh-5rem)] flex items-center py-4 lg:py-6 px-4 md:px-8 max-w-7xl mx-auto select-none">
       {/* Absolute Ambient Grid background decorations */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] -z-20 opacity-70" />
       
@@ -92,7 +92,7 @@ export const Hero = () => {
           repeat: Infinity, 
           ease: "easeInOut" 
         }}
-        className="absolute top-1/4 right-[10%] w-[350px] h-[350px] bg-primary/10 dark:bg-primary/5 rounded-full blur-[100px] -z-20 pointer-events-none"
+        className="absolute top-1/4 right-[10%] w-[320px] h-[320px] bg-primary/10 dark:bg-primary/5 rounded-full blur-[100px] -z-20 pointer-events-none"
       />
       <motion.div 
         animate={{ 
@@ -105,10 +105,10 @@ export const Hero = () => {
           repeat: Infinity, 
           ease: "easeInOut" 
         }}
-        className="absolute bottom-10 left-[15%] w-[320px] h-[320px] bg-blue-500/10 dark:bg-blue-500/5 rounded-full blur-[90px] -z-20 pointer-events-none"
+        className="absolute bottom-10 left-[15%] w-[300px] h-[300px] bg-blue-500/10 dark:bg-blue-500/5 rounded-full blur-[90px] -z-20 pointer-events-none"
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-8 xl:gap-12 items-center w-full relative z-10">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 xl:gap-10 items-center w-full relative z-10">
         <motion.div 
           className="order-2 lg:order-1 flex flex-col items-start w-full"
           initial={{ opacity: 0, x: -40 }}
@@ -116,18 +116,18 @@ export const Hero = () => {
           transition={{ duration: 0.8, ease: "easeOut" }}
         >
           {/* Work Readiness Pulser Badge & Dynamic Live Clock Hub */}
-          <div className="flex flex-wrap items-center gap-2.5 mb-4 lg:mb-3 xl:mb-5 w-full">
+          <div className="flex flex-wrap items-center gap-2 mb-2.5 w-full">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.6, delay: 0.1 }}
-              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 backdrop-blur-md shadow-sm"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 backdrop-blur-md shadow-sm"
             >
-              <span className="relative flex h-2.5 w-2.5">
+              <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="text-[11px] font-extrabold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                 Active for Opportunities
               </span>
             </motion.div>
@@ -136,49 +136,49 @@ export const Hero = () => {
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/25 backdrop-blur-sm text-primary text-[11px] uppercase font-black tracking-widest shadow-sm"
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/25 backdrop-blur-sm text-primary text-[10px] uppercase font-black tracking-wider shadow-sm"
               >
-                <Clock size={12} className="animate-spin duration-[4000ms]" style={{ animationDuration: '6s' }} />
+                <Clock size={11} className="animate-spin duration-[4000ms]" style={{ animationDuration: '6s' }} />
                 <span>Pune Time: {puneTime}</span>
               </motion.div>
             )}
             
-            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800/90 border border-gray-200/70 dark:border-zinc-700/80 text-gray-700 dark:text-zinc-300 text-[11px] uppercase font-bold tracking-widest shadow-sm">
-              <MapPin size={12} className="text-primary" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800/90 border border-gray-200/70 dark:border-zinc-700/80 text-gray-700 dark:text-zinc-300 text-[10px] uppercase font-bold tracking-wider shadow-sm">
+              <MapPin size={11} className="text-primary" />
               <span>Pune, Maharashtra, India</span>
             </span>
           </div>
 
-          <h1 className="text-3xl md:text-5xl lg:text-4xl xl:text-5xl xxl:text-6xl font-black mb-3 lg:mb-2 xl:mb-4 leading-[1.12] tracking-tight text-gray-900 dark:text-white">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-3xl xl:text-4xl font-black mb-2 leading-tight tracking-tight text-gray-900 dark:text-white">
             {!displayTitle ? (
-              <div className="h-16 w-3/4 bg-gray-200 dark:bg-gray-800 animate-pulse rounded-lg mb-4" />
+              <div className="h-10 w-3/4 bg-gray-200 dark:bg-gray-800 animate-pulse rounded-lg mb-2" />
             ) : (
               <>
                 {displayTitle} <span className="text-primary italic font-heading relative inline-block">
                   {displayName}
-                  <span className="absolute left-0 bottom-1 w-full h-[6px] bg-primary/15 -z-10 rounded-full" />
+                  <span className="absolute left-0 bottom-1 w-full h-[5px] bg-primary/15 -z-10 rounded-full" />
                 </span><br />
               </>
             )}
-            <span className="flex flex-wrap items-center gap-x-2 md:gap-x-3 mt-1.5">
+            <span className="flex flex-wrap items-center gap-x-2 mt-1">
               a <TypingText />
             </span>
           </h1>
 
           {!displayDesc ? (
-            <div className="space-y-3 mb-4 w-full">
-              <div className="h-4 w-full bg-gray-200 dark:bg-gray-800 animate-pulse rounded" />
-              <div className="h-4 w-5/6 bg-gray-200 dark:bg-gray-800 animate-pulse rounded" />
+            <div className="space-y-2 mb-2 w-full">
+              <div className="h-3.5 w-full bg-gray-200 dark:bg-gray-800 animate-pulse rounded" />
+              <div className="h-3.5 w-5/6 bg-gray-200 dark:bg-gray-800 animate-pulse rounded" />
             </div>
           ) : (
-            <p className="text-gray-600 dark:text-gray-300 text-base lg:text-sm xl:text-base leading-relaxed max-w-xl mb-5 font-medium">
+            <p className="text-gray-600 dark:text-gray-300 text-xs sm:text-sm lg:text-xs xl:text-sm leading-relaxed max-w-xl mb-2.5 font-medium line-clamp-2 md:line-clamp-3">
               {displayDesc}
             </p>
           )}
 
           {/* Featured Skills Pills */}
           {showBestSkills && displaySkills.length > 0 && (
-            <div className="flex flex-wrap gap-2.5 mb-6 select-none">
+            <div className="flex flex-wrap gap-2 mb-2.5 select-none">
               {displaySkills.map((skill, index) => (
                 <motion.span 
                   key={index}
@@ -186,7 +186,7 @@ export const Hero = () => {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   transition={{ duration: 0.35, delay: index * 0.05 }}
                   whileHover={{ scale: 1.05, y: -2 }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary/10 dark:bg-primary/15 border border-primary/25 text-primary text-[11px] font-extrabold uppercase tracking-wider shadow-sm cursor-default"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary/10 dark:bg-primary/15 border border-primary/25 text-primary text-[10px] font-extrabold uppercase tracking-wider shadow-xs cursor-default"
                 >
                   <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
                   {skill}
@@ -199,30 +199,30 @@ export const Hero = () => {
           <HeroCricketLiveScore />
 
           {/* Action Buttons Hub with primary visual guides */}
-          <div className="flex flex-wrap gap-4 mb-6 w-full sm:w-auto">
+          <div className="flex flex-wrap gap-3 mb-3 w-full sm:w-auto">
             <motion.button 
               id="hero-hire-me"
               onClick={() => window.dispatchEvent(new CustomEvent('open-hire-modal'))}
-              whileHover={{ y: -3, scale: 1.02 }}
+              whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-8 py-4 bg-primary text-white rounded-2xl font-bold uppercase tracking-widest text-xs shadow-xl shadow-primary/30 hover:brightness-110 transition-all duration-300 flex items-center gap-3 group cursor-pointer w-full sm:w-auto justify-center"
+              className="relative overflow-hidden px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-primary/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2.5 group cursor-pointer w-full sm:w-auto justify-center"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <span className="relative z-10 font-black tracking-widest">{t.nav.hireMe}</span>
-              <ArrowRight className="w-4 h-4 text-white group-hover:translate-x-1 transition-transform relative z-10" />
+              <span className="relative z-10 font-black tracking-wider">{t.nav.hireMe}</span>
+              <ArrowRight className="w-3.5 h-3.5 text-white group-hover:translate-x-1 transition-transform relative z-10" />
             </motion.button>
 
             <motion.button 
               id="hero-digital-pavati"
               onClick={() => navigate('/live/ganpati-mandal')}
-              whileHover={{ y: -3, scale: 1.02 }}
+              whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-8 py-4 bg-primary text-white rounded-2xl font-bold uppercase tracking-widest text-xs shadow-xl shadow-primary/25 hover:brightness-110 transition-all duration-300 flex items-center gap-3 group cursor-pointer w-full sm:w-auto justify-center border border-white/20"
+              className="relative overflow-hidden px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-primary/20 hover:brightness-110 transition-all duration-300 flex items-center gap-2.5 group cursor-pointer w-full sm:w-auto justify-center border border-white/20"
               title="Ganpati Mandal: Digital Pavati & ERP Live Demo"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <span className="text-base relative z-10">🚩</span>
-              <Receipt size={16} className="text-white/90 animate-pulse relative z-10" />
+              <span className="text-sm relative z-10">🚩</span>
+              <Receipt size={14} className="text-white/90 animate-pulse relative z-10" />
               <span className="relative z-10 font-black">
                 {language === 'mr' ? 'डिजिटल पावती पुस्तक' : language === 'hi' ? 'डिजिटल पावती बुक' : 'Digital Pavati Book'}
               </span>
@@ -231,17 +231,17 @@ export const Hero = () => {
 
           {/* Social Links and Quick Links Hub */}
           <motion.div 
-            className="flex flex-col md:flex-row gap-6 w-full border-t border-gray-200/60 dark:border-zinc-800/80 pt-6 mt-2"
-            initial={{ opacity: 0, y: 20 }}
+            className="flex flex-col sm:flex-row gap-4 lg:gap-6 w-full border-t border-gray-200/60 dark:border-zinc-800/80 pt-3 mt-1"
+            initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.3 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
           >
             {/* FIND WITH ME */}
             <div className="flex-1">
-              <span className="uppercase tracking-[2px] text-gray-500 dark:text-gray-400 text-xs font-black block mb-3">
+              <span className="uppercase tracking-[2px] text-gray-500 dark:text-gray-400 text-[11px] font-black block mb-2">
                 {t.hero.findMe}
               </span>
-              <div className="flex flex-wrap gap-3">
+              <div className="flex flex-wrap gap-2.5">
                 {[
                   { Icon: Facebook, key: 'facebook', label: 'Facebook' },
                   { Icon: Linkedin, key: 'linkedin', label: 'LinkedIn' },
@@ -261,11 +261,11 @@ export const Hero = () => {
                       target="_blank"
                       rel="noopener noreferrer"
                       aria-label={`Visit my ${label} profile`}
-                      whileHover={{ y: -4, scale: 1.08 }}
+                      whileHover={{ y: -3, scale: 1.06 }}
                       whileTap={{ scale: 0.95 }}
-                      className="w-12 h-12 rounded-2xl bg-white dark:bg-zinc-900 shadow-md flex items-center justify-center text-gray-700 dark:text-gray-200 hover:text-white hover:bg-primary transition-all duration-300 border border-gray-100 dark:border-zinc-800 hover:border-primary group"
+                      className="w-10 h-10 rounded-xl bg-white dark:bg-zinc-900 shadow-sm flex items-center justify-center text-gray-700 dark:text-gray-200 hover:text-white hover:bg-primary transition-all duration-300 border border-gray-100 dark:border-zinc-800 hover:border-primary group"
                     >
-                      <Icon size={20} className="group-hover:scale-110 transition-transform" />
+                      <Icon size={18} className="group-hover:scale-110 transition-transform" />
                     </motion.a>
                   );
                 })}
@@ -274,41 +274,17 @@ export const Hero = () => {
 
             {/* QUICK LINKS */}
             <div className="flex-1">
-              <span className="uppercase tracking-[2px] text-gray-500 dark:text-gray-400 text-xs font-black block mb-3">
+              <span className="uppercase tracking-[2px] text-gray-500 dark:text-gray-400 text-[11px] font-black block mb-2">
                 {language === 'mr' ? 'त्वरित दुवे' : language === 'hi' ? 'त्वरित लिंक' : 'QUICK ACCESS'}
               </span>
               <div className="flex flex-wrap gap-2.5">
-                <motion.button 
-                  whileHover={{ y: -2, scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => handleScrollTo('portfolio', '/projects')}
-                  className="h-12 px-5 rounded-2xl bg-primary text-white shadow-md shadow-primary/20 flex items-center justify-center gap-2 font-bold hover:brightness-110 transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer"
-                >
-                  <ArrowRight size={14} className="text-white" />
-                  <span>
-                    {language === 'mr' ? 'सर्व प्रकल्प' : language === 'hi' ? 'सभी प्रोजेक्ट्स' : 'All Projects'}
-                  </span>
-                </motion.button>
-
-                <motion.button 
-                  whileHover={{ y: -2, scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => handleScrollTo('courses', '/#courses')}
-                  className="h-12 px-5 rounded-2xl bg-primary text-white shadow-md shadow-primary/20 flex items-center justify-center gap-2 font-bold hover:brightness-110 transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer"
-                >
-                  <Sparkles size={14} className="text-white" />
-                  <span>
-                    {language === 'mr' ? 'कोर्सेस' : language === 'hi' ? 'कोर्सेस' : 'Courses'}
-                  </span>
-                </motion.button>
-
                 {/* Direct One-Click Gully Score Board Login */}
                 <motion.button 
                   id="hero-quick-access-cricket-login"
-                  whileHover={{ y: -2, scale: 1.03 }}
+                  whileHover={{ y: -2, scale: 1.02 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => navigate('/cricket-login')}
-                  className="h-12 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 font-bold hover:brightness-110 transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer border border-emerald-400/40 group"
+                  className="h-10 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm shadow-emerald-600/25 flex items-center justify-center gap-2 font-bold hover:brightness-110 transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer border border-emerald-400/40 group"
                   title="Direct 1-Click Login to Gully Scoreboard & Tournament Manager"
                 >
                   <Trophy size={14} className="text-amber-300 group-hover:scale-110 transition-transform" />
@@ -362,7 +338,7 @@ export const Hero = () => {
             className="absolute -bottom-2 right-2 md:right-6 lg:right-0 xl:right-4 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md px-3.5 py-2 lg:px-3 lg:py-1.5 xl:px-4 xl:py-2 rounded-xl shadow-lg border border-gray-200/50 dark:border-zinc-800/85 z-20 flex items-center gap-2 cursor-pointer hover:border-emerald-500/50 transition-colors group"
             title="Click to view successful projects and client works"
           >
-            <span className="text-lg md:text-xl xl:text-2xl font-black text-emerald-500 group-hover:scale-110 transition-transform">50+</span>
+            <span className="text-base md:text-lg xl:text-xl font-black text-emerald-500 group-hover:scale-110 transition-transform">50+</span>
             <div className="flex flex-col text-left">
               <span className="text-[8px] xl:text-[9px] font-black uppercase text-gray-400 leading-none">Successful</span>
               <span className="text-[9px] xl:text-[10px] font-bold text-gray-800 dark:text-gray-100 leading-tight flex items-center gap-1">
@@ -373,7 +349,7 @@ export const Hero = () => {
 
           {/* Premium Glassmorphic 3D perspective tilt canvas */}
           <motion.div 
-            className="relative w-full max-w-[310px] md:max-w-[360px] lg:max-w-[300px] xl:max-w-[360px] aspect-square rounded-3xl p-2.5 bg-white dark:bg-zinc-900 border border-gray-200/55 dark:border-zinc-800/85 card-shadow group overflow-visible"
+            className="relative w-full max-w-[270px] md:max-w-[320px] lg:max-w-[280px] xl:max-w-[330px] aspect-square rounded-3xl p-2.5 bg-white dark:bg-zinc-900 border border-gray-200/55 dark:border-zinc-800/85 card-shadow group overflow-visible"
             whileHover={{ 
               rotateY: 8, 
               rotateX: -4, 
@@ -431,7 +407,7 @@ export const Hero = () => {
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.9, duration: 0.6 }}
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 cursor-pointer select-none hidden md:flex"
+        className="absolute bottom-2 left-1/2 -translate-x-1/2 flex-col items-center gap-1 cursor-pointer select-none hidden 2xl:flex"
         onClick={() => {
           const targetSection = document.getElementById("about") || document.getElementById("projects") || document.getElementById("features") || document.getElementById("portfolio");
           if (targetSection) {
