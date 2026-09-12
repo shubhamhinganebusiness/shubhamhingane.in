@@ -437,7 +437,7 @@ export const LiveMatchGlobalBanner = () => {
   useEffect(() => {
     // Initial local cache population
     try {
-      const local = getLocalMatches().filter(m => m.status === 'live' && !isMatchDeleted(m.id) && !m.isHidden && !m.isBlocked && !(m as any).isDeleted);
+      const local = getLocalMatches().filter(m => m.status === 'live' && !isMatchDeleted(m.id) && !m.isHidden && !m.isBlocked && !(m as any).isDeleted && !isDemoOrAIMatch(m));
       if (local.length > 0) {
         setLiveMatches(local);
       }
@@ -449,7 +449,7 @@ export const LiveMatchGlobalBanner = () => {
       snapshot.forEach((docSnap: any) => {
         const data = docSnap.data() as MatchState;
         const m = { ...data, id: data.id || docSnap.id };
-        if (m.status === 'deleted' || (m as any).isDeleted === true || isMatchDeleted(m.id)) {
+        if (m.status === 'deleted' || (m as any).isDeleted === true || isMatchDeleted(m.id) || isDemoOrAIMatch(m)) {
           markMatchDeleted(m.id);
           return;
         }
@@ -1125,17 +1125,12 @@ export const SpectatorScoreboardSection = ({
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
         if (!m || !m.id) return;
 
-        // Permanently filter out matches that have been explicitly deleted
-        if ((m as any).isDeleted === true || m.status === 'deleted') {
+        // Permanently filter out matches that have been explicitly deleted or are AI/bot matches
+        if ((m as any).isDeleted === true || m.status === 'deleted' || isMatchDeleted(m.id) || isDemoOrAIMatch(m)) {
           markMatchDeleted(m.id);
           return;
         }
 
-        if (isDemoOrAIMatch(m)) {
-          return;
-        }
-
-        unmarkMatchDeleted(m.id);
         remoteMatches.push(m);
         remoteIds.add(m.id);
       });

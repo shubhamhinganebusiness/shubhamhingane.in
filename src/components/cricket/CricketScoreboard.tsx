@@ -50,7 +50,8 @@ import {
   pruneDeletedMatchesFromStorage,
   sanitizeForFirestore,
   compressImageFile,
-  isDemoOrAIMatch
+  isDemoOrAIMatch,
+  purgeCachedAIMatches
 } from './cricketStorage';
 import {
   CommentaryLanguage,
@@ -265,6 +266,10 @@ export interface MatchState {
   groundName?: string;
   isHidden?: boolean;
   isBlocked?: boolean;
+  isSynthetic?: boolean;
+  isAiMatch?: boolean;
+  isDemo?: boolean;
+  isBot?: boolean;
   playerOfTheMatch?: {
     name: string;
     runs: number;
@@ -785,8 +790,27 @@ export const CricketScoreboard: React.FC = () => {
     return user?.displayName || currentManagerId || 'Official Scorer';
   }, [currentManagerId, user]);
 
-  // Check if a match belongs to the official score manager - open to manager without login restriction
-  const isMatchOwnedByCurrentManager = (_m: MatchState | any): boolean => {
+  // Check if a match belongs to the official score manager and is not an unrequested AI bot / synthetic match
+  const isMatchOwnedByCurrentManager = (m: MatchState | any): boolean => {
+    if (!m || !m.id) return false;
+    // Strictly filter out any AI bot, synthetic, exhibition, demo, or deleted match
+    if (isDemoOrAIMatch(m) || isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted') {
+      return false;
+    }
+    // Reject matches created by bot / ai / system
+    const createdBy = String(m.createdBy || '').toLowerCase();
+    if (createdBy.includes('bot') || createdBy.includes('ai') || createdBy.includes('system') || createdBy.includes('simulator')) {
+      return false;
+    }
+    // If signed in as official scorekeeper / manager, verify ownership
+    if (isScoreManager) {
+      if (m.managerId && currentManagerId && m.managerId !== currentManagerId) {
+        return false;
+      }
+      if (m.createdBy && currentManagerId && m.createdBy !== currentManagerId && m.createdBy !== user?.uid && m.createdBy !== user?.email) {
+        return false;
+      }
+    }
     return true;
   };
 
@@ -1729,6 +1753,11 @@ export const CricketScoreboard: React.FC = () => {
 
   // Load autosaved active match state from LocalStorage on mount
   useEffect(() => {
+    // Proactively purge any cached AI bot matches, demo matches, or synthetic entries from local storage
+    try {
+      purgeCachedAIMatches();
+    } catch (_) {}
+
     let saved = null;
     try {
       saved = localStorage.getItem('cricket_active_match');
@@ -1738,11 +1767,13 @@ export const CricketScoreboard: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as MatchState;
-        const isOwned = !isScoreManager || isMatchOwnedByCurrentManager(parsed);
-        if (parsed && parsed.status === 'live' && parsed.id && !isMatchDeleted(parsed.id) && isOwned) {
+        if (parsed && (isDemoOrAIMatch(parsed) || isMatchDeleted(parsed.id) || !isMatchOwnedByCurrentManager(parsed))) {
+          // If match belongs to a different scorekeeper or is an AI bot match, purge from active state
+          localStorage.removeItem('cricket_active_match');
+          setLocalAutosavedMatch(null);
+        } else if (parsed && parsed.status === 'live' && parsed.id && isMatchOwnedByCurrentManager(parsed)) {
           setLocalAutosavedMatch(parsed);
-        } else if (parsed && parsed.id && (isMatchDeleted(parsed.id) || (isScoreManager && !isOwned))) {
-          // If match belongs to a different scorekeeper, do not populate this manager's active state
+        } else {
           setLocalAutosavedMatch(null);
         }
       } catch (err) {
@@ -2035,9 +2066,9 @@ export const CricketScoreboard: React.FC = () => {
       draftList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
       liveList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
 
-      const cleanHistory = historyList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
-      const cleanDrafts = draftList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
-      const cleanLive = liveList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
+      const cleanHistory = historyList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && isMatchOwnedByCurrentManager(m));
+      const cleanDrafts = draftList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && isMatchOwnedByCurrentManager(m));
+      const cleanLive = liveList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && isMatchOwnedByCurrentManager(m));
 
       setMatchHistory(cleanHistory);
       setSavedDrafts(cleanDrafts);
@@ -10672,7 +10703,24 @@ export const CricketScoreboard: React.FC = () => {
 
               {/* TAB 1.5: ACTIVE LIVE MATCHES */}
               {activeHistoryTab === 'live' && (
-                <div>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Score Manager Live Matches ({activeLiveMatches.length})
+                    </span>
+                    <button
+                      onClick={() => {
+                        purgeCachedAIMatches();
+                        setActiveLiveMatches(prev => prev.filter(m => isMatchOwnedByCurrentManager(m)));
+                        showNotification('Purged bot and cached live matches from storage', 'info');
+                      }}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none"
+                      title="Clear cached or unowned matches from local storage"
+                    >
+                      <RotateCcw size={12} />
+                      <span>Purge Bot / Cached Matches</span>
+                    </button>
+                  </div>
                   {activeLiveMatches.length === 0 ? (
                     <div className="text-center py-10">
                       <Radio className="mx-auto text-emerald-500 mb-3 animate-pulse" size={32} />

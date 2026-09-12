@@ -94,7 +94,6 @@ export const HeroCricketLiveScore: React.FC = () => {
         const completedList: MatchState[] = [];
 
         if (activeLocal && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal)) {
-          unmarkMatchDeleted(activeLocal.id);
           if (activeLocal.status === 'live') {
             activeList.push(activeLocal);
           } else if (activeLocal.status === 'completed') {
@@ -104,7 +103,6 @@ export const HeroCricketLiveScore: React.FC = () => {
 
         registry.forEach(m => {
           if (!isMatchDeleted(m.id) && !isDemoOrAIMatch(m)) {
-            unmarkMatchDeleted(m.id);
             if (m.status === 'live' && !activeList.some(a => a.id === m.id)) {
               activeList.push(m);
             } else if (m.status === 'completed' && !completedList.some(c => c.id === m.id)) {
@@ -139,16 +137,10 @@ export const HeroCricketLiveScore: React.FC = () => {
           const data = docSnap.data() as MatchState;
           const m = { ...data, id: data.id || docSnap.id };
 
-          if (m.status === 'deleted' || (m as any).isDeleted === true) {
+          if (m.status === 'deleted' || (m as any).isDeleted === true || isMatchDeleted(m.id) || isDemoOrAIMatch(m)) {
             markMatchDeleted(m.id);
             return;
           }
-
-          if (isDemoOrAIMatch(m)) {
-            return;
-          }
-
-          unmarkMatchDeleted(m.id);
 
           if (m.status === 'live' && !(m as any).isHidden && !(m as any).isBlocked) {
             active.push(m);

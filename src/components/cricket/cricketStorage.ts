@@ -237,21 +237,40 @@ export function sanitizeForFirestore<T = any>(obj: T): T {
   return result as T;
 }
 
+export const KNOWN_DELETED_OR_AI_MATCH_IDS = [
+  'match-premier-live-exhibition',
+  'match-1781148325457',
+  'match-1782016325671',
+  'match-1788498354696',
+  'match-1788598366521',
+  'test-realtime-check'
+];
+
 /**
  * Checks whether a match has been permanently deleted in local/client tombstone
  */
 export function isMatchDeleted(id: string): boolean {
   if (typeof window === 'undefined' || !id) return false;
-  if (id === 'match-premier-live-exhibition') return true;
+  const trimmedId = String(id).trim();
+  if (KNOWN_DELETED_OR_AI_MATCH_IDS.includes(trimmedId)) return true;
+  const lowerId = trimmedId.toLowerCase();
+  if (
+    lowerId.includes('exhibition') ||
+    lowerId.includes('demo') ||
+    lowerId.includes('bot') ||
+    lowerId.includes('synthetic') ||
+    lowerId.startsWith('custom-')
+  ) {
+    return true;
+  }
   try {
-    if (sessionStorage.getItem(`deleted_match_${id}`) === 'true') {
+    if (sessionStorage.getItem(`deleted_match_${trimmedId}`) === 'true') {
       return true;
     }
     const raw = localStorage.getItem(DELETED_REGISTRY_KEY);
     if (!raw) return false;
     const deletedMap = JSON.parse(raw);
-    if (deletedMap && typeof deletedMap === 'object' && deletedMap[id]) {
-      // Tomstones remain valid permanently or minimum 30 days
+    if (deletedMap && typeof deletedMap === 'object' && deletedMap[trimmedId]) {
       return true;
     }
   } catch (e) {
@@ -261,19 +280,74 @@ export function isMatchDeleted(id: string): boolean {
 }
 
 /**
- * Determines whether a match is an AI generated demo / synthetic / exhibition match.
+ * Determines whether a match is an AI generated demo / synthetic / bot / exhibition match.
  * Strictly filters out AI/synthetic matches so only official manager created matches are displayed.
  */
 export function isDemoOrAIMatch(m: any): boolean {
   if (!m) return true;
-  const id = String(m.id || '');
-  if (id === 'match-premier-live-exhibition' || id.includes('exhibition') || id.includes('demo') || id.startsWith('custom-')) return true;
-  if (m.isSynthetic === true || m.isAIGenerated === true || m.isAiMatch === true || m.isSimulated === true) return true;
-  const teamA = String(m.teamA || '').toLowerCase();
-  const teamB = String(m.teamB || '').toLowerCase();
+  const id = String(m.id || '').trim();
+  if (!id) return true;
+
+  // Known AI / bot / demo / deleted match IDs
+  if (KNOWN_DELETED_OR_AI_MATCH_IDS.includes(id)) return true;
+
+  const idLower = id.toLowerCase();
+  if (
+    idLower.includes('exhibition') || 
+    idLower.includes('demo') || 
+    idLower.startsWith('custom-') ||
+    idLower.includes('bot') ||
+    idLower.includes('synthetic') ||
+    idLower.includes('sim-') ||
+    idLower.includes('mock')
+  ) {
+    return true;
+  }
+
+  // Explicit flags
+  if (
+    m.isSynthetic === true || 
+    m.isAIGenerated === true || 
+    m.isAiMatch === true || 
+    m.isSimulated === true ||
+    m.isBot === true ||
+    m.isAi === true ||
+    m.bot === true ||
+    m.isAIBot === true ||
+    m.isAutomated === true ||
+    m.isMock === true
+  ) {
+    return true;
+  }
+
+  // Creator / manager name checks for AI / bots
+  const createdBy = String(m.createdBy || '').toLowerCase();
+  const managerName = String(m.managerName || '').toLowerCase();
+  const managerId = String(m.managerId || '').toLowerCase();
+  if (
+    createdBy.includes('bot') || createdBy.includes('ai') || createdBy.includes('system') || createdBy.includes('simulator') ||
+    managerName.includes('bot') || managerName.includes('ai') ||
+    managerId.includes('bot') || managerId.includes('ai')
+  ) {
+    return true;
+  }
+
+  // Team names check
+  const teamA = String(m.teamA || '').toLowerCase().trim();
+  const teamB = String(m.teamB || '').toLowerCase().trim();
+  if (!teamA || !teamB) return true;
   if (teamA.includes('demo') || teamB.includes('demo')) return true;
   if (teamA.includes('adelaide strikers') || teamB.includes('adelaide strikers')) return true;
   if (teamA === 'mumbai champions' && teamB === 'pune super warriors') return true;
+  if (teamA.includes('bot') || teamB.includes('bot')) return true;
+  if (teamA.includes('ai team') || teamB.includes('ai team') || teamA.includes('ai bot') || teamB.includes('ai bot')) return true;
+
+  // Tournament / series name check
+  const tournamentName = String(m.tournamentName || '').toLowerCase();
+  const seriesName = String(m.seriesName || '').toLowerCase();
+  if (tournamentName.includes('bot') || tournamentName.includes('ai match') || tournamentName.includes('ai tournament') || tournamentName.includes('demo')) return true;
+  if (seriesName.includes('bot') || seriesName.includes('ai series') || seriesName.includes('demo')) return true;
+
   return false;
 }
 
@@ -282,11 +356,12 @@ export function isDemoOrAIMatch(m: any): boolean {
  */
 export function markMatchDeleted(id: string): void {
   if (typeof window === 'undefined' || !id) return;
+  const trimmedId = String(id).trim();
   try {
-    sessionStorage.setItem(`deleted_match_${id}`, 'true');
+    sessionStorage.setItem(`deleted_match_${trimmedId}`, 'true');
     const raw = localStorage.getItem(DELETED_REGISTRY_KEY);
     const deletedMap: Record<string, number> = raw ? JSON.parse(raw) : {};
-    deletedMap[id] = Date.now();
+    deletedMap[trimmedId] = Date.now();
     localStorage.setItem(DELETED_REGISTRY_KEY, JSON.stringify(deletedMap));
   } catch (e) {
     console.warn('Failed to write to deleted matches registry:', e);
@@ -298,13 +373,18 @@ export function markMatchDeleted(id: string): void {
  */
 export function unmarkMatchDeleted(id: string): void {
   if (typeof window === 'undefined' || !id) return;
+  const trimmedId = String(id).trim();
+  // Never unmark known AI / bot / deleted matches
+  if (KNOWN_DELETED_OR_AI_MATCH_IDS.includes(trimmedId) || trimmedId.includes('bot') || trimmedId.includes('demo') || trimmedId.includes('exhibition')) {
+    return;
+  }
   try {
-    sessionStorage.removeItem(`deleted_match_${id}`);
+    sessionStorage.removeItem(`deleted_match_${trimmedId}`);
     const raw = localStorage.getItem(DELETED_REGISTRY_KEY);
     if (!raw) return;
     const deletedMap: Record<string, number> = JSON.parse(raw);
-    if (deletedMap && deletedMap[id]) {
-      delete deletedMap[id];
+    if (deletedMap && deletedMap[trimmedId]) {
+      delete deletedMap[trimmedId];
       localStorage.setItem(DELETED_REGISTRY_KEY, JSON.stringify(deletedMap));
     }
   } catch (e) {
@@ -365,7 +445,7 @@ export function getActiveMatch(): MatchState | null {
 export function setActiveMatch(match: MatchState | null): void {
   if (typeof window === 'undefined') return;
   try {
-    if (!match || match.status === 'completed' || isDemoOrAIMatch(match)) {
+    if (!match || match.status === 'completed' || isDemoOrAIMatch(match) || isMatchDeleted(match.id)) {
       localStorage.removeItem(ACTIVE_MATCH_KEY);
       broadcastMatchChange(match, 'update');
     } else {
@@ -436,6 +516,7 @@ export function getLocalMatchById(id: string): MatchState | null {
  */
 export function saveMatchToRegistry(match: MatchState): void {
   if (typeof window === 'undefined' || !match || !match.id) return;
+  if (isMatchDeleted(match.id) || isDemoOrAIMatch(match)) return;
   unmarkMatchDeleted(match.id);
   try {
     const current = getLocalMatches();
@@ -522,10 +603,10 @@ export function deleteLocalMatch(id: string): void {
 }
 
 /**
- * Prunes matches from local storage that are explicitly marked deleted or invalid.
+ * Prunes matches from local storage that are explicitly marked deleted, AI generated, or invalid.
  * Preserves local and offline matches so user scoreboards are never unexpectedly purged.
  */
-export function pruneDeletedMatchesFromStorage(validRemoteIds: Set<string>): void {
+export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): void {
   if (typeof window === 'undefined') return;
   try {
     const raw = localStorage.getItem(LOCAL_REGISTRY_KEY);
@@ -534,8 +615,13 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds: Set<string>): voi
       if (Array.isArray(parsed)) {
         const kept = parsed.filter(item => {
           if (!item || !item.id) return false;
-          // Only purge matches that are explicitly flagged as deleted
-          if (item.status === 'deleted' || (item as any).isDeleted === true) {
+          // Purge matches that are deleted or AI bot matches
+          if (
+            item.status === 'deleted' || 
+            (item as any).isDeleted === true || 
+            isMatchDeleted(item.id) || 
+            isDemoOrAIMatch(item)
+          ) {
             return false;
           }
           return true;
@@ -549,7 +635,12 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds: Set<string>): voi
     if (activeRaw) {
       const active = JSON.parse(activeRaw);
       if (active && active.id) {
-        if (active.status === 'deleted' || (active as any).isDeleted === true) {
+        if (
+          active.status === 'deleted' || 
+          (active as any).isDeleted === true || 
+          isMatchDeleted(active.id) || 
+          isDemoOrAIMatch(active)
+        ) {
           localStorage.removeItem(ACTIVE_MATCH_KEY);
         }
       }
@@ -557,6 +648,89 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds: Set<string>): voi
   } catch (e) {
     console.warn('Failed to prune deleted matches from local storage:', e);
   }
+}
+
+/**
+ * Actively purges any cached AI bot matches, demo matches, or unowned synthetic matches from browser storage.
+ */
+export function purgeCachedAIMatches(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // 1. Mark known AI and deleted IDs in tombstone
+    KNOWN_DELETED_OR_AI_MATCH_IDS.forEach(id => markMatchDeleted(id));
+
+    // 2. Fetch server-side tombstone list
+    fetch('/api/cricket/deleted-matches')
+      .then(res => res.json())
+      .then(data => {
+        if (data && Array.isArray(data.deletedIds)) {
+          data.deletedIds.forEach((id: string) => markMatchDeleted(id));
+        }
+      })
+      .catch(() => {});
+
+    // 3. Clear active match if it's AI / bot / demo
+    const activeRaw = localStorage.getItem(ACTIVE_MATCH_KEY);
+    if (activeRaw) {
+      try {
+        const active = JSON.parse(activeRaw);
+        if (active && (isDemoOrAIMatch(active) || isMatchDeleted(active.id))) {
+          localStorage.removeItem(ACTIVE_MATCH_KEY);
+          broadcastMatchChange(null, 'delete');
+        }
+      } catch (_) {
+        localStorage.removeItem(ACTIVE_MATCH_KEY);
+      }
+    }
+
+    // 4. Clean local registry
+    const registryRaw = localStorage.getItem(LOCAL_REGISTRY_KEY);
+    if (registryRaw) {
+      try {
+        const list = JSON.parse(registryRaw);
+        if (Array.isArray(list)) {
+          const cleaned = list.filter(m => m && m.id && !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
+          localStorage.setItem(LOCAL_REGISTRY_KEY, JSON.stringify(cleaned));
+        }
+      } catch (_) {
+        localStorage.removeItem(LOCAL_REGISTRY_KEY);
+      }
+    }
+
+    // 5. Clean custom past matches
+    const customRaw = localStorage.getItem('cricket_custom_past_matches');
+    if (customRaw) {
+      try {
+        const custom = JSON.parse(customRaw);
+        if (Array.isArray(custom)) {
+          const cleaned = custom.filter((m: any) => m && m.id && !isDemoOrAIMatch(m) && !isMatchDeleted(m.id));
+          localStorage.setItem('cricket_custom_past_matches', JSON.stringify(cleaned));
+        }
+      } catch (_) {}
+    }
+
+    // 6. Clean offline pending
+    const offlineRaw = localStorage.getItem(OFFLINE_PENDING_KEY);
+    if (offlineRaw) {
+      try {
+        const offline = JSON.parse(offlineRaw);
+        if (Array.isArray(offline)) {
+          const cleaned = offline.filter((m: any) => m && m.id && !isMatchDeleted(m.id) && !isDemoOrAIMatch(m));
+          localStorage.setItem(OFFLINE_PENDING_KEY, JSON.stringify(cleaned));
+        }
+      } catch (_) {}
+    }
+
+    // Dispatch update notification so UI reactively rerenders cleanly
+    window.dispatchEvent(new CustomEvent('cricket_match_updated', { detail: { eventType: 'update' } }));
+  } catch (err) {
+    console.warn('[cricketStorage] purgeCachedAIMatches note:', err);
+  }
+}
+
+// Automatically invoke on client load
+if (typeof window !== 'undefined') {
+  purgeCachedAIMatches();
 }
 
 /**
@@ -606,7 +780,6 @@ export function subscribeToMatchSync(callback: () => void): () => void {
  */
 export function getOrCreateDefaultMatch(): MatchState {
   const matchId = 'match-premier-live-exhibition';
-  unmarkMatchDeleted(matchId);
 
   const defaultMatch: MatchState = {
     id: matchId,
@@ -626,6 +799,10 @@ export function getOrCreateDefaultMatch(): MatchState {
     tournamentName: 'Gully Premier T20 Cup 2026',
     seriesName: 'Championship Final',
     groundName: 'Wankhede Cricket Ground, Mumbai',
+    isSynthetic: true,
+    isAiMatch: true,
+    isDemo: true,
+    isBot: true,
     innings1: {
       battingTeam: 'Mumbai Champions',
       bowlingTeam: 'Pune Super Warriors',
