@@ -229,6 +229,34 @@
       },
       "required": ["id", "teamA", "teamB", "oversLimit", "status"]
     },
+    "CricketDelivery": {
+      "title": "Cricket Ball Delivery",
+      "description": "Granular ball-by-ball delivery in sub-collection /cricket_matches/{matchId}/deliveries/{deliveryId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "matchId": { "type": "string" },
+        "inningsNum": { "type": "number", "enum": [1, 2] },
+        "overIndex": { "type": "number" },
+        "ballInOver": { "type": "number" },
+        "totalBallsBowled": { "type": "number" },
+        "batterName": { "type": "string" },
+        "bowlerName": { "type": "string" },
+        "nonStrikerName": { "type": "string" },
+        "runs": { "type": "number" },
+        "ballLabel": { "type": "string" },
+        "extraType": { "type": "string" },
+        "isWicket": { "type": "boolean" },
+        "wicketDetail": { "type": "string" },
+        "outMode": { "type": "string" },
+        "fielderName": { "type": "string" },
+        "description": { "type": "string" },
+        "isBoundaryFour": { "type": "boolean" },
+        "isBoundarySix": { "type": "boolean" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "matchId", "inningsNum", "batterName", "bowlerName", "runs"]
+    },
     "ScoreManagerProfile": {
       "title": "Score Manager Profile & Stream Pointer",
       "description": "Manager profile and active match routing pointer for permanent OBS overlays",
@@ -304,6 +332,10 @@
     "/cricket_players/{playerId}": {
       "schema": "CricketPlayer",
       "description": "Registered cricket player profiles"
+    },
+    "/cricket_live_summaries/{matchId}": {
+      "schema": "object",
+      "description": "Lightweight (<1.5KB) live match summary document for high-scale spectator broadcasting"
     },
     "/furniture_stores/{storeId}/products/{productId}": {
       "schema": "FurnitureProduct",

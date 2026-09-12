@@ -71,47 +71,72 @@ export const MiniLiveScoreNotificationWidget: React.FC<MiniLiveScoreNotification
 
     syncFromLocal();
 
-    // 2. Real-time Firestore active database subscription
+    // 2. Real-time spectator read pipeline (< 1.5 KB summary docs)
     let unsubFirestore: (() => void) | null = null;
     try {
-      unsubFirestore = onSnapshot(collection(db, 'cricket_matches'), (snapshot) => {
+      unsubFirestore = onSnapshot(collection(db, 'cricket_live_summaries'), (snapshot) => {
         setIsDbOnline(true);
         setLastSyncTime(new Date());
 
         const activeList: MatchState[] = [];
         snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as MatchState;
-          const match: MatchState = { ...data, id: data.id || docSnap.id };
+          const data = docSnap.data() as any;
+          if (data && data.status === 'live' && !isMatchDeleted(data.matchId || docSnap.id) && !(data as any).isDeleted) {
+            const runs = data.currentScore?.runs ?? 0;
+            const wickets = data.currentScore?.wickets ?? 0;
+            const balls = data.currentScore?.ballsBowled ?? 0;
+            const matchId = data.matchId || docSnap.id;
 
-          if (match.status === 'live' && !isMatchDeleted(match.id) && !(match as any).isDeleted) {
+            const match: MatchState = {
+              id: matchId,
+              status: 'live',
+              teamA: data.teamA,
+              teamB: data.teamB,
+              oversLimit: data.oversLimit || 5,
+              currentInningsNum: data.currentInningsNum || 1,
+              targetRuns: data.currentScore?.targetRuns,
+              innings1: {
+                runs: data.currentInningsNum === 1 ? runs : 0,
+                wickets: data.currentInningsNum === 1 ? wickets : 0,
+                ballsBowled: data.currentInningsNum === 1 ? balls : 0,
+                recentBalls: data.recentBallsMini || [],
+                battingTeam: data.teamA
+              },
+              innings2: data.currentInningsNum === 2 ? {
+                runs: runs,
+                wickets: wickets,
+                ballsBowled: balls,
+                recentBalls: data.recentBallsMini || [],
+                battingTeam: data.teamB
+              } : undefined,
+              updatedAt: data.updatedAt || Date.now()
+            } as any;
+
             activeList.push(match);
 
             // Check for real-time score milestones to notify
-            const currInnings = match.currentInningsNum === 2 ? match.innings2 : match.innings1;
-            const runs = currInnings?.runs ?? 0;
-            const wickets = currInnings?.wickets ?? 0;
-            const balls = currInnings?.ballsBowled ?? 0;
-
-            const prev = prevScoreRef.current[match.id];
+            const prev = prevScoreRef.current[matchId];
             if (prev) {
               if (wickets > prev.wickets) {
-                setLatestNotification(`💥 WICKET! ${currInnings?.battingTeam || match.teamA} lost a wicket (${runs}/${wickets})`);
+                setLatestNotification(`💥 WICKET! ${data.teamA} lost a wicket (${runs}/${wickets})`);
                 setNotificationType('wicket');
               } else if (runs - prev.runs === 6) {
-                setLatestNotification(`🔥 MAXIMUM 6! Huge hit by ${currInnings?.battingTeam || match.teamA} (${runs}/${wickets})`);
+                setLatestNotification(`🔥 MAXIMUM 6! Huge hit by ${data.teamA} (${runs}/${wickets})`);
                 setNotificationType('six');
               } else if (runs - prev.runs === 4) {
                 setLatestNotification(`⚡ BOUNDARY 4! Beautiful shot (${runs}/${wickets})`);
                 setNotificationType('four');
               }
             }
-            prevScoreRef.current[match.id] = { runs, wickets, balls };
+            prevScoreRef.current[matchId] = { runs, wickets, balls };
           }
         });
 
-        setLiveMatches(activeList);
+        if (activeList.length > 0) {
+          setLiveMatches(activeList);
+        }
       }, (error) => {
-        console.warn('Firestore live widget error:', error);
+        console.warn('Firestore live summary widget note:', error);
         setIsDbOnline(false);
       });
     } catch (err) {

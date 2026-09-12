@@ -244,6 +244,13 @@ service cloud.firestore {
       }
     }
 
+    match /cricket_live_summaries/{matchId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
     match /spectator_slider_images/{imageId} {
       allow read, write: if true;
       match /{allSub=**} {

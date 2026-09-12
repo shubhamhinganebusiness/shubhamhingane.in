@@ -23,6 +23,7 @@ import {
   subscribeToCricketMatchesCollection,
   subscribeToCricketMatchDoc
 } from '../../lib/firebase';
+import { subscribeToLiveSummary } from '../../services/cricketDb';
 import { doc, onSnapshot, collection } from 'firebase/firestore';
 
 // Local storage & real-time sync across scoreboard components
@@ -1367,6 +1368,35 @@ export const SpectatorScoreboardSection = ({
       }
     });
 
+    // Separate Spectator Read Pipeline: Ultra-fast live summary listener (< 1.5 KB)
+    const unsubSummary = subscribeToLiveSummary(targetMatchId, (summary) => {
+      if (!summary || isMatchDeleted(targetMatchId)) return;
+      setSelectedMatch(prev => {
+        if (!prev || prev.id !== targetMatchId) return prev;
+        const currentInningsNum = summary.currentInningsNum || prev.currentInningsNum;
+        const isSecond = currentInningsNum === 2;
+        const currentInnings = isSecond ? { ...(prev.innings2 || { overs: prev.oversLimit, ballsBowled: 0, runs: 0, wickets: 0, extras: 0, battingTeam: prev.teamB, bowlingTeam: prev.teamA, batsmen: [], bowlers: [], fallOfWickets: [] }) } : { ...prev.innings1 };
+
+        if (summary.currentScore) {
+          currentInnings.runs = summary.currentScore.runs;
+          currentInnings.wickets = summary.currentScore.wickets;
+          currentInnings.ballsBowled = summary.currentScore.ballsBowled;
+        }
+        if (summary.recentBallsMini && summary.recentBallsMini.length > 0) {
+          currentInnings.recentBalls = summary.recentBallsMini;
+        }
+
+        return {
+          ...prev,
+          currentInningsNum,
+          innings1: !isSecond ? currentInnings : prev.innings1,
+          innings2: isSecond ? currentInnings : prev.innings2,
+          updatedAt: summary.updatedAt || Date.now()
+        };
+      });
+      setLastRefreshed(new Date());
+    });
+
     // Also subscribe to Firebase Realtime Database for zero-latency instant updates across all visitor devices
     const unsubRtdb = subscribeToRealtimeDBMatch(targetMatchId, (remoteMatch: any) => {
       if (!remoteMatch || isMatchDeleted(targetMatchId) || (remoteMatch as any).isDeleted || remoteMatch.status === 'deleted') {
@@ -1400,6 +1430,7 @@ export const SpectatorScoreboardSection = ({
 
     return () => {
       unsub();
+      unsubSummary();
       unsubRtdb();
       unsubSync();
     };

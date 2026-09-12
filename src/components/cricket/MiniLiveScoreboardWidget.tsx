@@ -34,29 +34,49 @@ export const MiniLiveScoreboardWidget: React.FC<MiniLiveScoreboardWidgetProps> =
 
   const prevScoreRef = useRef<{ runs: number; wickets: number; matchId: string } | null>(null);
 
-  // Subscribe to real-time active database matches where status == 'live'
+  // SPECTATOR READ PIPELINE: Subscribe to ultra-lightweight summaries (< 1.5 KB) for instant real-time scores
   useEffect(() => {
     try {
-      const q = query(
-        collection(db, 'cricket_matches'),
-        where('status', '==', 'live')
-      );
-
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      const unsubSummaries = onSnapshot(collection(db, 'cricket_live_summaries'), (snapshot) => {
         const matches: MatchState[] = [];
         snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data && !(data as any).isDeleted && data.status === 'live') {
-            matches.push({ ...data, id: data.id || docSnap.id } as MatchState);
+          const data = docSnap.data() as any;
+          if (data && data.status === 'live' && !(data as any).isDeleted) {
+            const runs = data.currentScore?.runs ?? 0;
+            const wickets = data.currentScore?.wickets ?? 0;
+            const ballsBowled = data.currentScore?.ballsBowled ?? 0;
+            matches.push({
+              id: data.matchId || docSnap.id,
+              status: 'live',
+              teamA: data.teamA,
+              teamB: data.teamB,
+              oversLimit: data.oversLimit || 5,
+              currentInningsNum: data.currentInningsNum || 1,
+              targetRuns: data.currentScore?.targetRuns,
+              lastBallResult: data.recentBallsMini?.length ? data.recentBallsMini[data.recentBallsMini.length - 1] : '',
+              innings1: {
+                runs: data.currentInningsNum === 1 ? runs : (data.innings1Summary?.runs ?? 0),
+                wickets: data.currentInningsNum === 1 ? wickets : (data.innings1Summary?.wickets ?? 0),
+                ballsBowled: data.currentInningsNum === 1 ? ballsBowled : (data.innings1Summary?.ballsBowled ?? 0),
+                recentBalls: data.currentInningsNum === 1 ? (data.recentBallsMini || []) : [],
+                battingTeam: data.teamA
+              },
+              innings2: data.currentInningsNum === 2 ? {
+                runs: runs,
+                wickets: wickets,
+                ballsBowled: ballsBowled,
+                recentBalls: data.recentBallsMini || [],
+                battingTeam: data.teamB
+              } : undefined,
+              updatedAt: data.updatedAt || Date.now()
+            } as any);
           }
         });
 
-        // Sort by most recently updated
-        matches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-        setLiveMatches(matches);
-
-        // Check for real-time live events (boundaries, wickets)
         if (matches.length > 0) {
+          matches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          setLiveMatches(matches);
+
           const topMatch = matches[0];
           const currInnings = topMatch.currentInningsNum === 2 ? topMatch.innings2 : topMatch.innings1;
           const currRuns = currInnings?.runs ?? 0;
@@ -81,12 +101,12 @@ export const MiniLiveScoreboardWidget: React.FC<MiniLiveScoreboardWidgetProps> =
           };
         }
       }, (error) => {
-        console.warn('Real-time listener for mini scoreboard error:', error);
+        console.warn('Real-time spectator summary listener note:', error);
       });
 
-      return () => unsubscribe();
+      return () => unsubSummaries();
     } catch (e) {
-      console.warn('Failed to attach real-time live match listener:', e);
+      console.warn('Failed to attach spectator read pipeline listener:', e);
     }
   }, []);
 

@@ -53,6 +53,15 @@ import {
   isDemoOrAIMatch,
   purgeCachedAIMatches
 } from './cricketStorage';
+import { 
+  recordBallDelivery, 
+  deleteBallDelivery, 
+  BallDelivery,
+  updatePlayerCareerStats,
+  updateTournamentStandingsAfterMatch,
+  extractLiveSummary,
+  publishLiveSummary
+} from '../../services/cricketDb';
 import {
   CommentaryLanguage,
   useCommentaryLanguage,
@@ -1670,6 +1679,14 @@ export const CricketScoreboard: React.FC = () => {
         // Sanitize object to eliminate any undefined values before Firestore persistence
         const sanitized = sanitizeForFirestore(stateToSave);
         await safeSetDoc(matchDocRef, sanitized);
+
+        // Separate Write Pipeline: Publish ultra-lightweight (< 1.5 KB) summary for spectators
+        try {
+          const liveSummary = extractLiveSummary(stateToSave);
+          if (liveSummary) {
+            publishLiveSummary(liveSummary).catch(() => {});
+          }
+        } catch (sumErr) {}
 
         // Push real-time updates to Firebase Realtime Database for cross-device synchronization
         syncScoreToRealtimeDB(stateToSave.id, sanitized).catch((err) => {
@@ -3841,6 +3858,31 @@ export const CricketScoreboard: React.FC = () => {
 
     syncMatch(nextMatchState);
 
+    // Record granular ball delivery in sub-collection /cricket_matches/{matchId}/deliveries
+    if (nextMatchState.id && !isSpectator) {
+      const deliveryId = `inn${nextMatchState.currentInningsNum}_b${inn.ballsBowled}_t${Date.now()}`;
+      const deliveryPayload: BallDelivery = {
+        id: deliveryId,
+        matchId: nextMatchState.id,
+        inningsNum: nextMatchState.currentInningsNum as 1 | 2,
+        overIndex: Math.floor(Math.max(0, inn.ballsBowled - 1) / 6),
+        ballInOver: ((Math.max(0, inn.ballsBowled - 1) % 6) + 1),
+        totalBallsBowled: inn.ballsBowled,
+        batterName: striker.name,
+        bowlerName: bowler.name,
+        nonStrikerName: nonStriker?.name,
+        runs: ballRuns,
+        ballLabel: ballLabel,
+        extraType: effectiveExtraType,
+        isWicket: false,
+        description: ballDesc,
+        isBoundaryFour: eventType === 'boundary' && ballRuns === 4,
+        isBoundarySix: eventType === 'boundary' && ballRuns === 6,
+        timestamp: Date.now()
+      };
+      recordBallDelivery(nextMatchState.id, deliveryPayload).catch(() => {});
+    }
+
     // Trigger Server-side AI Commentary in the background if enabled
     if (aiCommentaryEnabled && !isSpectator) {
       const baseDesc = `${bowler.name} to ${striker.name}: ${outcomeDescription}`;
@@ -4368,6 +4410,31 @@ export const CricketScoreboard: React.FC = () => {
 
     syncMatch(nextMatchState);
 
+    // Record wicket delivery in sub-collection /cricket_matches/{matchId}/deliveries
+    if (nextMatchState.id && !isSpectator) {
+      const deliveryId = `inn${nextMatchState.currentInningsNum}_wkt${inn.ballsBowled}_t${Date.now()}`;
+      const deliveryPayload: BallDelivery = {
+        id: deliveryId,
+        matchId: nextMatchState.id,
+        inningsNum: nextMatchState.currentInningsNum as 1 | 2,
+        overIndex: Math.floor(Math.max(0, inn.ballsBowled - 1) / 6),
+        ballInOver: ((Math.max(0, inn.ballsBowled - 1) % 6) + 1),
+        totalBallsBowled: inn.ballsBowled,
+        batterName: dismissedBatter.name,
+        bowlerName: detailedBowler,
+        nonStrikerName: remainingPartner?.name,
+        runs: 0,
+        ballLabel: isRetiredHurt ? 'RH' : 'W',
+        isWicket: !isRetiredHurt,
+        wicketDetail: isRetiredHurt ? 'Retired Hurt' : catchDetails,
+        outMode: detailedHowOut,
+        fielderName: replay.fielderName || undefined,
+        description: commentaryDescription,
+        timestamp: Date.now()
+      };
+      recordBallDelivery(nextMatchState.id, deliveryPayload).catch(() => {});
+    }
+
     // Auto-clear wicket banner in overlayConfig after 5 seconds so it doesn't stay permanently stuck
     setTimeout(() => {
       syncMatch(prev => {
@@ -4642,6 +4709,83 @@ export const CricketScoreboard: React.FC = () => {
         modifiedState.innings2 = inn2;
 
         saveMatchToHistory(modifiedState);
+
+        // PHASE 2 & 3 AUTOMATION: Trigger player career stats update and tournament standings recalculation
+        try {
+          // 1. Process player performances across both innings
+          const allInnings = [modifiedState.innings1, modifiedState.innings2].filter(Boolean) as Innings[];
+          for (const inn of allInnings) {
+            // Batters
+            for (const b of inn.batsmen || []) {
+              if (b.balls > 0 || b.runs > 0) {
+                const normPlayerId = b.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                updatePlayerCareerStats(normPlayerId, {
+                  playerName: b.name,
+                  runs: b.runs,
+                  balls: b.balls,
+                  fours: b.fours || 0,
+                  sixes: b.sixes || 0,
+                  isOut: b.isOut || false,
+                  ballsBowled: 0,
+                  runsConceded: 0,
+                  maidens: 0,
+                  wickets: 0
+                }).catch(() => {});
+              }
+            }
+            // Bowlers
+            for (const bw of inn.bowlers || []) {
+              if (bw.ballsBowled > 0 || bw.runsConceded > 0) {
+                const normPlayerId = bw.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                updatePlayerCareerStats(normPlayerId, {
+                  playerName: bw.name,
+                  runs: 0,
+                  balls: 0,
+                  fours: 0,
+                  sixes: 0,
+                  isOut: false,
+                  ballsBowled: bw.ballsBowled,
+                  runsConceded: bw.runsConceded,
+                  maidens: bw.maidens || 0,
+                  wickets: bw.wickets
+                }).catch(() => {});
+              }
+            }
+          }
+
+          // 2. Automate Tournament Net Run Rate (NRR) and Points Standings
+          if (modifiedState.tournamentId) {
+            const tA = modifiedState.teamA;
+            const tB = modifiedState.teamB;
+            const inn1Obj = modifiedState.innings1;
+            const inn2Obj = modifiedState.innings2;
+            const teamARuns = inn1Obj?.battingTeam === tA ? (inn1Obj?.runs || 0) : (inn2Obj?.runs || 0);
+            const teamABalls = inn1Obj?.battingTeam === tA ? (inn1Obj?.ballsBowled || 0) : (inn2Obj?.ballsBowled || 0);
+            const teamBRuns = inn1Obj?.battingTeam === tB ? (inn1Obj?.runs || 0) : (inn2Obj?.runs || 0);
+            const teamBBalls = inn1Obj?.battingTeam === tB ? (inn1Obj?.ballsBowled || 0) : (inn2Obj?.ballsBowled || 0);
+
+            const winnerId = modifiedState.winner === tA 
+              ? tA 
+              : modifiedState.winner === tB 
+                ? tB 
+                : (modifiedState.winner === 'Tie' ? 'Tie' : 'NoResult');
+
+            updateTournamentStandingsAfterMatch(modifiedState.tournamentId, {
+              matchId: modifiedState.id,
+              teamAId: tA.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+              teamAName: tA,
+              teamARuns,
+              teamABallsFaced: teamABalls,
+              teamBId: tB.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+              teamBName: tB,
+              teamBRuns,
+              teamBBallsFaced: teamBBalls,
+              winnerTeamId: winnerId === 'Tie' ? 'Tie' : (winnerId === 'NoResult' ? 'NoResult' : winnerId.toLowerCase().replace(/[^a-z0-9]/g, '_'))
+            }).catch(() => {});
+          }
+        } catch (autoErr) {
+          console.warn('[CricketScoreboard] Post-match automation note:', autoErr);
+        }
       }
     }
 
