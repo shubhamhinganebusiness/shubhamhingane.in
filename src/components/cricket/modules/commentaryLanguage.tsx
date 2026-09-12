@@ -316,6 +316,46 @@ export const GULLY_COMMENTARY_POOLS = {
         "No-ball called for overstepping! Free hit awarded on the very next delivery!",
         "Dangerous high full toss over waist height! No-ball signaled, Free Hit next!"
       ]
+    },
+    legbyes: {
+      mr: [
+        "पॅड्सवर आदळला चेंडू! {bwl} चे जोरदार पायचीत अपील, पण पंचांनी गुडघ्यावर थाप मारून लेग बायचा इशारा केला! {bat} आणि साथीदाराने वेगाने धाव पूर्ण केली!",
+        "थाय पॅडला लागून चेंडू फाईन लेगच्या दिशेने गेला! क्षेत्ररक्षक धावून चेंडू पकडेपर्यंत फलंदाजांनी चपळाईने लेग बाय धावा घेतल्या!",
+        "पॅडला स्पर्शून चेंडू निसटला! जोरदार अपील फेटाळले, फलंदाजांनी हुशारीने लेग बाय धाव आपल्या खात्यात जमा केली!",
+        "इन-स्विंगरवर चकवला फलंदाज! चेंडू पॅडवर आदळून रिकाम्या जागेत गेला आणि फलंदाजांनी अचूक तालमेलाने लेग बाय घेतली!",
+        "पॅडवर तडक लागलेला चेंडू स्क्वेअर लेगकडे वळला, कोणतीही चूक न करता फलंदाजांनी लेग बाय धाव घेतली!"
+      ],
+      hi: [
+        "पैड से टकराई गेंद! {bwl} की जोरदार अपील, लेकिन अंपायर ने घुटने पर हाथ मारकर लेग बाई का इशारा दिया! बल्लेबाजों ने दौड़कर लेग बाई रन चुराया!",
+        "थाई पैड पर लगी गेंद! इन-स्विंगर से चकमा खाए {bat}, गेंद फाइन लेग की तरफ गई और बल्लेबाजों ने तेजी से लेग बाई पूरी की!",
+        "पैड से डिफलेक्ट होकर खाली जगह में गेंद! अंपायर का लेग बाई का सिग्नल, फील्डर गेंद तक पहुंचे तब तक सुरक्षित रन पूरा!",
+        "शानदार गेंद पैड पर लगी, एलबीडब्ल्यू की जोरदार अपील को नकारा, बल्लेबाजों ने सूझबूझ से लेग बाई रन निकाला!",
+        "गेंद पैड्स पर लगकर फाइन लेग बाउंड्री की तरफ लुढ़की, बल्लेबाजों ने चुस्ती दिखाते हुए लेग बाई रन जोड़े!"
+      ],
+      en: [
+        "Off the pads! Loud appeal from {bwl} turned down, umpire taps the knee signaling leg byes as {bat} scampers across!",
+        "Deft deflection off the thigh pad! {bat} was beaten for pace, ball trickles fine and the batsmen easily steal leg bye!",
+        "Struck on the front pad! Big shout for LBW rejected by umpire, batsmen take advantage of the loose ball for a quick leg bye!",
+        "Sharp delivery angles into the body, ricochets off the pads towards square leg for valuable leg byes!",
+        "Pads come into play! Searing inswinger hits high on the pad, rolling into the gap for a smart leg bye!"
+      ]
+    },
+    byes: {
+      mr: [
+        "यष्टिरक्षकाला चकवून चेंडू मागे गेला! फलंदाजांनी समयसूचकता दाखवून वेगाने बायची धाव पूर्ण केली!",
+        "वेगाने वळणारा चेंडू यष्टिरक्षकाच्या हातातून निसटला! फलंदाजांनी क्षणाचाही विलंब न करता बायची धाव घेतली!",
+        "उत्कृष्ट चेंडू, फलंदाज चकवला पण कीपरच्या हातूनही सुटला! अतिरिक्त बाय धाव धावफलकावर!"
+      ],
+      hi: [
+        "विकेटकीपर को चकमा देकर गेंद पीछे निकली! बल्लेबाजों ने फुर्ती दिखाते हुए बाई का रन पूरा किया!",
+        "टर्न होती हुई गेंद कीपर के दस्तानों से छिटकी! बल्लेबाजों ने मौके का फायदा उठाकर बाई के रन बटोरे!",
+        "गेंदबाज की खूबसूरत डिलीवरी, बल्लेबाज चूके और कीपर भी, अतिरिक्त बाई रन स्कोरबोर्ड में!"
+      ],
+      en: [
+        "Beats everyone! Slices past the batsman and the diving wicketkeeper, batsmen scamper through for byes!",
+        "Wild bounce eludes the gloves! Alert running between the wickets earns valuable bye extras!",
+        "Pitched and sharply turned, sneaks through to fine leg as batsmen take clean byes!"
+      ]
     }
   }
 };
@@ -407,6 +447,56 @@ export function generateLocalizedCricketCommentary(
   }
 
   if (type === 'extra' || options?.extraType) {
+    const isLegBye = options?.extraType === 'legbye' || options?.extraType === 'lb' || (type === 'extra' && options?.extraType?.includes('leg'));
+    if (isLegBye) {
+      const legByeRuns = (options as any)?.runsOffBat ?? (val > 0 ? val : 1);
+      if (legByeRuns === 4) {
+        if (targetLang === 'mr') {
+          return appendWinProb(`🚨 चौकार लेग बाय! ${bwl} चा चेंडू ${bat} च्या पॅडला स्पर्शून यष्टिरक्षकाला चकवत सुसाट सीमारेषेबाहेर गेला! फलंदाजी संघाला ४ मोफत लेग बाय धावा!`);
+        }
+        if (targetLang === 'hi') {
+          return appendWinProb(`🚨 चार रन लेग बाई! ${bwl} की गेंद ${bat} के पैड से टकराकर विकेटकीपर को छकाती हुई सीधे बाउंड्री पार! बल्लेबाजी टीम को मिले ४ कीमती लेग बाई रन!`);
+        }
+        return appendWinProb(`🚨 FOUR LEG BYES! ${bwl} angles onto the pads of ${bat}, ricochets past the diving keeper and races away to the fence! Four bonus leg bye runs!`);
+      }
+      if (legByeRuns > 1) {
+        if (targetLang === 'mr') {
+          return appendWinProb(`पॅड्सवर आदळला चेंडू! ${bwl} चे पायचीतचे अपील फेटाळले आणि ${bat} सह फलंदाजांनी चपळाईने ${legByeRuns} लेग बाय धावा पळून काढल्या!`);
+        }
+        if (targetLang === 'hi') {
+          return appendWinProb(`पैड पर लगी गेंद! ${bwl} की जोरदार अपील को अंपायर ने नकारा और दोनों बल्लेबाजों ने दौड़कर ${legByeRuns} लेग बाई रन चुराए!`);
+        }
+        return appendWinProb(`Off the pads! Umpire turns down ${bwl}'s appeal, and ${bat} and partner sprint hard to collect ${legByeRuns} leg byes!`);
+      }
+      const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.legbyes[targetLang]);
+      return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+    }
+
+    const isBye = options?.extraType === 'bye' || options?.extraType === 'b' || (type === 'extra' && options?.extraType?.includes('bye'));
+    if (isBye) {
+      const byeRuns = (options as any)?.runsOffBat ?? (val > 0 ? val : 1);
+      if (byeRuns === 4) {
+        if (targetLang === 'mr') {
+          return appendWinProb(`🚨 चौकार बाय! चेंडू थेट यष्टिरक्षकाला चकवून सीमारेषेबाहेर गेला! फलंदाजी संघाला ४ बाय धावा!`);
+        }
+        if (targetLang === 'hi') {
+          return appendWinProb(`🚨 चार रन बाई! गेंद विकेटकीपर को छकाकर सीधे बाउंड्री के पार! ४ अतिरिक्त बाई रन!`);
+        }
+        return appendWinProb(`🚨 FOUR BYES! The delivery beats both batter and keeper, racing away to the boundary rope!`);
+      }
+      if (byeRuns > 1) {
+        if (targetLang === 'mr') {
+          return appendWinProb(`फलंदाज चकवला, चेंडू मागे गेला आणि फलंदाजांनी सतर्क राहून ${byeRuns} बाय धावा पूर्ण केल्या!`);
+        }
+        if (targetLang === 'hi') {
+          return appendWinProb(`बल्लेबाज बीट हुए, गेंद पीछे निकली और दोनों बल्लेबाजों ने तेजी से ${byeRuns} बाई रन पूरे किए!`);
+        }
+        return appendWinProb(`Beaten by the bounce and movement! Batters take full advantage stealing ${byeRuns} bye runs!`);
+      }
+      const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.byes[targetLang]);
+      return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+    }
+
     const isNoBall = options?.extraType === 'noball' || (type === 'extra' && (options?.extraType?.includes('no') || options?.extraType === 'nb'));
     if (isNoBall) {
       const batRuns = (options as any)?.runsOffBat ?? (val > 0 ? val : 0);
@@ -477,20 +567,49 @@ export function translateCommentaryText(text: string, lang: CommentaryLanguage):
     }
   }
 
-  // Pattern: "[Bat1] and [Bat2] new batsman are come on crease and [Bowler] will bowl the first over. Target: [Target] runs."
-  const startMatch = trimmed.match(/(.+?)\s+and\s+(.+?)\s+new batsman are come on crease and\s+(.+?)\s+will bowl the first over(?:\.\s*Target:\s*(\d+)\s*runs)?/i);
-  if (startMatch) {
-    const b1 = startMatch[1].trim();
-    const b2 = startMatch[2].trim();
-    const bowl = startMatch[3].trim();
-    const target = startMatch[4];
+  // Pattern: Optional Tournament & Ground prefix followed by "[Bat1] and [Bat2] new batsman are come on crease and [Bowler] will bowl the first over. Target: [Target] runs."
+  if (trimmed.includes('new batsman are come on crease and') && trimmed.includes('will bowl the first over')) {
+    // Check for tournament name e.g. 🏆 [Tournament Name]
+    const tournM = trimmed.match(/🏆\s*(?:\[([^\]]+)\])?/i);
+    const tourn = tournM && tournM[1] ? tournM[1].trim() : '';
 
-    if (lang === 'mr') {
-      const targetStr = target ? ` लक्ष्य: ${target} धावा.` : '';
-      return `${b1} आणि ${b2} नवीन फलंदाज क्रीजवर आले आहेत आणि ${bowl} पहिले षटक टाकणार आहे.${targetStr}`;
-    } else if (lang === 'hi') {
-      const targetStr = target ? ` लक्ष्य: ${target} रन.` : '';
-      return `${b1} और ${b2} नए बल्लेबाज क्रीज पर आए हैं और ${bowl} पहला ओवर फेंकेंगे.${targetStr}`;
+    // Check for ground name e.g. 🏟️ Live from Ground Name:
+    const groundM = trimmed.match(/🏟️\s*(?:Live from|मैदान:?|येथून थेट:?)\s*([^:!]+?)(?::|!)/i);
+    const ground = groundM && groundM[1] ? groundM[1].trim() : '';
+
+    // Check for match clash e.g. Team A vs Team B is underway!
+    const clashM = trimmed.match(/([^:!]+?)\s*(?:vs|बनाम|विरुद्ध)\s*([^:!]+?)\s*(?:is underway|मुकाबला शुरू|सामना सुरू)!/i);
+    const teamA = clashM ? clashM[1].trim() : '';
+    const teamB = clashM ? clashM[2].trim() : '';
+
+    // Check for toss e.g. (Team A won toss & elected to bat first)
+    const tossM = trimmed.match(/\(([^)]+?)\s+won toss & elected to\s+(bat|bowl)\s+first\)/i);
+    const tossWin = tossM ? tossM[1].trim() : '';
+    const tossChoice = tossM ? tossM[2].trim() : '';
+
+    const batBowlMatch = trimmed.match(/(?:(?:underway!|\))\s*)?([^\s,]+(?:\s+[^\s,]+)*?)\s+and\s+([^\s,]+(?:\s+[^\s,]+)*?)\s+new batsman are come on crease and\s+([^\s,]+(?:\s+[^\s,]+)*?)\s+will bowl the first over(?:\.\s*Target:\s*(\d+)\s*runs)?/i);
+    if (batBowlMatch) {
+      const b1 = batBowlMatch[1].trim();
+      const b2 = batBowlMatch[2].trim();
+      const bowl = batBowlMatch[3].trim();
+      const target = batBowlMatch[4];
+      const targetStrHi = target ? ` लक्ष्य: ${target} रन.` : '';
+      const targetStrMr = target ? ` लक्ष्य: ${target} धावा.` : '';
+
+      const tournHdrHi = tourn ? `🏆 [${tourn}] ` : '';
+      const tournHdrMr = tourn ? `🏆 [${tourn}] ` : '';
+      const groundHdrHi = ground ? `🏟️ ${ground} से सीधा लाइव: ` : '';
+      const groundHdrMr = ground ? `🏟️ ${ground} येथून थेट प्रक्षेपण: ` : '';
+      const clashHi = (teamA && teamB) ? `${teamA} बनाम ${teamB} मुकाबला शुरू! ` : '';
+      const clashMr = (teamA && teamB) ? `${teamA} विरुद्ध ${teamB} सामना सुरू! ` : '';
+      const tossHi = tossWin ? `(${tossWin} ने टॉस जीतकर पहले ${tossChoice === 'bat' ? 'बल्लेबाजी' : 'गेंदबाजी'} चुनी). ` : '';
+      const tossMr = tossWin ? `(${tossWin} ने नाणेफेक जिंकून प्रथम ${tossChoice === 'bat' ? 'फलंदाजी' : 'गोलंदाजी'} निवडली). ` : '';
+
+      if (lang === 'mr') {
+        return `${tournHdrMr}${groundHdrMr}${clashMr}${tossMr}${b1} आणि ${b2} नवीन फलंदाज क्रीजवर आले आहेत आणि ${bowl} पहिले षटक टाकणार आहे.${targetStrMr}`;
+      } else if (lang === 'hi') {
+        return `${tournHdrHi}${groundHdrHi}${clashHi}${tossHi}${b1} और ${b2} नए बल्लेबाज क्रीज पर आए हैं और ${bowl} पहला ओवर फेंकेंगे.${targetStrHi}`;
+      }
     }
   }
 
@@ -958,17 +1077,76 @@ export function createBatsmanAnnouncement(
   let mr = '';
 
   if (options?.isRetiredHurt && dismissed) {
-    en = `📢 NEW BATSMAN ON CREASE: ${name} walks out to the middle following the injury retirement of ${dismissed}${partner ? ` to join ${partner}` : ''}. Wishing ${dismissed} a speedy recovery!`;
-    hi = `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के रिटायर्ड हर्ट होने के बाद ${name} मैदान पर आए हैं${partner ? ` और ${partner} का साथ निभाएंगे` : ''}. ${dismissed} के जल्द स्वस्थ होने की कामना!`;
-    mr = `📢 नवीन फलंदाज क्रीजवर: ${dismissed} दुखापतीमुळे रिटायर्ड हर्ट झाल्यानंतर ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ देतील` : ''}. ${dismissed} लवकरात लवकर बरे व्हावेत ही सदिच्छा!`;
+    const retiredVariants = [
+      {
+        en: `📢 NEW BATSMAN ON CREASE: ${name} walks out to the middle following the injury retirement of ${dismissed}${partner ? ` to join ${partner}` : ''}. Wishing ${dismissed} a speedy recovery!`,
+        hi: `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के रिटायर्ड हर्ट होने के बाद ${name} मैदान पर आए हैं${partner ? ` और ${partner} का साथ निभाएंगे` : ''}. ${dismissed} के जल्द स्वस्थ होने की कामना!`,
+        mr: `📢 नवीन फलंदाज क्रीजवर: ${dismissed} दुखापतीमुळे रिटायर्ड हर्ट झाल्यानंतर ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ देतील` : ''}. ${dismissed} लवकरात लवकर बरे व्हावेत ही सदिच्छा!`
+      },
+      {
+        en: `📢 BATSMAN REPLACEMENT: ${name} steps up as ${dismissed} leaves the field retired hurt${partner ? ` to rebuild with ${partner}` : ''}. Crucial moment for the batting side.`,
+        hi: `📢 बल्लेबाज बदलाव: ${dismissed} के चोटिल होकर जाने के बाद ${name} ने मोर्चा संभाला है${partner ? ` और ${partner} के साथ साझेदारी बनाएंगे` : ''}.`,
+        mr: `📢 फलंदाज बदल: ${dismissed} दुखापतग्रस्त होऊन परतल्यानंतर ${name} मैदानात उतरले आहेत${partner ? ` आणि ${partner} सोबत डाव सावरतील` : ''}.`
+      }
+    ];
+    const picked = retiredVariants[Math.floor(Math.random() * retiredVariants.length)];
+    en = picked.en;
+    hi = picked.hi;
+    mr = picked.mr;
   } else if (options?.isWicketFall && dismissed) {
-    en = `📢 NEW BATSMAN ON CREASE: ${name} walks out to the middle following the dismissal of ${dismissed}${partner ? ` to join ${partner}` : ''}. High expectations rest on this new pair!`;
-    hi = `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के आउट होने के बाद ${name} मैदान पर आए हैं${partner ? ` और ${partner} का साथ निभाएंगे` : ''}. इस नई साझेदारी पर सभी की निगाहें!`;
-    mr = `📢 नवीन फलंदाज क्रीजवर: ${dismissed} बाद झाल्यानंतर ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ देतील` : ''}. या नवीन जोडीकडून मोठ्या अपेक्षा!`;
+    const wicketFallVariants = [
+      {
+        en: `📢 NEW BATSMAN ON CREASE: ${name} strides purposefully to the middle following the wicket of ${dismissed}${partner ? ` to join ${partner}` : ''}! High expectations rest on this new pair!`,
+        hi: `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के आउट होने के बाद ${name} क्रीज पर पहुंचे हैं${partner ? ` और ${partner} का साथ निभाएंगे` : ''}. इस नई साझेदारी पर सभी की निगाहें!`,
+        mr: `📢 नवीन फलंदाज क्रीजवर: ${dismissed} बाद झाल्यानंतर ${name} आत्मविश्वासाने मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ देतील` : ''}. या नवीन जोडीकडून मोठ्या अपेक्षा!`
+      },
+      {
+        en: `📢 INCOMING BATSMAN: Fresh determination as ${name} enters the battle after ${dismissed}'s dismissal${partner ? ` partnering ${partner}` : ''}. Time to consolidate and counter-attack!`,
+        hi: `📢 नए बल्लेबाज की एंट्री: ${dismissed} के पतन के बाद ${name} मैदान में उतरे हैं${partner ? ` और ${partner} के साथ पारी को संभालेंगे` : ''}. अब सूझबूझ भरी बल्लेबाजी की दरकार!`,
+        mr: `📢 फलंदाजाचे आगमन: ${dismissed} च्या विकेटनंतर ${name} मैदानात उतरले आहेत${partner ? ` आणि ${partner} सोबत किल्ला लढवतील` : ''}. आता डाव सावरण्याची गरज!`
+      },
+      {
+        en: `📢 BATSMAN AT THE CREASE: ${name} marks the guard after ${dismissed} departs. The fielders close in as ${name}${partner ? ` and ${partner}` : ''} look to steady the innings!`,
+        hi: `📢 नए बल्लेबाज क्रीज पर: ${dismissed} के पवेलियन लौटने के बाद ${name} ने गार्ड लिया है${partner ? ` और ${partner} के साथ क्रीज पर हैं` : ''}. फील्डरों का घेरा सख्त!`,
+        mr: `📢 फलंदाज सज्ज: ${dismissed} बाद झाल्यावर ${name} यांनी गार्ड घेतला आहे${partner ? ` आणि ${partner} सोबत सज्ज आहेत` : ''}. क्षेत्ररक्षक चपळ आणि दबाव वाढवणारे!`
+      },
+      {
+        en: `📢 NEW PLAYER IN: ${name} walks into the cauldron under pressure${partner ? ` to support ${partner}` : ''}! A pivotal battle between bat and ball begins now.`,
+        hi: `📢 दबाव में नए बल्लेबाज: ${name} मैदान पर आए हैं${partner ? ` और ${partner} का हौसला बढ़ाएंगे` : ''}! गेंद और बल्ले के बीच अब कड़ा मुकाबला शुरू!`,
+        mr: `📢 फलंदाज मैदानात: दबावाच्या क्षणी ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} सोबत लढा देतील` : ''}! आता खरा खेळ रंगणार!`
+      }
+    ];
+    const picked = wicketFallVariants[Math.floor(Math.random() * wicketFallVariants.length)];
+    en = picked.en;
+    hi = picked.hi;
+    mr = picked.mr;
   } else {
-    en = `📢 NEW BATSMAN ON CREASE: ${name} arrives at the crease to take guard${partner ? ` alongside ${partner}` : ''}!`;
-    hi = `📢 नए बल्लेबाज क्रीज पर: ${name} बल्लेबाजी के लिए क्रीज पर आ चुके हैं${partner ? ` और साथी खिलाड़ी ${partner} के साथ तैयार हैं` : ''}!`;
-    mr = `📢 नवीन फलंदाज क्रीजवर: ${name} फलंदाजीसाठी मैदानात सज्ज झाले आहेत${partner ? ` आणि साथीदार ${partner} सोबत खेळतील` : ''}!`;
+    const regularVariants = [
+      {
+        en: `📢 NEW BATSMAN ON CREASE: ${name} arrives at the crease to take guard${partner ? ` alongside ${partner}` : ''}! Focused and ready to make an impact!`,
+        hi: `📢 नए बल्लेबाज क्रीज पर: ${name} बल्लेबाजी के लिए क्रीज पर आ चुके हैं${partner ? ` और साथी खिलाड़ी ${partner} के साथ तैयार हैं` : ''}! बड़ा स्कोर बनाने का इरादा!`,
+        mr: `📢 नवीन फलंदाज क्रीजवर: ${name} फलंदाजीसाठी मैदानात सज्ज झाले आहेत${partner ? ` आणि साथीदार ${partner} सोबत खेळतील` : ''}! लक्षवेधी खेळाची अपेक्षा!`
+      },
+      {
+        en: `📢 BATTER TAKES CHARGE: ${name} walks out to the center with positive body language${partner ? ` to bat with ${partner}` : ''}! Eyes firmly on the cherry!`,
+        hi: `📢 बल्लेबाज का आगमन: ${name} सकारात्मक ऊर्जा के साथ क्रीज पर पधारे हैं${partner ? ` और ${partner} के साथ जोड़ी बनाएंगे` : ''}!`,
+        mr: `📢 फलंदाज मैदानात: ${name} आक्रमक पवित्र्यात क्रीजवर हजर झाले आहेत${partner ? ` आणि ${partner} सोबत खेळतील` : ''}! धावफलक हालता ठेवण्याचा निर्धार!`
+      },
+      {
+        en: `📢 FRESH BATSMAN IN: Warm applause as ${name} takes guard${partner ? ` alongside ${partner}` : ''}. Let's see how ${name} navigates the bowling!`,
+        hi: `📢 नए बल्लेबाज क्रीज पर: जोरदार स्वागत के बीच ${name} ने स्ट्राइक संभाली है${partner ? ` और ${partner} दूसरे छोर पर हैं` : ''}!`,
+        mr: `📢 नवीन फलंदाज क्रीजवर: टाळ्यांच्या गजरात ${name} मैदानात दाखल झाले आहेत${partner ? ` आणि ${partner} ची साथ लाभेल` : ''}! आता गोलंदाजांवर दबाव आणण्याचे आव्हान!`
+      },
+      {
+        en: `📢 BATSMAN WALKS IN: ${name} settles into position${partner ? ` joining ${partner}` : ''}. Crisp timing and sharp running expected!`,
+        hi: `📢 बल्लेबाज क्रीज पर तैयार: ${name} मैदान पर पहुंचे हैं${partner ? ` और ${partner} के साथ तैयार हैं` : ''}! बेहतरीन शॉट सिलेक्शन की उम्मीद!`,
+        mr: `📢 फलंदाज खेळपट्टीवर: ${name} पूर्ण तयारीनिशी क्रीजवर उभे राहिले आहेत${partner ? ` आणि ${partner} सोबत खेळतील` : ''}! सुरेख फटकेबाजीची अपेक्षा!`
+      }
+    ];
+    const picked = regularVariants[Math.floor(Math.random() * regularVariants.length)];
+    en = picked.en;
+    hi = picked.hi;
+    mr = picked.mr;
   }
 
   return {
@@ -1001,13 +1179,59 @@ export function createBowlerAnnouncement(
   let mr = '';
 
   if (options?.isNewOver) {
-    en = `📢 BOWLING CHANGE: ${name} takes the ball for over ${overBall}${batter ? ` to bowl against ${batter}` : ''}! Fresh energy into the bowling attack.`;
-    hi = `📢 गेंदबाजी में बदलाव: ${name} ओवर ${overBall} के लिए गेंदबाजी आक्रमण की कमान संभाल रहे हैं${batter ? ` सामने हैं ${batter}` : ''}! नई ऊर्जा के साथ गेंदबाजी!`;
-    mr = `📢 गोलंदाजीत बदल: ${name} षटक ${overBall} टाकण्यासाठी सज्ज झाले आहेत${batter ? ` समोर फलंदाज ${batter}` : ''}! गोलंदाजीत नवा उत्साह!`;
+    const newOverVariants = [
+      {
+        en: `📢 BOWLING CHANGE: ${name} takes the ball for over ${overBall}${batter ? ` to bowl against ${batter}` : ''}! Fresh energy into the bowling attack.`,
+        hi: `📢 गेंदबाजी में बदलाव: ${name} ओवर ${overBall} के लिए गेंदबाजी आक्रमण की कमान संभाल रहे हैं${batter ? ` सामने हैं ${batter}` : ''}! नई ऊर्जा के साथ गेंदबाजी!`,
+        mr: `📢 गोलंदाजीत बदल: ${name} षटक ${overBall} टाकण्यासाठी सज्ज झाले आहेत${batter ? ` समोर फलंदाज ${batter}` : ''}! गोलंदाजीत नवा उत्साह!`
+      },
+      {
+        en: `📢 NEW OVER, FRESH SPELL: Captain tosses the ball to ${name} for over ${overBall}${batter ? ` facing ${batter}` : ''}. Seeking an instant breakthrough!`,
+        hi: `📢 नया ओवर, नया आक्रमण: कप्तान ने ओवर ${overBall} के लिए गेंद ${name} को सौंपी है${batter ? ` सामने ${batter}` : ''}. विकेट निकालने की कोशिश!`,
+        mr: `📢 नवीन षटक, नवा मारा: कर्णधाराने षटक ${overBall} साठी चेंडू ${name} कडे सोपवला आहे${batter ? ` समोर फलंदाज ${batter}` : ''}. लवकर विकेट मिळवण्याचा इरादा!`
+      },
+      {
+        en: `📢 TACTICAL BOWLER ROTATION: ${name} begins the run-up for over ${overBall}${batter ? ` against ${batter}` : ''}. Precision line and length will be key!`,
+        hi: `📢 रणनीतिक गेंदबाजी बदलाव: ${name} ओवर ${overBall} फेंकने के लिए तैयार हैं${batter ? ` सामने हैं ${batter}` : ''}. लाइन और लेंथ पर नजरें!`,
+        mr: `📢 डावपेचात्मक गोलंदाज बदल: ${name} षटक ${overBall} टाकण्यासाठी धाव घेत आहेत${batter ? ` समोर फलंदाज ${batter}` : ''}. अचूक टप्प्यावर मारा करणे गरजेचे!`
+      },
+      {
+        en: `📢 BOWLER INTRODUCED: ${name} steps up for over ${overBall}${batter ? ` to test ${batter}` : ''}! Will we see extra bounce or deception here?`,
+        hi: `📢 नए ओवर में आक्रमण: ${name} ओवर ${overBall} में गेंदबाजी करेंगे${batter ? ` सामने ${batter}` : ''}! क्या देखने को मिलेगी स्विंग या रफ्तार?`,
+        mr: `📢 गोलंदाज आक्रमणावर: ${name} षटक ${overBall} मध्ये गोलंदाजी करण्यासाठी तयार आहेत${batter ? ` समोर ${batter}` : ''}! चेंडूची गती आणि वळण फलंदाजाची परीक्षा घेणार!`
+      }
+    ];
+    const picked = newOverVariants[Math.floor(Math.random() * newOverVariants.length)];
+    en = picked.en;
+    hi = picked.hi;
+    mr = picked.mr;
   } else {
-    en = `📢 BOWLER INTO THE ATTACK: ${name} has been called into the bowling attack${batter ? ` to bowl to ${batter}` : ''}!`;
-    hi = `📢 गेंदबाजी में बदलाव: ${name} को आक्रमण पर लगाया गया है${batter ? ` सामने हैं ${batter}` : ''}!`;
-    mr = `📢 गोलंदाज आक्रमणावर: ${name} यांच्या हाती चेंडू सोपवला आहे${batter ? ` समोर फलंदाज ${batter}` : ''}!`;
+    const midOverVariants = [
+      {
+        en: `📢 BOWLER INTO THE ATTACK: ${name} has been called into the bowling attack${batter ? ` to bowl to ${batter}` : ''}! High focus on this contest.`,
+        hi: `📢 गेंदबाजी में बदलाव: ${name} को आक्रमण पर लगाया गया है${batter ? ` सामने हैं ${batter}` : ''}! सबकी नजरें इस मुकाबले पर!`,
+        mr: `📢 गोलंदाज आक्रमणावर: ${name} यांच्या हाती चेंडू सोपवला आहे${batter ? ` समोर फलंदाज ${batter}` : ''}! एका महत्त्वाच्या लढतीला सुरुवात!`
+      },
+      {
+        en: `📢 FRESH WEAPON BROUGHT ON: Captain summons ${name} into the attack${batter ? ` to restrict ${batter}` : ''}. Fielders are alert in the ring!`,
+        hi: `📢 कप्तान का तुरुप का पत्ता: ${name} को आक्रमण की कमान दी गई है${batter ? ` सामने ${batter}` : ''}. सर्कल में फील्डर मुस्तैद!`,
+        mr: `📢 कर्णधाराचे हुकमी पान: गोलंदाजीची धुरा ${name} कडे सोपवली आहे${batter ? ` समोर फलंदाज ${batter}` : ''}! क्षेत्ररक्षक सतर्क!`
+      },
+      {
+        en: `📢 BOWLING SHIFT: ${name} takes over bowling responsibilities${batter ? ` against ${batter}` : ''}. Looking to build dot ball pressure right away!`,
+        hi: `📢 गेंदबाज बदलाव: ${name} ने गेंदबाजी संभाली है${batter ? ` सामने ${batter}` : ''}. दबाव बनाने की पूरी तैयारी!`,
+        mr: `📢 गोलंदाजीत बदल: ${name} यांनी गोलंदाजीची कमान घेतली आहे${batter ? ` समोर ${batter}` : ''}. निर्धाव चेंडू टाकून दबाव आणण्याचा प्रयत्न!`
+      },
+      {
+        en: `📢 BOWLER ENTERS THE BATTLE: ${name} marks the run-up${batter ? ` to bowl to ${batter}` : ''}! A pivotal phase in the match begins.`,
+        hi: `📢 गेंदबाज का मैदान में कदम: ${name} गेंद के साथ तैयार हैं${batter ? ` सामने हैं ${batter}` : ''}! मैच का रोमांचक मोड़!`,
+        mr: `📢 गोलंदाज मैदानात सज्ज: ${name} चेंडू घेऊन धावण्यासाठी तयार आहेत${batter ? ` समोर फलंदाज ${batter}` : ''}! सामन्याला रंगत येणार!`
+      }
+    ];
+    const picked = midOverVariants[Math.floor(Math.random() * midOverVariants.length)];
+    en = picked.en;
+    hi = picked.hi;
+    mr = picked.mr;
   }
 
   return {
@@ -1234,6 +1458,134 @@ export function createMatchWinningCommentary(
     soundWave: true,
     translations: { en, hi, mr }
   };
+}
+
+/**
+ * Generates initial Match Start commentary containing Tournament Name and Ground Name
+ */
+export function createMatchStartCommentary(
+  match: {
+    tournamentName?: string | null;
+    groundName?: string | null;
+    teamA?: string;
+    teamB?: string;
+    tossWinner?: string | null;
+    tossChoice?: string | null;
+  },
+  batsman1Name: string,
+  batsman2Name: string,
+  bowler1Name: string
+): CommentaryWithTranslations {
+  const tName = (match.tournamentName || '').trim();
+  const gName = (match.groundName || 'Gully Ground').trim();
+  const teamA = match.teamA || 'Team A';
+  const teamB = match.teamB || 'Team B';
+  const b1 = batsman1Name?.trim() || 'Batter 1';
+  const b2 = batsman2Name?.trim() || 'Batter 2';
+  const bwl = bowler1Name?.trim() || 'Bowler 1';
+  const tossWin = match.tossWinner;
+  const tossChoice = match.tossChoice;
+
+  let tossEn = '';
+  let tossHi = '';
+  let tossMr = '';
+  if (tossWin && tossChoice) {
+    tossEn = ` (${tossWin} won toss & elected to ${tossChoice} first).`;
+    tossHi = ` (${tossWin} ने टॉस जीतकर पहले ${tossChoice === 'bat' ? 'बल्लेबाजी' : 'गेंदबाजी'} चुनी).`;
+    tossMr = ` (${tossWin} ने नाणेफेक जिंकून प्रथम ${tossChoice === 'bat' ? 'फलंदाजी' : 'गोलंदाजी'} निवडली).`;
+  }
+
+  const tournHdr = tName ? `🏆 [${tName}] ` : '';
+
+  const en = `${tournHdr}🏟️ Live from ${gName}: ${teamA} vs ${teamB} is underway!${tossEn} ${b1} and ${b2} new batsman are come on crease and ${bwl} will bowl the first over.`;
+  const hi = `${tournHdr}🏟️ ${gName} से सीधा लाइव: ${teamA} बनाम ${teamB} मुकाबला शुरू!${tossHi} ${b1} और ${b2} नए बल्लेबाज क्रीज पर आए हैं और ${bwl} पहला ओवर फेंकेंगे.`;
+  const mr = `${tournHdr}🏟️ ${gName} येथून थेट प्रक्षेपण: ${teamA} विरुद्ध ${teamB} सामना सुरू!${tossMr} ${b1} आणि ${b2} नवीन फलंदाज क्रीजवर आले आहेत आणि ${bwl} पहिले षटक टाकणार आहे.`;
+
+  return {
+    id: `comm-match-start-${Date.now()}`,
+    overBall: '0.0',
+    description: en,
+    type: 'milestone',
+    announcementType: 'match_start',
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Accurately determines if the current ball / match situation is a "Crucial Time" (decisive moment).
+ * Win probability will ONLY be displayed/appended at crucial times, not on every routine ball.
+ */
+export function isCrucialMatchMoment(
+  matchState: any,
+  innings: any,
+  options?: {
+    isWicket?: boolean;
+    isMilestone?: boolean;
+    runsOffBat?: number;
+    eventType?: string;
+    isSuperOver?: boolean;
+    probSwing?: number;
+  }
+): boolean {
+  if (!matchState || !innings) return false;
+
+  // 1. Super Over is always a crucial match moment
+  if (matchState.isSuperOver || options?.isSuperOver) return true;
+
+  const currentInningsNum = matchState.currentInningsNum || 1;
+  const oversLimit = Number(matchState.oversLimit) || 10;
+  const totalBalls = oversLimit * 6;
+  const ballsBowled = Number(innings.ballsBowled) || 0;
+  const ballsRemaining = Math.max(0, totalBalls - ballsBowled);
+  const runs = Number(innings.runs) || 0;
+  const wickets = Number(innings.wickets) || 0;
+  const targetRuns = Number(matchState.targetRuns);
+
+  // 2. Major Milestone (50, 100, Hat-trick)
+  if (options?.isMilestone) return true;
+
+  // 3. Significant win probability swing (>= 15% shift from previous state)
+  if (options?.probSwing && options.probSwing >= 15) return true;
+
+  // 4. Second Innings (The Chase) - Crucial match pressure moments
+  if (currentInningsNum === 2 && targetRuns) {
+    const runsNeeded = Math.max(0, targetRuns - runs);
+
+    // Death overs squeeze: Last 3 overs (<= 18 balls remaining) with match undecided
+    if (ballsRemaining <= 18 && runsNeeded > 0) return true;
+
+    // Victory or defense in touching distance (<= 20 runs needed)
+    if (runsNeeded <= 20 && runsNeeded > 0) return true;
+
+    // Heavy bowling squeeze in chase: 7 or more wickets down
+    if (wickets >= 7 && runsNeeded > 0) return true;
+
+    // High Required Run Rate pressure (RRR >= 12.0 after initial overs)
+    if (ballsBowled >= 12 && ballsRemaining > 0) {
+      const rrr = (runsNeeded / ballsRemaining) * 6;
+      if (rrr >= 12.0) return true;
+    }
+
+    // Crucial wicket in chase: any wicket falling when runsNeeded <= 35 or wickets >= 5
+    if (options?.isWicket && (runsNeeded <= 35 || wickets >= 5)) return true;
+
+    // Game-changing six in the death overs or under high required rate
+    if (options?.eventType === 'boundary' && options?.runsOffBat === 6 && (ballsRemaining <= 24 || (ballsBowled > 12 && (runsNeeded / Math.max(1, ballsRemaining)) * 6 >= 10.0))) {
+      return true;
+    }
+  }
+
+  // 5. First Innings - Only pivotal late-innings / extreme situations
+  if (currentInningsNum === 1) {
+    // Final over of the 1st innings
+    if (ballsRemaining <= 6 && ballsBowled > 0) return true;
+
+    // Severe collapse: 8 or more wickets down
+    if (wickets >= 8 && options?.isWicket) return true;
+  }
+
+  return false;
 }
 
 /* =========================================================================

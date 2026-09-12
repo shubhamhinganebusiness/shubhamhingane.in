@@ -67,6 +67,8 @@ import {
   createInningsSummaryCommentary,
   createRunChaseEquationCommentary,
   createMatchWinningCommentary,
+  createMatchStartCommentary,
+  isCrucialMatchMoment,
   getOrdinalWordEn,
   getOrdinalWordHi,
   getOrdinalWordMr,
@@ -947,6 +949,15 @@ export const CricketScoreboard: React.FC = () => {
   const [showBroadcastCenter, setShowBroadcastCenter] = useState(false);
   const [showObsModal, setShowObsModal] = useState(false);
   const [obsModalTab, setObsModalTab] = useState<'permanent' | 'single' | 'guide'>('permanent');
+  const [hiddenResultCardIds, setHiddenResultCardIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('cricket_hidden_result_card_ids') || '[]';
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Inline confirmation states to replace window.confirm inside sandboxed iframe
   const [activeLiveMatchDeleteConfirmId, setActiveLiveMatchDeleteConfirmId] = useState<string | null>(null);
@@ -2371,12 +2382,19 @@ export const CricketScoreboard: React.FC = () => {
           currentBowlerIndex: 0,
           fallOfWickets: [],
           commentaryList: [
-            {
-              id: `c-${Date.now()}`,
-              overBall: '0.0',
-              description: `Batter 1 State and Batter 2 State new batsman are come on crease and Bowler 1 State will bowl the first over. (${coinTossWinTeam} won toss & elected to ${choice} first)`,
-              type: 'milestone'
-            }
+            createMatchStartCommentary(
+              {
+                tournamentName: 'Gully Match',
+                groundName: venueName || 'Gully Ground',
+                teamA: paramTeamA,
+                teamB: paramTeamB,
+                tossWinner: coinTossWinTeam,
+                tossChoice: choice
+              },
+              'Batter 1 State',
+              'Batter 2 State',
+              'Bowler 1 State'
+            )
           ],
           history: [
             { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -2597,6 +2615,20 @@ export const CricketScoreboard: React.FC = () => {
     const bowler1Name = setupOpeningBowler.trim() || ((bowlRoster && bowlRoster.length > 0) ? bowlRoster[0] : 'Bowler 1 State');
 
     // Initialize first innings
+    const startMatchComm = createMatchStartCommentary(
+      {
+        tournamentName: tournamentName || match?.tournamentName || null,
+        groundName: groundName || match?.groundName || 'Gully Ground',
+        teamA,
+        teamB,
+        tossWinner: coinTossWinTeam,
+        tossChoice
+      },
+      batsman1Name,
+      batsman2Name,
+      bowler1Name
+    );
+
     const initialInnings: Innings = {
       battingTeam: batFirstTeam,
       bowlingTeam: bowlFirstTeam,
@@ -2615,9 +2647,7 @@ export const CricketScoreboard: React.FC = () => {
       nonStrikerIndex: 1,
       currentBowlerIndex: 0,
       fallOfWickets: [],
-      commentaryList: [
-        { id: `c-${Date.now()}`, overBall: '0.0', description: `${batsman1Name} and ${batsman2Name} new batsman are come on crease and ${bowler1Name} will bowl the first over.`, type: 'milestone' }
-      ],
+      commentaryList: [startMatchComm],
       history: [
         { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
       ]
@@ -2665,6 +2695,26 @@ export const CricketScoreboard: React.FC = () => {
     try {
       localStorage.setItem('cricket_active_match', JSON.stringify(newMatch));
     } catch (e) {}
+
+    // Trigger AI Opening Commentary with Tournament and Ground Name
+    if (aiCommentaryEnabled && !isSpectator) {
+      generateAICommentary(
+        newMatch,
+        { type: 'match_start' },
+        batsman1Name,
+        bowler1Name,
+        startMatchComm.description,
+        1,
+        {
+          nonStrikerName: batsman2Name,
+          isOverStart: true,
+          isMatchStart: true,
+          tournamentName: newMatch.tournamentName || undefined,
+          groundName: newMatch.groundName || undefined
+        },
+        startMatchComm.id
+      );
+    }
 
     // Synchronize active match pointer for permanent OBS link
     if (currentManagerId) {
@@ -3024,6 +3074,9 @@ export const CricketScoreboard: React.FC = () => {
       isNewBatsmanOnCrease?: boolean;
       newBatsmanName?: string;
       isOverStart?: boolean;
+      isMatchStart?: boolean;
+      tournamentName?: string;
+      groundName?: string;
       isCrucialTime?: boolean;
       specialTrigger?: {
         type: 'wicket' | 'fifty' | 'hundred' | 'hat_trick' | 'retire_hurt';
@@ -3078,6 +3131,9 @@ export const CricketScoreboard: React.FC = () => {
           isNewBatsmanOnCrease: additionalContext?.isNewBatsmanOnCrease || false,
           newBatsmanName: additionalContext?.newBatsmanName || '',
           isOverStart: additionalContext?.isOverStart || false,
+          isMatchStart: additionalContext?.isMatchStart || (eventInfo?.type === 'match_start'),
+          tournamentName: additionalContext?.tournamentName || matchState?.tournamentName || (match as any)?.tournamentName || undefined,
+          groundName: additionalContext?.groundName || matchState?.groundName || (match as any)?.groundName || undefined,
           isCrucialTime: additionalContext?.isCrucialTime,
           language: userCommentaryLang,
           contextualTone: toneInfo.tone,
@@ -3624,13 +3680,18 @@ export const CricketScoreboard: React.FC = () => {
     else if (event.type === 'legbye') ballLabel = event.val ? `${event.val}LB` : 'LB';
 
     const ballDesc = `${bowler.name} to ${striker.name}: ${outcomeDescription}`;
+    const effectiveExtraType = 
+      event.type === 'noball' ? 'noball' : 
+      (event.type === 'wide' ? 'wide' : 
+      (event.type === 'legbye' ? 'legbye' : 
+      (event.type === 'bye' ? 'bye' : event.extraType)));
+
     const localizedEventCat: 'dot' | 'runs' | 'boundary' | 'wicket' | 'extra' = 
       eventType === 'boundary' ? 'boundary' : 
-      eventType === 'extra' ? 'extra' : 
+      (eventType === 'extra' || event.type === 'legbye' || event.type === 'bye' || event.type === 'noball' || event.type === 'wide') ? 'extra' : 
       (event.type === 'dot' ? 'dot' : 'runs');
 
-    const runsOffBatFromDelivery = (event.type === 'noball' || event.type === 'wide') ? (event.val || 0) : ballRuns;
-    const effectiveExtraType = event.type === 'noball' ? 'noball' : (event.type === 'wide' ? 'wide' : event.extraType);
+    const runsOffBatFromDelivery = (event.type === 'noball' || event.type === 'wide') ? (event.val || 0) : (event.type === 'legbye' || event.type === 'bye') ? (event.val || 1) : ballRuns;
 
     let deliveryWinProb: any = undefined;
     try {
@@ -3649,17 +3710,14 @@ export const CricketScoreboard: React.FC = () => {
       // non-fatal
     }
 
-    // Requirement 4: Win probability shown only at crucial times, not on every ball
-    const isCrucialMoment = Boolean(
-      (eventType === 'boundary' && runsOffBatFromDelivery === 6) ||
-      milestoneSpecial ||
-      (isCalculatedOverBall && inn.ballsBowled > 0 && inn.ballsBowled % 6 === 0) ||
-      nextMatchState.isSuperOver ||
-      (nextMatchState.currentInningsNum === 2 && nextMatchState.targetRuns && (
-        (nextMatchState.oversLimit * 6 - inn.ballsBowled <= 18) ||
-        (nextMatchState.targetRuns - inn.runs <= 25)
-      ))
-    );
+    // Requirement 4: Win probability shown only at crucial times ("cryshal time"), not on every ball
+    const isCrucialMoment = isCrucialMatchMoment(nextMatchState, inn, {
+      isWicket: false,
+      isMilestone: Boolean(milestoneSpecial),
+      runsOffBat: runsOffBatFromDelivery,
+      eventType: eventType,
+      isSuperOver: Boolean(nextMatchState.isSuperOver)
+    });
 
     const generatedHi = generateLocalizedCricketCommentary(
       localizedEventCat,
@@ -3677,8 +3735,18 @@ export const CricketScoreboard: React.FC = () => {
       'mr',
       { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
     );
+    const generatedEn = (effectiveExtraType === 'legbye' || effectiveExtraType === 'bye' || effectiveExtraType === 'noball')
+      ? generateLocalizedCricketCommentary(
+          'extra',
+          runsOffBatFromDelivery,
+          striker.name,
+          bowler.name,
+          'en',
+          { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
+        )
+      : ballDesc;
 
-    let localizedEnWithProb = ballDesc;
+    let localizedEnWithProb = generatedEn;
     if (isCrucialMoment && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
       const pA = Math.round(deliveryWinProb.probA ?? 50);
       const pB = Math.round(deliveryWinProb.probB ?? 50);
@@ -4165,16 +4233,22 @@ export const CricketScoreboard: React.FC = () => {
       ? `RETIRED HURT: ${dismissedBatter.name} has retired hurt (${dismissedBatter.runs} off ${dismissedBatter.balls}b). ${finalBatsmanName} takes the crease.`
       : `OUT! ${dismissedBatter.name} has to walk back (${dismissedBatter.runs} off ${dismissedBatter.balls}b). ${catchDetails}. After wicket fell, ${finalBatsmanName} new batsman come on crease. ${rdWktReact}${overCompletionSuffix}`;
 
+    const isWicketCrucial = isCrucialMatchMoment(nextMatchState, inn, {
+      isWicket: !isRetiredHurt,
+      eventType: isRetiredHurt ? 'retire_hurt' : 'wicket',
+      isSuperOver: Boolean(nextMatchState.isSuperOver)
+    });
+
     const wktHi = isRetiredHurt
       ? `रिटायर्ड हर्ट: ${dismissedBatter.name} चोटिल होकर मैदान से बाहर गए हैं (${dismissedBatter.runs} रन, ${dismissedBatter.balls} गेंद). ${finalBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`
-      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb });
+      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb, isCrucialTime: isWicketCrucial });
 
     const wktMr = isRetiredHurt
       ? `रिटायर्ड हर्ट: ${dismissedBatter.name} दुखापतीमुळे मैदानाबाहेर गेले आहेत (${dismissedBatter.runs} धावा, ${dismissedBatter.balls} चेंडू). ${finalBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
-      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb });
+      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb, isCrucialTime: isWicketCrucial });
 
     let localizedEnWithProb = commentaryDescription;
-    if (!isRetiredHurt && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
+    if (!isRetiredHurt && isWicketCrucial && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
       const pA = Math.round(deliveryWinProb.probA ?? 50);
       const pB = Math.round(deliveryWinProb.probB ?? 50);
       localizedEnWithProb += ` [AI Win Probability: ${deliveryWinProb.teamA} ${pA}% | ${deliveryWinProb.teamB} ${pB}%]`;
@@ -4322,6 +4396,7 @@ export const CricketScoreboard: React.FC = () => {
           nonStrikerName: remainingPartner?.name,
           isNewBatsmanOnCrease: true,
           newBatsmanName: finalBatsmanName,
+          isCrucialTime: isWicketCrucial,
           specialTrigger: {
             type: isRetiredHurt ? 'retire_hurt' : 'wicket',
             batterName: dismissedBatter.name,
@@ -10667,6 +10742,49 @@ export const CricketScoreboard: React.FC = () => {
                                   <Trash2 size={13} />
                                 </button>
                               )}
+
+                              <button
+                                onClick={() => {
+                                  const winnerText = past.winner === 'Tie' ? 'Match Tied!' : `${past.winner} ${past.winReason || 'Won the Match'}`;
+                                  const t1Overs = past.innings1 ? `${Math.floor(past.innings1.ballsBowled / 6)}.${past.innings1.ballsBowled % 6}` : '0.0';
+                                  const t2Overs = past.innings2 ? `${Math.floor(past.innings2.ballsBowled / 6)}.${past.innings2.ballsBowled % 6}` : '0.0';
+                                  const team1Score = past.innings1 ? `${past.innings1.battingTeam || past.teamA}: ${past.innings1.runs}/${past.innings1.wickets} (${t1Overs} ov)` : '';
+                                  const team2Score = past.innings2 ? `${past.innings2.battingTeam || past.teamB}: ${past.innings2.runs}/${past.innings2.wickets} (${t2Overs} ov)` : '';
+                                  const matchUrl = `${window.location.origin}/?matchId=${past.id}&spectator=true`;
+                                  const shareText = `🏏 *CRICKET MATCH RESULT* 🏆\n*${past.teamA} vs ${past.teamB}*\n\n🔥 *Result:* ${winnerText}\n📊 ${team1Score}\n📊 ${team2Score}\n\n👉 *View Full Scorecard & Highlights:*\n${matchUrl}`;
+                                  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+                                  window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+                                }}
+                                className="px-3.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border border-emerald-500/20 flex items-center justify-center shadow-inner"
+                                title="Share Result on WhatsApp with Dynamic Match Banner"
+                              >
+                                <Send size={13} />
+                              </button>
+
+                              <button
+                                onClick={async () => {
+                                  const isCurrentlyHidden = hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true;
+                                  const nextIds = isCurrentlyHidden 
+                                    ? hiddenResultCardIds.filter(id => id !== past.id)
+                                    : [...hiddenResultCardIds, past.id];
+                                  setHiddenResultCardIds(nextIds);
+                                  try {
+                                    localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(nextIds));
+                                  } catch (_) {}
+                                  try {
+                                    await setDoc(doc(db, 'cricket_matches', past.id), { hideResultCard: !isCurrentlyHidden }, { merge: true });
+                                  } catch (_) {}
+                                  window.dispatchEvent(new CustomEvent('cricket_match_result_visibility_changed', { detail: { matchId: past.id, isHidden: !isCurrentlyHidden } }));
+                                }}
+                                className={`px-3.5 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border flex items-center justify-center shadow-inner ${
+                                  hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true
+                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-750'
+                                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                }`}
+                                title={hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? "Hidden from Homepage Hero Card. Click to Show on Homepage." : "Visible on Homepage Hero Card. Click to Hide from Homepage."}
+                              >
+                                {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? <EyeOff size={13} /> : <Eye size={13} />}
+                              </button>
                             </div>
 
 

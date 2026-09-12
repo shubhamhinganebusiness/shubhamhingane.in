@@ -55,6 +55,7 @@ import {
   CommentaryLanguageSelector
 } from './modules/commentaryLanguage';
 import { WinProbabilityCard } from './modules/WinProbabilityCard';
+import { SpectatorImageSlider } from './SpectatorImageSlider';
 
 // Struct definitions matching those in CricketScoreboard.tsx
 interface Batsman {
@@ -1807,6 +1808,20 @@ export const SpectatorScoreboardSection = ({
       .catch((err) => {
         console.error("Clipboard copy failed", err);
       });
+  };
+
+  const handleShareWhatsApp = () => {
+    if (!selectedMatch) return;
+    const shareUrl = `${window.location.origin}${window.location.pathname}?matchId=${selectedMatch.id}&spectator=true`;
+    const isCompleted = selectedMatch.status === 'completed';
+    const headline = isCompleted
+      ? `🏆 ${selectedMatch.winner ? `${selectedMatch.winner} Won!` : 'Match Result:'} ${selectedMatch.teamA} vs ${selectedMatch.teamB}`
+      : `🏏 LIVE CRICKET: ${selectedMatch.teamA} vs ${selectedMatch.teamB}`;
+    const scoreSummary = currentInnings
+      ? `\n📊 Score: ${currentInnings.battingTeam} ${currentInnings.runs}/${currentInnings.wickets} (${Math.floor(currentInnings.ballsBowled / 6)}.${currentInnings.ballsBowled % 6} ov)`
+      : '';
+    const message = `${headline}${scoreSummary}\n\n👉 Click link to see live score & match banner:\n${shareUrl}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const handleCopyOBSLink = () => {
@@ -3577,59 +3592,15 @@ export const SpectatorScoreboardSection = ({
               </>
             )}
 
-            {/* Match Banner in Spectator Full Details Page - Fully Visible (No Cutting) with Download Option */}
-            {selectedMatch.matchBannerUrl && (
-              <div className="w-full rounded-2xl sm:rounded-3xl overflow-hidden relative shadow-2xl border border-slate-200 dark:border-slate-800 bg-slate-950 flex flex-col items-center justify-center group mb-6">
-                {/* Ambient Blurred Backdrop - smooth full bleed without cropping foreground content */}
-                <img
-                  src={selectedMatch.matchBannerUrl}
-                  alt=""
-                  aria-hidden="true"
-                  className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-35 scale-110 pointer-events-none select-none"
-                />
-
-                {/* Fully visible, uncropped Match Banner graphic */}
-                <div className="relative z-10 w-full flex items-center justify-center p-1 sm:p-2">
-                  <img
-                    src={selectedMatch.matchBannerUrl}
-                    alt={`${selectedMatch.teamA} vs ${selectedMatch.teamB} Match Banner`}
-                    className="w-full h-auto max-h-[580px] object-contain rounded-xl sm:rounded-2xl block mx-auto transition-transform duration-300 shadow-md"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-
-                {/* Top Overlay Badges and Small Download Button */}
-                <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-                  <span className="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[9px] font-mono font-black text-amber-300 border border-white/10 uppercase tracking-widest hidden sm:inline-flex shadow-sm">
-                    1280 × 720 HD
-                  </span>
-                  {selectedMatch.status === 'live' && (
-                    <span className="px-2.5 py-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-lg animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                      LIVE
-                    </span>
-                  )}
-                  {/* Small Download Button for viewers */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDownloadBanner(selectedMatch.matchBannerUrl!, selectedMatch.teamA, selectedMatch.teamB);
-                    }}
-                    id="btn-download-spectator-banner"
-                    className="px-3 py-1.5 rounded-full bg-black/80 hover:bg-black text-white font-bold text-[10px] tracking-wider uppercase border border-white/25 hover:border-amber-400/80 shadow-lg flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md active:scale-95"
-                    title="Download full match banner image"
-                  >
-                    {downloadingBanner ? (
-                      <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <Download size={12} className="text-amber-300" />
-                    )}
-                    <span>{downloadingBanner ? 'Saving...' : 'Download Banner'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* 16:9 Image Slider in Spectator Full Details Page (with automatic Match Banner integration & Super Admin images) */}
+            <SpectatorImageSlider
+              matchBannerUrl={selectedMatch.matchBannerUrl}
+              teamA={selectedMatch.teamA}
+              teamB={selectedMatch.teamB}
+              matchStatus={selectedMatch.status}
+              onDownloadBanner={handleDownloadBanner}
+              downloadingBanner={downloadingBanner}
+            />
 
             {/* Top Match Bar Header */}
             <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -3712,6 +3683,14 @@ export const SpectatorScoreboardSection = ({
                 >
                   <Download size={13} />
                   <span className="truncate">Download Scoreboard</span>
+                </button>
+                <button
+                  onClick={handleShareWhatsApp}
+                  className="flex-1 sm:flex-initial px-3 py-2 sm:px-3.5 sm:py-2.5 bg-[#25D366] hover:bg-[#20bd5a] text-slate-950 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm min-h-[38px]"
+                  title="Share Match & Banner on WhatsApp"
+                >
+                  <Send size={13} />
+                  <span className="truncate">WhatsApp Share</span>
                 </button>
                 <button
                   onClick={handleCopyLink}

@@ -57,6 +57,7 @@ export function calculateWinProbabilityDetails(
   match: any,
   previousProbA?: number | null
 ): WinProbabilityMetrics {
+  const norm = (s?: string) => (s || '').trim().toLowerCase();
   const teamAName = match?.teamA || 'Team A';
   const teamBName = match?.teamB || 'Team B';
   const oversLimit = Math.max(1, Number(match?.oversLimit) || 10);
@@ -82,33 +83,51 @@ export function calculateWinProbabilityDetails(
   let rrr: number | undefined;
   let equationText = '';
 
-  if (currentInningsNum === 1) {
-    // 1st INNINGS: Baseline projected score modeling
+  const isMatchCompleted = match?.status === 'completed' || (match?.winner && match?.winner !== '');
+
+  if (isMatchCompleted) {
+    const winner = norm(match?.winner);
+    if (winner === 'tie' || winner.includes('tied') || winner.includes('draw')) {
+      probA = 50;
+    } else if (winner === norm(teamAName) || (norm(teamAName) && winner.includes(norm(teamAName)))) {
+      probA = 100;
+    } else if (winner === norm(teamBName) || (norm(teamBName) && winner.includes(norm(teamBName)))) {
+      probA = 0;
+    } else {
+      probA = 50;
+    }
+    equationText = match?.winReason || `${match?.winner || 'Match'} Completed`;
+  } else if (currentInningsNum === 1) {
+    // 1st INNINGS: Baseline projected score modeling with progressive sample weight
     equationText = `${runs}/${wickets} in ${oversBowledText} ov (CRR: ${crr})`;
     if (ballsBowled === 0) {
       probA = 50;
     } else {
-      const parRate = oversLimit <= 10 ? 8.5 : 8.0;
+      const parRate = oversLimit <= 6 ? 9.0 : (oversLimit <= 10 ? 8.2 : 7.8);
       const parScore = parRate * oversLimit;
-      const wicketsInHand = 10 - wickets;
-      const wicketWeight = Math.pow(wicketsInHand / 10, 0.75);
+      const wicketsInHand = Math.max(0, 10 - wickets);
+      const wicketWeight = Math.pow(wicketsInHand / 10, 0.7);
 
       // Projected runs based on current momentum and remaining wickets
-      const projectedRuns = runs + (ballsRemaining / 6) * Math.max(4.0, (crr * 0.75 + 2.5) * wicketWeight);
+      const projectedRuns = runs + (ballsRemaining / 6) * Math.max(4.5, (crr * 0.65 + 3.0) * wicketWeight);
       const diff = projectedRuns - parScore;
       
-      // Logistic sigmoid scaling
+      // Sigmoid mapping
       const z = diff / (parScore * 0.35);
       const rawProb = 100 / (1 + Math.exp(-z));
-      const battingProb = Math.min(92, Math.max(8, Math.round(rawProb)));
 
-      // If Team A is batting first
-      const teamAIsBatting = battingTeamName === teamAName;
+      // Dampen early-overs volatility: in 1st innings, don't swing past 55-45 in the first 20% of the game
+      const sampleConfidence = Math.min(1.0, Math.pow(ballsBowled / totalBalls, 0.6));
+      const dampenedBattingProb = 50 + (rawProb - 50) * sampleConfidence;
+      const battingProb = Math.min(88, Math.max(12, Math.round(dampenedBattingProb)));
+
+      // If Team A is batting first (case-insensitive safe match)
+      const teamAIsBatting = norm(battingTeamName) === norm(teamAName);
       probA = teamAIsBatting ? battingProb : 100 - battingProb;
     }
   } else {
-    // 2nd INNINGS: Chase pressure modeling (Where dramatic tilts happen)
-    const effectiveTarget = target || 100;
+    // 2nd INNINGS: Chase pressure modeling
+    const effectiveTarget = target || ((Number(match?.innings1?.runs) || 0) + 1);
     runsNeeded = Math.max(0, effectiveTarget - runs);
     rrr = ballsRemaining > 0 ? Number(((runsNeeded / ballsRemaining) * 6).toFixed(2)) : (runsNeeded === 0 ? 0 : 99);
     equationText = runsNeeded <= 0
@@ -116,53 +135,65 @@ export function calculateWinProbabilityDetails(
       : `${runsNeeded} needed off ${ballsRemaining} ball${ballsRemaining === 1 ? '' : 's'}`;
 
     let battingProb = 50;
+    const wicketsInHand = Math.max(0, 10 - wickets);
 
     if (runs >= effectiveTarget) {
       battingProb = 100;
     } else if (wickets >= 10 || (ballsRemaining <= 0 && runsNeeded > 0)) {
-      battingProb = 0;
-    } else if (runsNeeded > ballsRemaining * 6) {
-      // Mathematically impossible without illegal deliveries
-      battingProb = 1;
-    } else {
-      const runsPerBall = runsNeeded / Math.max(1, ballsRemaining);
-      const wicketsInHand = Math.max(0, 10 - wickets);
-
-      // Calibrated formula for cricket chases:
-      // When 40 needed off 12 (runsPerBall = 3.33, RRR = 20):
-      // battingProb plummets to ~4-6% (User requested: "With 40 needed off 12, India's win prob plummeted to 5%")
-      if (ballsRemaining <= 18 && runsPerBall >= 3.0) {
-        // Extreme death over squeeze
-        if (runsPerBall >= 3.5 || wicketsInHand <= 2) {
-          battingProb = Math.max(2, Math.min(5, Math.round(15 / runsPerBall)));
-        } else {
-          // e.g. 40 off 12 balls with 4 wickets: exactly ~5%
-          battingProb = Math.max(4, Math.min(7, Math.round(18 / runsPerBall - (10 - wickets) * 0.5)));
-        }
-      } else if (runsNeeded <= ballsRemaining * 0.75 && wicketsInHand >= 5) {
-        // Comfortably cruising (e.g. 15 needed off 20 balls)
-        battingProb = Math.min(96, Math.max(85, Math.round(85 + (ballsRemaining - runsNeeded) * 0.8)));
+      // If balls exhausted and runs are exactly equal (target - 1), it's a tie
+      if (ballsRemaining <= 0 && runs === effectiveTarget - 1) {
+        battingProb = 50;
       } else {
-        // Multi-variable logistic regression curve
-        // z evaluates match balance:
-        // - at RRR = 8.0 and wicketsInHand = 6, z ~ 0 (50% prob)
-        // - as RRR exceeds 14, z drops rapidly
-        const rrrDiff = 8.5 - rrr;
-        const wicketFactor = (wicketsInHand - 5.5) * 0.45;
-        const ballsLeftFactor = (ballsRemaining / totalBalls) * 0.5;
-
-        const z = (rrrDiff * 0.28) + wicketFactor - ballsLeftFactor;
-        const sig = 100 / (1 + Math.exp(-z));
-        battingProb = Math.min(97, Math.max(3, Math.round(sig)));
+        battingProb = 0;
       }
+    } else if (runsNeeded > ballsRemaining * 6) {
+      // Impossible without extras
+      battingProb = 1;
+    } else if (runsNeeded === 1) {
+      // Only 1 run needed:
+      if (ballsRemaining >= 3 && wicketsInHand >= 2) battingProb = 99;
+      else if (ballsRemaining === 2) battingProb = 95;
+      else if (ballsRemaining === 1) battingProb = 75; // 1 off 1 with wickets left favors batting
+      else battingProb = 95;
+    } else if (runsNeeded <= 3 && ballsRemaining >= runsNeeded * 2 && wicketsInHand >= 3) {
+      battingProb = 97;
+    } else if (ballsRemaining <= 6) {
+      // Last over mechanics
+      if (runsNeeded <= 2) battingProb = 95;
+      else if (runsNeeded <= 6) battingProb = wicketsInHand >= 3 ? 75 : 55;
+      else if (runsNeeded <= 10) battingProb = wicketsInHand >= 3 ? 42 : 25;
+      else if (runsNeeded <= 15) battingProb = wicketsInHand >= 2 ? 18 : 8;
+      else if (runsNeeded <= 20) battingProb = 6;
+      else battingProb = 2;
+    } else if (ballsRemaining <= 18 && (runsNeeded / ballsRemaining) >= 2.8) {
+      // High RRR in death overs
+      const runsPerBall = runsNeeded / ballsRemaining;
+      if (runsPerBall >= 3.3 || wicketsInHand <= 2) {
+        battingProb = Math.max(2, Math.min(6, Math.round(14 / runsPerBall)));
+      } else {
+        battingProb = Math.max(5, Math.min(10, Math.round(20 / runsPerBall - (10 - wicketsInHand) * 0.5)));
+      }
+    } else if (runsNeeded <= ballsRemaining * 0.75 && wicketsInHand >= 5) {
+      // Comfortably cruising
+      const comfortBonus = Math.min(15, (ballsRemaining - runsNeeded) * 0.5);
+      battingProb = Math.min(96, Math.max(82, Math.round(82 + comfortBonus)));
+    } else {
+      // Multi-variable logistic regression curve
+      const rrrDiff = 8.5 - rrr;
+      const wicketFactor = (wicketsInHand - 5.5) * 0.45;
+      const ballsLeftFactor = (ballsRemaining / totalBalls) * 0.35;
+
+      const z = (rrrDiff * 0.28) + wicketFactor - ballsLeftFactor;
+      const sig = 100 / (1 + Math.exp(-z));
+      battingProb = Math.min(97, Math.max(3, Math.round(sig)));
     }
 
-    const teamAIsBatting = battingTeamName === teamAName;
+    const teamAIsBatting = norm(battingTeamName) === norm(teamAName);
     probA = teamAIsBatting ? battingProb : 100 - battingProb;
   }
 
   const probB = 100 - probA;
-  const battingTeamProb = battingTeamName === teamAName ? probA : probB;
+  const battingTeamProb = norm(battingTeamName) === norm(teamAName) ? probA : probB;
   const bowlingTeamProb = 100 - battingTeamProb;
 
   let favoredTeamName = teamAName;

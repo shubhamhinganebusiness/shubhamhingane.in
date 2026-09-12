@@ -18,7 +18,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isSignedIn() && (
-        request.auth.token.email.lower() in ['jamkhednewsnetwork@gmail.com', 'shubhamhingane7719@gmail.com', 'shubhamingane7719@gmail.com', '771999595@admin.com', '7719959593@admin.com', 'shubhamhinganebusiness@gmail.com'] ||
+        request.auth.token.email.lower() in ['jamkhednewsnetwork@gmail.com', 'shubhamhingane7719@gmail.com', 'shubhamingane7719@gmail.com', '771999595@admin.com', '7719959593@admin.com', 'shubhamhinganebusiness@gmail.com', 'streetsportsoffical@gmail.com'] ||
         (userExists(request.auth.uid) && getUserData(request.auth.uid).role == 'super_admin')
       );
     }
@@ -238,6 +238,13 @@ service cloud.firestore {
     }
 
     match /cricket_players/{playerId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /spectator_slider_images/{imageId} {
       allow read, write: if true;
       match /{allSub=**} {
         allow read, write: if true;

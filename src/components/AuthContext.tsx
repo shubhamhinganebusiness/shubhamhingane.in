@@ -69,46 +69,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const checkUserSession = async () => {
-      // 1. Try to fetch Virtual Local Storage Master Session First (Failsafe)
-      let virtualUserStr = null;
-      try {
-        virtualUserStr = localStorage.getItem('erp_virtual_user');
-      } catch (e) {
-        console.warn('LocalStorage erp_virtual_user read blocked:', e);
-      }
-      
-      if (virtualUserStr) {
-        try {
-          const vu = JSON.parse(virtualUserStr);
-          setUser(vu as any);
-          setRole(vu.role || 'super_admin');
-          setPharmacyId(vu.pharmacyId || null);
-          setStoreId(vu.storeId || null);
-          setLoading(false);
-          return;
-        } catch (e) {
-          console.error('Failed to parse virtual user:', e);
-        }
-      }
-
       const { auth, db, isFirestoreQuotaExhausted } = await import('../lib/firebase');
       const { onAuthStateChanged } = await import('firebase/auth');
       const { doc, getDoc, setDoc, query, collection, where, getDocs, limit } = await import('firebase/firestore');
 
       const unsubscribe = onAuthStateChanged(auth, async (user) => {
-        // Double-check if a virtual user session was created during the duration of onAuthStateChanged callback
-        let nestedVirtualUser = null;
-        try {
-          nestedVirtualUser = localStorage.getItem('erp_virtual_user');
-        } catch (e) {}
-        
-        if (nestedVirtualUser) {
-          setLoading(false);
-          return;
-        }
-
-        setLoading(true);
         if (user) {
+          // Real Firebase user authenticated - clear any conflicting virtual user session
+          try {
+            const currentVu = localStorage.getItem('erp_virtual_user');
+            if (currentVu) {
+              const parsed = JSON.parse(currentVu);
+              if (parsed.uid !== user.uid) {
+                localStorage.removeItem('erp_virtual_user');
+              }
+            }
+          } catch (_) {}
+
+          setLoading(true);
           setUser(user);
           
           // Safety check for the owner's email - always give them super_admin role if they log in
@@ -118,7 +96,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             'shubhamingane7719@gmail.com',
             '771999595@admin.com',
             '7719959593@admin.com',
-            'shubhamhinganebusiness@gmail.com'
+            'shubhamhinganebusiness@gmail.com',
+            'streetsportsoffical@gmail.com'
           ];
           let forceSuperAdmin = false;
           if (user.email && adminEmails.includes(user.email)) {
@@ -314,9 +293,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         } else {
+          // If no Firebase user is authenticated, check for virtual failsafe session
+          let virtualUserStr = null;
+          try {
+            virtualUserStr = localStorage.getItem('erp_virtual_user');
+          } catch (e) {
+            console.warn('LocalStorage erp_virtual_user read blocked:', e);
+          }
+
+          if (virtualUserStr) {
+            try {
+              const vu = JSON.parse(virtualUserStr);
+              setUser(vu as any);
+              setRole(vu.role || 'super_admin');
+              setPharmacyId(vu.pharmacyId || null);
+              setStoreId(vu.storeId || null);
+              setLoading(false);
+              return;
+            } catch (e) {
+              console.error('Failed to parse virtual user:', e);
+            }
+          }
+
           setUser(null);
           setRole(null);
           setPharmacyId(null);
+          setStoreId(null);
         }
         setLoading(false);
       });

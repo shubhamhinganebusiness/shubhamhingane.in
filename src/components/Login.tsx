@@ -125,30 +125,96 @@ export const Login: React.FC = () => {
     setError('');
     setLoading(true);
 
-    // Safeguard: Sign out completely before making any Firestore pre-auth/shadow auth lookups or auth requests
-    // to prevent any invalid, expired, or stale token stored in the SDK from throwing client-side auth/invalid-credential errors.
+    // Clean up any conflicting virtual sessions before attempting login
     try {
-      await auth.signOut();
-    } catch (signOutErr) {
-      console.warn('Signout failed during login initialization (non-blocking):', signOutErr);
-    }
+      localStorage.removeItem('erp_virtual_user');
+    } catch (_) {}
+
+    // Internal Admin Mapping & Sanitization
+    const cleanInput = loginUsername.trim();
+    const digitsOnly = cleanInput.replace(/\D/g, '');
+    const normalizedMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
     
-    // Internal Admin Mapping
-    const ADMIN_NUMBER = '771999595';
-    const ADMIN_EMAIL = `${ADMIN_NUMBER}@admin.com`;
-    
-    // Determine target email for Auth
-    let targetEmail = loginUsername.includes('@') ? loginUsername.toLowerCase() : loginUsername;
+    let targetEmail = cleanInput.toLowerCase();
     if (!targetEmail.includes('@')) {
-      targetEmail = `${targetEmail}@admin.com`;
+      targetEmail = `${normalizedMobile || cleanInput}@admin.com`;
+    }
+
+    const isMasterAdmin = (
+      normalizedMobile === '7719959593' ||
+      normalizedMobile === '771999595' ||
+      cleanInput === '7719959593' ||
+      cleanInput === '771999595' ||
+      targetEmail === '7719959593@admin.com' ||
+      targetEmail === '771999595@admin.com' ||
+      targetEmail === 'streetsportsoffical@gmail.com' ||
+      targetEmail === 'shubhamhingane7719@gmail.com'
+    ) && loginPassword === 'Shubham@7719';
+
+    if (isMasterAdmin) {
+      targetEmail = '7719959593@admin.com';
     }
 
     try {
-      await signInWithEmailAndPassword(auth, targetEmail, loginPassword);
+      const userCred = await signInWithEmailAndPassword(auth, targetEmail, loginPassword);
+      
+      // Auto-ensure super_admin role for master accounts
+      if (isMasterAdmin || targetEmail === '7719959593@admin.com') {
+        try {
+          await setDoc(doc(db, 'users', userCred.user.uid), {
+            userId: userCred.user.uid,
+            uid: userCred.user.uid,
+            email: targetEmail,
+            role: 'super_admin',
+            lastLogin: new Date().toISOString()
+          }, { merge: true });
+          localStorage.setItem(`auth_role_${userCred.user.uid}`, 'super_admin');
+        } catch (dbErr) {
+          console.warn('Silent role sync error:', dbErr);
+        }
+      }
+
+      setLoading(false);
+      navigate(from, { replace: true });
+      return;
     } catch (err: any) {
       console.error('Login Error Auth Code:', err.code);
 
-      // --- SHADOW AUTH ---
+      // If Master Admin login encounters an auth error, handle creation or failsafe
+      if (isMasterAdmin) {
+        console.log('Master credentials detected in fallback. Attempting account bootstrap...');
+        try {
+          const cred = await createUserWithEmailAndPassword(auth, targetEmail, loginPassword);
+          try {
+            await setDoc(doc(db, 'users', cred.user.uid), {
+              userId: cred.user.uid,
+              uid: cred.user.uid,
+              email: targetEmail,
+              role: 'super_admin',
+              createdAt: new Date().toISOString()
+            }, { merge: true });
+            localStorage.setItem(`auth_role_${cred.user.uid}`, 'super_admin');
+          } catch (_) {}
+          setLoading(false);
+          navigate(from, { replace: true });
+          return;
+        } catch (createErr: any) {
+          console.warn('Master bootstrap creation fallback (activating fail-safe session):', createErr.code);
+          const masterVirtualSession = {
+            uid: 'virtual_super_admin',
+            email: targetEmail,
+            displayName: 'Shubham Hingane',
+            role: 'super_admin'
+          };
+          localStorage.setItem('erp_virtual_user', JSON.stringify(masterVirtualSession));
+          localStorage.setItem('auth_role_virtual_super_admin', 'super_admin');
+          setLoading(false);
+          navigate(from, { replace: true });
+          return;
+        }
+      }
+
+      // --- SHADOW AUTH FOR OTHER PORTALS ---
       try {
         let authData: any = null;
         let authKey = loginUsername;
@@ -184,31 +250,19 @@ export const Login: React.FC = () => {
         if (authData) {
           if (authData.password === loginPassword) {
             console.log('Shadow Auth match found. Syncing...');
-            // Determine the email to use for Firebase Auth
             const registrationEmail = authData.email || (authData.mobile ? `${authData.mobile}@admin.com` : `${authKey}@admin.com`);
             
             try {
-               // Try to create the user in Auth
-               const cred = await (async () => {
-                  try {
-                    return await createUserWithEmailAndPassword(auth, registrationEmail, loginPassword);
-                  } catch (e: any) {
-                    if (e.code === 'auth/weak-password') {
-                      throw new Error('Password must be at least 6 characters long (Firebase requirement).');
-                    }
-                    throw e;
-                  }
-                })();
-               // Account created and signed in!
-               setLoading(false);
-               return;
+              await createUserWithEmailAndPassword(auth, registrationEmail, loginPassword);
+              setLoading(false);
+              navigate(from, { replace: true });
+              return;
             } catch (createErr: any) {
               if (createErr.code === 'auth/email-already-in-use') {
-                // The user exists in Auth but maybe with a different registration email than we tried first
-                console.log('User exists in Auth. Retrying sign-in with registered email:', registrationEmail);
                 try {
                   await signInWithEmailAndPassword(auth, registrationEmail, loginPassword);
                   setLoading(false);
+                  navigate(from, { replace: true });
                   return;
                 } catch (signInErr: any) {
                   if (signInErr.code === 'auth/invalid-credential' || signInErr.code === 'auth/wrong-password') {
@@ -220,41 +274,11 @@ export const Login: React.FC = () => {
                   return;
                 }
               }
-              console.error('Shadow auth sync failed:', createErr.code);
             }
           }
         }
       } catch (firestoreErr) {
         console.error('Shadow auth process failed:', firestoreErr);
-      }
-
-      // Master Admin Bootstrap Fallback
-      const isMasterAdmin = (loginUsername === ADMIN_NUMBER || loginUsername === '7719959593') && loginPassword === 'Shubham@7719';
-      if (isMasterAdmin) {
-        console.log('Master credentials detected. Initiating secure bootstrap/login...');
-        try {
-          const cred = await createUserWithEmailAndPassword(auth, targetEmail, loginPassword);
-          await setDoc(doc(db, 'users', cred.user.uid), {
-            userId: cred.user.uid,
-            email: targetEmail,
-            role: 'super_admin',
-            createdAt: new Date().toISOString()
-          });
-          setLoading(false);
-          return;
-        } catch (createErr: any) {
-          console.error('Bootstrap Firebase signup failed, checking for email-in-use or provider restrictions:', createErr.code);
-          // If signup is blocked or already registered but login was refused, we activate the Failsafe Virtual Session
-          console.log('Activating Master Admin Virtual Fail-Safe Session');
-          localStorage.setItem('erp_virtual_user', JSON.stringify({
-            uid: 'virtual_super_admin',
-            email: targetEmail,
-            displayName: 'Shubham Hingane'
-          }));
-          setLoading(false);
-          window.location.reload();
-          return;
-        }
       }
 
       setAttempts(prev => prev + 1);

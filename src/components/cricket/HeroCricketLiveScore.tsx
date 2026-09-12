@@ -7,12 +7,18 @@ import {
   ArrowRight, 
   Flame, 
   Eye, 
+  EyeOff,
   Play, 
   Sparkles,
   ChevronRight,
   Shield,
   Activity,
-  Layers
+  Layers,
+  Send,
+  Calendar,
+  MapPin,
+  Award,
+  CheckCircle2
 } from 'lucide-react';
 import { MatchState } from './CricketScoreboard';
 import { 
@@ -27,7 +33,7 @@ import {
   isDemoOrAIMatch
 } from './cricketStorage';
 import { db, rtdb } from '../../lib/firebase';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { ref as rtdbRef, onValue as rtdbOnValue } from 'firebase/database';
 import { useAuth } from '../AuthContext';
 
@@ -37,6 +43,20 @@ export const HeroCricketLiveScore: React.FC = () => {
   const [liveMatches, setLiveMatches] = useState<MatchState[]>([]);
   const [recentCompletedMatches, setRecentCompletedMatches] = useState<MatchState[]>([]);
   const [matchIndex, setMatchIndex] = useState<number>(0);
+  const [completedIndex, setCompletedIndex] = useState<number>(0);
+  const [viewTab, setViewTab] = useState<'live' | 'result'>('live');
+  const [hiddenCardIds, setHiddenCardIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('cricket_hidden_result_card_ids') || '[]';
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [globalHideResultCards, setGlobalHideResultCards] = useState<boolean>(() => {
+    return localStorage.getItem('cricket_hide_completed_result_cards') === 'true';
+  });
   const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
   const [isHovered, setIsHovered] = useState<boolean>(false);
 
@@ -284,9 +304,26 @@ export const HeroCricketLiveScore: React.FC = () => {
       if (e.key === 'cricket_active_match' || e.key === 'cricket_matches_local_registry') {
         loadInitialLocal();
       }
+      if (e.key === 'cricket_hidden_result_card_ids' || e.key === 'cricket_hide_completed_result_cards') {
+        try {
+          const raw = localStorage.getItem('cricket_hidden_result_card_ids') || '[]';
+          setHiddenCardIds(JSON.parse(raw));
+          setGlobalHideResultCards(localStorage.getItem('cricket_hide_completed_result_cards') === 'true');
+        } catch (_) {}
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      try {
+        const raw = localStorage.getItem('cricket_hidden_result_card_ids') || '[]';
+        setHiddenCardIds(JSON.parse(raw));
+        setGlobalHideResultCards(localStorage.getItem('cricket_hide_completed_result_cards') === 'true');
+      } catch (_) {}
+      setLastUpdated(Date.now());
     };
 
     window.addEventListener('cricket_match_updated', handleUpdate);
+    window.addEventListener('cricket_match_result_visibility_changed', handleVisibilityChange);
     window.addEventListener('storage', handleStorage);
 
     return () => {
@@ -294,6 +331,7 @@ export const HeroCricketLiveScore: React.FC = () => {
       if (unsubRtdb) unsubRtdb();
       if (unsubCompletedRtdb) unsubCompletedRtdb();
       window.removeEventListener('cricket_match_updated', handleUpdate);
+      window.removeEventListener('cricket_match_result_visibility_changed', handleVisibilityChange);
       window.removeEventListener('storage', handleStorage);
     };
   }, []);
@@ -302,6 +340,52 @@ export const HeroCricketLiveScore: React.FC = () => {
     if (liveMatches.length === 0) return null;
     return liveMatches[matchIndex % liveMatches.length] || liveMatches[0];
   }, [liveMatches, matchIndex]);
+
+  const unhiddenCompletedMatches = useMemo(() => {
+    if (globalHideResultCards) return [];
+    return recentCompletedMatches.filter(m => {
+      if ((m as any).hideResultCard === true || (m as any).isHidden === true || (m as any).isBlocked === true) return false;
+      if (hiddenCardIds.includes(m.id)) return false;
+      return true;
+    });
+  }, [recentCompletedMatches, globalHideResultCards, hiddenCardIds, lastUpdated]);
+
+  const activeCompletedMatch = useMemo(() => {
+    if (unhiddenCompletedMatches.length === 0) return null;
+    return unhiddenCompletedMatches[completedIndex % unhiddenCompletedMatches.length] || unhiddenCompletedMatches[0];
+  }, [unhiddenCompletedMatches, completedIndex]);
+
+  // Hide action for score managers directly on the homepage
+  const handleHideCompletedMatch = async (matchId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!matchId) return;
+    setHiddenCardIds(prev => {
+      const next = [...prev, matchId];
+      try {
+        localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(next));
+      } catch (_) {}
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, 'cricket_matches', matchId), { hideResultCard: true, isHidden: true }, { merge: true });
+    } catch (_) {}
+
+    window.dispatchEvent(new CustomEvent('cricket_match_result_visibility_changed', { detail: { matchId, isHidden: true } }));
+  };
+
+  const handleShareResultWhatsApp = (m: MatchState, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const winnerText = m.winner === 'Tie' ? 'Match Tied!' : `${m.winner} ${m.winReason || 'Won the Match'}`;
+    const t1Overs = m.innings1 ? `${Math.floor(m.innings1.ballsBowled / 6)}.${m.innings1.ballsBowled % 6}` : '0.0';
+    const t2Overs = m.innings2 ? `${Math.floor(m.innings2.ballsBowled / 6)}.${m.innings2.ballsBowled % 6}` : '0.0';
+    const team1Score = m.innings1 ? `${m.innings1.battingTeam || m.teamA}: ${m.innings1.runs}/${m.innings1.wickets} (${t1Overs} ov)` : '';
+    const team2Score = m.innings2 ? `${m.innings2.battingTeam || m.teamB}: ${m.innings2.runs}/${m.innings2.wickets} (${t2Overs} ov)` : '';
+    const matchUrl = `${window.location.origin}/?matchId=${m.id}&spectator=true`;
+    const shareText = `🏏 *CRICKET MATCH RESULT* 🏆\n*${m.teamA} vs ${m.teamB}*\n\n🔥 *Result:* ${winnerText}\n📊 ${team1Score}\n📊 ${team2Score}\n\n👉 *View Full Match Scorecard & Highlights:*\n${matchUrl}`;
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+  };
 
   // Derived scoring calculations
   const matchDetails = useMemo(() => {
@@ -382,8 +466,18 @@ export const HeroCricketLiveScore: React.FC = () => {
     };
   }, [activeMatch]);
 
+  const hasLiveMatch = !!(activeMatch && activeMatch.status === 'live' && matchDetails);
+  const hasCompletedMatch = !!activeCompletedMatch;
+
+  // If neither a live match nor an unhidden completed match exists, hide hero card
+  if (!hasLiveMatch && !hasCompletedMatch) {
+    return null;
+  }
+
+  const showLiveCard = hasLiveMatch && (viewTab === 'live' || !hasCompletedMatch);
+
   // If a match is LIVE, render the ultra-modern, attractive broadcast scoreboard card
-  if (activeMatch && activeMatch.status === 'live' && matchDetails) {
+  if (showLiveCard && activeMatch && matchDetails) {
     const {
       battingTeam,
       bowlingTeam,
@@ -433,6 +527,19 @@ export const HeroCricketLiveScore: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* If completed matches also exist, show toggle pill */}
+            {hasCompletedMatch && (
+              <button
+                type="button"
+                onClick={() => setViewTab('result')}
+                className="px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all"
+                title="View Latest Match Result Card"
+              >
+                <Trophy size={11} className="text-amber-400" />
+                <span>Result ({unhiddenCompletedMatches.length})</span>
+              </button>
+            )}
+
             {liveMatches.length > 1 && (
               <div className="flex items-center gap-1 bg-white/5 rounded-full px-2 py-0.5 border border-white/10">
                 <button
@@ -612,8 +719,284 @@ export const HeroCricketLiveScore: React.FC = () => {
     );
   }
 
-  // If NO match is currently live:
-  // Directly show the match score card only if match is live; do not show any notification or placeholder card.
+  // 2. RENDER ENHANCED MATCH RESULT RECORD CARD
+  if (activeCompletedMatch) {
+    const m = activeCompletedMatch;
+    const team1 = m.innings1?.battingTeam || m.teamA || 'Team 1';
+    const team2 = m.innings2?.battingTeam || m.teamB || 'Team 2';
+
+    const team1Runs = m.innings1?.runs ?? 0;
+    const team1Wickets = m.innings1?.wickets ?? 0;
+    const team1Balls = m.innings1?.ballsBowled ?? 0;
+    const team1Overs = `${Math.floor(team1Balls / 6)}.${team1Balls % 6}`;
+
+    const team2Runs = m.innings2?.runs ?? 0;
+    const team2Wickets = m.innings2?.wickets ?? 0;
+    const team2Balls = m.innings2?.ballsBowled ?? 0;
+    const team2Overs = `${Math.floor(team2Balls / 6)}.${team2Balls % 6}`;
+
+    const winnerText = m.winner === 'Tie' ? 'Match Tied!' : `${m.winner} ${m.winReason || 'Won the Match'}`;
+    const isTeam1Winner = m.winner && (m.winner.toLowerCase() === team1.toLowerCase() || m.winner.toLowerCase() === (m.teamA || '').toLowerCase());
+    const isTeam2Winner = m.winner && (m.winner.toLowerCase() === team2.toLowerCase() || m.winner.toLowerCase() === (m.teamB || '').toLowerCase());
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 15, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.4, ease: 'easeOut' }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-amber-500/40 shadow-2xl shadow-amber-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group"
+      >
+        {/* Ambient Trophy Gold Glow */}
+        <div className="absolute -top-16 -right-16 w-56 h-56 bg-amber-500/15 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse" />
+        <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none -z-10" />
+
+        {/* 16:9 Match Banner (if uploaded by organizer or scorekeeper) */}
+        {m.matchBannerUrl ? (
+          <div className="relative w-full aspect-[16/9] max-h-48 overflow-hidden bg-slate-900 border-b border-white/10">
+            <img 
+              src={m.matchBannerUrl} 
+              alt={`${m.teamA} vs ${m.teamB}`} 
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" 
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-transparent" />
+            
+            {/* Top badges on banner */}
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 bg-slate-950/85 backdrop-blur-md px-3 py-1 rounded-full border border-amber-500/40 flex items-center gap-1.5 shadow-lg">
+                <Trophy size={12} className="text-amber-400" />
+                MATCH RESULT
+              </span>
+
+              <div className="flex items-center gap-2">
+                {hasLiveMatch && (
+                  <button
+                    type="button"
+                    onClick={() => setViewTab('live')}
+                    className="px-2.5 py-1 rounded-full bg-emerald-500/90 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-md"
+                    title="Switch to Active Live Match"
+                  >
+                    <Radio size={10} className="animate-pulse" />
+                    <span>Live Match</span>
+                  </button>
+                )}
+
+                {unhiddenCompletedMatches.length > 1 && (
+                  <div className="flex items-center gap-1 bg-slate-950/85 backdrop-blur-md rounded-full px-2 py-0.5 border border-white/20">
+                    <button
+                      type="button"
+                      onClick={() => setCompletedIndex(prev => (prev > 0 ? prev - 1 : unhiddenCompletedMatches.length - 1))}
+                      className="text-slate-300 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                    >
+                      ◀
+                    </button>
+                    <span className="text-[10px] font-mono font-bold text-amber-400">
+                      {completedIndex + 1}/{unhiddenCompletedMatches.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCompletedIndex(prev => (prev + 1) % unhiddenCompletedMatches.length)}
+                      className="text-slate-300 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                    >
+                      ▶
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Card Header without banner */
+          <div className="px-5 py-3.5 bg-white/[0.04] border-b border-white/10 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-3 py-1 rounded-full border border-amber-500/40 flex items-center gap-1.5 shadow-sm">
+                <Trophy size={12} className="text-amber-400" />
+                MATCH RESULT
+              </span>
+              {m.oversLimit && (
+                <span className="text-[10px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-md border border-white/10">
+                  {m.oversLimit} Overs
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {hasLiveMatch && (
+                <button
+                  type="button"
+                  onClick={() => setViewTab('live')}
+                  className="px-2.5 py-1 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all"
+                  title="Switch to Active Live Match"
+                >
+                  <Radio size={10} className="animate-pulse text-emerald-400" />
+                  <span>Live ({liveMatches.length})</span>
+                </button>
+              )}
+
+              {unhiddenCompletedMatches.length > 1 && (
+                <div className="flex items-center gap-1 bg-white/5 rounded-full px-2 py-0.5 border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setCompletedIndex(prev => (prev > 0 ? prev - 1 : unhiddenCompletedMatches.length - 1))}
+                    className="text-slate-400 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                  >
+                    ◀
+                  </button>
+                  <span className="text-[10px] font-mono font-bold text-amber-400">
+                    {completedIndex + 1}/{unhiddenCompletedMatches.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCompletedIndex(prev => (prev + 1) % unhiddenCompletedMatches.length)}
+                    className="text-slate-400 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                  >
+                    ▶
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Card Body: Result Highlights & Head-to-Head Scores */}
+        <div className="p-5 space-y-4">
+          {/* Winner Headline Banner */}
+          <div className="p-3.5 bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border border-amber-500/35 rounded-2xl flex items-center justify-between gap-3 shadow-inner">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/30">
+                <Trophy size={18} />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[9px] uppercase font-black text-amber-400 tracking-widest block">
+                  Official Match Result
+                </span>
+                <h4 className="text-sm sm:text-base font-black text-white truncate tracking-tight">
+                  {winnerText}
+                </h4>
+              </div>
+            </div>
+            {m.date && (
+              <div className="text-right shrink-0">
+                <span className="text-[10px] font-mono font-bold text-slate-400 flex items-center gap-1">
+                  <Calendar size={11} className="text-slate-500" />
+                  {m.date}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Head to Head Innings Score Comparison */}
+          <div className="space-y-2.5">
+            {/* Team 1 Score Row */}
+            <div className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+              isTeam1Winner 
+                ? 'bg-amber-500/10 border-amber-500/30 shadow-md shadow-amber-950/20' 
+                : 'bg-white/[0.03] border-white/5'
+            }`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center font-black text-xs text-white shrink-0">
+                  {team1.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="text-sm font-bold text-white truncate">{team1}</span>
+                    {isTeam1Winner && (
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 shadow-sm shrink-0">
+                        🏆 WINNER
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">1st Innings</span>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-lg sm:text-xl font-black font-mono text-white">
+                  {team1Runs}/{team1Wickets}
+                </div>
+                <div className="text-[10px] font-mono text-slate-400">
+                  {team1Overs} / {m.oversLimit || 5} ov
+                </div>
+              </div>
+            </div>
+
+            {/* Team 2 Score Row */}
+            <div className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+              isTeam2Winner 
+                ? 'bg-amber-500/10 border-amber-500/30 shadow-md shadow-amber-950/20' 
+                : 'bg-white/[0.03] border-white/5'
+            }`}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center font-black text-xs text-white shrink-0">
+                  {team2.slice(0, 2).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="text-sm font-bold text-white truncate">{team2}</span>
+                    {isTeam2Winner && (
+                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 shadow-sm shrink-0">
+                        🏆 WINNER
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">2nd Innings</span>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-lg sm:text-xl font-black font-mono text-white">
+                  {team2Runs}/{team2Wickets}
+                </div>
+                <div className="text-[10px] font-mono text-slate-400">
+                  {team2Overs} / {m.oversLimit || 5} ov
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Bar: Detail Scoreboard, WhatsApp Share & Scorekeeper Hide Toggle */}
+          <div className="pt-2 flex flex-col sm:flex-row gap-2">
+            <button
+              id="hero-view-detail-result-btn"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDetailScoreboard(m.id);
+              }}
+              className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 cursor-pointer border-none"
+              title="View full detailed scorecard for this concluded match"
+            >
+              <span>View Full Scorecard</span>
+              <ArrowRight size={14} />
+            </button>
+
+            <button
+              id="hero-share-result-whatsapp-btn"
+              type="button"
+              onClick={(e) => handleShareResultWhatsApp(m, e)}
+              className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-950/40 cursor-pointer border-none shrink-0"
+              title="Share match result on WhatsApp (includes match banner automatically)"
+            >
+              <Send size={14} className="text-emerald-200" />
+              <span>WhatsApp</span>
+            </button>
+
+            {isScoreManager && (
+              <button
+                type="button"
+                onClick={(e) => handleHideCompletedMatch(m.id, e)}
+                className="p-3 rounded-2xl bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 flex items-center justify-center transition-all cursor-pointer shrink-0"
+                title="Hide this Match Result Card from Homepage (Scorekeeper Only)"
+              >
+                <EyeOff size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // If NO match is currently live or visible:
   return null;
 };
 

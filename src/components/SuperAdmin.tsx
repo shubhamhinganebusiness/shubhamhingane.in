@@ -10,6 +10,7 @@ import { AdminAnalytics } from './AdminAnalytics';
 import { MedPortalManagement } from './med/MedPortalManagement';
 import { MessPortalManagement } from './mess/MessPortalManagement';
 import { PlayerDirectoryDashboard } from './cricket/PlayerDirectoryDashboard';
+import { SpectatorSliderAdmin } from './cricket/SpectatorSliderAdmin';
 
 interface PasswordStrength {
   score: number; // 0 to 4
@@ -94,7 +95,7 @@ export const generateSecurePassword = (): string => {
 
 export const SuperAdmin: React.FC = () => {
   const { role, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'settings'>('site');
+  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings'>('site');
   const [users, setUsers] = useState<any[]>([]);
   const [shopOwners, setShopOwners] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -112,7 +113,7 @@ export const SuperAdmin: React.FC = () => {
   const [newSMPassword, setNewSMPassword] = useState('');
   const [creatingSM, setCreatingSM] = useState(false);
   const [showSMPass, setShowSMPass] = useState<Record<string, boolean>>({});
-  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'managers'>('players');
+  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'managers' | 'slider'>('players');
 
   // Account Security Tab States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -630,6 +631,12 @@ export const SuperAdmin: React.FC = () => {
               className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'cricket' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
             >
               Player Approvals
+            </button>
+            <button 
+              onClick={() => setActiveTab('slider')}
+              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'slider' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+            >
+              Spectator Slider (16:9)
             </button>
             <button 
               onClick={() => setActiveTab('settings')}
@@ -1250,11 +1257,20 @@ export const SuperAdmin: React.FC = () => {
                     >
                       Scorekeepers & Managers
                     </button>
+                    <button
+                      onClick={() => setCricketSubTab('slider')}
+                      type="button"
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'slider' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                    >
+                      Spectator 16:9 Slider
+                    </button>
                   </div>
                 </div>
 
                 {cricketSubTab === 'players' ? (
                   <PlayerDirectoryDashboard forceAdminMode={true} />
+                ) : cricketSubTab === 'slider' ? (
+                  <SpectatorSliderAdmin />
                 ) : (
                   <div className="space-y-8">
                     {/* Score Manager creation form */}
@@ -1430,6 +1446,15 @@ export const SuperAdmin: React.FC = () => {
                   </div>
                 )}
               </div>
+            </motion.div>
+          ) : activeTab === 'slider' ? (
+            <motion.div
+              key="slider"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <SpectatorSliderAdmin />
             </motion.div>
           ) : (
              <motion.div

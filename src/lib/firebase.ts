@@ -4,6 +4,8 @@ import {
   initializeFirestore, 
   memoryLocalCache,
   doc, 
+  collection,
+  onSnapshot,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -186,6 +188,48 @@ export function subscribeToRealtimeDBCompletedMatch(onUpdate: (completedMatch: a
       console.warn('[Realtime Database] Completed match listener note:', error);
     });
   } catch (e) {
+    return () => {};
+  }
+}
+
+/**
+ * Subscribe to the cricket_matches Firestore collection with error guard
+ */
+export function subscribeToCricketMatchesCollection(
+  onNext: (snapshot: any) => void,
+  onError?: (error: any) => void
+): () => void {
+  try {
+    const q = collection(db, 'cricket_matches');
+    return onSnapshot(q, onNext, (err) => {
+      console.warn('[Firestore] cricket_matches listener note:', err?.message || err);
+      if (onError) onError(err);
+    });
+  } catch (err) {
+    console.warn('[Firestore] Failed to attach cricket_matches listener:', err);
+    if (onError) onError(err);
+    return () => {};
+  }
+}
+
+/**
+ * Subscribe to a specific cricket match doc in Firestore with error guard
+ */
+export function subscribeToCricketMatchDoc(
+  matchId: string,
+  onNext: (docSnap: any) => void,
+  onError?: (error: any) => void
+): () => void {
+  if (!matchId) return () => {};
+  try {
+    const docRef = doc(db, 'cricket_matches', matchId);
+    return onSnapshot(docRef, onNext, (err) => {
+      console.warn(`[Firestore] cricket_matches/${matchId} listener note:`, err?.message || err);
+      if (onError) onError(err);
+    });
+  } catch (err) {
+    console.warn(`[Firestore] Failed to attach doc listener for ${matchId}:`, err);
+    if (onError) onError(err);
     return () => {};
   }
 }

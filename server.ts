@@ -664,7 +664,10 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
     newBatsmanName?: string,
     contextualTone?: string,
     specialTrigger?: any,
-    winProbability?: any
+    winProbability?: any,
+    tournamentName?: string,
+    groundName?: string,
+    isCrucialTime?: boolean
   ): { en: string; hi: string; mr: string } {
     const bats = batsmanName || 'The batsman';
     const bowl = bowlerName || 'The bowler';
@@ -674,6 +677,8 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
     const oLower = (originalDesc || '').toLowerCase();
 
     function appendWinProb(result: { en: string; hi: string; mr: string }): { en: string; hi: string; mr: string } {
+      // User directive: only show win probability at crucial times ("cryshal time"), never on routine balls!
+      if (!isCrucialTime) return result;
       if (!winProbability || !winProbability.teamA || !winProbability.teamB) return result;
       const pA = Math.round(winProbability.probA ?? 50);
       const pB = Math.round(winProbability.probB ?? 50);
@@ -686,6 +691,18 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
         hi: result.hi.includes('[AI') ? result.hi : `${result.hi}${tagHi}`,
         mr: result.mr.includes('[AI') ? result.mr : `${result.mr}${tagMr}`
       };
+    }
+
+    // Match Start Announcement with Tournament Name and Ground Name
+    if (type === 'match_start' || event?.isMatchStart || (oLower.includes('new batsman are come on crease') && oLower.includes('first over'))) {
+      const tName = (tournamentName || 'Tournament').trim();
+      const gName = (groundName || 'Gully Ground').trim();
+      const tournHdr = tName ? `🏆 [${tName}] ` : '';
+      return appendWinProb({
+        en: `${tournHdr}🏟️ Live from ${gName}: An exhilarating cricket clash is underway! ${bats} and partner are ready on the crease, and ${bowl} is warming up to deliver the first over!`,
+        hi: `${tournHdr}🏟️ ${gName} से सीधा लाइव: एक शानदार और रोमांचक मुकाबला शुरू हो चुका है! ${bats} क्रीज पर मौजूद हैं और ${bowl} पहला ओवर फेंकने के लिए तैयार!`,
+        mr: `${tournHdr}🏟️ ${gName} येथून थेट प्रक्षेपण: एका अटीतटीच्या रोमांचक सामन्याला सुरुवात झाली आहे! ${bats} क्रीजवर सज्ज असून ${bowl} पहिले षटक टाकण्यासाठी सज्ज आहेत!`
+      });
     }
 
     // Special check for No-Ball with taken runs
@@ -1057,15 +1074,23 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
       language,
       contextualTone,
       specialTrigger,
-      winProbability 
+      winProbability,
+      tournamentName,
+      groundName,
+      isMatchStart,
+      isCrucialTime
     } = req.body;
 
     const incomingNewBatsman = reqNewBat || additionalContext?.newBatsmanName || '';
     const userPreferredLang = (language === 'mr' || language === 'hi' || language === 'en') ? language : 'en';
     const activeTone = contextualTone || additionalContext?.contextualTone || 'BALANCED_CRICKET';
+    const finalTournamentName = (tournamentName || additionalContext?.tournamentName || matchState?.tournamentName || '').trim();
+    const finalGroundName = (groundName || additionalContext?.groundName || matchState?.groundName || '').trim();
+    const isStartOfMatch = Boolean(isMatchStart || event?.type === 'match_start' || additionalContext?.isMatchStart || (originalDescription && originalDescription.includes('new batsman are come on crease') && originalDescription.includes('first over')));
+    const isCrucial = Boolean(isCrucialTime || additionalContext?.isCrucialTime);
 
-    // Format AI win probability badges for commentary
-    const wp = winProbability;
+    // Format AI win probability badges for commentary - ONLY if it's a crucial time!
+    const wp = isCrucial ? winProbability : undefined;
     let probTagEn = "";
     let probTagHi = "";
     let probTagMr = "";
@@ -1153,7 +1178,19 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         console.warn("GEMINI_API_KEY missing. Handing over to local multilingual gully commentator.");
-        const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger, winProbability);
+        const fallback = getGullyCommentaryMultilingual(
+          event,
+          batsman?.name,
+          bowler?.name,
+          originalDescription,
+          incomingNewBatsman,
+          activeTone,
+          specialTrigger,
+          wp,
+          finalTournamentName,
+          finalGroundName,
+          isCrucial
+        );
         return res.json({
           text: fallback[userPreferredLang] || fallback.en,
           translations: fallback
@@ -1177,6 +1214,20 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
       const previousCommentariesText = recentCommentariesList.length > 0
         ? recentCommentariesList.map((desc: string) => `- "${desc}"`).join("\n")
         : "None";
+
+      // Match Start Tournament and Ground Directive
+      let matchStartDirective = "";
+      if (isStartOfMatch || event?.type === 'match_start') {
+        matchStartDirective = `CRITICAL MATCH START DIRECTIVE:
+- Match Status: BRAND NEW MATCH COMMENCING NOW!
+- Tournament Name: "${finalTournamentName || 'Tournament / Bilateral Series'}"
+- Ground / Venue Name: "${finalGroundName || 'Gully Stadium / Ground'}"
+- MANDATORY COMMENTARY REQUIREMENT: Welcome all cricket fans, spectators, and the crowd to the match! In your opening sentence in all three languages (English, Hindi, Marathi), you MUST explicitly announce and incorporate BOTH the Tournament Name ("${finalTournamentName || 'Tournament'}") and the Ground Name ("${finalGroundName || 'Ground'}")!`;
+      } else if (finalTournamentName || finalGroundName) {
+        matchStartDirective = `TOURNAMENT & VENUE CONTEXT:
+- Tournament: "${finalTournamentName || 'Tournament'}"
+- Ground / Venue: "${finalGroundName || 'Ground'}"`;
+      }
 
       // Contextual Tone Directive for the AI Commentator
       let toneDirective = "";
@@ -1230,6 +1281,7 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         You are an exceptionally humorous, creative, and energetic cricket commentator for local gully & tournament matches.
         Generate live commentary for the ongoing ball delivery in THREE languages: English, Hindi, and Marathi.
 
+        ${matchStartDirective}
         ${toneDirective}
         ${noBallDirective}
         ${specialDirective}
@@ -1248,13 +1300,14 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         - Balls Bowled: ${matchState?.ballsBowled ?? 0}
         - Target Score: ${matchState?.targetRuns ?? 'N/A'}
 
-        ${wp && wp.teamA && wp.teamB ? `LIVE MATCH AI WIN PROBABILITY METRICS:
+        ${wp && wp.teamA && wp.teamB ? `CRUCIAL TIME DETECTED - LIVE MATCH AI WIN PROBABILITY METRICS:
         - ${wp.teamA}: ${Math.round(wp.probA)}% vs ${wp.teamB}: ${Math.round(wp.probB)}%
         - Favored side: ${wp.favoredTeam || wp.teamA} (${Math.round(wp.favoredProbability || 50)}%)
-        - MANDATORY RULE: At the very end of your commentary in each language, include the win probability tag:
+        - MANDATORY RULE: Because this is a CRUCIAL match moment, at the very end of your commentary in each language, include the win probability tag:
           * English end tag: "${probTagEn}"
           * Hindi end tag: "${probTagHi}"
-          * Marathi end tag: "${probTagMr}"` : ''}
+          * Marathi end tag: "${probTagMr}"` : `WIN PROBABILITY DISPLAY RULE:
+        - This delivery is during NORMAL match play. Do NOT include win probability percentages or tags in the commentary. Keep commentary focused on the delivery action.`}
 
         RECENT PREVIOUS DELIVERIES COMMENTARY:
         ${previousCommentariesText}
@@ -1279,9 +1332,20 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         try {
           const parsed = JSON.parse(matchJson[0]);
           if (parsed.en && parsed.hi && parsed.mr) {
-            const finalEn = (probTagEn && !parsed.en.includes('[AI')) ? `${parsed.en.trim()}${probTagEn}` : parsed.en.trim();
-            const finalHi = (probTagHi && !parsed.hi.includes('[AI')) ? `${parsed.hi.trim()}${probTagHi}` : parsed.hi.trim();
-            const finalMr = (probTagMr && !parsed.mr.includes('[AI')) ? `${parsed.mr.trim()}${probTagMr}` : parsed.mr.trim();
+            let parsedEn = parsed.en.trim();
+            let parsedHi = parsed.hi.trim();
+            let parsedMr = parsed.mr.trim();
+
+            if (!isCrucial) {
+              // Strip any win probability tag if model output accidentally contains one during routine play
+              parsedEn = parsedEn.replace(/\s*\[AI\s*(?:Win Probability|जीत की संभावना|विजयाची शक्यता)[^\]]*\]/gi, '').trim();
+              parsedHi = parsedHi.replace(/\s*\[AI\s*(?:Win Probability|जीत की संभावना|विजयाची शक्यता)[^\]]*\]/gi, '').trim();
+              parsedMr = parsedMr.replace(/\s*\[AI\s*(?:Win Probability|जीत की संभावना|विजयाची शक्यता)[^\]]*\]/gi, '').trim();
+            }
+
+            const finalEn = (probTagEn && !parsedEn.includes('[AI')) ? `${parsedEn}${probTagEn}` : parsedEn;
+            const finalHi = (probTagHi && !parsedHi.includes('[AI')) ? `${parsedHi}${probTagHi}` : parsedHi;
+            const finalMr = (probTagMr && !parsedMr.includes('[AI')) ? `${parsedMr}${probTagMr}` : parsedMr;
 
             return res.json({
               text: userPreferredLang === 'mr' ? finalMr : userPreferredLang === 'hi' ? finalHi : finalEn,
@@ -1299,7 +1363,19 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
 
       // If single language returned or couldn't parse JSON
       const plainText = raw.replace(/^\{|\}$/g, '').trim();
-      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger, winProbability);
+      const fallback = getGullyCommentaryMultilingual(
+        event,
+        batsman?.name,
+        bowler?.name,
+        originalDescription,
+        incomingNewBatsman,
+        activeTone,
+        specialTrigger,
+        wp,
+        finalTournamentName,
+        finalGroundName,
+        isCrucial
+      );
       const plainEn = (probTagEn && plainText && !plainText.includes('[AI')) ? `${plainText}${probTagEn}` : (plainText || fallback.en);
       res.json({
         text: userPreferredLang === 'mr' ? fallback.mr : userPreferredLang === 'hi' ? fallback.hi : plainEn,
@@ -1311,7 +1387,19 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
       });
     } catch (error: any) {
       console.warn("Gemini Commentary API Quota limit or error triggered. Reverting to local gully commentator:", error.message || error);
-      const fallback = getGullyCommentaryMultilingual(event, batsman?.name, bowler?.name, originalDescription, incomingNewBatsman, activeTone, specialTrigger, winProbability);
+      const fallback = getGullyCommentaryMultilingual(
+        event,
+        batsman?.name,
+        bowler?.name,
+        originalDescription,
+        incomingNewBatsman,
+        activeTone,
+        specialTrigger,
+        wp,
+        finalTournamentName,
+        finalGroundName,
+        isCrucial
+      );
       res.json({
         text: fallback[userPreferredLang] || fallback.en,
         translations: fallback

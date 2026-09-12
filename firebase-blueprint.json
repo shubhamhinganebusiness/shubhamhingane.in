@@ -260,9 +260,31 @@
         "winnerTeamName": { "type": "string" }
       },
       "required": ["id", "name", "status"]
+    },
+    "SpectatorSliderImage": {
+      "title": "Spectator Slider Image",
+      "description": "16:9 banner and promotional images displayed on the cricket spectator scoreboard carousel",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "linkUrl": { "type": "string" },
+        "order": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["imageUrl"]
     }
   },
   "firestore": {
+    "/spectator_slider_images/{imageId}": {
+      "schema": "SpectatorSliderImage",
+      "description": "16:9 carousel slides for spectator cricket scoreboard display"
+    },
     "/score_managers/{managerId}": {
       "schema": "ScoreManagerProfile",
       "description": "Score manager profile, stream key credentials, and active live match pointer for OBS overlay"
