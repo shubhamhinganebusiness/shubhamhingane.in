@@ -958,11 +958,15 @@ export const CricketScoreboard: React.FC = () => {
       return [];
     }
   });
+  const [restorableCardVisibilityFilter, setRestorableCardVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
 
   // Inline confirmation states to replace window.confirm inside sandboxed iframe
   const [activeLiveMatchDeleteConfirmId, setActiveLiveMatchDeleteConfirmId] = useState<string | null>(null);
   const [draftMatchDeleteConfirmId, setDraftMatchDeleteConfirmId] = useState<string | null>(null);
   const [completedRecordDeleteConfirmId, setCompletedRecordDeleteConfirmId] = useState<string | null>(null);
+  const [clearHistoryConfirm, setClearHistoryConfirm] = useState(false);
+  const [completedCurrentMatchDeleteConfirm, setCompletedCurrentMatchDeleteConfirm] = useState(false);
+  const [completedModalDeleteConfirm, setCompletedModalDeleteConfirm] = useState(false);
   const [resetMatchConfirm, setResetMatchConfirm] = useState(false);
   const [declareInningsConfirm, setDeclareInningsConfirm] = useState(false);
   const [discardSavedSessionConfirm, setDiscardSavedSessionConfirm] = useState(false);
@@ -5618,6 +5622,15 @@ export const CricketScoreboard: React.FC = () => {
       if (restorableEndDate) {
         if (past.date > restorableEndDate) return false;
       }
+
+      // Visibility filtering (Hide/Unhide match card after result)
+      const isCardHidden = hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true;
+      if (restorableCardVisibilityFilter === 'visible' && isCardHidden) {
+        return false;
+      }
+      if (restorableCardVisibilityFilter === 'hidden' && !isCardHidden) {
+        return false;
+      }
       
       // Search matching team names, winner, or date
       if (restorableSearchQuery.trim()) {
@@ -5632,7 +5645,7 @@ export const CricketScoreboard: React.FC = () => {
       
       return true;
     });
-  }, [matchHistory, restorableSearchQuery, restorableStartDate, restorableEndDate]);
+  }, [matchHistory, restorableSearchQuery, restorableStartDate, restorableEndDate, restorableCardVisibilityFilter, hiddenResultCardIds]);
 
   // Team presets managers
   const handleSaveTeam = async () => {
@@ -10349,12 +10362,37 @@ export const CricketScoreboard: React.FC = () => {
                   </button>
 
                   {activeHistoryTab === 'restorable' && matchHistory.length > 0 && (
-                    <button
-                      onClick={handleClearHistory}
-                      className="px-4 py-2 hover:bg-rose-100 text-rose-500 bg-rose-50 dark:bg-rose-500/10 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all cursor-pointer border-none"
-                    >
-                      Reset Journal
-                    </button>
+                    clearHistoryConfirm ? (
+                      <div className="flex items-center gap-1.5 p-1 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900 rounded-xl">
+                        <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 px-1.5">
+                          Delete all {matchHistory.length} completed records?
+                        </span>
+                        <button
+                          onClick={() => {
+                            handleClearHistory();
+                            setClearHistoryConfirm(false);
+                          }}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-black uppercase text-[8px] tracking-wider cursor-pointer border-none shadow-sm transition-all"
+                        >
+                          Confirm Delete All
+                        </button>
+                        <button
+                          onClick={() => setClearHistoryConfirm(false)}
+                          className="px-2 py-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg font-bold uppercase text-[8px] tracking-wider cursor-pointer border-none transition-all"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setClearHistoryConfirm(true)}
+                        className="px-3.5 py-2 hover:bg-rose-100 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-900/50 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title="Permanently delete all completed records"
+                      >
+                        <Trash2 size={12} />
+                        <span>Delete All Records</span>
+                      </button>
+                    )
                   )}
                 </div>
               </div>
@@ -10390,7 +10428,7 @@ export const CricketScoreboard: React.FC = () => {
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
                   }`}
                 >
-                  Live Completed Logs ({matchHistory.length})
+                  Completed Records ({matchHistory.length})
                 </button>
                 <button
                   onClick={() => setActiveHistoryTab('drafts')}
@@ -10600,12 +10638,56 @@ export const CricketScoreboard: React.FC = () => {
                       />
                     </div>
 
-                    {(restorableSearchQuery || restorableStartDate || restorableEndDate) && (
+                    <div className="w-full sm:w-auto space-y-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-450 dark:text-slate-500 block">
+                        Card Visibility
+                      </label>
+                      <div className="flex bg-white dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setRestorableCardVisibilityFilter('all')}
+                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${
+                            restorableCardVisibilityFilter === 'all'
+                              ? 'bg-emerald-500 text-white shadow-sm'
+                              : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          All ({matchHistory.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRestorableCardVisibilityFilter('visible')}
+                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1 ${
+                            restorableCardVisibilityFilter === 'visible'
+                              ? 'bg-emerald-500 text-white shadow-sm'
+                              : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          <Eye size={11} />
+                          <span>Visible</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRestorableCardVisibilityFilter('hidden')}
+                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1 ${
+                            restorableCardVisibilityFilter === 'hidden'
+                              ? 'bg-rose-500 text-white shadow-sm'
+                              : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          <EyeOff size={11} />
+                          <span>Hidden</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {(restorableSearchQuery || restorableStartDate || restorableEndDate || restorableCardVisibilityFilter !== 'all') && (
                       <button
                         onClick={() => {
                           setRestorableSearchQuery('');
                           setRestorableStartDate('');
                           setRestorableEndDate('');
+                          setRestorableCardVisibilityFilter('all');
                         }}
                         className="px-4 py-2 bg-slate-200 hover:bg-slate-250 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-650 dark:text-slate-300 rounded-xl font-bold uppercase text-[9px] tracking-widest cursor-pointer border-none transition-all w-full sm:w-auto align-middle"
                       >
@@ -10647,11 +10729,21 @@ export const CricketScoreboard: React.FC = () => {
                           className="bg-slate-50 dark:bg-slate-850/50 rounded-2xl p-5 border border-slate-100 dark:border-slate-800 hover:border-emerald-500/30 transition-all flex flex-col justify-between"
                         >
                           <div>
-                            <div className="flex justify-between items-start mb-3">
-                              <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-md">
-                                {past.oversLimit} Overs
-                              </span>
-                              <span className="text-[9px] font-mono font-bold text-slate-400">{past.date}</span>
+                            <div className="flex justify-between items-start mb-3 gap-2">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[9px] font-black uppercase px-2.5 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-md">
+                                  {past.oversLimit} Overs
+                                </span>
+                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md flex items-center gap-1 ${
+                                  hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true
+                                    ? 'bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40'
+                                    : 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40'
+                                }`}>
+                                  {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? <EyeOff size={10} /> : <Eye size={10} />}
+                                  <span>{hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? 'Card Hidden' : 'Card Visible'}</span>
+                                </span>
+                              </div>
+                              <span className="text-[9px] font-mono font-bold text-slate-400 shrink-0">{past.date}</span>
                             </div>
 
                             <div className="space-y-1.5 my-3 text-sm font-bold">
@@ -10677,17 +10769,20 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
 
-                          <div className="flex flex-col gap-2 mt-4 pt-2 border-t border-slate-100 dark:border-slate-800/40 w-full">
+                          <div className="flex flex-col gap-2.5 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/40 w-full">
+                            {/* Primary Action Row */}
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleLoadPastMatch(past)}
-                                className="flex-1 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border-none"
+                                className="flex-1 py-2 px-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all cursor-pointer border-none shadow-sm flex items-center justify-center gap-1.5"
+                                title="Load this match on the live scoreboard"
                               >
-                                Restore on Scoreboard
+                                <RotateCcw size={12} />
+                                <span>Restore on Scoreboard</span>
                               </button>
                               <button
                                 onClick={() => setExpandedKeyMomentsId(expandedKeyMomentsId === past.id ? null : past.id)}
-                                className={`px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border-none flex items-center justify-center gap-1 shrink-0 ${
+                                className={`px-3 py-2 rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1 shrink-0 ${
                                   expandedKeyMomentsId === past.id
                                     ? 'bg-amber-500 text-slate-950 font-black shadow-inner shadow-black/10'
                                     : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20'
@@ -10697,97 +10792,126 @@ export const CricketScoreboard: React.FC = () => {
                                 <BookOpen size={13} />
                                 <span>{expandedKeyMomentsId === past.id ? 'Close' : 'Summary'}</span>
                               </button>
+                            </div>
+
+                            {/* Secondary Action Row: Utilities & Delete Match Option */}
+                            <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    const winnerText = past.winner === 'Tie' ? 'Match Tied!' : `${past.winner} ${past.winReason || 'Won the Match'}`;
+                                    const t1Overs = past.innings1 ? `${Math.floor(past.innings1.ballsBowled / 6)}.${past.innings1.ballsBowled % 6}` : '0.0';
+                                    const t2Overs = past.innings2 ? `${Math.floor(past.innings2.ballsBowled / 6)}.${past.innings2.ballsBowled % 6}` : '0.0';
+                                    const team1Score = past.innings1 ? `${past.innings1.battingTeam || past.teamA}: ${past.innings1.runs}/${past.innings1.wickets} (${t1Overs} ov)` : '';
+                                    const team2Score = past.innings2 ? `${past.innings2.battingTeam || past.teamB}: ${past.innings2.runs}/${past.innings2.wickets} (${t2Overs} ov)` : '';
+                                    const matchUrl = `${window.location.origin}/?matchId=${past.id}&spectator=true`;
+                                    const shareText = `🏏 *CRICKET MATCH RESULT* 🏆\n*${past.teamA} vs ${past.teamB}*\n\n🔥 *Result:* ${winnerText}\n📊 ${team1Score}\n📊 ${team2Score}\n\n👉 *View Full Scorecard & Highlights:*\n${matchUrl}`;
+                                    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+                                    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+                                  }}
+                                  className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl font-bold transition-all cursor-pointer border border-emerald-500/20 flex items-center justify-center shadow-inner"
+                                  title="Share Result on WhatsApp with Dynamic Match Banner"
+                                >
+                                  <Send size={13} />
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(past, null, 2));
+                                    const downloadAnchor = document.createElement('a');
+                                    downloadAnchor.setAttribute("href", dataStr);
+                                    const titleSlug = `${past.teamA || 'TeamA'}_vs_${past.teamB || 'TeamB'}`.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                                    downloadAnchor.setAttribute("download", `match_history_audit_${titleSlug}_${past.id || Date.now()}.json`);
+                                    document.body.appendChild(downloadAnchor);
+                                    downloadAnchor.click();
+                                    downloadAnchor.remove();
+                                  }}
+                                  className="p-2 bg-slate-105 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-650 dark:text-slate-300 rounded-xl font-bold transition-all cursor-pointer border-none flex items-center justify-center shadow-inner"
+                                  title="Download Full JSON Snapshot for Data Auditing"
+                                  id={`btn-download-json-${past.id}`}
+                                >
+                                  <Download size={13} />
+                                </button>
+
+                                <button
+                                  onClick={async () => {
+                                    const isCurrentlyHidden = hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true;
+                                    const nextIds = isCurrentlyHidden 
+                                      ? hiddenResultCardIds.filter(id => id !== past.id)
+                                      : [...hiddenResultCardIds, past.id];
+                                    setHiddenResultCardIds(nextIds);
+                                    try {
+                                      localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(nextIds));
+                                    } catch (_) {}
+                                    try {
+                                      await setDoc(doc(db, 'cricket_matches', past.id), { hideResultCard: !isCurrentlyHidden }, { merge: true });
+                                    } catch (_) {}
+                                    window.dispatchEvent(new CustomEvent('cricket_match_result_visibility_changed', { detail: { matchId: past.id, isHidden: !isCurrentlyHidden } }));
+                                    showNotification(!isCurrentlyHidden ? 'Match card hidden after result' : 'Match card unhidden after result', 'info');
+                                  }}
+                                  className={`px-2.5 py-1.5 rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-1 shadow-sm ${
+                                    hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true
+                                      ? 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50'
+                                      : 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50'
+                                  }`}
+                                  title={hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? "Match card is hidden after result. Click to Unhide." : "Match card is visible after result. Click to Hide."}
+                                >
+                                  {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? (
+                                    <>
+                                      <EyeOff size={11} />
+                                      <span>Hidden</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Eye size={11} />
+                                      <span>Visible</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+
+                              {/* Prominent Match Delete Record Button */}
                               <button
-                                onClick={() => {
-                                  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(past, null, 2));
-                                  const downloadAnchor = document.createElement('a');
-                                  downloadAnchor.setAttribute("href", dataStr);
-                                  const titleSlug = `${past.teamA || 'TeamA'}_vs_${past.teamB || 'TeamB'}`.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-                                  downloadAnchor.setAttribute("download", `match_history_audit_${titleSlug}_${past.id || Date.now()}.json`);
-                                  document.body.appendChild(downloadAnchor);
-                                  downloadAnchor.click();
-                                  downloadAnchor.remove();
-                                }}
-                                className="px-3.5 py-2 bg-slate-105 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-650 dark:text-slate-300 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border-none flex items-center justify-center shadow-inner"
-                                title="Download Full JSON Snapshot for Data Auditing"
-                                id={`btn-download-json-${past.id}`}
+                                onClick={() => setCompletedRecordDeleteConfirmId(completedRecordDeleteConfirmId === past.id ? null : past.id)}
+                                className={`px-2.5 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-1 shadow-sm ${
+                                  completedRecordDeleteConfirmId === past.id
+                                    ? 'bg-rose-600 text-white border-rose-600'
+                                    : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/40'
+                                }`}
+                                id={`btn-delete-completed-${past.id}`}
+                                title="Delete this completed match record"
                               >
-                                <Download size={13} />
+                                <Trash2 size={12} />
+                                <span>Delete Record</span>
                               </button>
-                              {completedRecordDeleteConfirmId === past.id ? (
-                                <div className="flex items-center gap-1 shrink-0">
+                            </div>
+
+                            {/* Prominent Dedicated Confirmation Panel */}
+                            {completedRecordDeleteConfirmId === past.id && (
+                              <div className="mt-2 p-3 bg-rose-50/95 dark:bg-rose-950/85 border border-rose-200 dark:border-rose-900 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-left shadow-sm">
+                                <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300 text-[11px] font-bold">
+                                  <AlertCircle size={15} className="text-rose-600 dark:text-rose-400 shrink-0" />
+                                  <span>Permanently delete this completed match record?</span>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
                                   <button
                                     onClick={() => {
                                       handleDeleteLiveCompletedMatch(past.id);
                                       setCompletedRecordDeleteConfirmId(null);
                                     }}
-                                    className="px-2.5 py-2 bg-rose-500 hover:bg-rose-600 text-white font-black text-[8px] uppercase tracking-wider rounded-xl cursor-pointer border-none shadow-sm transition-all"
+                                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border-none shadow-sm transition-all flex items-center gap-1"
                                   >
-                                    Confirm
+                                    <Trash2 size={11} /> Confirm Delete
                                   </button>
                                   <button
                                     onClick={() => setCompletedRecordDeleteConfirmId(null)}
-                                    className="px-1.5 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-350 font-extrabold text-[8px] uppercase tracking-wider rounded-xl cursor-pointer border-none transition-all"
+                                    className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-350 font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border-none transition-all"
                                   >
-                                    ✕
+                                    Cancel
                                   </button>
                                 </div>
-                              ) : (
-                                <button
-                                  onClick={() => setCompletedRecordDeleteConfirmId(past.id)}
-                                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border-none flex items-center justify-center shadow-inner"
-                                  id={`btn-delete-completed-${past.id}`}
-                                  title="Delete Record Permanently"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              )}
-
-                              <button
-                                onClick={() => {
-                                  const winnerText = past.winner === 'Tie' ? 'Match Tied!' : `${past.winner} ${past.winReason || 'Won the Match'}`;
-                                  const t1Overs = past.innings1 ? `${Math.floor(past.innings1.ballsBowled / 6)}.${past.innings1.ballsBowled % 6}` : '0.0';
-                                  const t2Overs = past.innings2 ? `${Math.floor(past.innings2.ballsBowled / 6)}.${past.innings2.ballsBowled % 6}` : '0.0';
-                                  const team1Score = past.innings1 ? `${past.innings1.battingTeam || past.teamA}: ${past.innings1.runs}/${past.innings1.wickets} (${t1Overs} ov)` : '';
-                                  const team2Score = past.innings2 ? `${past.innings2.battingTeam || past.teamB}: ${past.innings2.runs}/${past.innings2.wickets} (${t2Overs} ov)` : '';
-                                  const matchUrl = `${window.location.origin}/?matchId=${past.id}&spectator=true`;
-                                  const shareText = `🏏 *CRICKET MATCH RESULT* 🏆\n*${past.teamA} vs ${past.teamB}*\n\n🔥 *Result:* ${winnerText}\n📊 ${team1Score}\n📊 ${team2Score}\n\n👉 *View Full Scorecard & Highlights:*\n${matchUrl}`;
-                                  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-                                  window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-                                }}
-                                className="px-3.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border border-emerald-500/20 flex items-center justify-center shadow-inner"
-                                title="Share Result on WhatsApp with Dynamic Match Banner"
-                              >
-                                <Send size={13} />
-                              </button>
-
-                              <button
-                                onClick={async () => {
-                                  const isCurrentlyHidden = hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true;
-                                  const nextIds = isCurrentlyHidden 
-                                    ? hiddenResultCardIds.filter(id => id !== past.id)
-                                    : [...hiddenResultCardIds, past.id];
-                                  setHiddenResultCardIds(nextIds);
-                                  try {
-                                    localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(nextIds));
-                                  } catch (_) {}
-                                  try {
-                                    await setDoc(doc(db, 'cricket_matches', past.id), { hideResultCard: !isCurrentlyHidden }, { merge: true });
-                                  } catch (_) {}
-                                  window.dispatchEvent(new CustomEvent('cricket_match_result_visibility_changed', { detail: { matchId: past.id, isHidden: !isCurrentlyHidden } }));
-                                }}
-                                className={`px-3.5 py-2 rounded-xl font-bold text-[9px] uppercase tracking-widest transition-all cursor-pointer border flex items-center justify-center shadow-inner ${
-                                  hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true
-                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-750'
-                                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                                }`}
-                                title={hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? "Hidden from Homepage Hero Card. Click to Show on Homepage." : "Visible on Homepage Hero Card. Click to Hide from Homepage."}
-                              >
-                                {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? <EyeOff size={13} /> : <Eye size={13} />}
-                              </button>
-                            </div>
-
-
+                              </div>
+                            )}
                           </div>
 
                           {expandedKeyMomentsId === past.id && (
@@ -12872,13 +12996,111 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="pt-4 flex gap-4 justify-center">
+                  {/* Match Result Card Visibility Option (Hide / Unhide match card after result) */}
+                  <div className="mt-5 p-4 bg-black/30 backdrop-blur-md rounded-2xl max-w-md mx-auto border border-white/20 flex flex-col sm:flex-row items-center justify-between gap-3 text-left">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2.5 rounded-xl ${
+                        hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true
+                          ? 'bg-rose-500/20 text-rose-300'
+                          : 'bg-emerald-500/20 text-emerald-300'
+                      }`}>
+                        {hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black uppercase tracking-wider text-white">
+                            Match Result Card
+                          </span>
+                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${
+                            hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true
+                              ? 'bg-rose-500 text-white'
+                              : 'bg-emerald-500 text-white'
+                          }`}>
+                            {hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true ? 'Card Hidden' : 'Card Visible'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-white/70 mt-0.5">
+                          {hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true
+                            ? 'Hidden from homepage & spectator cards'
+                            : 'Showing on homepage & spectator cards'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const isCurrentlyHidden = hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true;
+                        const nextIds = isCurrentlyHidden 
+                          ? hiddenResultCardIds.filter(id => id !== match.id)
+                          : [...hiddenResultCardIds, match.id];
+                        setHiddenResultCardIds(nextIds);
+                        try {
+                          localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(nextIds));
+                        } catch (_) {}
+                        try {
+                          await setDoc(doc(db, 'cricket_matches', match.id), { hideResultCard: !isCurrentlyHidden }, { merge: true });
+                        } catch (_) {}
+                        window.dispatchEvent(new CustomEvent('cricket_match_result_visibility_changed', { detail: { matchId: match.id, isHidden: !isCurrentlyHidden } }));
+                        showNotification(!isCurrentlyHidden ? 'Match card hidden after result' : 'Match card is now visible after result', 'info');
+                      }}
+                      className={`px-4 py-2.5 rounded-xl font-black uppercase text-[10px] tracking-wider transition-all cursor-pointer border-none shadow-md flex items-center gap-1.5 shrink-0 ${
+                        hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true
+                          ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                          : 'bg-rose-500 hover:bg-rose-600 text-white'
+                      }`}
+                      title={hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true ? 'Unhide match card' : 'Hide match card'}
+                    >
+                      {hiddenResultCardIds.includes(match.id) || (match as any).hideResultCard === true ? (
+                        <>
+                          <Eye size={13} />
+                          <span>Unhide Card</span>
+                        </>
+                      ) : (
+                        <>
+                          <EyeOff size={13} />
+                          <span>Hide Card</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="pt-4 flex flex-wrap gap-3 justify-center items-center">
                     <button
                       onClick={handleResetMatch}
                       className="px-6 py-2.5 bg-white hover:bg-slate-100 text-emerald-800 rounded-xl font-bold uppercase tracking-wider text-[10px] transition-all cursor-pointer border-none shadow-sm"
                     >
                       New Match Setup
                     </button>
+
+                    {completedCurrentMatchDeleteConfirm ? (
+                      <div className="flex items-center gap-2 p-1.5 bg-black/50 backdrop-blur-sm border border-rose-400/50 rounded-xl">
+                        <span className="text-[10px] font-bold text-rose-200 px-1">Permanently delete this completed match?</span>
+                        <button
+                          onClick={async () => {
+                            await handleDeleteLiveCompletedMatch(match.id);
+                            setCompletedCurrentMatchDeleteConfirm(false);
+                          }}
+                          className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-black text-[9px] uppercase tracking-wider cursor-pointer border-none shadow-sm flex items-center gap-1"
+                        >
+                          <Trash2 size={11} /> Yes, Delete
+                        </button>
+                        <button
+                          onClick={() => setCompletedCurrentMatchDeleteConfirm(false)}
+                          className="px-2 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold text-[9px] uppercase tracking-wider cursor-pointer border-none"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setCompletedCurrentMatchDeleteConfirm(true)}
+                        className="px-5 py-2.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-200 hover:text-white border border-rose-500/40 rounded-xl font-bold uppercase tracking-wider text-[10px] transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title="Delete this completed match record permanently"
+                      >
+                        <Trash2 size={13} />
+                        <span>Delete Completed Record</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -16915,6 +17137,46 @@ export const CricketScoreboard: React.FC = () => {
                   >
                     <FileDown size={14} className="text-emerald-200" /> Export Match Report PDF
                   </button>
+
+                  {/* Delete option for completed record */}
+                  {completedModalDeleteConfirm ? (
+                    <div className="p-3 bg-rose-950/70 border border-rose-500/40 rounded-2xl flex items-center justify-between gap-3 text-left">
+                      <div className="text-[10.5px] text-rose-300 font-bold flex items-center gap-1.5">
+                        <AlertCircle size={14} className="text-rose-400 shrink-0" />
+                        <span>Permanently delete this completed match record?</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setShowCompletionModal(false);
+                            setCompletedModalDeleteConfirm(false);
+                            await handleDeleteLiveCompletedMatch(match.id);
+                          }}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-[9px] uppercase tracking-wider rounded-xl border-none cursor-pointer shadow-sm flex items-center gap-1"
+                        >
+                          <Trash2 size={11} /> Confirm Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCompletedModalDeleteConfirm(false)}
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[9px] uppercase tracking-wider rounded-xl border-none cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setCompletedModalDeleteConfirm(true)}
+                      className="w-full py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold uppercase tracking-wider text-[10px] rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      title="Delete this completed match record permanently"
+                    >
+                      <Trash2 size={13} />
+                      <span>Delete Completed Match Record</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>

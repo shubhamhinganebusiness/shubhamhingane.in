@@ -11,8 +11,6 @@ export interface SliderSlide {
   id: string;
   imageUrl: string;
   title?: string;
-  subtitle?: string;
-  linkUrl?: string;
   isMatchBanner?: boolean;
   order?: number;
   isActive?: boolean;
@@ -59,8 +57,6 @@ export const SpectatorImageSlider: React.FC<SpectatorImageSliderProps> = ({
                 id: doc.id,
                 imageUrl: data.imageUrl,
                 title: data.title || '',
-                subtitle: data.subtitle || data.description || '',
-                linkUrl: data.linkUrl || '',
                 isMatchBanner: false,
                 order: typeof data.order === 'number' ? data.order : 100,
                 isActive: true
@@ -87,7 +83,6 @@ export const SpectatorImageSlider: React.FC<SpectatorImageSliderProps> = ({
       id: 'auto-match-banner',
       imageUrl: matchBannerUrl,
       title: `${teamA} vs ${teamB}`,
-      subtitle: 'Official Live Match Banner',
       isMatchBanner: true,
       order: -1
     });
@@ -259,35 +254,16 @@ export const SpectatorImageSlider: React.FC<SpectatorImageSliderProps> = ({
                 <span>{downloadingBanner ? 'Saving...' : 'Download Banner'}</span>
               </button>
             )}
-
-            {currentSlide.linkUrl && (
-              <a
-                href={currentSlide.linkUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-1.5 rounded-full bg-indigo-600/90 hover:bg-indigo-600 text-white font-bold text-[10px] tracking-wider uppercase border border-white/20 shadow-lg flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md"
-              >
-                <ExternalLink size={11} />
-                <span>Visit Link</span>
-              </a>
-            )}
           </div>
         </div>
 
-        {/* Bottom Slide Info Overlay (if slide has title or subtitle) */}
-        {(currentSlide.title || currentSlide.subtitle) && (
+        {/* Bottom Slide Info Overlay (if slide has title) */}
+        {currentSlide.title && (
           <div className="absolute inset-x-0 bottom-0 z-20 pointer-events-none bg-gradient-to-t from-slate-950/90 via-slate-950/50 to-transparent pt-10 pb-4 px-4 sm:px-6">
             <div className="max-w-xl">
-              {currentSlide.title && (
-                <h4 className="text-white text-sm sm:text-base font-black tracking-tight drop-shadow-md">
-                  {currentSlide.title}
-                </h4>
-              )}
-              {currentSlide.subtitle && (
-                <p className="text-slate-300 text-[11px] sm:text-xs font-medium line-clamp-1 drop-shadow-sm mt-0.5">
-                  {currentSlide.subtitle}
-                </p>
-              )}
+              <h4 className="text-white text-sm sm:text-base font-black tracking-tight drop-shadow-md">
+                {currentSlide.title}
+              </h4>
             </div>
           </div>
         )}

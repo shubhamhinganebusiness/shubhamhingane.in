@@ -3,7 +3,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { updatePassword } from 'firebase/auth';
 import { collection, doc, setDoc, getDoc, getDocs, query, orderBy, deleteDoc, where } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutDashboard, Plus, Users, Trash2, ShieldCheck, Mail, Database, Settings as SettingsIcon, AlertCircle, MessageSquare, Phone, Clock, Store, Edit2, Eye, EyeOff, X, Sparkles, RefreshCw, Lock, Check, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, Plus, Users, Trash2, ShieldCheck, Mail, Database, Settings as SettingsIcon, AlertCircle, MessageSquare, Phone, Clock, Store, Edit2, Eye, EyeOff, X, Sparkles, RefreshCw, Lock, Check, ShieldAlert, ChevronDown } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { SiteManagement } from './SiteManagement';
 import { AdminAnalytics } from './AdminAnalytics';
@@ -569,86 +569,85 @@ export const SuperAdmin: React.FC = () => {
     return <div className="p-20 text-center font-bold">Access Denied. Super Admin only.</div>;
   }
 
+  const TABS = [
+    { id: 'site', label: 'Site CMS' },
+    { id: 'users', label: 'Users' },
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'messages', label: 'Messages' },
+    { id: 'enterprise', label: 'Agro Enterprise' },
+    { id: 'med', label: 'Med Portal' },
+    { id: 'mess', label: 'Mess Management' },
+    { id: 'cricket', label: 'Player Approvals' },
+    { id: 'slider', label: 'Spectator Slider (16:9)' },
+    { id: 'settings', label: 'Settings' },
+  ] as const;
+
   return (
-    <div className="min-h-screen bg-gray-50 pt-24 pb-12 px-4">
-      <div className="max-w-6xl mx-auto">
-        <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100 mb-8 flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-4">
-            <div className="p-4 bg-primary/10 rounded-2xl text-primary">
-              <ShieldCheck size={32} />
+    <div className="min-h-screen bg-gray-50 pt-20 sm:pt-24 pb-12 px-3 sm:px-6 w-full max-w-full overflow-x-hidden">
+      <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
+        <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-4 sm:p-6 md:p-8 shadow-sm border border-gray-100 flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 sm:gap-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="p-3 sm:p-4 bg-primary/10 rounded-2xl text-primary shrink-0">
+                <ShieldCheck size={28} className="sm:w-8 sm:h-8" />
+              </div>
+              <div>
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-gray-900 tracking-tight">Super Admin Panel</h1>
+                <p className="text-gray-500 font-medium text-xs sm:text-sm">Manage Site Content & Users</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-black text-gray-900 tracking-tight">Super Admin Panel</h1>
-              <p className="text-gray-500 font-medium">Manage Site Content & Users</p>
+
+            <button 
+              onClick={() => logout()}
+              className="xl:hidden px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer border-none"
+              title="Sign Out"
+            >
+              Sign Out
+            </button>
+          </div>
+
+          {/* Mobile Quick Dropdown for 1-tap switching */}
+          <div className="block xl:hidden w-full">
+            <div className="relative">
+              <select
+                value={activeTab}
+                onChange={(e) => setActiveTab(e.target.value as any)}
+                className="w-full bg-gray-100 hover:bg-gray-150 border border-gray-200 text-gray-900 font-bold text-xs sm:text-sm rounded-xl px-4 py-2.5 appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+              >
+                {TABS.map(tab => (
+                  <option key={tab.id} value={tab.id}>
+                    {tab.label}
+                  </option>
+                ))}
+              </select>
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                <ChevronDown size={16} />
+              </div>
             </div>
           </div>
 
-          <div className="flex bg-gray-100 p-1.5 rounded-2xl">
-            <button 
-              onClick={() => setActiveTab('site')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'site' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Site CMS
-            </button>
-            <button 
-              onClick={() => setActiveTab('users')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'users' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Users
-            </button>
-            <button 
-              onClick={() => setActiveTab('analytics')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'analytics' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Analytics
-            </button>
-            <button 
-              onClick={() => setActiveTab('messages')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'messages' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Messages
-            </button>
-            <button 
-              onClick={() => setActiveTab('enterprise')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'enterprise' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Agro Enterprise
-            </button>
-            <button 
-              onClick={() => setActiveTab('med')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'med' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Med Portal
-            </button>
-            <button 
-              onClick={() => setActiveTab('mess')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'mess' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Mess Management
-            </button>
-            <button 
-              onClick={() => setActiveTab('cricket')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'cricket' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Player Approvals
-            </button>
-            <button 
-              onClick={() => setActiveTab('slider')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'slider' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Spectator Slider (16:9)
-            </button>
-            <button 
-              onClick={() => setActiveTab('settings')}
-              className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === 'settings' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              Settings
-            </button>
+          {/* Horizontally Scrollable Tab Bar */}
+          <div className="w-full xl:w-auto overflow-x-auto no-scrollbar scroll-smooth py-1 -mx-1 px-1">
+            <div className="flex items-center bg-gray-100 p-1.5 rounded-2xl gap-1 w-max min-w-full sm:min-w-0">
+              {TABS.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`whitespace-nowrap px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer border-none ${
+                    activeTab === tab.id
+                      ? 'bg-white text-primary shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900 bg-transparent'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <button 
             onClick={() => logout()}
-            className="px-6 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-all"
+            className="hidden xl:inline-flex px-6 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-all shrink-0 cursor-pointer border-none"
           >
             Sign Out
           </button>
@@ -679,11 +678,11 @@ export const SuperAdmin: React.FC = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+              className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8"
             >
               <div className="lg:col-span-2">
-                <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100">
-                  <h2 className="text-xl font-bold text-gray-900 mb-8 flex items-center gap-2">
+                <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-4 sm:p-6 md:p-8 shadow-sm border border-gray-100">
+                  <h2 className="text-xl font-bold text-gray-900 mb-6 sm:mb-8 flex items-center gap-2">
                     <Database className="text-primary" size={20} />
                     Registered Users
                   </h2>
@@ -695,8 +694,8 @@ export const SuperAdmin: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
+                  <div className="overflow-x-auto -mx-2 px-2 sm:mx-0 sm:px-0">
+                    <table className="w-full text-left min-w-[500px]">
                       <thead>
                         <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100">
                           <th className="py-4">UID</th>
@@ -708,10 +707,10 @@ export const SuperAdmin: React.FC = () => {
                       <tbody>
                         {users.map((u) => (
                           <tr key={u.id} className="border-b border-gray-50/50">
-                            <td className="py-4 font-mono text-xs text-gray-400">{u.id}</td>
-                            <td className="py-4 font-bold text-gray-900">{u.email}</td>
+                            <td className="py-4 font-mono text-xs text-gray-400 max-w-[120px] truncate" title={u.id}>{u.id}</td>
+                            <td className="py-4 font-bold text-gray-900 text-xs sm:text-sm">{u.email}</td>
                             <td className="py-4">
-                               <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${u.role === 'super_admin' ? 'bg-purple-100 text-purple-600' : u.role === 'dairy_admin' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
+                               <span className={`px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase ${u.role === 'super_admin' ? 'bg-purple-100 text-purple-600' : u.role === 'dairy_admin' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
                                  {u.role || 'user'}
                                </span>
                             </td>
@@ -742,9 +741,9 @@ export const SuperAdmin: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-8">
-                <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-100">
-                  <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <div className="space-y-6 sm:space-y-8">
+                <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 md:p-10 shadow-sm border border-gray-100">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4 sm:mb-6 flex items-center gap-2">
                     <Mail className="text-primary" size={20} />
                     Pre-authorize Paid User
                   </h3>
@@ -804,9 +803,9 @@ export const SuperAdmin: React.FC = () => {
                   </form>
                 </div>
 
-                <div className="bg-primary rounded-[2.5rem] p-10 text-white shadow-2xl">
-                  <Users size={48} className="mb-6 opacity-50" />
-                  <h3 className="text-4xl font-black mb-2">{users.length}</h3>
+                <div className="bg-primary rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-10 text-white shadow-2xl">
+                  <Users size={40} className="mb-4 sm:mb-6 opacity-50" />
+                  <h3 className="text-3xl sm:text-4xl font-black mb-1 sm:mb-2">{users.length}</h3>
                   <p className="text-primary-foreground/70 font-bold uppercase tracking-widest text-xs">Total Registered Users</p>
                 </div>
               </div>
@@ -817,11 +816,11 @@ export const SuperAdmin: React.FC = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="space-y-8"
+              className="space-y-6 sm:space-y-8"
             >
-              <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100">
-                <div className="flex justify-between items-center mb-8">
-                  <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-4 sm:p-6 md:p-8 shadow-sm border border-gray-100">
+                <div className="flex justify-between items-center mb-6 sm:mb-8">
+                  <h2 className="text-lg sm:text-xl font-bold text-gray-900 flex items-center gap-2">
                     <MessageSquare className="text-primary" size={20} />
                     Inquiry Messages
                   </h2>
@@ -840,13 +839,13 @@ export const SuperAdmin: React.FC = () => {
                     </div>
                   ) : (
                     messages.map((msg) => (
-                      <div key={msg.id} className="p-6 bg-gray-50 rounded-3xl border border-gray-100 group relative">
+                      <div key={msg.id} className="p-4 sm:p-6 bg-gray-50 rounded-2xl sm:rounded-3xl border border-gray-100 group relative">
                         <div className="flex flex-col md:flex-row justify-between gap-4 mb-4">
                           <div className="space-y-1">
                             <div className="flex items-center gap-3">
-                              <h4 className="font-black text-gray-900 text-lg tracking-tight uppercase">{msg.name}</h4>
+                              <h4 className="font-black text-gray-900 text-base sm:text-lg tracking-tight uppercase">{msg.name}</h4>
                               {msg.type === 'hire' && (
-                                <span className="px-2 py-0.5 bg-purple-100 text-purple-600 text-[10px] font-black rounded-md uppercase tracking-widest">Hire Request</span>
+                                <span className="px-2 py-0.5 bg-purple-100 text-purple-600 text-[9px] sm:text-[10px] font-black rounded-md uppercase tracking-widest">Hire Request</span>
                               )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
@@ -855,7 +854,7 @@ export const SuperAdmin: React.FC = () => {
                               <span className="flex items-center gap-1"><Clock size={12} /> {msg.createdAt?.toDate?.()?.toLocaleString() || 'Recently'}</span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <a 
                               href={`https://wa.me/${msg.phone.replace(/\D/g, '')}?text=Hi ${msg.name}, I received your message: "${msg.subject}"`}
                               target="_blank"
@@ -888,27 +887,27 @@ export const SuperAdmin: React.FC = () => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="space-y-8"
+              className="space-y-6 sm:space-y-8"
             >
-              <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-100">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="p-4 bg-primary/10 rounded-2xl text-primary">
+              <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-4 sm:p-6 md:p-8 lg:p-10 shadow-sm border border-gray-100">
+                <div className="flex items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
+                  <div className="p-3 sm:p-4 bg-primary/10 rounded-2xl text-primary shrink-0">
                     <Database size={24} />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">Enterprise Controls</h2>
-                    <p className="text-gray-500 font-medium font-bold text-xs uppercase tracking-widest mt-1">Manage agro shop credentials and access levels.</p>
+                    <h2 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight">Enterprise Controls</h2>
+                    <p className="text-gray-500 font-bold text-xs uppercase tracking-widest mt-1">Manage agro shop credentials and access levels.</p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-bold text-gray-900">Create Shop Owner</h3>
+                      <h3 className="text-base sm:text-lg font-bold text-gray-900">Create Shop Owner</h3>
                       <span className="px-3 py-1 bg-primary/10 text-primary text-[10px] font-black rounded-full uppercase tracking-widest">New Credential</span>
                     </div>
                     <form onSubmit={handleCreateAgroOwner} className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Owner Name</label>
                           <input
@@ -917,7 +916,7 @@ export const SuperAdmin: React.FC = () => {
                             placeholder="e.g. Rahul Patil"
                             value={newAgroOwner.ownerName}
                             onChange={(e) => setNewAgroOwner(p => ({ ...p, ownerName: e.target.value }))}
-                            className="w-full px-5 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-primary/10 font-bold text-sm"
+                            className="w-full px-4 sm:px-5 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-primary/10 font-bold text-sm"
                           />
                         </div>
                         <div className="space-y-1">
@@ -928,7 +927,7 @@ export const SuperAdmin: React.FC = () => {
                             placeholder="e.g. Kisan Agro"
                             value={newAgroOwner.shopName}
                             onChange={(e) => setNewAgroOwner(p => ({ ...p, shopName: e.target.value }))}
-                            className="w-full px-5 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-primary/10 font-bold text-sm"
+                            className="w-full px-4 sm:px-5 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-4 focus:ring-primary/10 font-bold text-sm"
                           />
                         </div>
                       </div>
@@ -982,21 +981,21 @@ export const SuperAdmin: React.FC = () => {
                         </div>
                       ) : (
                         shopOwners.map(owner => (
-                          <div key={owner.id} className="p-5 bg-gray-50 rounded-2xl border border-gray-100 flex items-center justify-between group hover:bg-white hover:shadow-md transition-all">
-                            <div className="flex items-center gap-4">
-                              <div className="p-3 bg-white rounded-xl text-primary shadow-sm group-hover:scale-110 transition-transform">
+                          <div key={owner.id} className="p-4 sm:p-5 bg-gray-50 rounded-2xl border border-gray-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group hover:bg-white hover:shadow-md transition-all">
+                            <div className="flex items-center gap-3 sm:gap-4">
+                              <div className="p-2.5 sm:p-3 bg-white rounded-xl text-primary shadow-sm group-hover:scale-110 transition-transform shrink-0">
                                 <Store size={18} />
                               </div>
                               <div>
-                                <p className="font-black text-gray-900 tracking-tight">{owner.shopName}</p>
-                                <div className="flex items-center gap-2">
+                                <p className="font-black text-gray-900 tracking-tight text-sm sm:text-base">{owner.shopName}</p>
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-[10px] font-bold text-gray-400 uppercase">{owner.ownerName}</span>
                                   <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                   <span className="text-[10px] font-mono text-gray-500">{owner.mobile}</span>
                                 </div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 sm:gap-3 flex-wrap self-end sm:self-auto">
                                <button
                                  onClick={() => setViewingShopOwner(owner)}
                                  className="p-2 bg-white rounded-lg text-gray-400 hover:text-blue-500 border border-gray-100 shadow-sm transition-all"
@@ -1036,25 +1035,25 @@ export const SuperAdmin: React.FC = () => {
                 {/* Edit Modal */}
                 <AnimatePresence>
                   {editingShopOwner && (
-                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm">
                       <motion.div 
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.9 }}
-                        className="w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+                        className="w-full max-w-lg bg-white rounded-2xl sm:rounded-[2.5rem] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
                       >
-                        <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                        <div className="p-4 sm:p-6 md:p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 shrink-0">
                           <div>
-                            <h3 className="text-xl font-bold text-gray-900">Edit Shop Credentials</h3>
+                            <h3 className="text-lg sm:text-xl font-bold text-gray-900">Edit Shop Credentials</h3>
                             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">ID: {editingShopOwner.id}</p>
                           </div>
                           <button onClick={() => setEditingShopOwner(null)} className="p-2 hover:bg-gray-200 rounded-full transition-colors">
                             <X size={20} />
                           </button>
                         </div>
-                        <form onSubmit={handleUpdateAgroOwner} className="p-8 space-y-6">
+                        <form onSubmit={handleUpdateAgroOwner} className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-6 overflow-y-auto">
                            <div className="space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Owner Name</label>
                                   <input
@@ -1127,18 +1126,18 @@ export const SuperAdmin: React.FC = () => {
                   )}
 
                   {viewingShopOwner && (
-                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm">
                       <motion.div 
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, scale: 0.9 }}
-                        className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+                        className="w-full max-w-md bg-white rounded-2xl sm:rounded-[2.5rem] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
                       >
-                        <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-primary text-white">
+                        <div className="p-4 sm:p-6 md:p-8 border-b border-gray-100 flex justify-between items-center bg-primary text-white shrink-0">
                           <div className="flex items-center gap-3">
                             <Store size={24} />
                             <div>
-                              <h3 className="text-xl font-bold tracking-tight">{viewingShopOwner.shopName}</h3>
+                              <h3 className="text-lg sm:text-xl font-bold tracking-tight">{viewingShopOwner.shopName}</h3>
                               <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest">Ownership Credentials</p>
                             </div>
                           </div>
@@ -1146,8 +1145,8 @@ export const SuperAdmin: React.FC = () => {
                             <X size={20} />
                           </button>
                         </div>
-                        <div className="p-8 space-y-6">
-                           <div className="grid grid-cols-2 gap-6">
+                        <div className="p-4 sm:p-6 md:p-8 space-y-4 sm:space-y-6 overflow-y-auto">
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                               <div>
                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Owner Name</p>
                                 <p className="font-bold text-gray-900 border-b border-gray-100 pb-2">{viewingShopOwner.ownerName}</p>
@@ -1229,38 +1228,38 @@ export const SuperAdmin: React.FC = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-gray-100">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+              <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-4 sm:p-6 md:p-8 shadow-sm border border-gray-100">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6 sm:mb-8">
                   <div>
-                    <h2 className="text-2xl font-black text-gray-900 flex items-center gap-3">
-                      <ShieldCheck className="text-primary" />
+                    <h2 className="text-xl sm:text-2xl font-black text-gray-900 flex items-center gap-3">
+                      <ShieldCheck className="text-primary shrink-0" />
                       Cricket League Dashboard & Scoring
                     </h2>
-                    <p className="text-gray-500 font-medium">
+                    <p className="text-gray-500 font-medium text-xs sm:text-sm mt-1">
                       Manage player directories, league settings, and GullyScore local scorekeeper credentials.
                     </p>
                   </div>
                   
                   {/* Sub tab selectors */}
-                  <div className="flex items-center gap-2 bg-gray-100 p-1 rounded-2xl">
+                  <div className="flex items-center gap-1.5 sm:gap-2 bg-gray-100 p-1 rounded-2xl overflow-x-auto max-w-full no-scrollbar">
                     <button
                       onClick={() => setCricketSubTab('players')}
                       type="button"
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'players' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'players' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Player Approvals
                     </button>
                     <button
                       onClick={() => setCricketSubTab('managers')}
                       type="button"
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'managers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'managers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Scorekeepers & Managers
                     </button>
                     <button
                       onClick={() => setCricketSubTab('slider')}
                       type="button"
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'slider' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'slider' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Spectator 16:9 Slider
                     </button>
@@ -1274,15 +1273,15 @@ export const SuperAdmin: React.FC = () => {
                 ) : (
                   <div className="space-y-8">
                     {/* Score Manager creation form */}
-                    <div className="bg-gray-50 p-6 md:p-8 rounded-[2rem] border border-gray-150">
-                      <h3 className="text-lg font-black text-gray-900 mb-2 flex items-center gap-2">
-                        <Plus className="text-primary" /> Create GullyScore Scorekeeper / Score Manager
+                    <div className="bg-gray-50 p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-[2rem] border border-gray-150">
+                      <h3 className="text-base sm:text-lg font-black text-gray-900 mb-2 flex items-center gap-2">
+                        <Plus className="text-primary shrink-0" /> Create GullyScore Scorekeeper / Score Manager
                       </h3>
                       <p className="text-xs text-gray-500 font-medium mb-6">
                         Provide credentials below. Scorekeepers and score managers can log in on the dedicated GullyScore score management interface to update scores, start, edit, and manage matches.
                       </p>
                       
-                      <form onSubmit={handleCreateScoreManager} className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                      <form onSubmit={handleCreateScoreManager} className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 items-end">
                         <div className="space-y-2">
                           <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block">Full Name</label>
                           <input
@@ -1380,23 +1379,23 @@ export const SuperAdmin: React.FC = () => {
                     </div>
 
                     {/* Existing Score Managers table list */}
-                    <div className="bg-white border border-gray-100 rounded-[2rem] overflow-hidden shadow-sm">
-                      <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
-                        <h3 className="text-sm font-black text-gray-800 uppercase tracking-wider">Authorized Scorekeeper Accounts</h3>
+                    <div className="bg-white border border-gray-100 rounded-2xl sm:rounded-[2rem] overflow-hidden shadow-sm">
+                      <div className="px-4 sm:px-6 py-4 bg-gray-50 border-b border-gray-100 flex justify-between items-center">
+                        <h3 className="text-xs sm:text-sm font-black text-gray-800 uppercase tracking-wider">Authorized Scorekeeper Accounts</h3>
                         <span className="bg-primary/10 text-primary text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
                           {scoreManagers.length} Total
                         </span>
                       </div>
                       
                       {scoreManagers.length === 0 ? (
-                        <div className="p-12 text-center">
+                        <div className="p-8 sm:p-12 text-center">
                           <AlertCircle className="mx-auto text-gray-300 mb-2" size={32} />
                           <p className="text-sm text-gray-500 font-medium">No scorekeepers created yet.</p>
                           <p className="text-xs text-gray-400 mt-1">Use the form above to provision scorekeeper login credentials.</p>
                         </div>
                       ) : (
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
+                          <table className="w-full text-left border-collapse min-w-[520px]">
                             <thead>
                               <tr className="border-b border-gray-100 bg-gray-50/50">
                                 <th className="p-4 text-[10px] font-bold uppercase text-gray-450 tracking-wider">Full Name</th>
@@ -1465,7 +1464,7 @@ export const SuperAdmin: React.FC = () => {
               className="max-w-2xl mx-auto space-y-8"
             >
               {/* Account Security & Password Manager Dashboard */}
-              <div className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-gray-100 animate-fade-in text-left">
+              <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 md:p-10 shadow-sm border border-gray-100 animate-fade-in text-left">
                 <div className="flex items-center justify-between border-b border-gray-100 pb-6 mb-8 flex-wrap gap-4 text-left">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">

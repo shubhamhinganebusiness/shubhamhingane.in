@@ -16,8 +16,6 @@ export interface SliderImageDoc {
   id: string;
   imageUrl: string;
   title: string;
-  subtitle?: string;
-  linkUrl?: string;
   order: number;
   isActive: boolean;
   createdAt?: any;
@@ -60,8 +58,6 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
   const [formData, setFormData] = useState({
     imageUrl: '',
     title: '',
-    subtitle: '',
-    linkUrl: '',
     order: 0,
     isActive: true
   });
@@ -88,8 +84,6 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
           id: d.id,
           imageUrl: data.imageUrl || '',
           title: data.title || '',
-          subtitle: data.subtitle || data.description || '',
-          linkUrl: data.linkUrl || '',
           order: typeof data.order === 'number' ? data.order : 0,
           isActive: data.isActive !== false,
           createdAt: data.createdAt,
@@ -112,8 +106,6 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
     setFormData({
       imageUrl: '',
       title: '',
-      subtitle: '',
-      linkUrl: '',
       order: images.length,
       isActive: true
     });
@@ -125,8 +117,6 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
     setFormData({
       imageUrl: item.imageUrl,
       title: item.title,
-      subtitle: item.subtitle || '',
-      linkUrl: item.linkUrl || '',
       order: item.order,
       isActive: item.isActive
     });
@@ -212,8 +202,6 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
       const payload: any = {
         imageUrl: formData.imageUrl.trim(),
         title: formData.title.trim(),
-        subtitle: formData.subtitle.trim(),
-        linkUrl: formData.linkUrl.trim(),
         order: Number(formData.order) || 0,
         isActive: Boolean(formData.isActive),
         updatedAt: new Date().toISOString(),
@@ -446,22 +434,6 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
                   <h4 className="text-sm font-black text-slate-900 dark:text-white truncate">
                     {item.title || 'Untitled Slide'}
                   </h4>
-                  {item.subtitle && (
-                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5 font-medium">
-                      {item.subtitle}
-                    </p>
-                  )}
-                  {item.linkUrl && (
-                    <a
-                      href={item.linkUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[10px] text-indigo-500 hover:text-indigo-600 font-bold mt-1 inline-flex items-center gap-1"
-                    >
-                      <span>{item.linkUrl.replace(/^https?:\/\//, '').slice(0, 25)}...</span>
-                      <ExternalLink size={9} />
-                    </a>
-                  )}
                 </div>
 
                 {/* Actions */}

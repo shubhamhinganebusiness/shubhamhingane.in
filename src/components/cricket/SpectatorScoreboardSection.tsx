@@ -1509,7 +1509,15 @@ export const SpectatorScoreboardSection = ({
     });
   }, [allMatches]);
 
-  const completedMatches = useMemo(() => allMatches.filter(m => m && m.status === 'completed' && !m.isHidden && !m.isBlocked), [allMatches]);
+  const completedMatches = useMemo(() => allMatches.filter(m => {
+    if (!m || m.status !== 'completed' || m.isHidden || m.isBlocked) return false;
+    if ((m as any).hideResultCard === true) return false;
+    try {
+      const localHidden = JSON.parse(localStorage.getItem('cricket_hidden_result_card_ids') || '[]');
+      if (Array.isArray(localHidden) && localHidden.includes(m.id)) return false;
+    } catch (_) {}
+    return true;
+  }), [allMatches]);
 
   const filteredCompletedMatches = useMemo(() => {
     const query = completedSearchQuery.trim().toLowerCase();
