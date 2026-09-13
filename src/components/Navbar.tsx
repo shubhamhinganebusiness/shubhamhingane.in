@@ -1,10 +1,7 @@
 import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { Menu, X, Globe, LogOut, Moon, Sun } from 'lucide-react';
+import { Menu, X } from 'lucide-react';
 import { useLanguage } from './LanguageContext';
-import { useTheme } from './ThemeContext';
-import { Language } from '../translations';
-import { LanguageModal } from './LanguageModal';
 import { HireMeModal } from './HireMeModal';
 import { useAuth } from './AuthContext';
 import { useSiteSettings } from '../hooks/useCMS';
@@ -12,10 +9,8 @@ import { isMatchDeleted, markMatchDeleted } from './cricket/cricketStorage';
 
 export const Navbar = () => {
   const [isOpen, setIsOpen] = React.useState(false);
-  const [isLangModalOpen, setIsLangModalOpen] = React.useState(false);
   const [isHireModalOpen, setIsHireModalOpen] = React.useState(false);
-  const { language, t } = useLanguage();
-  const { theme, toggleTheme } = useTheme();
+  const { t } = useLanguage();
   const { user, role, logout } = useAuth();
   const location = useLocation();
   const { settings, loading } = useSiteSettings();
@@ -200,28 +195,10 @@ export const Navbar = () => {
                     </Link>
                   )}
 
-                  {/* Theme Toggle Button */}
-                  <button
-                    onClick={toggleTheme}
-                    className="p-2 bg-white dark:bg-gray-800 rounded-lg card-shadow border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 transition-all duration-300"
-                    title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-                  >
-                    {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-                  </button>
-
-                  {/* Language Selector Button */}
-                  <button
-                    onClick={() => setIsLangModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 rounded-lg card-shadow border border-gray-100 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:text-primary transition-all duration-300 text-xs font-bold uppercase tracking-widest"
-                  >
-                    <Globe size={16} />
-                    {language.toUpperCase()}
-                  </button>
-
                   <button 
                     onClick={() => setIsHireModalOpen(true)}
                     aria-label="Hire me or buy my services"
-                    className="bg-primary text-white px-6 py-2 rounded-lg font-bold shadow-lg hover:shadow-primary/30 transition-all duration-300 uppercase text-xs tracking-widest"
+                    className="bg-primary text-white px-6 py-2 rounded-lg font-bold shadow-lg hover:shadow-primary/30 transition-all duration-300 uppercase text-xs tracking-widest cursor-pointer"
                   >
                     {t.nav.hireMe}
                   </button>
@@ -229,29 +206,21 @@ export const Navbar = () => {
               </div>
             </div>
 
-            <div className="md:hidden flex items-center gap-4">
-               {/* Theme Toggle (Mobile) */}
-               <button
-                  onClick={toggleTheme}
-                  className="p-2 bg-white dark:bg-gray-800 rounded-lg card-shadow text-gray-700 dark:text-gray-200"
-                >
-                  {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-                </button>
-
-               {/* Mobile Language Selector Button */}
-               <button
-                  onClick={() => setIsLangModalOpen(true)}
-                  className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 rounded-lg card-shadow text-gray-700 dark:text-gray-200 text-xs font-bold uppercase"
-                >
-                  <Globe size={14} />
-                  {language.toUpperCase()}
-                </button>
+            <div className="md:hidden flex items-center gap-3">
+              <button 
+                onClick={() => setIsHireModalOpen(true)}
+                aria-label="Hire me or buy my services"
+                className="bg-primary text-white px-3.5 py-1.5 rounded-lg font-bold shadow-sm hover:shadow-primary/30 transition-all duration-300 uppercase text-[10px] tracking-wider cursor-pointer"
+              >
+                {t.nav.hireMe}
+              </button>
 
               <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="text-gray-600 hover:text-primary transition-colors focus:outline-none"
+                className="text-gray-600 hover:text-primary transition-colors focus:outline-none p-1.5 cursor-pointer"
+                aria-label="Toggle navigation menu"
               >
-                {isOpen ? <X size={28} /> : <Menu size={28} />}
+                {isOpen ? <X size={26} /> : <Menu size={26} />}
               </button>
             </div>
           </div>
@@ -309,11 +278,6 @@ export const Navbar = () => {
           </div>
         )}
       </nav>
-
-      <LanguageModal 
-        isOpen={isLangModalOpen} 
-        onClose={() => setIsLangModalOpen(false)} 
-      />
 
       <HireMeModal 
         isOpen={isHireModalOpen} 

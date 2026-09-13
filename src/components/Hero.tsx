@@ -1,17 +1,19 @@
 import React from 'react';
-import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Receipt, Sparkles, LogIn, Trophy } from 'lucide-react';
+import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Receipt, Sparkles, LogIn, Trophy, Globe } from 'lucide-react';
 import { TypingText } from './TypingText';
 import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSiteSettings } from '../hooks/useCMS';
 import { useNavigate } from 'react-router-dom';
 import { HeroCricketLiveScore } from './cricket/HeroCricketLiveScore';
+import { LanguageModal } from './LanguageModal';
 
 export const Hero = () => {
-  const { t, language } = useLanguage();
+  const { t, language, setLanguage } = useLanguage();
   const { settings, loading } = useSiteSettings();
   const navigate = useNavigate();
   const [showIDCardModal, setShowIDCardModal] = React.useState(false);
+  const [isLangModalOpen, setIsLangModalOpen] = React.useState(false);
 
   const displayTitle = settings?.heroTitle || t.hero.title;
   const displayName = settings?.heroName || t.hero.name;
@@ -115,38 +117,81 @@ export const Hero = () => {
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
         >
-          {/* Work Readiness Pulser Badge & Dynamic Live Clock Hub */}
-          <div className="flex flex-wrap items-center gap-2 mb-2.5 w-full">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 backdrop-blur-md shadow-sm"
-            >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                Active for Opportunities
-              </span>
-            </motion.div>
-
-            {puneTime && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/25 backdrop-blur-sm text-primary text-[10px] uppercase font-black tracking-wider shadow-sm"
+          {/* Work Readiness Pulser Badge, Dynamic Live Clock Hub & Hero Language Selector */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3 w-full">
+            <div className="flex flex-wrap items-center gap-2">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.6, delay: 0.1 }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 backdrop-blur-md shadow-xs"
               >
-                <Clock size={11} className="animate-spin duration-[4000ms]" style={{ animationDuration: '6s' }} />
-                <span>Pune Time: {puneTime}</span>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  Active for Opportunities
+                </span>
               </motion.div>
-            )}
-            
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800/90 border border-gray-200/70 dark:border-zinc-700/80 text-gray-700 dark:text-zinc-300 text-[10px] uppercase font-bold tracking-wider shadow-sm">
-              <MapPin size={11} className="text-primary" />
-              <span>Pune, Maharashtra, India</span>
-            </span>
+
+              {puneTime && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/25 backdrop-blur-sm text-primary text-[10px] uppercase font-black tracking-wider shadow-xs"
+                >
+                  <Clock size={11} className="animate-spin duration-[4000ms]" style={{ animationDuration: '6s' }} />
+                  <span>Pune Time: {puneTime}</span>
+                </motion.div>
+              )}
+              
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800/90 border border-gray-200/70 dark:border-zinc-700/80 text-gray-700 dark:text-zinc-300 text-[10px] uppercase font-bold tracking-wider shadow-xs">
+                <MapPin size={11} className="text-primary" />
+                <span>Pune, India</span>
+              </span>
+            </div>
+
+            {/* Language Change Option in Hero Section */}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="inline-flex items-center gap-1 p-1 bg-white/95 dark:bg-zinc-900/95 border border-gray-200 dark:border-zinc-800 rounded-xl shadow-xs backdrop-blur-sm"
+              title="Change website language / भाषा निवडा"
+            >
+              <button
+                onClick={() => setIsLangModalOpen(true)}
+                className="flex items-center gap-1.5 px-2 py-1 text-gray-700 dark:text-gray-300 hover:text-primary transition-colors cursor-pointer"
+                title="Select language"
+                aria-label="Open language modal"
+              >
+                <Globe size={13} className="text-primary" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                  {language === 'mr' ? 'भाषा:' : language === 'hi' ? 'भाषा:' : 'Language:'}
+                </span>
+              </button>
+              <div className="flex items-center gap-1">
+                {[
+                  { code: 'en', label: 'English', short: 'EN' },
+                  { code: 'mr', label: 'मराठी', short: 'मराठी' },
+                  { code: 'hi', label: 'हिंदी', short: 'हिंदी' },
+                ].map((item) => (
+                  <button
+                    key={item.code}
+                    onClick={() => setLanguage(item.code as any)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black transition-all cursor-pointer ${
+                      language === item.code
+                        ? 'bg-primary text-white shadow-xs scale-102'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800'
+                    }`}
+                    title={`Switch to ${item.label}`}
+                  >
+                    {item.short}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
           </div>
 
           <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-3xl xl:text-4xl font-black mb-2 leading-tight tracking-tight text-gray-900 dark:text-white">
@@ -426,6 +471,11 @@ export const Hero = () => {
           />
         </div>
       </motion.div>
+
+      <LanguageModal 
+        isOpen={isLangModalOpen} 
+        onClose={() => setIsLangModalOpen(false)} 
+      />
     </section>
   );
 };
