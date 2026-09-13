@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../AuthContext';
 import { uploadImageToStorage, STORAGE_FOLDERS, StorageFolder } from '../../utils/imageUpload';
+import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from '../../utils/imageUrlHelper';
 import { CricketMatchBanner } from './CricketImageFallback';
 
 export interface SliderImageDoc {
@@ -585,9 +586,16 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
                   <div className="flex gap-2">
                     <input
                       type="url"
-                      placeholder="Paste Image URL (https://...)"
+                      placeholder="Paste Image URL or Drive Link (https://...)"
                       value={formData.imageUrl}
-                      onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, imageUrl: normalizeImageUrl(e.target.value) })}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData('text');
+                        if (pasted) {
+                          e.preventDefault();
+                          setFormData({ ...formData, imageUrl: normalizeImageUrl(pasted) });
+                        }
+                      }}
                       className="flex-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-2.5 text-xs font-semibold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/30"
                     />
 
@@ -609,6 +617,12 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
                       <span>{uploadingImage ? `Uploading (${uploadProgress}%)...` : 'Upload File'}</span>
                     </button>
                   </div>
+
+                  {isGoogleDriveUrl(formData.imageUrl) && (
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                      <Check size={12} /> Google Drive link auto-converted to direct image stream
+                    </p>
+                  )}
 
                   {uploadingImage && (
                     <div className="space-y-1">

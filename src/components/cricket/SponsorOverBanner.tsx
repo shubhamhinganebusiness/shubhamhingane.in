@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Phone, ExternalLink } from 'lucide-react';
 import { LocalCricketSponsor, getLocalSponsors, subscribeToSponsors } from '../../utils/cricketSponsorsStorage';
+import { normalizeImageUrl, handleSmartImageError } from '../../utils/imageUrlHelper';
 
 interface SponsorOverBannerProps {
   overNumber?: number;
@@ -83,12 +84,11 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
             Sponsor
           </span>
           <img
-            src={sponsor.logoUrl}
+            src={normalizeImageUrl(sponsor.logoUrl)}
             alt={sponsor.name}
+            referrerPolicy="no-referrer"
             className="w-5 h-5 rounded-md object-cover shrink-0"
-            onError={(e) => {
-              (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
-            }}
+            onError={(e) => handleSmartImageError(e, sponsor.logoUrl, 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80')}
           />
           <span className="font-extrabold text-slate-800 dark:text-white truncate">
             {sponsor.name}
@@ -113,23 +113,21 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
     return (
       <div className={`rounded-2xl overflow-hidden border border-amber-300/60 dark:border-amber-700/40 relative group ${className}`}>
         <img
-          src={sponsor.bannerUrl}
+          src={normalizeImageUrl(sponsor.bannerUrl)}
           alt={sponsor.name}
+          referrerPolicy="no-referrer"
           className="w-full h-28 sm:h-36 object-cover"
-          onError={(e) => {
-            (e.target as any).src = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
-          }}
+          onError={(e) => handleSmartImageError(e, sponsor.bannerUrl, 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80')}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex flex-col justify-end p-3.5 text-white">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <img
-                src={sponsor.logoUrl}
+                src={normalizeImageUrl(sponsor.logoUrl)}
                 alt={sponsor.name}
+                referrerPolicy="no-referrer"
                 className="w-8 h-8 rounded-lg object-cover border border-white/20 shrink-0"
-                onError={(e) => {
-                  (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
-                }}
+                onError={(e) => handleSmartImageError(e, sponsor.logoUrl, 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80')}
               />
               <div className="min-w-0">
                 <span className="text-[9px] font-black uppercase tracking-wider text-amber-300">
@@ -162,12 +160,11 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <img
-            src={sponsor.logoUrl}
+            src={normalizeImageUrl(sponsor.logoUrl)}
             alt={sponsor.name}
+            referrerPolicy="no-referrer"
             className="w-10 h-10 rounded-xl object-cover border border-amber-200 dark:border-amber-800 shadow-sm shrink-0"
-            onError={(e) => {
-              (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
-            }}
+            onError={(e) => handleSmartImageError(e, sponsor.logoUrl, 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80')}
           />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">

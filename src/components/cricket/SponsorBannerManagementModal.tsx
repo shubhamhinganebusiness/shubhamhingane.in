@@ -13,6 +13,11 @@ import {
   subscribeToSponsors
 } from '../../utils/cricketSponsorsStorage';
 import { uploadImageToStorage, STORAGE_FOLDERS } from '../../utils/imageUpload';
+import { 
+  normalizeImageUrl, 
+  isGoogleDriveUrl, 
+  handleSmartImageError 
+} from '../../utils/imageUrlHelper';
 
 interface SponsorBannerManagementModalProps {
   isOpen: boolean;
@@ -100,13 +105,14 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
     if (!file) return;
 
     setUploadingLogo(true);
-    setUploadProgress(15);
+    setUploadProgress(20);
     try {
       const uploadResult = await uploadImageToStorage(file, {
         folder: STORAGE_FOLDERS.ADS,
         cropSquare: true,
         maxWidth: 400,
         maxHeight: 400,
+        fallbackToBase64: true,
         onProgress: (progress) => {
           setUploadProgress(progress);
         }
@@ -115,7 +121,18 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
         setLogoUrl(uploadResult.url);
       }
     } catch (err: any) {
-      alert('Failed to upload logo: ' + (err?.message || 'Error'));
+      console.warn('[Logo Upload] Primary upload route failed, falling back to direct FileReader:', err);
+      try {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (typeof ev.target?.result === 'string') {
+            setLogoUrl(ev.target.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      } catch (fErr: any) {
+        alert('Failed to process image: ' + (err?.message || 'Error'));
+      }
     } finally {
       setUploadingLogo(false);
       setUploadProgress(0);
@@ -128,12 +145,13 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
     if (!file) return;
 
     setUploadingBanner(true);
-    setUploadProgress(15);
+    setUploadProgress(20);
     try {
       const uploadResult = await uploadImageToStorage(file, {
         folder: STORAGE_FOLDERS.ADS,
         maxWidth: 1280,
         maxHeight: 720,
+        fallbackToBase64: true,
         onProgress: (progress) => {
           setUploadProgress(progress);
         }
@@ -142,7 +160,18 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
         setBannerUrl(uploadResult.url);
       }
     } catch (err: any) {
-      alert('Failed to upload banner: ' + (err?.message || 'Error'));
+      console.warn('[Banner Upload] Primary upload route failed, falling back to direct FileReader:', err);
+      try {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (typeof ev.target?.result === 'string') {
+            setBannerUrl(ev.target.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      } catch (fErr: any) {
+        alert('Failed to process banner: ' + (err?.message || 'Error'));
+      }
     } finally {
       setUploadingBanner(false);
       setUploadProgress(0);
@@ -154,6 +183,9 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
     e.preventDefault();
     if (!name.trim()) return;
 
+    const normalizedLogo = normalizeImageUrl(logoUrl.trim()) || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
+    const normalizedBanner = normalizeImageUrl(bannerUrl.trim()) || normalizedLogo || 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
+
     const sponsorObj: LocalCricketSponsor = {
       id: editingId || `sponsor_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: name.trim(),
@@ -162,8 +194,8 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
       tagline: tagline.trim(),
       phone: phone.trim(),
       website: website.trim(),
-      logoUrl: logoUrl.trim() || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80',
-      bannerUrl: bannerUrl.trim() || logoUrl.trim() || 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80',
+      logoUrl: normalizedLogo,
+      bannerUrl: normalizedBanner,
       displayOnOverBreakdown,
       displayOnLiveStream,
       displayOnScorecardPdf,
@@ -352,12 +384,11 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                       <div className="w-16 h-16 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-900 shrink-0 relative flex items-center justify-center">
                         {logoUrl ? (
                           <img
-                            src={logoUrl}
+                            src={normalizeImageUrl(logoUrl)}
                             alt="Logo preview"
+                            referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
-                            }}
+                            onError={(e) => handleSmartImageError(e, logoUrl, 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80')}
                           />
                         ) : (
                           <ImageIcon size={20} className="text-slate-400" />
@@ -368,9 +399,16 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                         <div className="flex gap-2">
                           <input
                             type="text"
-                            placeholder="Logo URL (https://...)"
+                            placeholder="Logo URL or Drive Link (https://...)"
                             value={logoUrl}
-                            onChange={(e) => setLogoUrl(e.target.value)}
+                            onChange={(e) => setLogoUrl(normalizeImageUrl(e.target.value))}
+                            onPaste={(e) => {
+                              const pastedText = e.clipboardData.getData('text');
+                              if (pastedText) {
+                                e.preventDefault();
+                                setLogoUrl(normalizeImageUrl(pastedText));
+                              }
+                            }}
                             className="flex-1 px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white"
                           />
                           <input
@@ -384,15 +422,21 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                             type="button"
                             onClick={() => logoInputRef.current?.click()}
                             disabled={uploadingLogo}
-                            className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all"
+                            className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all shadow-sm"
                           >
                             <Upload size={13} />
                             <span>{uploadingLogo ? `${uploadProgress}%` : 'Upload'}</span>
                           </button>
                         </div>
-                        <p className="text-[10px] text-slate-400">
-                          Recommended: 1:1 square image (PNG/JPG/WebP)
-                        </p>
+                        {isGoogleDriveUrl(logoUrl) ? (
+                          <p className="text-[9.5px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                            <Check size={11} /> Google Drive link auto-converted to direct image
+                          </p>
+                        ) : (
+                          <p className="text-[10px] text-slate-400">
+                            Upload from device or paste Google Drive / web image link
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -408,12 +452,11 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                       <div className="h-16 w-full rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-900 relative flex items-center justify-center">
                         {bannerUrl ? (
                           <img
-                            src={bannerUrl}
+                            src={normalizeImageUrl(bannerUrl)}
                             alt="Banner preview"
+                            referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (e.target as any).src = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
-                            }}
+                            onError={(e) => handleSmartImageError(e, bannerUrl, 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80')}
                           />
                         ) : (
                           <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
@@ -426,9 +469,16 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          placeholder="Banner Image URL (https://...)"
+                          placeholder="Banner URL or Drive Link (https://...)"
                           value={bannerUrl}
-                          onChange={(e) => setBannerUrl(e.target.value)}
+                          onChange={(e) => setBannerUrl(normalizeImageUrl(e.target.value))}
+                          onPaste={(e) => {
+                            const pastedText = e.clipboardData.getData('text');
+                            if (pastedText) {
+                              e.preventDefault();
+                              setBannerUrl(normalizeImageUrl(pastedText));
+                            }
+                          }}
                           className="flex-1 px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white"
                         />
                         <input
@@ -442,12 +492,21 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                           type="button"
                           onClick={() => bannerInputRef.current?.click()}
                           disabled={uploadingBanner}
-                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all"
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all shadow-sm"
                         >
                           <Upload size={13} />
                           <span>{uploadingBanner ? `${uploadProgress}%` : 'Upload'}</span>
                         </button>
                       </div>
+                      {isGoogleDriveUrl(bannerUrl) ? (
+                        <p className="text-[9.5px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                          <Check size={11} /> Google Drive banner converted to direct stream
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-slate-400">
+                          Upload 16:9 banner from device or paste Google Drive sharing URL
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -532,12 +591,11 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                           {/* Logo Avatar */}
                           <div className="relative shrink-0">
                             <img
-                              src={sponsor.logoUrl}
+                              src={normalizeImageUrl(sponsor.logoUrl)}
                               alt={sponsor.name}
+                              referrerPolicy="no-referrer"
                               className="w-14 h-14 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
-                              onError={(e) => {
-                                (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
-                              }}
+                              onError={(e) => handleSmartImageError(e, sponsor.logoUrl, 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80')}
                             />
                             <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded text-[7.5px] font-black uppercase bg-slate-900 text-white shadow-xs">
                               LOGO
@@ -548,12 +606,11 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                           {sponsor.bannerUrl && (
                             <div className="relative shrink-0 hidden md:block">
                               <img
-                                src={sponsor.bannerUrl}
+                                src={normalizeImageUrl(sponsor.bannerUrl)}
                                 alt={`${sponsor.name} banner`}
+                                referrerPolicy="no-referrer"
                                 className="w-24 h-14 rounded-xl object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
-                                onError={(e) => {
-                                  (e.target as any).src = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
-                                }}
+                                onError={(e) => handleSmartImageError(e, sponsor.bannerUrl, 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80')}
                               />
                               <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded text-[7.5px] font-black uppercase bg-amber-600 text-white shadow-xs">
                                 BANNER

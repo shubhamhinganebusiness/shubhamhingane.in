@@ -194,26 +194,21 @@ export const Navbar = () => {
                       <span className="xl:hidden">LIVE MATCH</span>
                     </Link>
                   )}
-
-                  <button 
-                    onClick={() => setIsHireModalOpen(true)}
-                    aria-label="Hire me or buy my services"
-                    className="bg-primary text-white px-6 py-2 rounded-lg font-bold shadow-lg hover:shadow-primary/30 transition-all duration-300 uppercase text-xs tracking-widest cursor-pointer"
-                  >
-                    {t.nav.hireMe}
-                  </button>
                 </div>
               </div>
             </div>
 
             <div className="md:hidden flex items-center gap-3">
-              <button 
-                onClick={() => setIsHireModalOpen(true)}
-                aria-label="Hire me or buy my services"
-                className="bg-primary text-white px-3.5 py-1.5 rounded-lg font-bold shadow-sm hover:shadow-primary/30 transition-all duration-300 uppercase text-[10px] tracking-wider cursor-pointer"
-              >
-                {t.nav.hireMe}
-              </button>
+              {liveMatch && (
+                <Link
+                  to={`/live/cricket-details?matchId=${liveMatch.id}`}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-600 text-white rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm animate-pulse no-underline"
+                  title="Live match in progress"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping shrink-0" />
+                  <span>LIVE</span>
+                </Link>
+              )}
 
               <button
                 onClick={() => setIsOpen(!isOpen)}
@@ -265,15 +260,6 @@ export const Navbar = () => {
                   </Link>
                 )
               ))}
-              <button 
-                className="w-full text-left px-3 py-4 text-base font-bold text-primary"
-                onClick={() => {
-                  setIsOpen(false);
-                  setIsHireModalOpen(true);
-                }}
-              >
-                 {t.nav.hireMe}
-              </button>
             </div>
           </div>
         )}
