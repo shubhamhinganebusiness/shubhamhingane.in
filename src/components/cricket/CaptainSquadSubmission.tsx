@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, isFirestoreQuotaExhausted } from '../../lib/firebase';
+import { uploadImageToStorage, STORAGE_FOLDERS } from '../../utils/imageUpload';
 
 export interface SquadPlayerItem {
   id: string;
@@ -264,7 +265,7 @@ export const CaptainSquadSubmission: React.FC = () => {
     });
   };
 
-  // Team Logo upload handler
+  // Team Logo upload handler (Sends to Firebase Storage and generates public Download URL)
   const handleTeamLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -275,11 +276,20 @@ export const CaptainSquadSubmission: React.FC = () => {
     }
 
     try {
-      const compressedUrl = await compressImageFile(file, 300, 0.85);
-      setTeamLogo(compressedUrl);
-      setFeedbackMsg({ text: 'Team logo uploaded successfully!', type: 'success' });
-    } catch {
-      setFeedbackMsg({ text: 'Failed to process team logo image.', type: 'error' });
+      setFeedbackMsg({ text: 'Uploading team logo to Firebase Storage...', type: 'info' });
+      const result = await uploadImageToStorage(file, { folder: STORAGE_FOLDERS.TEAMS, maxWidth: 200, quality: 0.85 });
+      setTeamLogo(result.url);
+      setFeedbackMsg({ text: 'Team logo uploaded to Firebase Storage successfully!', type: 'success' });
+    } catch (err: any) {
+      console.warn('Logo upload note:', err);
+      // Local fallback
+      try {
+        const compressedUrl = await compressImageFile(file, 300, 0.85);
+        setTeamLogo(compressedUrl);
+        setFeedbackMsg({ text: 'Team logo saved locally.', type: 'info' });
+      } catch {
+        setFeedbackMsg({ text: 'Failed to process team logo image.', type: 'error' });
+      }
     }
     // Reset file input so same file can be re-selected if needed
     if (teamLogoInputRef.current) teamLogoInputRef.current.value = '';
@@ -368,7 +378,7 @@ export const CaptainSquadSubmission: React.FC = () => {
     });
   };
 
-  // Player photo upload handler
+  // Player photo upload handler (Sends to Firebase Storage and generates public Download URL)
   const handlePlayerPhotoUpload = async (idx: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -379,10 +389,25 @@ export const CaptainSquadSubmission: React.FC = () => {
     }
 
     try {
-      const compressedData = await compressImageFile(file, 240, 0.85);
-      handleUpdatePlayer(idx, 'photo', compressedData);
-    } catch {
-      setFeedbackMsg({ text: 'Failed to process player photo.', type: 'error' });
+      setFeedbackMsg({ text: `Uploading photo for player #${idx + 1} to Firebase Storage...`, type: 'info' });
+      const result = await uploadImageToStorage(file, {
+        folder: STORAGE_FOLDERS.PLAYERS,
+        maxWidth: 200,
+        quality: 0.85,
+        cropSquare: true
+      });
+      handleUpdatePlayer(idx, 'photo', result.url);
+      setFeedbackMsg({ text: `Player #${idx + 1} photo uploaded to Firebase Storage!`, type: 'success' });
+    } catch (err: any) {
+      console.warn('Player photo upload note:', err);
+      // Local fallback
+      try {
+        const compressedData = await compressImageFile(file, 240, 0.85);
+        handleUpdatePlayer(idx, 'photo', compressedData);
+        setFeedbackMsg({ text: `Player #${idx + 1} photo saved locally.`, type: 'info' });
+      } catch {
+        setFeedbackMsg({ text: 'Failed to process player photo.', type: 'error' });
+      }
     }
   };
 

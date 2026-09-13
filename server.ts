@@ -5,6 +5,20 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
 
+// Lazy loading for sharp to prevent any startup crash if native bindings have issues
+let sharpInstance: any = null;
+async function getSharp() {
+  if (sharpInstance) return sharpInstance;
+  try {
+    const mod = await import("sharp");
+    sharpInstance = mod.default || mod;
+    return sharpInstance;
+  } catch (err) {
+    console.warn("[Server] sharp native module not available or failed to load, falling back to raw buffer:", err);
+    return null;
+  }
+}
+
 dotenv.config();
 
 // Lazy instance variables for server-side SEO database operations
@@ -262,6 +276,252 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Cricbuzz-grade Image Upload Architecture Endpoint:
+  // 1. Organizes into logical Firebase Storage folders:
+  //    - players/ (player profile photos, e.g. players/player_id_123.webp)
+  //    - matches/ (match and tournament banners, e.g. matches/match_id_789.webp)
+  //    - ads/ (advertisement and sponsor banners, e.g. ads/sponsor_ad_01.webp)
+  //    - teams/ (team logos and club emblems)
+  // 2. Sharp Image Optimization:
+  //    - Resizes players to 200x200 square crop, compressing 5MB photos down to ~15KB
+  //    - Resizes banners to 1280x720 (16:9 standard)
+  // 3. Google Cloud CDN Caching:
+  //    - Sets cache-control headers (public, max-age=31536000, immutable) for repeat-user speed
+  app.post("/api/upload-image", async (req, res) => {
+    try {
+      const {
+        image,
+        folder = "uploads",
+        filename,
+        mimeType,
+        entityId,
+        maxWidth,
+        maxHeight,
+        quality,
+        cropSquare
+      } = req.body || {};
+
+      if (!image || typeof image !== "string") {
+        return res.status(400).json({ error: "Image data (base64 or data URL) is required." });
+      }
+
+      // Parse base64 or data URL
+      let inputBuffer: Buffer;
+      let inputContentType = mimeType || "image/jpeg";
+      if (image.startsWith("data:")) {
+        const match = image.match(/^data:([a-zA-Z0-9/+-]+);base64,(.+)$/);
+        if (match) {
+          inputContentType = match[1];
+          inputBuffer = Buffer.from(match[2], "base64");
+        } else {
+          return res.status(400).json({ error: "Invalid data URL format." });
+        }
+      } else {
+        inputBuffer = Buffer.from(image, "base64");
+      }
+
+      // 25MB upper boundary safeguard
+      if (inputBuffer.length > 25 * 1024 * 1024) {
+        return res.status(413).json({ error: "Image exceeds 25MB limit." });
+      }
+
+      // 1. Logical Cricbuzz-standard Folder Classification
+      let cleanFolder = folder.replace(/^\/+|\/+$/g, "").toLowerCase();
+      // Normalize synonyms to standard folders
+      if (cleanFolder.includes("player") || cleanFolder === "squad_players") {
+        cleanFolder = "players";
+      } else if (cleanFolder.includes("match") || cleanFolder === "spectator_banners") {
+        cleanFolder = "matches";
+      } else if (cleanFolder.includes("ad") || cleanFolder.includes("sponsor")) {
+        cleanFolder = "ads";
+      } else if (cleanFolder.includes("team")) {
+        cleanFolder = "teams";
+      }
+
+      // 2. Sharp Image Optimization & High-Performance Compression
+      let outputBuffer = inputBuffer;
+      let outputContentType = inputContentType;
+      let outputExt = "webp";
+
+      try {
+        const isSvg = inputContentType === "image/svg+xml" || (filename && filename.endsWith(".svg"));
+        const isGif = inputContentType === "image/gif" || (filename && filename.endsWith(".gif"));
+
+        if (!isSvg && !isGif) {
+          const sharp = await getSharp();
+          if (sharp) {
+            const sharpImg = sharp(inputBuffer).rotate(); // auto-orient via EXIF
+
+            if (cleanFolder === "players" || cropSquare) {
+            // Cricbuzz Player Portrait standard:
+            // 200x200 pixels square crop focused on upper face (prevents 5MB phone photos lagging UI)
+            const targetDim = maxWidth && maxWidth <= 400 ? maxWidth : 200;
+            outputBuffer = await sharpImg
+              .resize(targetDim, targetDim, {
+                fit: "cover",
+                position: "top" // Focus on upper body / headshot
+              })
+              .webp({ quality: quality || 82, effort: 4 })
+              .toBuffer();
+            outputContentType = "image/webp";
+            outputExt = "webp";
+          } else if (cleanFolder === "teams") {
+            // Team Logo standard: 200x200 contain with alpha transparency
+            const targetDim = maxWidth && maxWidth <= 400 ? maxWidth : 200;
+            outputBuffer = await sharpImg
+              .resize(targetDim, targetDim, {
+                fit: "contain",
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+              })
+              .webp({ quality: quality || 85, effort: 4 })
+              .toBuffer();
+            outputContentType = "image/webp";
+            outputExt = "webp";
+          } else if (cleanFolder === "matches" || cleanFolder === "ads") {
+            // Match & Ad Banner standard: 1280x720 (16:9)
+            const targetW = maxWidth || 1280;
+            const targetH = maxHeight || 720;
+            outputBuffer = await sharpImg
+              .resize(targetW, targetH, {
+                fit: "inside",
+                withoutEnlargement: true
+              })
+              .webp({ quality: quality || 85, effort: 4 })
+              .toBuffer();
+            outputContentType = "image/webp";
+            outputExt = "webp";
+          } else {
+            // General site asset resize
+            const targetW = maxWidth || 1200;
+            const targetH = maxHeight || 1200;
+            outputBuffer = await sharpImg
+              .resize(targetW, targetH, {
+                fit: "inside",
+                withoutEnlargement: true
+              })
+              .webp({ quality: quality || 82 })
+              .toBuffer();
+            outputContentType = "image/webp";
+            outputExt = "webp";
+          }
+        }
+      }
+      } catch (sharpError) {
+        console.warn("[Upload Route] Sharp image processing note, using original buffer:", sharpError);
+        outputBuffer = inputBuffer;
+      }
+
+      // 3. Structured File Naming (e.g. players/player_id_123.webp, matches/match_id_789.webp)
+      const timestamp = Date.now();
+      let safeName = "";
+      if (entityId) {
+        const sanitizedId = entityId.replace(/[^a-zA-Z0-9_-]/g, "_");
+        safeName = `${sanitizedId}.${outputExt}`;
+      } else if (cleanFolder === "players") {
+        safeName = `player_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder === "matches") {
+        safeName = `match_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder === "ads") {
+        safeName = `sponsor_ad_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder === "teams") {
+        safeName = `team_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (filename) {
+        safeName = `${filename.replace(/[^a-zA-Z0-9_-]/g, "_")}.${outputExt}`;
+      } else {
+        safeName = `img_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      }
+
+      const storagePath = `${cleanFolder}/${safeName}`;
+
+      // 4. Upload to Firebase Storage with Google Cloud CDN Cache Headers
+      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+          const bucket = config.storageBucket;
+          if (bucket) {
+            // Upload binary to Firebase Storage
+            const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(storagePath)}`;
+            const uploadRes = await fetch(uploadUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": outputContentType,
+                ...(config.apiKey ? { "x-goog-api-key": config.apiKey } : {})
+              },
+              body: outputBuffer
+            });
+
+            if (uploadRes.ok) {
+              const resJson: any = await uploadRes.json();
+              const token = resJson.downloadTokens || (resJson.metadata && resJson.metadata.firebaseStorageDownloadTokens) || "";
+              
+              // Set Cache-Control metadata on Firebase Storage / Google Cloud CDN
+              try {
+                const patchUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}`;
+                await fetch(patchUrl, {
+                  method: "PATCH",
+                  headers: {
+                    "Content-Type": "application/json",
+                    ...(config.apiKey ? { "x-goog-api-key": config.apiKey } : {})
+                  },
+                  body: JSON.stringify({
+                    cacheControl: "public, max-age=31536000, immutable",
+                    contentType: outputContentType,
+                    metadata: {
+                      firebaseStorageDownloadTokens: token,
+                      optimizedBy: "sharp",
+                      folder: cleanFolder
+                    }
+                  })
+                });
+              } catch (metaErr) {
+                console.warn("[Upload Route] CDN cache metadata patch note:", metaErr);
+              }
+
+              const publicUrl = token
+                ? `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${token}`
+                : `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media`;
+
+              return res.json({
+                success: true,
+                url: publicUrl,
+                path: storagePath,
+                size: outputBuffer.length,
+                originalSize: inputBuffer.length,
+                contentType: outputContentType,
+                name: safeName,
+                folder: cleanFolder,
+                cacheControl: "public, max-age=31536000, immutable"
+              });
+            } else {
+              const errText = await uploadRes.text();
+              console.warn("[Upload Route] Firebase Storage REST note:", errText);
+            }
+          }
+        } catch (storageErr) {
+          console.warn("[Upload Route] Storage upload attempt note:", storageErr);
+        }
+      }
+
+      // Safe fallback data URL if bucket is unreachable
+      const fallbackDataUrl = `data:${outputContentType};base64,${outputBuffer.toString("base64")}`;
+      return res.json({
+        success: true,
+        url: fallbackDataUrl,
+        path: `local-base64/${storagePath}`,
+        size: outputBuffer.length,
+        originalSize: inputBuffer.length,
+        contentType: outputContentType,
+        name: safeName,
+        folder: cleanFolder,
+        isBase64Fallback: true
+      });
+    } catch (error: any) {
+      console.error("[Upload Route] Error processing upload:", error);
+      res.status(500).json({ error: error.message || "Failed to upload image." });
+    }
+  });
+
   // Cricket deleted matches persistence & cross-device synchronization
   const DELETED_MATCHES_FILE = path.join(process.cwd(), "cricket-deleted-matches.json");
   function loadDeletedMatchIds(): string[] {
@@ -454,7 +714,40 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
     }
   }
 
-  return clone;
+  // Strip player photos from squad rosters safely
+  if (Array.isArray(clone.teamASquad)) {
+    clone.teamASquad = clone.teamASquad.map((p: any) => {
+      if (p && typeof p === "object" && p.photo && typeof p.photo === "string" && p.photo.length > 20000) {
+        const { photo, ...rest } = p;
+        return rest;
+      }
+      return p;
+    });
+  }
+  if (Array.isArray(clone.teamBSquad)) {
+    clone.teamBSquad = clone.teamBSquad.map((p: any) => {
+      if (p && typeof p === "object" && p.photo && typeof p.photo === "string" && p.photo.length > 20000) {
+        const { photo, ...rest } = p;
+        return rest;
+      }
+      return p;
+    });
+  }
+
+  return cleanServerUndefined(clone);
+}
+
+function cleanServerUndefined(obj: any): any {
+  if (obj === undefined) return null;
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(cleanServerUndefined);
+  const result: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) {
+      result[k] = cleanServerUndefined(v);
+    }
+  }
+  return result;
 }
 
   // Set Active Match endpoint (switches match to 'live' and retires previous matches to 'completed')
@@ -598,6 +891,82 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
     } catch (err: any) {
       console.error("[Cricket API] Error completing match:", err);
       res.status(500).json({ error: err.message || "Failed to complete match" });
+    }
+  });
+
+  // Resilient server-side cricket match save endpoint
+  // Provides low-latency server-to-database write proxy when client WebChannel is congested or times out
+  app.post("/api/cricket/save-match", async (req, res) => {
+    try {
+      const { matchId, matchData } = req.body || {};
+      if (!matchId || typeof matchId !== "string") {
+        return res.status(400).json({ error: "matchId string is required" });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, setDoc } = await import("firebase/firestore");
+      const matchDocRef = doc(db, "cricket_matches", matchId);
+      
+      const cleaned = cleanServerUndefined(matchData || {});
+      const prunedPayload = pruneServerMatchPayload(cleaned, 800000);
+      prunedPayload.updatedAt = Date.now();
+
+      try {
+        await setDoc(matchDocRef, prunedPayload, { merge: true });
+      } catch (writeErr: any) {
+        console.warn("[Cricket API] Initial setDoc failed, retrying with deep prune:", writeErr?.message || writeErr);
+        const deepPruned = pruneServerMatchPayload(cleaned, 400000);
+        deepPruned.updatedAt = Date.now();
+        await setDoc(matchDocRef, deepPruned, { merge: true });
+      }
+
+      return res.json({ success: true, matchId, savedAt: Date.now() });
+    } catch (err: any) {
+      console.error("[Cricket API] Error saving match on server:", err);
+      res.status(500).json({ error: err.message || "Failed to save match on server" });
+    }
+  });
+
+  // Generic server-side document save endpoint for cricket collections
+  app.post("/api/cricket/save-doc", async (req, res) => {
+    try {
+      const { collectionName, docId, data, options } = req.body || {};
+      if (!collectionName || !docId) {
+        return res.status(400).json({ error: "collectionName and docId are required" });
+      }
+
+      // Allowed cricket collections
+      const allowedCollections = [
+        "cricket_matches", 
+        "cricket_tournaments", 
+        "cricket_teams", 
+        "cricket_players", 
+        "cricket_sponsors", 
+        "cricket_live_summaries", 
+        "score_managers"
+      ];
+      if (!allowedCollections.includes(collectionName)) {
+        return res.status(403).json({ error: `Collection ${collectionName} not authorized for proxy write` });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, setDoc } = await import("firebase/firestore");
+      const targetDocRef = doc(db, collectionName, docId);
+      const cleaned = cleanServerUndefined(data || {});
+
+      await setDoc(targetDocRef, cleaned, options || { merge: true });
+      return res.json({ success: true, collectionName, docId, savedAt: Date.now() });
+    } catch (err: any) {
+      console.error("[Cricket API] Error saving document via proxy:", err);
+      res.status(500).json({ error: err.message || "Failed to save document on server" });
     }
   });
 

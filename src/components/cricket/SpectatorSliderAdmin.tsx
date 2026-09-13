@@ -11,6 +11,8 @@ import {
   query, orderBy, serverTimestamp, updateDoc 
 } from 'firebase/firestore';
 import { useAuth } from '../AuthContext';
+import { uploadImageToStorage, STORAGE_FOLDERS, StorageFolder } from '../../utils/imageUpload';
+import { CricketMatchBanner } from './CricketImageFallback';
 
 export interface SliderImageDoc {
   id: string;
@@ -18,6 +20,7 @@ export interface SliderImageDoc {
   title: string;
   order: number;
   isActive: boolean;
+  folder?: string;
   createdAt?: any;
   updatedAt?: any;
   createdBy?: string;
@@ -59,9 +62,11 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
     imageUrl: '',
     title: '',
     order: 0,
-    isActive: true
+    isActive: true,
+    folder: STORAGE_FOLDERS.MATCHES as string
   });
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Live test preview state
@@ -86,6 +91,7 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
           title: data.title || '',
           order: typeof data.order === 'number' ? data.order : 0,
           isActive: data.isActive !== false,
+          folder: data.folder || STORAGE_FOLDERS.MATCHES,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
           createdBy: data.createdBy
@@ -107,7 +113,8 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
       imageUrl: '',
       title: '',
       order: images.length,
-      isActive: true
+      isActive: true,
+      folder: STORAGE_FOLDERS.MATCHES
     });
     setIsFormOpen(true);
   };
@@ -118,13 +125,14 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
       imageUrl: item.imageUrl,
       title: item.title,
       order: item.order,
-      isActive: item.isActive
+      isActive: item.isActive,
+      folder: item.folder || STORAGE_FOLDERS.MATCHES
     });
     setIsFormOpen(true);
   };
 
-  // Convert uploaded image file to lightweight, 16:9 optimized data URL
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload banner image to Firebase Storage and save download URL
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -134,51 +142,67 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
     }
 
     setUploadingImage(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const src = event.target?.result;
-      if (typeof src !== 'string') {
-        setUploadingImage(false);
-        return;
-      }
-
-      const img = new Image();
-      img.onload = () => {
-        try {
-          // Standard 16:9 canvas scaling (max 1280x720 for crisp quality)
-          let maxWidth = 1280;
-          let maxHeight = 720;
-          let { width, height } = img;
-
-          if (width > maxWidth || height > maxHeight) {
-            const ratio = Math.min(maxWidth / width, maxHeight / height);
-            width = Math.round(width * ratio);
-            height = Math.round(height * ratio);
-          }
-
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.max(1, width);
-          canvas.height = Math.max(1, height);
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-            const optimizedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
-            setFormData((prev) => ({ ...prev, imageUrl: optimizedDataUrl }));
-          }
-        } catch (canvasErr) {
-          console.warn('Canvas optimization fallback to original:', canvasErr);
-          setFormData((prev) => ({ ...prev, imageUrl: src }));
-        } finally {
+    setUploadProgress(0);
+    try {
+      const targetFolder = formData.folder === STORAGE_FOLDERS.ADS ? STORAGE_FOLDERS.ADS : STORAGE_FOLDERS.MATCHES;
+      const result = await uploadImageToStorage(file, {
+        folder: targetFolder,
+        maxWidth: 1280,
+        quality: 0.85,
+        onProgress: (pct) => setUploadProgress(pct)
+      });
+      setFormData((prev) => ({ ...prev, imageUrl: result.url }));
+    } catch (err: any) {
+      console.warn('Storage banner upload note, falling back to local canvas:', err);
+      // Standard 16:9 canvas scaling fallback
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const src = event.target?.result;
+        if (typeof src !== 'string') {
           setUploadingImage(false);
+          return;
         }
+
+        const img = new Image();
+        img.onload = () => {
+          try {
+            let maxWidth = 1280;
+            let maxHeight = 720;
+            let { width, height } = img;
+
+            if (width > maxWidth || height > maxHeight) {
+              const ratio = Math.min(maxWidth / width, maxHeight / height);
+              width = Math.round(width * ratio);
+              height = Math.round(height * ratio);
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, width);
+            canvas.height = Math.max(1, height);
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              const optimizedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              setFormData((prev) => ({ ...prev, imageUrl: optimizedDataUrl }));
+            }
+          } catch (canvasErr) {
+            console.warn('Canvas optimization fallback to original:', canvasErr);
+            setFormData((prev) => ({ ...prev, imageUrl: src }));
+          } finally {
+            setUploadingImage(false);
+          }
+        };
+        img.onerror = () => {
+          setUploadingImage(false);
+          alert('Failed to process image.');
+        };
+        img.src = src;
       };
-      img.onerror = () => {
-        setUploadingImage(false);
-        alert('Failed to process image.');
-      };
-      img.src = src;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+      return;
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -204,6 +228,7 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
         title: formData.title.trim(),
         order: Number(formData.order) || 0,
         isActive: Boolean(formData.isActive),
+        folder: formData.folder || STORAGE_FOLDERS.MATCHES,
         updatedAt: new Date().toISOString(),
         createdBy: user?.email || 'super_admin'
       };
@@ -511,6 +536,46 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
               </div>
 
               <form onSubmit={handleSave} className="space-y-4">
+                {/* Storage Folder Category Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
+                    Storage Category & Folder
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, folder: STORAGE_FOLDERS.MATCHES })}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 cursor-pointer ${
+                        formData.folder === STORAGE_FOLDERS.MATCHES
+                          ? 'bg-emerald-500/10 border-emerald-500 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      <span className="text-sm">🏏</span>
+                      <div>
+                        <div className="font-bold">Match Banner</div>
+                        <div className="text-[10px] font-mono opacity-70">matches/</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, folder: STORAGE_FOLDERS.ADS })}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 cursor-pointer ${
+                        formData.folder === STORAGE_FOLDERS.ADS
+                          ? 'bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      <span className="text-sm">📢</span>
+                      <div>
+                        <div className="font-bold">Sponsor / Ad</div>
+                        <div className="text-[10px] font-mono opacity-70">ads/</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Image Selection Tabs / Inputs */}
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
@@ -541,17 +606,38 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
                       className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition-all border border-slate-200 dark:border-slate-700 cursor-pointer flex items-center gap-1.5 shrink-0"
                     >
                       <Upload size={14} />
-                      <span>{uploadingImage ? 'Optimizing...' : 'Upload File'}</span>
+                      <span>{uploadingImage ? `Uploading (${uploadProgress}%)...` : 'Upload File'}</span>
                     </button>
                   </div>
+
+                  {uploadingImage && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                        <span>Uploading to Firebase Storage ({formData.folder}/) with CDN Cache...</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <div className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 transition-all duration-200"
+                          style={{ width: `${uploadProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* 16:9 Live Preview Box */}
-                {formData.imageUrl ? (
-                  <div className="space-y-1.5">
+                {/* 16:9 Live Preview Box with Cricbuzz Fallback */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
                     <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">
-                      Live 16:9 Preview
+                      Live 16:9 Banner Preview
                     </span>
+                    <span className="text-[10px] font-mono text-emerald-500 font-semibold">
+                      {formData.imageUrl ? '✓ Custom Banner' : 'Cricbuzz Stadium Fallback'}
+                    </span>
+                  </div>
+
+                  {formData.imageUrl ? (
                     <div className="w-full aspect-[16/9] max-h-[220px] bg-slate-950 rounded-2xl overflow-hidden relative border border-slate-200 dark:border-slate-800 flex items-center justify-center">
                       <div
                         className="absolute inset-0 bg-cover bg-center blur-md opacity-30 scale-105 pointer-events-none"
@@ -568,13 +654,15 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
                         16:9 Frame
                       </span>
                     </div>
-                  </div>
-                ) : (
-                  <div className="w-full aspect-[16/9] max-h-[140px] border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col items-center justify-center text-slate-400 space-y-1">
-                    <ImageIcon size={24} />
-                    <span className="text-[11px] font-medium">Image preview will show here in 16:9 ratio</span>
-                  </div>
-                )}
+                  ) : (
+                    <CricketMatchBanner
+                      title={formData.title || 'Live Cricket Match Broadcast'}
+                      subtitle="Upload an image to replace this Cricbuzz stadium fallback"
+                      aspectRatio="16:9"
+                      className="max-h-[220px]"
+                    />
+                  )}
+                </div>
 
                 {/* Title */}
                 <div className="space-y-1">

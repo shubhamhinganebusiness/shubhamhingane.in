@@ -1,4 +1,5 @@
 import { MatchState } from './CricketScoreboard';
+export type { MatchState };
 
 const ACTIVE_MATCH_KEY = 'cricket_active_match';
 const LOCAL_REGISTRY_KEY = 'cricket_matches_local_registry';

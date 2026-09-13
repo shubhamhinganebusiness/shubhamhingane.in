@@ -7,6 +7,7 @@ import {
   Briefcase, Camera, Eye, EyeOff, Share2, 
   Settings as SettingsIcon, Type, ChevronRight, Edit3, X, Mail
 } from 'lucide-react';
+import { uploadImageToStorage } from '../utils/imageUpload';
 
 export const SiteManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -145,46 +146,58 @@ export const SiteManagement: React.FC = () => {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, callback: (url: string) => void) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-        const max_size = 800; // Optimize dimension for web/cards so they load instantly
+    try {
+      setStatus({ type: 'success', msg: 'Uploading image to Firebase Cloud Storage...' });
+      const result = await uploadImageToStorage(file, {
+        folder: 'site_assets',
+        maxWidth: 1200,
+        quality: 0.85
+      });
+      callback(result.url);
+      setStatus({ type: 'success', msg: 'Image uploaded to Firebase Storage and ready to save!' });
+      setTimeout(() => setStatus(null), 3000);
+    } catch (uploadErr) {
+      console.warn('Storage upload note, falling back to local canvas:', uploadErr);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const max_size = 800; // Optimize dimension for web/cards
 
-        if (width > height) {
-          if (width > max_size) {
-            height *= max_size / width;
-            width = max_size;
+          if (width > height) {
+            if (width > max_size) {
+              height *= max_size / width;
+              width = max_size;
+            }
+          } else {
+            if (height > max_size) {
+              width *= max_size / height;
+              height = max_size;
+            }
           }
-        } else {
-          if (height > max_size) {
-            width *= max_size / height;
-            height = max_size;
-          }
-        }
 
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          // Convert to compressed jpeg which is incredibly small and safe for Firestore limit (usually ~40KB)
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          callback(dataUrl);
-        } else {
-          callback(event.target?.result as string);
-        }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            callback(dataUrl);
+          } else {
+            callback(event.target?.result as string);
+          }
+        };
+        img.src = event.target?.result as string;
       };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleUpdateSettings = async (e?: React.FormEvent) => {

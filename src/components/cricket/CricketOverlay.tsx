@@ -79,8 +79,35 @@ interface Innings {
   history?: BallProgress[];
 }
 
+export type BroadcastTheme =
+  | 'broadcast-pro'
+  | 'ipl-style'
+  | 'cricheroes-dark'
+  | 'neon-sport'
+  | 'clean-white'
+  | 'retro-gold'
+  | 'carbon-modern';
+
+export type BroadcastLayout =
+  | 'ribbon-full'
+  | 'slanted-pro-design'
+  | 'docked-corner'
+  | 'mobile-vertical'
+  | 'minimal-pill'
+  | 'score-bug-1900-200';
+
+export type BugPosition = 'bottom-full' | 'bottom-left' | 'bottom-right' | 'bottom-center' | 'top-full' | 'mobile-vertical';
+
 interface OverlayConfig {
-  template: 'broadcast-pro' | 'neon-sport' | 'clean-white' | 'ipl-style' | 'score-bug-1900-200' | 'slanted-pro-design';
+  template: 'broadcast-pro' | 'neon-sport' | 'clean-white' | 'ipl-style' | 'score-bug-1900-200' | 'slanted-pro-design' | string;
+  theme?: BroadcastTheme | string;
+  layout?: BroadcastLayout | string;
+  bugPosition?: BugPosition | string;
+  showBallByBallDots?: boolean;
+  showStrikeRates?: boolean;
+  showWinProbability?: boolean;
+  showSponsorBadge?: boolean;
+  sponsorText?: string;
   showStatsPanel: boolean;
   showTicker: boolean;
   tickerMessage: string;
@@ -254,8 +281,10 @@ export const CricketOverlay: React.FC = () => {
   const [newBatterAlert, setNewBatterAlert] = useState<string | null>(null);
   const [newBowlerAlert, setNewBowlerAlert] = useState<string | null>(null);
 
-  // Synchronous visual alerts (SIX, FOUR, WICKET)
-  const [activeAlert, setActiveAlert] = useState<'six' | 'four' | 'wicket' | null>(null);
+  // Synchronous visual alerts (SIX, FOUR, WICKET, STINGERS)
+  const [activeAlert, setActiveAlert] = useState<string | null>(null);
+  const [activeAlertMeta, setActiveAlertMeta] = useState<any>(undefined);
+  const [showStingerBar, setShowStingerBar] = useState<boolean>(false);
   const [showDemoControls, setShowDemoControls] = useState<boolean>(true);
   const [wicketTriggerAlert, setWicketTriggerAlert] = useState<boolean>(false);
 
@@ -301,6 +330,14 @@ export const CricketOverlay: React.FC = () => {
   const activeConfig = useMemo<Required<Omit<OverlayConfig, 'manualAlertTrigger'>> & { manualAlertTrigger?: OverlayConfig['manualAlertTrigger'] }>(() => {
     const fallback: Required<Omit<OverlayConfig, 'manualAlertTrigger'>> & { manualAlertTrigger?: OverlayConfig['manualAlertTrigger'] } = {
       template: 'slanted-pro-design',
+      theme: 'broadcast-pro',
+      layout: 'slanted-pro-design',
+      bugPosition: 'bottom-full',
+      showBallByBallDots: true,
+      showStrikeRates: true,
+      showWinProbability: true,
+      showSponsorBadge: true,
+      sponsorText: 'GULLY PREMIER LEAGUE',
       showStatsPanel: true,
       showTicker: true,
       tickerMessage: 'LIVE BROADCAST REPLAY STREAMING',
@@ -331,6 +368,22 @@ export const CricketOverlay: React.FC = () => {
     if (!match || !match.overlayConfig) return fallback;
     return {
       template: match.overlayConfig.template || fallback.template,
+      theme: match.overlayConfig.theme || (
+        ['broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern'].includes(match.overlayConfig.template as string)
+          ? match.overlayConfig.template
+          : fallback.theme
+      ),
+      layout: match.overlayConfig.layout || (
+        ['slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(match.overlayConfig.template as string)
+          ? match.overlayConfig.template
+          : fallback.layout
+      ),
+      bugPosition: match.overlayConfig.bugPosition || fallback.bugPosition,
+      showBallByBallDots: match.overlayConfig.showBallByBallDots !== false,
+      showStrikeRates: match.overlayConfig.showStrikeRates !== false,
+      showWinProbability: match.overlayConfig.showWinProbability !== false,
+      showSponsorBadge: match.overlayConfig.showSponsorBadge !== false,
+      sponsorText: match.overlayConfig.sponsorText || fallback.sponsorText,
       showStatsPanel: match.overlayConfig.showStatsPanel !== false,
       showTicker: match.overlayConfig.showTicker !== false,
       tickerMessage: match.overlayConfig.tickerMessage || fallback.tickerMessage,
@@ -673,6 +726,7 @@ export const CricketOverlay: React.FC = () => {
     if (activeConfig.manualAlertTrigger && activeConfig.manualAlertTrigger.timestamp > lastProcessedAlertRef.current) {
       lastProcessedAlertRef.current = activeConfig.manualAlertTrigger.timestamp;
       setActiveAlert(activeConfig.manualAlertTrigger.type);
+      setActiveAlertMeta((activeConfig.manualAlertTrigger as any).meta);
     }
   }, [activeConfig.manualAlertTrigger]);
 
@@ -1316,55 +1370,125 @@ export const CricketOverlay: React.FC = () => {
     );
   }
 
+  // Active Broadcast Theme & Layout Resolution
+  const activeTheme = (activeConfig.theme || (
+    ['broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern'].includes(activeConfig.template)
+      ? activeConfig.template
+      : 'broadcast-pro'
+  )) as BroadcastTheme;
+
+  const activeLayout = (activeConfig.layout || (
+    ['slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(activeConfig.template)
+      ? activeConfig.template
+      : 'ribbon-full'
+  )) as BroadcastLayout;
+
   // Active Template Style configs mapper
-  const isNeon = activeConfig.template === 'neon-sport';
-  const isWhite = activeConfig.template === 'clean-white';
-  const isIpl = activeConfig.template === 'ipl-style';
-  const isPro = activeConfig.template === 'broadcast-pro';
+  const isNeon = activeTheme === 'neon-sport';
+  const isWhite = activeTheme === 'clean-white';
+  const isIpl = activeTheme === 'ipl-style';
+  const isPro = activeTheme === 'broadcast-pro';
+  const isCricHeroes = activeTheme === 'cricheroes-dark';
+  const isRetro = activeTheme === 'retro-gold';
+  const isCarbon = activeTheme === 'carbon-modern';
 
   let themeColors = {
-    cardBg: 'bg-slate-950/90 border-slate-800/80 text-white backdrop-blur-xl',
-    accentText: 'text-amber-500',
-    accentBg: 'bg-amber-500',
+    cardBg: 'bg-slate-950/92 border-slate-800/80 text-white backdrop-blur-xl shadow-2xl',
+    ribbonBg: 'bg-slate-950/95 border-slate-800/80 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)]',
+    accentText: 'text-amber-400 font-bold',
+    accentBg: 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950',
     titleText: 'text-slate-100 font-black',
-    pillDefault: 'bg-slate-800 border-slate-700 text-slate-300',
-    headerGlow: 'border-l-4 border-amber-500shadow-[0_4px_30px_rgba(0,0,0,0.5)]',
+    pillDefault: 'bg-slate-900 border-slate-700/60 text-slate-300',
+    pillActive: 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-bold',
+    headerGlow: 'border-l-4 border-amber-500 shadow-[0_4px_30px_rgba(0,0,0,0.5)]',
     tickerBg: 'bg-slate-900/95 border-t border-slate-800/30 text-slate-300',
-    subCard: 'bg-slate-900/80 border-slate-800/40'
+    subCard: 'bg-slate-900/80 border-slate-800/40',
+    borderAccent: 'border-amber-500/40'
   };
 
   if (isNeon) {
     themeColors = {
-      cardBg: 'bg-neutral-950/95 border-emerald-500/20 text-white shadow-[0_0_25px_rgba(16,185,129,0.15)]',
-      accentText: 'text-emerald-400',
-      accentBg: 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]',
+      cardBg: 'bg-black/96 border-fuchsia-500/30 text-white shadow-[0_0_30px_rgba(217,70,239,0.25)] backdrop-blur-2xl',
+      ribbonBg: 'bg-black/95 border-fuchsia-500/40 text-white shadow-[0_0_35px_rgba(217,70,239,0.3)] backdrop-blur-2xl',
+      accentText: 'text-lime-400 font-black drop-shadow-[0_0_8px_rgba(163,230,53,0.7)]',
+      accentBg: 'bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white font-black shadow-[0_0_15px_rgba(217,70,239,0.5)]',
       titleText: 'text-white font-extrabold',
-      pillDefault: 'bg-neutral-900 border-emerald-500/10 text-emerald-400',
-      headerGlow: 'border-l-4 border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.1)]',
-      tickerBg: 'bg-neutral-900/95 border-emerald-500/10 text-slate-300',
-      subCard: 'bg-neutral-900/90 border-neutral-800/50'
+      pillDefault: 'bg-neutral-900 border-fuchsia-500/20 text-fuchsia-300',
+      pillActive: 'bg-lime-500/20 border-lime-400/60 text-lime-300 font-black shadow-[0_0_10px_rgba(163,230,53,0.4)]',
+      headerGlow: 'border-l-4 border-fuchsia-400 shadow-[0_0_30px_rgba(217,70,239,0.2)]',
+      tickerBg: 'bg-neutral-950/95 border-fuchsia-500/20 text-fuchsia-200',
+      subCard: 'bg-neutral-900/90 border-neutral-800/60',
+      borderAccent: 'border-fuchsia-500/50'
     };
   } else if (isWhite) {
     themeColors = {
-      cardBg: 'bg-white border-slate-200/80 text-slate-900 shadow-xl',
-      accentText: 'text-rose-600',
-      accentBg: 'bg-rose-600 shadow-md',
+      cardBg: 'bg-white/95 border-slate-200/90 text-slate-900 shadow-2xl backdrop-blur-xl',
+      ribbonBg: 'bg-white/95 border-slate-200/90 text-slate-900 shadow-[0_20px_50px_rgba(0,0,0,0.2)] backdrop-blur-xl',
+      accentText: 'text-blue-700 font-extrabold',
+      accentBg: 'bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-md font-black',
       titleText: 'text-slate-900 font-extrabold',
-      pillDefault: 'bg-slate-100 border-slate-250 text-slate-700',
-      headerGlow: 'border-l-4 border-rose-600 shadow-sm',
-      tickerBg: 'bg-slate-50 border-t border-slate-200 text-slate-600',
-      subCard: 'bg-slate-50 border-slate-150'
+      pillDefault: 'bg-slate-100 border-slate-300 text-slate-700',
+      pillActive: 'bg-blue-50 border-blue-500/40 text-blue-800 font-black',
+      headerGlow: 'border-l-4 border-blue-600 shadow-sm',
+      tickerBg: 'bg-slate-50 border-t border-slate-200 text-slate-700 font-medium',
+      subCard: 'bg-slate-50/90 border-slate-200',
+      borderAccent: 'border-blue-600/40'
     };
   } else if (isIpl) {
     themeColors = {
-      cardBg: 'bg-gradient-to-br from-indigo-950/95 via-purple-950/95 to-slate-950/90 border-purple-500/30 text-white shadow-[0_0_35px_rgba(168,85,247,0.25)]',
-      accentText: 'text-purple-400',
-      accentBg: 'bg-gradient-to-r from-purple-500 to-pink-500',
+      cardBg: 'bg-gradient-to-r from-[#0a1128]/95 via-[#1c1440]/95 to-[#0b0e1e]/95 border-amber-400/40 text-white shadow-[0_0_35px_rgba(251,191,36,0.25)] backdrop-blur-2xl',
+      ribbonBg: 'bg-gradient-to-r from-[#0a1128]/98 via-[#1c1440]/98 to-[#0b0e1e]/98 border-amber-400/50 text-white shadow-[0_0_40px_rgba(251,191,36,0.3)] backdrop-blur-2xl',
+      accentText: 'text-amber-300 font-black drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]',
+      accentBg: 'bg-gradient-to-r from-amber-400 via-yellow-500 to-amber-600 text-slate-950 font-black shadow-[0_0_15px_rgba(251,191,36,0.5)]',
       titleText: 'text-white font-black',
-      pillDefault: 'bg-purple-900/40 border-purple-500/20 text-purple-200',
-      headerGlow: 'border-l-4 border-purple-500 shadow-purple-500/30',
-      tickerBg: 'bg-indigo-950/95 border-t border-purple-500/10 text-purple-200',
-      subCard: 'bg-purple-900/20 border-purple-500/10'
+      pillDefault: 'bg-indigo-950/80 border-purple-500/30 text-purple-200',
+      pillActive: 'bg-amber-400/20 border-amber-400/60 text-amber-200 font-black',
+      headerGlow: 'border-l-4 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.35)]',
+      tickerBg: 'bg-indigo-950/95 border-t border-purple-500/20 text-purple-200',
+      subCard: 'bg-purple-950/40 border-purple-500/20',
+      borderAccent: 'border-amber-400/60'
+    };
+  } else if (isCricHeroes) {
+    themeColors = {
+      cardBg: 'bg-[#0d1117]/96 border-cyan-500/40 text-white shadow-[0_20px_50px_rgba(6,182,212,0.15)] backdrop-blur-2xl',
+      ribbonBg: 'bg-[#0d1117]/98 border-cyan-500/40 text-white shadow-[0_20px_50px_rgba(6,182,212,0.2)] backdrop-blur-2xl',
+      accentText: 'text-cyan-400 font-mono font-bold tracking-tight',
+      accentBg: 'bg-gradient-to-r from-cyan-500 to-emerald-500 text-slate-950 font-black shadow-[0_0_15px_rgba(6,182,212,0.4)]',
+      titleText: 'text-white font-black',
+      pillDefault: 'bg-[#161b22] border-cyan-500/20 text-cyan-200',
+      pillActive: 'bg-cyan-500/20 border-cyan-400/60 text-cyan-300 font-bold',
+      headerGlow: 'border-l-4 border-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.25)]',
+      tickerBg: 'bg-[#161b22]/95 border-t border-cyan-500/20 text-cyan-100',
+      subCard: 'bg-[#161b22]/90 border-cyan-500/15',
+      borderAccent: 'border-cyan-500/50'
+    };
+  } else if (isRetro) {
+    themeColors = {
+      cardBg: 'bg-gradient-to-r from-[#211707]/96 via-[#150f05]/96 to-[#211707]/96 border-amber-500/60 text-amber-50 shadow-[0_20px_50px_rgba(217,119,6,0.2)] backdrop-blur-2xl',
+      ribbonBg: 'bg-gradient-to-r from-[#211707]/98 via-[#150f05]/98 to-[#211707]/98 border-amber-500/60 text-amber-50 shadow-[0_20px_50px_rgba(217,119,6,0.25)] backdrop-blur-2xl',
+      accentText: 'text-amber-300 font-serif font-black tracking-wider',
+      accentBg: 'bg-gradient-to-r from-amber-600 to-yellow-600 text-amber-950 font-black shadow-[0_0_15px_rgba(245,158,11,0.3)]',
+      titleText: 'text-amber-100 font-serif font-black',
+      pillDefault: 'bg-[#2a1d0b] border-amber-500/30 text-amber-300',
+      pillActive: 'bg-amber-500/30 border-amber-400/70 text-amber-200 font-black',
+      headerGlow: 'border-l-4 border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.3)]',
+      tickerBg: 'bg-[#1e1507]/95 border-t border-amber-500/30 text-amber-200',
+      subCard: 'bg-[#2a1d0b]/80 border-amber-500/20',
+      borderAccent: 'border-amber-500/60'
+    };
+  } else if (isCarbon) {
+    themeColors = {
+      cardBg: 'bg-[#121417]/96 border-zinc-700/80 text-zinc-100 shadow-[0_20px_50px_rgba(0,0,0,0.9)] backdrop-blur-2xl',
+      ribbonBg: 'bg-[#121417]/98 border-zinc-700/80 text-zinc-100 shadow-[0_20px_50px_rgba(0,0,0,0.95)] backdrop-blur-2xl',
+      accentText: 'text-rose-500 font-mono font-bold',
+      accentBg: 'bg-gradient-to-r from-rose-600 to-red-700 text-white font-black shadow-[0_0_15px_rgba(225,29,72,0.4)]',
+      titleText: 'text-white font-extrabold',
+      pillDefault: 'bg-zinc-900/90 border-zinc-750 text-zinc-300',
+      pillActive: 'bg-rose-500/20 border-rose-500/60 text-rose-300 font-bold',
+      headerGlow: 'border-l-4 border-rose-500 shadow-[0_0_20px_rgba(225,29,72,0.2)]',
+      tickerBg: 'bg-zinc-900/95 border-t border-zinc-750 text-zinc-300',
+      subCard: 'bg-zinc-900/70 border-zinc-800',
+      borderAccent: 'border-rose-500/50'
     };
   }
 
@@ -1844,10 +1968,419 @@ export const CricketOverlay: React.FC = () => {
       </AnimatePresence>
 
       {/* =========================================================================
-          3. MAIN SCORE BUG BLOCK (BOTTOM-LEFT STANDARD BROADCAST POSITION)
+          3A. MODERN EDGE-TO-EDGE BROADCAST LOWER THIRD RIBBON (IPL / T20 WORLD CUP)
           ========================================================================= */}
-      {activeConfig.showScoreBug && activeConfig.template !== 'score-bug-1900-200' && activeConfig.template !== 'slanted-pro-design' && (
-        <div className={`absolute bottom-16 left-16 w-[680px] rounded-[2rem] border overflow-hidden ${themeColors.cardBg} ${themeColors.headerGlow} z-30 shadow-2xl`}>
+      {activeConfig.showScoreBug && activeLayout === 'ribbon-full' && (
+        <div 
+          id="modern-broadcast-ribbon"
+          className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-6' : 'bottom-6'} left-1/2 -translate-x-1/2 w-[98%] max-w-[1900px] h-[82px] select-none font-sans z-30 flex items-stretch rounded-2xl border ${themeColors.borderAccent || 'border-white/10'} ${themeColors.ribbonBg || themeColors.cardBg} overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.85)]`}
+        >
+          {/* Boundary Flash Strip */}
+          {lastBdryFlash === '4' && (
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-sky-400 animate-pulse z-50 shadow-[0_0_12px_rgba(56,189,248,0.8)]" />
+          )}
+          {lastBdryFlash === '6' && (
+            <div className="absolute inset-x-0 top-0 h-1.5 bg-amber-400 animate-pulse z-50 shadow-[0_0_14px_rgba(251,191,36,0.9)]" />
+          )}
+
+          {/* SECTION 1: LIVE STATUS & BATTING TEAM SCORE */}
+          <div className="w-[23%] shrink-0 px-4 flex items-center gap-3 border-r border-white/10 bg-black/25">
+            {/* Pulsing Live indicator */}
+            <div className="flex flex-col items-center justify-center shrink-0">
+              {match?.status === 'live' ? (
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-600/90 text-white font-black text-[9px] shadow-[0_0_10px_rgba(220,38,38,0.5)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                  <span>LIVE</span>
+                </div>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-bold text-[8px] uppercase">
+                  {match?.status || 'MATCH'}
+                </span>
+              )}
+              <span className="text-[8px] font-mono font-bold text-slate-400 mt-0.5">
+                {inningsNum === 1 ? '1st INN' : '2nd INN'}
+              </span>
+            </div>
+
+            {/* Team Crest / Logo */}
+            {currentInnings.battingTeam === match.teamA && match.teamALogo ? (
+              <img 
+                src={match.teamALogo} 
+                alt={match.teamA} 
+                className="w-11 h-11 rounded-full border border-white/20 object-contain bg-slate-900 shrink-0 shadow-md" 
+                referrerPolicy="no-referrer"
+              />
+            ) : currentInnings.battingTeam === match.teamB && match.teamBLogo ? (
+              <img 
+                src={match.teamBLogo} 
+                alt={match.teamB} 
+                className="w-11 h-11 rounded-full border border-white/20 object-contain bg-slate-900 shrink-0 shadow-md" 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white text-base shadow-md border border-white/20 shrink-0 uppercase"
+                style={{ backgroundColor: activeTeamColor }}
+              >
+                {currentInnings.battingTeam.slice(0, 3)}
+              </div>
+            )}
+
+            {/* Team Name + Score + Overs */}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-1">
+                <span className={`text-xs font-black uppercase tracking-wider truncate ${themeColors.titleText}`}>
+                  {currentInnings.battingTeam}
+                </span>
+                <span className="text-[10px] font-mono font-bold text-amber-400 shrink-0">
+                  CRR {calculateCRR}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2 mt-0.5">
+                <span className="text-3xl font-mono font-black tracking-tight text-white drop-shadow">
+                  {currentInnings.runs}/{currentInnings.wickets}
+                </span>
+                <span className="text-xs font-mono font-bold text-slate-300">
+                  ({Math.floor(currentInnings.ballsBowled / 6)}.{currentInnings.ballsBowled % 6}/{match.oversLimit} ov)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 2: BATTERS HUD */}
+          <div className="w-[30%] shrink-0 px-4 flex items-center gap-3 border-r border-white/10 bg-black/10">
+            {/* Striker */}
+            {battingStats?.striker ? (
+              <div className="flex-1 min-w-0 p-1.5 rounded-xl bg-white/5 border border-white/5">
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                    <span className="text-xs font-black text-white uppercase truncate">
+                      {battingStats.striker.name}*
+                    </span>
+                  </div>
+                  {activeConfig.showStrikeRates && (
+                    <span className="text-[8px] font-mono font-bold px-1 rounded bg-amber-400/20 text-amber-300 shrink-0">
+                      SR {battingStats.striker.sr}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between mt-1">
+                  <span className="text-base font-mono font-black text-amber-300">
+                    {battingStats.striker.runs}
+                    <span className="text-[11px] font-normal text-slate-400 ml-1">({battingStats.striker.balls})</span>
+                  </span>
+                  <span className="text-[9px] font-mono text-slate-400">
+                    {battingStats.striker.fours || 0}x4 • {battingStats.striker.sixes || 0}x6
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 text-center text-xs text-slate-500 font-mono">No Batter</div>
+            )}
+
+            {/* Non-Striker */}
+            {battingStats?.nonStriker ? (
+              <div className="flex-1 min-w-0 p-1.5 rounded-xl bg-white/5 border border-white/5">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-bold text-slate-300 uppercase truncate">
+                    {battingStats.nonStriker.name}
+                  </span>
+                  {activeConfig.showStrikeRates && (
+                    <span className="text-[8px] font-mono font-bold px-1 rounded bg-white/10 text-slate-300 shrink-0">
+                      SR {battingStats.nonStriker.sr}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between mt-1">
+                  <span className="text-base font-mono font-black text-slate-200">
+                    {battingStats.nonStriker.runs}
+                    <span className="text-[11px] font-normal text-slate-400 ml-1">({battingStats.nonStriker.balls})</span>
+                  </span>
+                  <span className="text-[9px] font-mono text-slate-400">
+                    {battingStats.nonStriker.fours || 0}x4 • {battingStats.nonStriker.sixes || 0}x6
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 text-center text-xs text-slate-500 font-mono">-</div>
+            )}
+          </div>
+
+          {/* SECTION 3: BOWLER HUD */}
+          <div className="w-[20%] shrink-0 px-4 flex items-center justify-between border-r border-white/10 bg-black/15">
+            {bowlingStats ? (
+              <div className="w-full">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider">
+                    BOWLING
+                  </span>
+                  {activeConfig.showStrikeRates && (
+                    <span className="text-[8.5px] font-mono font-bold text-slate-400">
+                      ECON {bowlingStats.econ}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between mt-0.5">
+                  <span className="text-xs font-black text-white uppercase truncate max-w-[130px]">
+                    {bowlingStats.name}
+                  </span>
+                  <span className="text-base font-mono font-black text-emerald-400">
+                    {bowlingStats.wickets}/{bowlingStats.runs}
+                    <span className="text-[10px] font-mono text-slate-400 ml-1">
+                      ({Math.floor(bowlingStats.balls / 6)}.{bowlingStats.balls % 6})
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <span className="text-xs text-slate-500 font-mono">No Active Bowler</span>
+            )}
+          </div>
+
+          {/* SECTION 4: BALL-BY-BALL DOTS */}
+          {activeConfig.showBallByBallDots && (
+            <div className="w-[15%] shrink-0 px-3 flex flex-col justify-center border-r border-white/10 bg-black/25">
+              <div className="text-[8.5px] font-mono font-black uppercase text-slate-400 mb-1 tracking-wider flex items-center justify-between">
+                <span>THIS OVER</span>
+                <span className="text-slate-500">{currentOverBalls.length}/6</span>
+              </div>
+              <div className="flex items-center gap-1 overflow-hidden">
+                {currentOverBalls.length > 0 ? (
+                  currentOverBalls.slice(0, 6).map((b, idx) => {
+                    const details = getPillDetails(b);
+                    return (
+                      <div
+                        key={b.id || idx}
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-mono font-black border shrink-0 ${details.style}`}
+                        title={details.label}
+                      >
+                        {details.label}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <span className="text-[9px] text-slate-500 font-mono italic">Start of over...</span>
+                )}
+                {currentOverBalls.length < 6 && (
+                  Array.from({ length: 6 - currentOverBalls.length }).map((_, padIdx) => (
+                    <div 
+                      key={`pad-ribbon-${padIdx}`} 
+                      className="w-6 h-6 rounded-full border border-dashed border-white/15 flex items-center justify-center text-[8px] text-slate-600 font-mono shrink-0"
+                    >
+                      •
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 5: EQUATION / PROJECTED & SPONSOR */}
+          <div className="flex-1 px-3 flex flex-col justify-center bg-black/35 min-w-0">
+            {inningsNum === 2 && match.targetRuns ? (
+              <div>
+                <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block">
+                  TARGET {match.targetRuns}
+                </span>
+                <span className="text-[11px] font-mono font-black text-amber-300 block truncate">
+                  NEED {Math.max(0, match.targetRuns - currentInnings.runs)} IN {Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b
+                </span>
+                <span className="text-[8.5px] font-mono text-slate-400 block">
+                  RRR: <span className={`font-bold ${rrrColorClass}`}>{calculateRRR}</span>
+                </span>
+              </div>
+            ) : (
+              <div>
+                <span className="text-[8px] font-mono font-bold text-slate-400 uppercase tracking-widest block">
+                  INNINGS 1
+                </span>
+                <span className="text-[11px] font-mono font-black text-slate-200 block">
+                  PROJECTED: {projectedScore || '-'}
+                </span>
+                <span className="text-[8.5px] font-mono text-slate-400 block">
+                  Overs limit: {match.oversLimit} ov
+                </span>
+              </div>
+            )}
+
+            {activeConfig.showSponsorBadge && (
+              <div className="mt-1 pt-1 border-t border-white/10 text-[7.5px] font-bold text-slate-400 uppercase tracking-widest truncate">
+                🏏 {activeConfig.sponsorText || 'GULLY PREMIER LEAGUE'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          3B. MOBILE VERTICAL 9:16 LIVE STREAMING SCORE CARD (Reels / Shorts / TikTok)
+          ========================================================================= */}
+      {activeConfig.showScoreBug && activeLayout === 'mobile-vertical' && (
+        <div 
+          id="mobile-vertical-scorecard"
+          className="absolute bottom-24 left-1/2 -translate-x-1/2 w-[460px] max-w-[94vw] select-none font-sans z-30 rounded-3xl border border-white/15 bg-slate-950/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.9)] p-4 flex flex-col gap-2.5 overflow-hidden"
+        >
+          {/* Top Row: Live badge + Batting Team + Score + Overs */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-full bg-red-600 text-white font-black text-[9px] flex items-center gap-1 shadow-[0_0_8px_rgba(220,38,38,0.6)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                LIVE
+              </span>
+              <span className="text-sm font-black uppercase text-white tracking-wider">
+                {currentInnings.battingTeam}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-mono font-black text-white">
+                {currentInnings.runs}/{currentInnings.wickets}
+              </span>
+              <span className="text-xs font-mono font-bold text-slate-400">
+                ({Math.floor(currentInnings.ballsBowled / 6)}.{currentInnings.ballsBowled % 6}/{match.oversLimit})
+              </span>
+            </div>
+          </div>
+
+          {/* Equation Banner */}
+          <div className="px-3 py-1 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-[10px] font-mono">
+            {inningsNum === 2 && match.targetRuns ? (
+              <>
+                <span className="font-bold text-slate-400">TGT {match.targetRuns}</span>
+                <span className="font-black text-amber-300">NEED {Math.max(0, match.targetRuns - currentInnings.runs)} IN {Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b</span>
+                <span className="font-bold text-slate-400">RRR {calculateRRR}</span>
+              </>
+            ) : (
+              <>
+                <span className="font-bold text-slate-400">CRR {calculateCRR}</span>
+                <span className="font-black text-white">PROJ {projectedScore || '-'}</span>
+                <span className="font-bold text-slate-400">1st Innings</span>
+              </>
+            )}
+          </div>
+
+          {/* Batters & Bowler Row */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-2 rounded-xl bg-white/5 border border-white/5">
+              <span className="text-[8px] font-mono text-slate-400 block uppercase">STRIKER</span>
+              <span className="text-xs font-black text-amber-300 block truncate">
+                {battingStats?.striker.name || 'Batter'}*
+              </span>
+              <span className="text-sm font-mono font-black text-white">
+                {battingStats?.striker.runs || 0}
+                <span className="text-[10px] font-normal text-slate-400 ml-1">({battingStats?.striker.balls || 0})</span>
+              </span>
+            </div>
+            <div className="p-2 rounded-xl bg-white/5 border border-white/5">
+              <span className="text-[8px] font-mono text-slate-400 block uppercase">NON-STRIKER</span>
+              <span className="text-xs font-bold text-slate-300 block truncate">
+                {battingStats?.nonStriker?.name || '-'}
+              </span>
+              <span className="text-sm font-mono font-black text-slate-300">
+                {battingStats?.nonStriker?.runs || 0}
+                <span className="text-[10px] font-normal text-slate-400 ml-1">({battingStats?.nonStriker?.balls || 0})</span>
+              </span>
+            </div>
+            <div className="p-2 rounded-xl bg-white/5 border border-white/5">
+              <span className="text-[8px] font-mono text-slate-400 block uppercase">BOWLER</span>
+              <span className="text-xs font-black text-emerald-400 block truncate">
+                {bowlingStats?.name || '-'}
+              </span>
+              <span className="text-sm font-mono font-black text-emerald-300">
+                {bowlingStats ? `${bowlingStats.wickets}/${bowlingStats.runs}` : '0/0'}
+              </span>
+            </div>
+          </div>
+
+          {/* Ball by ball dots */}
+          {activeConfig.showBallByBallDots && (
+            <div className="flex items-center justify-between pt-1 border-t border-white/10">
+              <span className="text-[8px] font-mono font-bold text-slate-400 uppercase">THIS OVER:</span>
+              <div className="flex items-center gap-1.5">
+                {currentOverBalls.slice(0, 6).map((b, idx) => {
+                  const details = getPillDetails(b);
+                  return (
+                    <div
+                      key={b.id || idx}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-mono font-black border ${details.style}`}
+                    >
+                      {details.label}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          3C. MINIMAL FLOATING PILL CAPSULE
+          ========================================================================= */}
+      {activeConfig.showScoreBug && activeLayout === 'minimal-pill' && (
+        <div 
+          id="minimal-pill-bug"
+          className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-6' : 'bottom-10'} left-1/2 -translate-x-1/2 rounded-full border ${themeColors.borderAccent || 'border-white/15'} ${themeColors.ribbonBg || themeColors.cardBg} px-6 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.85)] backdrop-blur-2xl flex items-center gap-4 z-30 select-none font-sans`}
+        >
+          {/* Live indicator */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+            <span className="text-[10px] font-black uppercase text-red-400 font-mono">LIVE</span>
+          </div>
+
+          <div className="h-4 w-px bg-white/20" />
+
+          {/* Team & Score */}
+          <div className="flex items-baseline gap-2 shrink-0">
+            <span className="text-sm font-black uppercase text-white tracking-wider">{currentInnings.battingTeam}</span>
+            <span className="text-xl font-mono font-black text-white">
+              {currentInnings.runs}/{currentInnings.wickets}
+            </span>
+            <span className="text-xs font-mono font-bold text-slate-400">
+              ({Math.floor(currentInnings.ballsBowled / 6)}.{currentInnings.ballsBowled % 6})
+            </span>
+          </div>
+
+          <div className="h-4 w-px bg-white/20" />
+
+          {/* Striker */}
+          {battingStats?.striker && (
+            <div className="flex items-baseline gap-1.5 shrink-0">
+              <span className="text-xs font-black text-amber-300 uppercase">{battingStats.striker.name}*</span>
+              <span className="text-xs font-mono font-bold text-white">{battingStats.striker.runs}({battingStats.striker.balls})</span>
+            </div>
+          )}
+
+          <div className="h-4 w-px bg-white/20" />
+
+          {/* Bowler */}
+          {bowlingStats && (
+            <div className="flex items-baseline gap-1.5 shrink-0">
+              <span className="text-xs font-bold text-emerald-400 uppercase">{bowlingStats.name}</span>
+              <span className="text-xs font-mono font-bold text-emerald-300">{bowlingStats.wickets}/{bowlingStats.runs}</span>
+            </div>
+          )}
+
+          {/* Equation or CRR */}
+          <div className="h-4 w-px bg-white/20" />
+          <div className="text-xs font-mono font-black text-amber-400 shrink-0">
+            {inningsNum === 2 && match.targetRuns 
+              ? `Need ${Math.max(0, match.targetRuns - currentInnings.runs)} in ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b`
+              : `CRR ${calculateCRR}`}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          3D. DOCKED CORNER TV SCORE BUG (BOTTOM-LEFT / BOTTOM-RIGHT STANDARD)
+          ========================================================================= */}
+      {activeConfig.showScoreBug && activeLayout === 'docked-corner' && (
+        <div className={`absolute ${
+          activeConfig.bugPosition === 'bottom-right' ? 'bottom-16 right-16' :
+          activeConfig.bugPosition === 'bottom-center' ? 'bottom-16 left-1/2 -translate-x-1/2' :
+          activeConfig.bugPosition === 'top-full' ? 'top-16 left-16' :
+          'bottom-16 left-16'
+        } w-[680px] rounded-[2rem] border overflow-hidden ${themeColors.cardBg} ${themeColors.headerGlow} z-30 shadow-2xl`}>
           
           {/* Dynamic Boundary Flash strip overlay */}
           {lastBdryFlash === '4' && (
@@ -2131,9 +2664,9 @@ export const CricketOverlay: React.FC = () => {
       )}
 
       {/* =========================================================================
-          3B. GIANT CENTERED SCORE BUG (1900px width x 200px height)
+          3E. GIANT CENTERED SCORE BUG (1900px width x 200px height)
           ========================================================================= */}
-      {activeConfig.showScoreBug && activeConfig.template === 'score-bug-1900-200' && (
+      {activeConfig.showScoreBug && activeLayout === 'score-bug-1900-200' && (
         <div 
           className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1900px] h-[200px] rounded-[2rem] border overflow-hidden flex items-stretch shadow-[0_20px_60px_rgba(0,0,0,0.95)] ${themeColors.cardBg}`} 
           style={{ borderColor: activeTeamColor }}
@@ -2364,9 +2897,9 @@ export const CricketOverlay: React.FC = () => {
       )}
 
       {/* =========================================================================
-          3C. CUSTOM SLANTED PRO DESIGN MODE (As requested by the user!)
+          3F. CUSTOM SLANTED PRO DESIGN MODE (As requested by the user!)
           ========================================================================= */}
-      {activeConfig.showScoreBug && activeConfig.template === 'slanted-pro-design' && (
+      {activeConfig.showScoreBug && activeLayout === 'slanted-pro-design' && (
         <div 
           className="absolute bottom-12 left-1/2 -translate-x-1/2 w-[1900px] h-[80px] select-none font-sans z-30"
           id="custom-slanted-pro-bug"
@@ -3077,8 +3610,17 @@ export const CricketOverlay: React.FC = () => {
       </AnimatePresence>
 
       {/* ON-SCREEN HOVER TRANSITIONS TOOLBAR (Convenience bar for TV Directors & OBS Testers) */}
-      <div className="absolute top-2 inset-x-0 flex justify-center z-[60] pointer-events-auto opacity-0 hover:opacity-100 transition-opacity duration-300">
+      <div className="absolute top-2 inset-x-0 flex flex-col items-center gap-1.5 z-[60] pointer-events-auto opacity-0 hover:opacity-100 transition-opacity duration-300">
         <div className="bg-slate-950/90 border border-white/10 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-1.5 text-xs font-mono flex-wrap justify-center">
+          <button
+            onClick={() => setShowStingerBar(prev => !prev)}
+            className={`px-2.5 py-1 rounded-xl font-black uppercase text-[10px] transition-all cursor-pointer flex items-center gap-1 ${
+              showStingerBar ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/30' : 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
+            }`}
+          >
+            <span>⚡</span>
+            <span>Event Stingers ({showStingerBar ? 'Hide' : 'Show'})</span>
+          </button>
           <span className="text-amber-400 font-bold uppercase text-[10px] mr-1">TV Transitions:</span>
           <button
             onClick={() => setActiveGraphic(['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(activeGraphic) ? 'none' : 'individual_stats')}
@@ -3176,16 +3718,66 @@ export const CricketOverlay: React.FC = () => {
             </button>
           )}
         </div>
+
+        {/* Live Event Stingers & Stickers Floating Quick-Bar */}
+        {showStingerBar && (
+          <div className="bg-slate-950/95 border border-rose-500/30 backdrop-blur-2xl px-4 py-2 rounded-2xl shadow-2xl flex items-center gap-1.5 text-xs font-mono flex-wrap justify-center max-w-4xl animate-in fade-in slide-in-from-top-2 duration-200">
+            <span className="text-rose-400 font-black uppercase text-[10px] mr-1">Trigger Stinger:</span>
+            {[
+              { id: 'six', label: '🚀 6 Six', color: 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/30' },
+              { id: 'four', label: '⚡ 4 Four', color: 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/30' },
+              { id: 'bowled', label: '💥 Bowled', color: 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/30' },
+              { id: 'caught', label: '🧤 Caught', color: 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border-orange-500/30' },
+              { id: 'run_out', label: '🎯 Direct Hit', color: 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/30' },
+              { id: 'lbw', label: '🔴 LBW DRS', color: 'bg-red-600/20 hover:bg-red-600/30 text-red-400 border-red-600/30' },
+              { id: 'stumped', label: '⚡ Stumped', color: 'bg-orange-600/20 hover:bg-orange-600/30 text-orange-300 border-orange-600/30' },
+              { id: 'free_hit', label: '🚨 Free Hit', color: 'bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 border-yellow-500/30' },
+              { id: 'hat_trick_ball', label: '⚠️ Hat-Trick Ball', color: 'bg-red-600/20 hover:bg-red-600/30 text-red-300 border-red-600/30' },
+              { id: 'hat_trick', label: '👑 Hat-Trick!', color: 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border-amber-400/30' },
+              { id: 'one_tip_hand', label: '✋ 1-Tip 1-Hand', color: 'bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border-sky-500/30' },
+              { id: 'lost_ball', label: '🏠 Ball in House', color: 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border-orange-500/30' },
+              { id: 'car_hit', label: '🚗 Car Hit (-5)', color: 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/30' },
+              { id: 'fifty', label: '🎖️ 50 Fifty', color: 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/30' },
+              { id: 'hundred', label: '👑 100 Century', color: 'bg-yellow-400/20 hover:bg-yellow-400/30 text-yellow-200 border-yellow-400/30' },
+              { id: 'super_over', label: '⚡ Super Over', color: 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/30' },
+            ].map(stinger => (
+              <button
+                key={stinger.id}
+                onClick={() => {
+                  const currStriker = currentInnings?.batsmen?.[currentInnings.strikerIndex];
+                  const currBowler = currentInnings?.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings?.bowlers?.find(b => b.isCurrent);
+                  setActiveAlert(stinger.id);
+                  setActiveAlertMeta({
+                    batterName: currStriker?.name || 'Striker',
+                    bowlerName: currBowler?.name || 'Bowler',
+                    fielderName: 'Direct Throw',
+                    runs: currStriker?.runs || 52,
+                    balls: currStriker?.balls || 24,
+                    speed: '138 km/h',
+                    distance: '98m'
+                  });
+                }}
+                className={`px-2 py-1 rounded-xl font-bold uppercase text-[9px] border transition-all cursor-pointer ${stinger.color}`}
+              >
+                {stinger.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {renderCustomOverlayImage()}
 
       {/* =========================================================================
-          4B. RICH ANIMATED OVERLAY ALERTS (SIX, FOUR, WICKET)
+          4B. RICH ANIMATED OVERLAY ALERTS & STINGERS (SIX, FOUR, WICKET, DISMISSALS, GULLY RULES)
           ========================================================================= */}
       <CricketOverlayAnimations
         activeAnimation={activeAlert}
-        onAnimationComplete={() => setActiveAlert(null)}
+        metadata={activeAlertMeta}
+        onAnimationComplete={() => {
+          setActiveAlert(null);
+          setActiveAlertMeta(undefined);
+        }}
       />
 
     </div>

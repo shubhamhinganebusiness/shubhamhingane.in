@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Trophy, Medal, Award, Flame, Zap, Shield, Search, BarChart3, TrendingUp, Compass, Users
+  Trophy, Medal, Award, Flame, Zap, Shield, Search, BarChart3, TrendingUp, Compass, Users, Crown, Sparkles
 } from 'lucide-react';
 import { TeamWithRoster, PlayerProfile } from './TournamentVenueScheduler';
+import { CareerPlayerCardModal, PlayerCareerStats } from './CareerPlayerCardModal';
+import { SponsorOverBanner } from './SponsorOverBanner';
 
 interface TournamentMatch {
   id: string;
@@ -58,9 +60,42 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
 }) => {
   const [activeLeaderboardTab, setActiveLeaderboardTab] = useState<'batting' | 'bowling' | 'fielding' | 'profiles' | 'awards'>('batting');
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<string>('');
+  const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<PlayerCareerStats | null>(null);
   
   // Historical & dynamic players stats buffer state
   const [playerStatsList, setPlayerStatsList] = useState<PlayerStats[]>([]);
+
+  const handleOpenPlayerCard = (p: PlayerStats) => {
+    const careerStats: PlayerCareerStats = {
+      name: p.playerName,
+      team: p.teamName,
+      role: p.wickets >= 4 && p.runs >= 40 ? 'All-Rounder' : p.wickets >= 4 ? 'Bowler' : 'Batsman',
+      matches: p.innings || 3,
+      innings: p.innings,
+      runs: p.runs,
+      highestScore: p.highestScore,
+      ballsFaced: p.balls,
+      fours: p.fours,
+      sixes: p.sixes,
+      fifties: p.highestScore >= 50 && p.highestScore < 100 ? 1 : p.highestScore >= 100 ? 2 : 0,
+      hundreds: p.highestScore >= 100 ? 1 : 0,
+      notOuts: Math.max(0, p.innings - 2),
+      ducks: p.runs === 0 && p.innings > 0 ? 1 : 0,
+      goldenDucks: 0,
+      oversBowled: p.overs,
+      runsConceded: p.runsConceded,
+      wickets: p.wickets,
+      maidens: Math.floor(p.overs * 0.1),
+      bestBowling: p.bestBowling,
+      dotBallsBowled: p.dotBalls,
+      deathOversBowled: Math.max(0, Math.floor(p.overs * 0.3)),
+      deathRunsConceded: Math.floor(p.runsConceded * 0.35),
+      catches: p.catches,
+      stumpings: p.stumpings,
+      runOuts: p.runOuts,
+    };
+    setSelectedCareerPlayer(careerStats);
+  };
 
   // Generate simulated stats to populate leaderboards initially, and overlay actual completions
   useEffect(() => {
@@ -242,7 +277,114 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
   ];
 
   return (
-    <div className="space-y-8 text-left text-slate-800 dark:text-slate-100">
+    <div className="space-y-6 text-left text-slate-800 dark:text-slate-100">
+      {/* Official Local Sponsor Banner */}
+      <SponsorOverBanner variant="expanded" />
+
+      {/* Live Orange Cap & Purple Cap Spotlight Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Orange Cap Spotlight */}
+        {sortedBatting[0] && (
+          <div 
+            onClick={() => handleOpenPlayerCard(sortedBatting[0])}
+            className="p-5 rounded-3xl bg-gradient-to-r from-orange-600 via-amber-600 to-yellow-600 text-white shadow-lg relative overflow-hidden cursor-pointer hover:shadow-xl hover:scale-[1.01] transition-all group"
+          >
+            <div className="flex justify-between items-start">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🟠</span>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-white/80 block">Tournament Award</span>
+                  <h3 className="font-black text-base uppercase tracking-wider flex items-center gap-1.5">
+                    Orange Cap Leader <Crown size={16} className="text-yellow-200 animate-bounce" />
+                  </h3>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-black/25 text-[10px] font-black uppercase tracking-wider backdrop-blur-sm">
+                Top Run Scorer
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center font-black text-xl border border-white/30">
+                  {sortedBatting[0].playerName.charAt(0)}
+                </div>
+                <div>
+                  <h4 className="font-black text-lg group-hover:text-yellow-200 transition-colors">
+                    {sortedBatting[0].playerName}
+                  </h4>
+                  <p className="text-xs text-white/80 font-semibold">{sortedBatting[0].teamName}</p>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <span className="text-2xl sm:text-3xl font-black block tracking-tight">{sortedBatting[0].runs}</span>
+                <span className="text-[10px] uppercase font-bold text-white/80 block">
+                  {sortedBatting[0].balls} balls • SR {sortedBatting[0].strikeRate}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-white/15 flex items-center justify-between text-[11px] font-semibold text-white/90">
+              <span>HS: {sortedBatting[0].highestScore} | 4s: {sortedBatting[0].fours} | 6s: {sortedBatting[0].sixes}</span>
+              <span className="text-yellow-200 underline font-bold group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-0.5">
+                View Gully Badges →
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Purple Cap Spotlight */}
+        {sortedBowling[0] && (
+          <div 
+            onClick={() => handleOpenPlayerCard(sortedBowling[0])}
+            className="p-5 rounded-3xl bg-gradient-to-r from-purple-700 via-indigo-700 to-fuchsia-700 text-white shadow-lg relative overflow-hidden cursor-pointer hover:shadow-xl hover:scale-[1.01] transition-all group"
+          >
+            <div className="flex justify-between items-start">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🟣</span>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-white/80 block">Tournament Award</span>
+                  <h3 className="font-black text-base uppercase tracking-wider flex items-center gap-1.5">
+                    Purple Cap Leader <Crown size={16} className="text-fuchsia-200 animate-bounce" />
+                  </h3>
+                </div>
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-black/25 text-[10px] font-black uppercase tracking-wider backdrop-blur-sm">
+                Top Wicket Taker
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center font-black text-xl border border-white/30">
+                  {sortedBowling[0].playerName.charAt(0)}
+                </div>
+                <div>
+                  <h4 className="font-black text-lg group-hover:text-fuchsia-200 transition-colors">
+                    {sortedBowling[0].playerName}
+                  </h4>
+                  <p className="text-xs text-white/80 font-semibold">{sortedBowling[0].teamName}</p>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <span className="text-2xl sm:text-3xl font-black block tracking-tight">{sortedBowling[0].wickets}</span>
+                <span className="text-[10px] uppercase font-bold text-white/80 block">
+                  {sortedBowling[0].overs} ov • Econ {sortedBowling[0].economy}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-white/15 flex items-center justify-between text-[11px] font-semibold text-white/90">
+              <span>Best: {sortedBowling[0].bestBowling} | Dots: {sortedBowling[0].dotBalls} ({sortedBowling[0].dotPercentage}%)</span>
+              <span className="text-fuchsia-200 underline font-bold group-hover:translate-x-0.5 transition-transform inline-flex items-center gap-0.5">
+                View Gully Badges →
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
       
       {/* Tab Navigation header */}
       <div className="bg-slate-50 dark:bg-slate-950 p-1.5 rounded-2xl flex gap-1.5 overflow-x-auto no-scrollbar border border-slate-200/60 dark:border-slate-800/30">
@@ -332,10 +474,17 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
               </thead>
               <tbody>
                 {sortedBatting.map((player, idx) => (
-                  <tr key={player.playerName} className="border-b border-slate-50 dark:border-slate-850 hover:bg-slate-50 dark:hover:bg-slate-950/40">
+                  <tr 
+                    key={player.playerName} 
+                    onClick={() => handleOpenPlayerCard(player)}
+                    className="border-b border-slate-50 dark:border-slate-850 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20 cursor-pointer transition-colors group"
+                    title="Click to view Career Card & Gully Badges"
+                  >
                     <td className="py-3.5 px-3 text-center text-slate-400 font-bold">{idx + 1}</td>
                     <td className="py-3.5 px-3 flex flex-col justify-center">
-                      <span className="font-extrabold text-slate-800 dark:text-white">{player.playerName}</span>
+                      <span className="font-extrabold text-slate-800 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                        {player.playerName}
+                      </span>
                       <span className="text-[9px] text-slate-400 font-bold">{player.teamName}</span>
                     </td>
                     <td className="py-3.5 px-3 text-center text-slate-500">{player.innings}</td>
@@ -384,14 +533,21 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
               </thead>
               <tbody>
                 {sortedBowling.map((player, idx) => (
-                  <tr key={player.playerName} className="border-b border-slate-50 dark:border-slate-850 hover:bg-slate-50 dark:hover:bg-slate-950/40">
+                  <tr 
+                    key={player.playerName} 
+                    onClick={() => handleOpenPlayerCard(player)}
+                    className="border-b border-slate-50 dark:border-slate-850 hover:bg-purple-50/40 dark:hover:bg-purple-950/20 cursor-pointer transition-colors group"
+                    title="Click to view Career Card & Gully Badges"
+                  >
                     <td className="py-3.5 px-3 text-center text-slate-404 font-bold">{idx + 1}</td>
                     <td className="py-3.5 px-3 flex flex-col justify-center">
-                      <span className="font-extrabold text-slate-800 dark:text-white">{player.playerName}</span>
+                      <span className="font-extrabold text-slate-800 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
+                        {player.playerName}
+                      </span>
                       <span className="text-[9px] text-slate-400 font-bold">{player.teamName}</span>
                     </td>
                     <td className="py-3.5 px-3 text-center text-slate-500">{player.overs}</td>
-                    <td className="py-3.5 px-3 text-center text-blue-550 dark:text-blue-400 font-black text-sm">{player.wickets}</td>
+                    <td className="py-3.5 px-3 text-center text-purple-600 dark:text-purple-400 font-black text-sm">{player.wickets}</td>
                     <td className="py-3.5 px-3 text-center text-rose-505 dark:text-rose-455 text-rose-400">{player.runsConceded}</td>
                     <td className="py-3.5 px-3 text-center font-mono text-slate-500 font-extrabold">{player.economy}</td>
                     <td className="py-3.5 px-3 text-center font-mono text-purple-600 dark:text-purple-400">{player.bestBowling}</td>
@@ -749,6 +905,13 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
 
         </div>
       )}
+
+      {/* Career Player Card & Gully Badges Modal */}
+      <CareerPlayerCardModal
+        isOpen={Boolean(selectedCareerPlayer)}
+        onClose={() => setSelectedCareerPlayer(null)}
+        player={selectedCareerPlayer}
+      />
 
     </div>
   );

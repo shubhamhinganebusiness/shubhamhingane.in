@@ -337,6 +337,10 @@
       "schema": "object",
       "description": "Lightweight (<1.5KB) live match summary document for high-scale spectator broadcasting"
     },
+    "/cricket_sponsors/{sponsorId}": {
+      "schema": "object",
+      "description": "Local sponsor banners for over breakdowns, live streams, and scorecard PDFs"
+    },
     "/furniture_stores/{storeId}/products/{productId}": {
       "schema": "FurnitureProduct",
       "description": "Product catalog for a store"

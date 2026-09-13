@@ -184,7 +184,7 @@ const PlayerAvatar: React.FC<{
     );
   }
 
-  // Consistent gradient based on character code
+  // Consistent gradient based on character code with Cricbuzz silhouette
   const charCode = (cleanName.charCodeAt(0) || 0) + (cleanName.charCodeAt(1) || 0);
   const bgGradients = [
     'from-slate-800 to-slate-900 text-amber-300',
@@ -196,8 +196,19 @@ const PlayerAvatar: React.FC<{
   const selectedBg = bgGradients[charCode % bgGradients.length];
 
   return (
-    <div className={`${sizeClasses} rounded-2xl bg-gradient-to-br ${selectedBg} border ${borderColor} shadow-lg flex items-center justify-center font-black tracking-wider shrink-0 select-none`}>
-      <span>{initials}</span>
+    <div className={`${sizeClasses} rounded-2xl bg-gradient-to-br ${selectedBg} border ${borderColor} shadow-lg relative flex items-center justify-center font-black tracking-wider shrink-0 select-none overflow-hidden`}>
+      {/* Subtle cricket batsman silhouette watermark */}
+      <svg
+        viewBox="0 0 64 64"
+        fill="currentColor"
+        className="w-4/5 h-4/5 absolute inset-0 m-auto opacity-15 pointer-events-none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <circle cx="32" cy="14" r="7.5" />
+        <path d="M20 25 C20 22 24 21 32 21 C40 21 44 22 44 25 L41 38 C41 40 38 41 32 41 C26 41 23 40 23 38 Z" />
+        <path d="M14 34 L10 49 C9 53 13 54 15 52 L20 37 Z" />
+      </svg>
+      <span className="relative z-10">{initials}</span>
     </div>
   );
 };

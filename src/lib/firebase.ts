@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from 'firebase/auth';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 import { 
   initializeFirestore, 
   memoryLocalCache,
@@ -51,7 +52,7 @@ if (typeof window !== 'undefined') {
   }, true);
 }
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 
 export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-a0ff377c-7ae5-429e-9263-df2bcb690093';
 
@@ -60,6 +61,14 @@ export const db = initializeFirestore(app, {
   localCache: memoryLocalCache(),
   ignoreUndefinedProperties: true
 }, firestoreDatabaseId);
+
+// Initialize Firebase Storage
+export let storage: FirebaseStorage | null = null;
+try {
+  storage = getStorage(app);
+} catch (err) {
+  console.warn('[Firebase Storage] Initialization note:', err);
+}
 
 // Initialize Firebase Realtime Database (RTDB)
 export let rtdb: Database | null = null;
@@ -389,6 +398,19 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+function cleanUndefined(data: any): any {
+  if (data === undefined) return null;
+  if (data === null || typeof data !== 'object') return data;
+  if (Array.isArray(data)) return data.map(cleanUndefined);
+  const result: Record<string, any> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v !== undefined) {
+      result[k] = cleanUndefined(v);
+    }
+  }
+  return result;
+}
+
 function pruneDocSize(obj: any): any {
   if (!obj || typeof obj !== 'object') return obj;
   try {
@@ -404,10 +426,22 @@ function pruneDocSize(obj: any): any {
       clone.playerPhotos = {};
     }
     if (Array.isArray(clone.teamASquad)) {
-      clone.teamASquad = clone.teamASquad.map((p: any) => (p && typeof p === 'object' && p.photo ? { ...p, photo: undefined } : p));
+      clone.teamASquad = clone.teamASquad.map((p: any) => {
+        if (p && typeof p === 'object' && p.photo) {
+          const { photo, ...rest } = p;
+          return rest;
+        }
+        return p;
+      });
     }
     if (Array.isArray(clone.teamBSquad)) {
-      clone.teamBSquad = clone.teamBSquad.map((p: any) => (p && typeof p === 'object' && p.photo ? { ...p, photo: undefined } : p));
+      clone.teamBSquad = clone.teamBSquad.map((p: any) => {
+        if (p && typeof p === 'object' && p.photo) {
+          const { photo, ...rest } = p;
+          return rest;
+        }
+        return p;
+      });
     }
     if (clone.innings1?.commentaryList && clone.innings1.commentaryList.length > 50) {
       clone.innings1 = { ...clone.innings1, commentaryList: clone.innings1.commentaryList.slice(-50) };
@@ -415,43 +449,144 @@ function pruneDocSize(obj: any): any {
     if (clone.innings2?.commentaryList && clone.innings2.commentaryList.length > 50) {
       clone.innings2 = { ...clone.innings2, commentaryList: clone.innings2.commentaryList.slice(-50) };
     }
-    return clone;
+    return cleanUndefined(clone);
   } catch {
-    return obj;
+    return cleanUndefined(obj);
+  }
+}
+
+function isOversized(data: any): boolean {
+  if (!data || typeof data !== 'object') return false;
+  try {
+    const s = JSON.stringify(data);
+    return s.length > 250000;
+  } catch {
+    return false;
+  }
+}
+
+async function saveMatchViaServerProxy(docId: string, data: any): Promise<boolean> {
+  if (typeof window === 'undefined' || !docId) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const cleaned = cleanUndefined(data);
+    const res = await fetch('/api/cricket/save-match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchId: docId, matchData: cleaned }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function saveDocViaServerProxy(collectionName: string, docId: string, data: any, options?: any): Promise<boolean> {
+  if (typeof window === 'undefined' || !collectionName || !docId) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    const cleaned = cleanUndefined(data);
+    const res = await fetch('/api/cricket/save-doc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collectionName, docId, data: cleaned, options }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    return res.ok;
+  } catch (err) {
+    return false;
   }
 }
 
 /**
- * Safe write wrapper for setDoc that writes reliably with a timeout guard
+ * Safe write wrapper for setDoc that writes reliably with a timeout guard and automatic server fallback
  */
 export async function safeSetDoc(docRef: any, data: any, options?: any) {
+  const cleaned = cleanUndefined(data);
+  const payloadToWrite = isOversized(cleaned) ? pruneDocSize(cleaned) : cleaned;
+  
+  const docPath = docRef?.path || '';
+  const docId = docRef?.id || '';
+  const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
+  const collectionName = docPath.split('/')[0] || '';
+
+  // Quick 3.5s timeout for client write before invoking resilient server proxy
+  const timeoutMs = 3500;
+  let clientTimedOut = false;
+
   try {
-    const writePromise = options !== undefined ? setDoc(docRef, data, options) : setDoc(docRef, data);
+    const writePromise = options !== undefined ? setDoc(docRef, payloadToWrite, options) : setDoc(docRef, payloadToWrite);
     await Promise.race([
       writePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore write timeout')), 9000))
+      new Promise((_, reject) => setTimeout(() => {
+        clientTimedOut = true;
+        reject(new Error('Firestore write timeout'));
+      }, timeoutMs))
     ]);
   } catch (error: any) {
     if (isQuotaError(error)) {
       recordFirestoreQuotaExhaustion(2);
       return;
     }
-    const errMsg = String(error?.message || error || '').toLowerCase();
-    if (errMsg.includes('exceeds the maximum allowed size') || errMsg.includes('1,048,576 bytes') || errMsg.includes('cannot be written because its size')) {
-      console.warn('[Firestore Size Guard] Document size exceeds 1MB limit. Pruning media payloads and retrying...', docRef?.id);
-      try {
-        const pruned = pruneDocSize(data);
-        const retryPromise = options !== undefined ? setDoc(docRef, pruned, options) : setDoc(docRef, pruned);
-        await Promise.race([
-          retryPromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore write timeout')), 9000))
-        ]);
+
+    // If client write encounters a timeout or network latency, invoke fast server proxy
+    if (isCricketMatch && docId) {
+      const serverOk = await saveMatchViaServerProxy(docId, payloadToWrite);
+      if (serverOk) {
         return;
-      } catch (retryErr) {
-        console.warn('[Firestore Size Guard] Write failed after pruning. Maintained in local cache:', retryErr);
+      }
+    } else if (collectionName && docId) {
+      const serverOk = await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options);
+      if (serverOk) {
         return;
       }
     }
+
+    const errMsg = String(error?.message || error || '').toLowerCase();
+    if (
+      errMsg.includes('exceeds the maximum allowed size') || 
+      errMsg.includes('1,048,576 bytes') || 
+      errMsg.includes('cannot be written because its size')
+    ) {
+      console.warn('[Firestore Safe Guard] Retrying with aggressive media pruning for doc:', docId || docPath);
+      try {
+        const pruned = pruneDocSize(payloadToWrite);
+        if (isCricketMatch && docId) {
+          const serverRetryOk = await saveMatchViaServerProxy(docId, pruned);
+          if (serverRetryOk) return;
+        } else if (collectionName && docId) {
+          const serverRetryOk = await saveDocViaServerProxy(collectionName, docId, pruned, options);
+          if (serverRetryOk) return;
+        }
+
+        const retryPromise = options !== undefined ? setDoc(docRef, pruned, options) : setDoc(docRef, pruned);
+        await Promise.race([
+          retryPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore write timeout')), 5000))
+        ]);
+        return;
+      } catch (retryErr) {
+        if (isCricketMatch && docId) {
+          const finalServerOk = await saveMatchViaServerProxy(docId, pruneDocSize(payloadToWrite));
+          if (finalServerOk) return;
+        }
+        console.warn('[Firestore Safe Guard] Write maintained in local/offline cache:', retryErr);
+        return;
+      }
+    }
+
+    // If client timed out, don't throw an unhandled fatal error;
+    // The background WebChannel write will still settle or the local cache has preserved it
+    if (clientTimedOut) {
+      console.info('[Firestore Safe Guard] Client write deferred to background channel for:', docId || docPath);
+      return;
+    }
+
     throw error;
   }
 }
@@ -460,17 +595,28 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
  * Safe write wrapper for updateDoc that writes reliably with a timeout guard
  */
 export async function safeUpdateDoc(docRef: any, ...args: any[]) {
+  const timeoutMs = 20000;
   try {
     const writePromise = (updateDoc as any)(docRef, ...args);
     await Promise.race([
       writePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore update timeout')), 9000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore update timeout')), timeoutMs))
     ]);
   } catch (error: any) {
     if (isQuotaError(error)) {
       recordFirestoreQuotaExhaustion(2);
       return;
     }
+
+    const docPath = docRef?.path || '';
+    const docId = docRef?.id || '';
+    const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
+
+    if (isCricketMatch && docId && args.length === 1 && typeof args[0] === 'object') {
+      const serverOk = await saveMatchViaServerProxy(docId, args[0]);
+      if (serverOk) return;
+    }
+
     const errMsg = String(error?.message || error || '').toLowerCase();
     if (errMsg.includes('not_found') || errMsg.includes('no document to update') || errMsg.includes('not-found')) {
       try {
@@ -494,7 +640,7 @@ export async function safeDeleteDoc(docRef: any) {
     const writePromise = deleteDoc(docRef);
     await Promise.race([
       writePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore delete timeout')), 9000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore delete timeout')), 20000))
     ]);
   } catch (error) {
     if (isQuotaError(error)) {

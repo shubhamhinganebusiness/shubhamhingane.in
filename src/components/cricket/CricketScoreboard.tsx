@@ -88,6 +88,12 @@ import {
 } from './modules/commentaryLanguage';
 import { WinProbabilityCard } from './modules/WinProbabilityCard';
 import { calculateWinProbabilityDetails } from './modules/winProbabilityEngine';
+import { OfflineSyncStatusBadge } from './OfflineSyncStatusBadge';
+import { enqueueMatchBallSave, processOfflineScoringQueue, isNetworkOnline } from '../../utils/offlineScoringQueue';
+import { CareerPlayerCardModal, PlayerCareerStats } from './CareerPlayerCardModal';
+import { LiveTournamentLeaderboardWidget } from './LiveTournamentLeaderboardWidget';
+import { SponsorBannerManagementModal } from './SponsorBannerManagementModal';
+import { SponsorOverBanner } from './SponsorOverBanner';
 
 // Types & Interfaces
 export interface Batsman {
@@ -197,8 +203,9 @@ interface OverlayConfig {
   customBanner?: 'none' | 'four' | 'six' | 'fifty' | 'hundred' | 'drinks' | 'rain' | 'free_hit' | 'out';
   customBannerText?: string;
   manualAlertTrigger?: {
-    type: 'six' | 'four' | 'wicket';
+    type: 'six' | 'four' | 'wicket' | string;
     timestamp: number;
+    meta?: any;
   };
   activeGraphic?: string;
   lowerThirdMode?: 'intro' | 'equation' | 'umpires';
@@ -1408,6 +1415,114 @@ export const CricketScoreboard: React.FC = () => {
   const [editModalWickets, setEditModalWickets] = useState(0);
   const [editModalBallsBowled, setEditModalBallsBowled] = useState(0);
 
+  // Career Player Card, Tournament Leaderboard, and Sponsor Manager modal states
+  const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<PlayerCareerStats | null>(null);
+  const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const [showSponsorModal, setShowSponsorModal] = useState(false);
+
+  const openCareerCardByName = (playerName: string, teamHint?: string) => {
+    if (!playerName) return;
+    const nameTrimmed = playerName.trim().toLowerCase();
+    let runs = 0;
+    let balls = 0;
+    let fours = 0;
+    let sixes = 0;
+    let highest = 0;
+    let inningsCount = 0;
+    let notOuts = 0;
+    let ducks = 0;
+    let goldenDucks = 0;
+
+    let oversBowled = 0;
+    let runsConceded = 0;
+    let wickets = 0;
+    let maidens = 0;
+    let dotBallsBowled = 0;
+    let bestWkts = 0;
+    let bestRuns = 999;
+
+    let catches = 0;
+    let stumpings = 0;
+    let runOuts = 0;
+
+    const inspectInnings = (inn: any) => {
+      if (!inn) return;
+      (inn.batsmen || []).forEach((b: any) => {
+        if (b.name && b.name.trim().toLowerCase() === nameTrimmed) {
+          runs += b.runs || 0;
+          balls += b.balls || 0;
+          fours += b.fours || 0;
+          sixes += b.sixes || 0;
+          if ((b.runs || 0) > highest) highest = b.runs;
+          inningsCount += 1;
+          if (b.isOut) {
+            if ((b.runs || 0) === 0) {
+              ducks += 1;
+              if ((b.balls || 0) <= 1) goldenDucks += 1;
+            }
+          } else {
+            notOuts += 1;
+          }
+        }
+      });
+
+      (inn.bowlers || []).forEach((bw: any) => {
+        if (bw.name && bw.name.trim().toLowerCase() === nameTrimmed) {
+          oversBowled += Number(((bw.ballsBowled || 0) / 6).toFixed(1));
+          runsConceded += bw.runsConceded || 0;
+          wickets += bw.wickets || 0;
+          maidens += bw.maidens || 0;
+          dotBallsBowled += Math.floor((bw.ballsBowled || 0) * 0.45);
+          if ((bw.wickets || 0) > bestWkts) {
+            bestWkts = bw.wickets;
+            bestRuns = bw.runsConceded || 0;
+          }
+        }
+      });
+
+      // Check fielding in dismissal records
+      (inn.batsmen || []).forEach((b: any) => {
+        if (b.fielderName && b.fielderName.trim().toLowerCase() === nameTrimmed) {
+          if (b.outMode === 'Caught') catches += 1;
+          if (b.outMode === 'Stumped') stumpings += 1;
+          if (b.outMode === 'Run Out') runOuts += 1;
+        }
+      });
+    };
+
+    inspectInnings(match.innings1);
+    inspectInnings(match.innings2);
+
+    const stats: PlayerCareerStats = {
+      name: playerName.trim(),
+      team: teamHint || (match.innings1?.battingTeam || match.teamA || 'Gully Club'),
+      role: wickets >= 2 && runs >= 20 ? 'All-Rounder' : wickets >= 2 ? 'Bowler' : 'Batsman',
+      matches: Math.max(1, inningsCount || (oversBowled > 0 ? 1 : 1)),
+      innings: Math.max(1, inningsCount),
+      runs,
+      highestScore: highest,
+      ballsFaced: balls,
+      fours,
+      sixes,
+      fifties: highest >= 50 && highest < 100 ? 1 : 0,
+      hundreds: highest >= 100 ? 1 : 0,
+      notOuts,
+      ducks,
+      goldenDucks,
+      oversBowled,
+      runsConceded,
+      wickets,
+      maidens,
+      bestBowling: bestWkts > 0 ? `${bestWkts}/${bestRuns}` : '0/0',
+      dotBallsBowled,
+      catches,
+      stumpings,
+      runOuts
+    };
+
+    setSelectedCareerPlayer(stats);
+  };
+
   const handleApplyDlsTarget = (revisedTarget: number, revisedOvers: number) => {
     setMatch(prev => {
       const updated = {
@@ -1634,6 +1749,13 @@ export const CricketScoreboard: React.FC = () => {
           }
         }
       }
+
+      // Process IndexedDB offline scoring queue
+      try {
+        await processOfflineScoringQueue();
+      } catch (qErr) {
+        console.warn('[Offline Queue] Processing queued balls error:', qErr);
+      }
     };
 
     window.addEventListener('online', retryOfflineSaves);
@@ -1660,6 +1782,16 @@ export const CricketScoreboard: React.FC = () => {
       const stateToSave = latestStateToSaveRef.current;
       if (!stateToSave || !stateToSave.id || isMatchDeleted(stateToSave.id) || stateToSave.status === 'deleted' || (stateToSave as any).isDeleted) {
         setSaveStatus(null);
+        return;
+      }
+
+      // Check if network is offline -> immediately store in IndexedDB offline queue
+      if (!isNetworkOnline()) {
+        try {
+          await enqueueMatchBallSave(stateToSave);
+          localStorage.setItem('cricket_active_match', JSON.stringify(stateToSave));
+        } catch (e) {}
+        setSaveStatus('saved');
         return;
       }
 
@@ -1712,9 +1844,10 @@ export const CricketScoreboard: React.FC = () => {
             localStorage.removeItem('cricket_matches_offline_pending');
           } catch (e) {}
         } else {
-          console.error('[Autosave] Failed to write to server:', err);
-          // Fallback to localStorage and recover saveStatus
+          console.error('[Autosave] Failed to write to server, queueing to offline storage:', err);
+          // Enqueue to IndexedDB background queue so no ball is ever lost
           try {
+            await enqueueMatchBallSave(stateToSave);
             localStorage.setItem('cricket_matches_offline_pending', JSON.stringify(stateToSave));
             localStorage.setItem('cricket_active_match', JSON.stringify(stateToSave));
           } catch (e) {}
@@ -3477,7 +3610,14 @@ export const CricketScoreboard: React.FC = () => {
           ...(nextMatchState.overlayConfig || {}),
           manualAlertTrigger: {
             type: 'four',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            meta: {
+              batterName: striker.name,
+              bowlerName: bowler.name,
+              speed: `${Math.floor(126 + Math.random() * 20)} km/h`,
+              runs: striker.runs,
+              balls: striker.balls
+            }
           },
           customBanner: 'four',
           customBannerText: '4 Runs! Classy Placement.'
@@ -3493,7 +3633,14 @@ export const CricketScoreboard: React.FC = () => {
           ...(nextMatchState.overlayConfig || {}),
           manualAlertTrigger: {
             type: 'six',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            meta: {
+              batterName: striker.name,
+              bowlerName: bowler.name,
+              distance: `${Math.floor(80 + Math.random() * 32)}m`,
+              runs: striker.runs,
+              balls: striker.balls
+            }
           },
           customBanner: 'six',
           customBannerText: '6 Runs! Out of the park.'
@@ -3569,10 +3716,32 @@ export const CricketScoreboard: React.FC = () => {
           ...(nextMatchState.overlayConfig || {}),
           manualAlertTrigger: {
             type: 'six',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            meta: {
+              batterName: striker.name,
+              bowlerName: bowler.name,
+              distance: `${Math.floor(82 + Math.random() * 30)}m`,
+              runs: striker.runs,
+              balls: striker.balls
+            }
           },
           customBanner: 'six',
           customBannerText: '6 Runs! Out of the park.'
+        };
+      } else {
+        // Auto-trigger animated fullscreen free hit siren alert overlay
+        nextMatchState.overlayConfig = {
+          ...(nextMatchState.overlayConfig || {}),
+          manualAlertTrigger: {
+            type: 'free_hit',
+            timestamp: Date.now(),
+            meta: {
+              bowlerName: bowler.name,
+              batterName: striker.name
+            }
+          },
+          customBanner: 'free_hit',
+          customBannerText: 'FREE HIT! Bowler overstepped.'
         };
       }
 
@@ -3661,7 +3830,15 @@ export const CricketScoreboard: React.FC = () => {
         ...(nextMatchState.overlayConfig || {}),
         manualAlertTrigger: {
           type: 'fifty',
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          meta: {
+            batterName: striker.name,
+            runs: striker.runs,
+            balls: striker.balls,
+            fours: striker.fours,
+            sixes: striker.sixes,
+            strikeRate: striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0'
+          }
         },
         customBanner: 'fifty',
         customBannerText: milestoneSpecial.bannerTitle
@@ -3681,7 +3858,15 @@ export const CricketScoreboard: React.FC = () => {
         ...(nextMatchState.overlayConfig || {}),
         manualAlertTrigger: {
           type: 'hundred',
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          meta: {
+            batterName: striker.name,
+            runs: striker.runs,
+            balls: striker.balls,
+            fours: striker.fours,
+            sixes: striker.sixes,
+            strikeRate: striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0'
+          }
         },
         customBanner: 'hundred',
         customBannerText: milestoneSpecial.bannerTitle
@@ -4332,12 +4517,35 @@ export const CricketScoreboard: React.FC = () => {
     }
 
     if (!isRetiredHurt) {
+      let stingerType = 'wicket';
+      if (hatTrickSpecial) {
+        stingerType = 'hat_trick';
+      } else if (detailedHowOut === 'Bowled') {
+        stingerType = 'bowled';
+      } else if (detailedHowOut === 'Caught') {
+        stingerType = 'caught';
+      } else if (detailedHowOut === 'Run Out') {
+        stingerType = 'run_out';
+      } else if (detailedHowOut === 'LBW') {
+        stingerType = 'lbw';
+      } else if (detailedHowOut === 'Stumped') {
+        stingerType = 'stumped';
+      }
+
       // Auto-trigger animated fullscreen wicket blast overlay
       nextMatchState.overlayConfig = {
         ...(nextMatchState.overlayConfig || {}),
         manualAlertTrigger: {
-          type: 'wicket',
-          timestamp: Date.now()
+          type: stingerType,
+          timestamp: Date.now(),
+          meta: {
+            batterName: dismissedBatter.name,
+            bowlerName: detailedBowler || bowler.name,
+            fielderName: replay.fielderName || '',
+            howOut: detailedHowOut,
+            runs: dismissedBatter.runs,
+            balls: dismissedBatter.balls
+          }
         },
         customBanner: 'out',
         customBannerText: wicketSpecial.bannerTitle
@@ -6551,6 +6759,69 @@ export const CricketScoreboard: React.FC = () => {
     );
   };
 
+  const renderSharedOverlays = () => {
+    return (
+      <>
+        {/* Live Tournament Orange & Purple Cap Leaderboards Modal */}
+        <AnimatePresence>
+          {showLeaderboardModal && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar flex flex-col relative z-10"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-lg">
+                      🏆
+                    </div>
+                    <div>
+                      <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">Tournament Caps & Leaderboard</h3>
+                      <p className="text-[10px] sm:text-[11px] text-slate-400">Live Ball-by-Ball Orange Cap (Runs) & Purple Cap (Wickets)</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowLeaderboardModal(false)}
+                    className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center border-none cursor-pointer text-sm font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="flex-1">
+                  <LiveTournamentLeaderboardWidget
+                    activeMatch={match}
+                    tournamentId={match.tournamentId}
+                    onSelectPlayer={(player) => {
+                      setSelectedCareerPlayer(player);
+                    }}
+                  />
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Career Player Card & Gully Badges Modal */}
+        <CareerPlayerCardModal
+          isOpen={!!selectedCareerPlayer}
+          onClose={() => setSelectedCareerPlayer(null)}
+          player={selectedCareerPlayer}
+        />
+
+        {/* Local Sponsor Banner Management Modal */}
+        <SponsorBannerManagementModal
+          isOpen={showSponsorModal}
+          onClose={() => setShowSponsorModal(false)}
+          matchId={match.id}
+        />
+      </>
+    );
+  };
+
   // early return for live cricket scoreboard scoring pad (100vh viewport constraint)
   const isScoringDisabled = isInningsLocked || match.status === 'completed';
 
@@ -6632,6 +6903,29 @@ export const CricketScoreboard: React.FC = () => {
 
             {match.id && match.status !== 'setup' && (
               <>
+                {/* Offline-First Background Sync Status Badge */}
+                <OfflineSyncStatusBadge className="shrink-0" />
+
+                {/* Live Tournament Orange & Purple Cap Leaderboard */}
+                <button
+                  onClick={() => setShowLeaderboardModal(true)}
+                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500 hover:to-orange-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 shadow-xs"
+                  title="Live Tournament Leaderboards (Orange Cap & Purple Cap)"
+                >
+                  <Trophy size={12} className="text-amber-400" />
+                  <span className="hidden sm:inline">Caps</span>
+                </button>
+
+                {/* Local Match & Over Sponsors Manager */}
+                <button
+                  onClick={() => setShowSponsorModal(true)}
+                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/30 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 shadow-xs"
+                  title="Manage Ground & Live Stream Sponsors"
+                >
+                  <Award size={12} className="text-emerald-400" />
+                  <span className="hidden sm:inline">Sponsors</span>
+                </button>
+
                 <button
                   onClick={handleExportMatchPDF}
                   className="h-8 sm:h-9 px-1.5 sm:px-3 bg-slate-800 hover:bg-slate-750 text-slate-200 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-0.5 transition-all text-white shrink-0"
@@ -7222,6 +7516,14 @@ export const CricketScoreboard: React.FC = () => {
 
                 const activeOverlayConfig = match.overlayConfig || {
                   template: 'broadcast-pro',
+                  theme: 'broadcast-pro',
+                  layout: 'ribbon-full',
+                  bugPosition: 'bottom-full',
+                  showBallByBallDots: true,
+                  showStrikeRates: true,
+                  showWinProbability: false,
+                  showSponsorBadge: true,
+                  sponsorText: 'GULLY PREMIER LEAGUE',
                   showStatsPanel: true,
                   showTicker: true,
                   tickerMessage: 'LIVE BROADCAST PRESENTATION',
@@ -7269,14 +7571,22 @@ export const CricketScoreboard: React.FC = () => {
                   }
                 };
 
-                const triggerManualAlert = (type: 'six' | 'four' | 'wicket') => {
+                const triggerManualAlert = (type: string, meta?: any) => {
                   updateOverlayProp({
                     manualAlertTrigger: {
                       type,
-                      timestamp: Date.now()
+                      timestamp: Date.now(),
+                      meta: meta || {
+                        batterName: match.teamA ? `${match.teamA} Striker` : 'Striker',
+                        bowlerName: match.teamB ? `${match.teamB} Bowler` : 'Bowler',
+                        runs: 50,
+                        balls: 24,
+                        distance: '96m',
+                        speed: '138 km/h'
+                      }
                     }
                   });
-                  showNotification(`Broadcast Alert: ${type.toUpperCase()} animated visual triggered!`, 'success');
+                  showNotification(`Broadcast Stinger: ${type.toUpperCase().replace(/_/g, ' ')} triggered!`, 'success');
                 };
 
                 return (
@@ -7349,29 +7659,153 @@ export const CricketScoreboard: React.FC = () => {
                       {activeControlTab === 'alerts' && (
                         <div className="space-y-3">
                           <div>
-                            <span className="text-[7.5px] font-black text-rose-405 uppercase tracking-widest block mb-1">Instant Fullscreen Blast Overlays</span>
-                            <div className="grid grid-cols-3 gap-1">
-                              <button
-                                onClick={() => triggerManualAlert('four')}
-                                className="py-2 bg-sky-500/5 hover:bg-sky-500/10 border border-sky-550/20 hover:border-sky-500/30 text-sky-400 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
-                              >
-                                <span className="text-xs">🏏</span>
-                                <span>Four</span>
-                              </button>
-                              <button
-                                onClick={() => triggerManualAlert('six')}
-                                className="py-2 bg-amber-500/5 hover:bg-amber-500/10 border border-amber-550/20 hover:border-amber-500/30 text-amber-400 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
-                              >
-                                <span className="text-xs">🔥</span>
-                                <span>Six</span>
-                              </button>
-                              <button
-                                onClick={() => triggerManualAlert('wicket')}
-                                className="py-2 bg-rose-500/5 hover:bg-rose-500/10 border border-rose-550/20 hover:border-rose-500/30 text-rose-400 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all active:scale-95 flex flex-col items-center justify-center gap-0.5"
-                              >
-                                <span className="text-xs">❌</span>
-                                <span>Wicket</span>
-                              </button>
+                            <span className="text-[7.5px] font-black text-rose-405 uppercase tracking-widest block mb-1">Animated Event Stingers & Popups</span>
+                            
+                            {/* Boundaries */}
+                            <div className="space-y-1 mb-2">
+                              <span className="text-[6.5px] font-mono font-bold text-slate-500 uppercase block">Boundaries & Runs</span>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  onClick={() => triggerManualAlert('four', { speed: '136 km/h' })}
+                                  className="py-1.5 px-2 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 text-[8px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>⚡</span>
+                                  <span>Cracking 4</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('six', { distance: '94m' })}
+                                  className="py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-[8px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>🚀</span>
+                                  <span>Maximum 6</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Dismissals */}
+                            <div className="space-y-1 mb-2">
+                              <span className="text-[6.5px] font-mono font-bold text-slate-500 uppercase block">Dismissal Stingers</span>
+                              <div className="grid grid-cols-3 gap-1">
+                                <button
+                                  onClick={() => triggerManualAlert('bowled')}
+                                  className="py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                >
+                                  <span>💥</span>
+                                  <span>Bowled</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('caught')}
+                                  className="py-1.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                >
+                                  <span>🧤</span>
+                                  <span>Caught</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('run_out')}
+                                  className="py-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                >
+                                  <span>🎯</span>
+                                  <span>Direct Hit</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('lbw')}
+                                  className="py-1.5 bg-red-600/10 hover:bg-red-600/20 border border-red-600/30 text-red-400 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                >
+                                  <span>🔴</span>
+                                  <span>LBW DRS</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('stumped')}
+                                  className="py-1.5 bg-orange-600/10 hover:bg-orange-600/20 border border-orange-600/30 text-orange-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                >
+                                  <span>⚡</span>
+                                  <span>Stumped</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('wicket')}
+                                  className="py-1.5 bg-rose-600/10 hover:bg-rose-600/20 border border-rose-600/30 text-rose-400 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                >
+                                  <span>❌</span>
+                                  <span>Out</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* High Tension & Gully Rules */}
+                            <div className="space-y-1 mb-2">
+                              <span className="text-[6.5px] font-mono font-bold text-slate-500 uppercase block">High Tension & Gully Rules</span>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  onClick={() => triggerManualAlert('free_hit')}
+                                  className="py-1.5 px-2 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>🚨</span>
+                                  <span>Free Hit</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('hat_trick_ball')}
+                                  className="py-1.5 px-2 bg-red-600/10 hover:bg-red-600/20 border border-red-600/30 text-red-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>⚠️</span>
+                                  <span>Hat-Trick Ball</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('hat_trick')}
+                                  className="py-1.5 px-2 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/30 text-amber-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>👑</span>
+                                  <span>Hat-Trick!</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('super_over')}
+                                  className="py-1.5 px-2 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>⚡</span>
+                                  <span>Super Over</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('one_tip_hand')}
+                                  className="py-1.5 px-2 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>✋</span>
+                                  <span>1-Tip 1-Hand</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('lost_ball')}
+                                  className="py-1.5 px-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>🏠</span>
+                                  <span>Ball In House</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('car_hit')}
+                                  className="col-span-2 py-1.5 px-2 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>🚗💥</span>
+                                  <span>Direct Car Hit (-5 Runs)</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Milestones */}
+                            <div className="space-y-1">
+                              <span className="text-[6.5px] font-mono font-bold text-slate-500 uppercase block">Player Milestones</span>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  onClick={() => triggerManualAlert('fifty')}
+                                  className="py-1.5 px-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>🎖️</span>
+                                  <span>50 Fifty</span>
+                                </button>
+                                <button
+                                  onClick={() => triggerManualAlert('hundred')}
+                                  className="py-1.5 px-2 bg-yellow-400/10 hover:bg-yellow-400/20 border border-yellow-400/30 text-yellow-300 text-[7.5px] font-black uppercase rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1"
+                                >
+                                  <span>👑</span>
+                                  <span>100 Century</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
 
@@ -7833,30 +8267,160 @@ export const CricketScoreboard: React.FC = () => {
 
                       {/* --- THEME TAB --- */}
                       {activeControlTab === 'templates' && (
-                        <div className="space-y-3">
+                        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                          {/* 1. BROADCAST TV THEMES */}
                           <div>
-                            <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1">Pick Active Theme Template</span>
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
+                              <span>🎨 Broadcast TV Color Theme</span>
+                              <span className="text-amber-400 font-mono text-[7px]">7 STYLES</span>
+                            </span>
                             <div className="grid grid-cols-2 gap-1.5">
                               {[
-                                { id: 'slanted-pro-design', label: '🖼️ Slanted Pro Design' },
-                                { id: 'score-bug-1900-200', label: '🎮 Vintage Retro (1900x200)' }
+                                { id: 'broadcast-pro', label: '📺 Broadcast Pro', desc: 'ESPN Navy & Amber' },
+                                { id: 'ipl-style', label: '🏏 IPL 2025 Purple/Gold', desc: 'Premium Royal League' },
+                                { id: 'cricheroes-dark', label: '⚡ CricHeroes Elite', desc: 'Cyan Tech Dark' },
+                                { id: 'neon-sport', label: '🟢 Neon Cyberpunk', desc: 'Fuchsia & Electric Lime' },
+                                { id: 'clean-white', label: '⚪ Clean Minimal', desc: 'Daylight High-Contrast' },
+                                { id: 'retro-gold', label: '🏆 Classic Gold', desc: 'Heritage Championship' },
+                                { id: 'carbon-modern', label: '🔥 Carbon Modern', desc: 'Matte Black & Crimson' }
                               ].map(t => {
-                                const isThemeActive = activeOverlayConfig.template === t.id || (t.id === 'slanted-pro-design' && !['slanted-pro-design', 'score-bug-1900-200'].includes(activeOverlayConfig.template));
+                                const isCurrent = (activeOverlayConfig.theme || activeOverlayConfig.template) === t.id;
                                 return (
                                   <button
                                     key={t.id}
-                                    onClick={() => updateOverlayProp({ template: t.id as any })}
-                                    className={`py-1 text-[8px] font-extrabold text-left px-2 rounded-lg border cursor-pointer transition-all truncate ${
-                                      isThemeActive
-                                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 font-extrabold'
-                                        : 'bg-slate-950 border-white/5 text-slate-500 hover:text-slate-400'
+                                    onClick={() => updateOverlayProp({ theme: t.id as any, template: t.id as any })}
+                                    className={`p-2 text-left rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                                      isCurrent
+                                        ? 'bg-rose-500/15 border-rose-500/40 text-white shadow-md'
+                                        : 'bg-slate-950/70 border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10'
                                     }`}
                                   >
-                                    {t.label}
+                                    <span className="text-[8.5px] font-black tracking-tight block truncate">{t.label}</span>
+                                    <span className="text-[7px] text-slate-400 opacity-75 truncate block mt-0.5">{t.desc}</span>
                                   </button>
                                 );
                               })}
                             </div>
+                          </div>
+
+                          {/* 2. SCOREBOARD GRAPHIC LAYOUT */}
+                          <div className="pt-2 border-t border-white/5">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
+                              <span>📐 Scoreboard Graphic Layout</span>
+                              <span className="text-rose-400 font-mono text-[7px]">6 DESIGNS</span>
+                            </span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {[
+                                { id: 'ribbon-full', label: '👑 Full Edge Ribbon', desc: 'Modern IPL Lower Third' },
+                                { id: 'slanted-pro-design', label: '📐 Slanted Modern', desc: 'Angled Polygon Panels' },
+                                { id: 'docked-corner', label: '📦 Docked Corner Bug', desc: 'ESPN/Sky Sports Corner Box' },
+                                { id: 'mobile-vertical', label: '📱 9:16 Vertical Live', desc: 'Safe for Reels / TikTok' },
+                                { id: 'minimal-pill', label: '💊 Floating Pill Capsule', desc: 'Streamlined Slim Bug' },
+                                { id: 'score-bug-1900-200', label: '🎮 Giant Centered Bug', desc: '1900x200 Massive Banner' }
+                              ].map(l => {
+                                const isCurrent = (activeOverlayConfig.layout || activeOverlayConfig.template) === l.id;
+                                return (
+                                  <button
+                                    key={l.id}
+                                    onClick={() => updateOverlayProp({ layout: l.id as any, template: l.id as any })}
+                                    className={`p-2 text-left rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                                      isCurrent
+                                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-md font-bold'
+                                        : 'bg-slate-950/70 border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10'
+                                    }`}
+                                  >
+                                    <span className="text-[8.5px] font-black tracking-tight block truncate">{l.label}</span>
+                                    <span className="text-[7px] text-slate-400 opacity-75 truncate block mt-0.5">{l.desc}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 3. BUG SCREEN PLACEMENT */}
+                          <div className="pt-2 border-t border-white/5">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5">
+                              📍 Screen Alignment / Position
+                            </span>
+                            <div className="grid grid-cols-3 gap-1">
+                              {[
+                                { id: 'bottom-full', label: 'Bottom Edge' },
+                                { id: 'bottom-left', label: 'Bottom Left' },
+                                { id: 'bottom-right', label: 'Bottom Right' },
+                                { id: 'bottom-center', label: 'Bottom Center' },
+                                { id: 'top-full', label: 'Top Bar' }
+                              ].map(pos => {
+                                const isCurrent = (activeOverlayConfig.bugPosition || 'bottom-full') === pos.id;
+                                return (
+                                  <button
+                                    key={pos.id}
+                                    onClick={() => updateOverlayProp({ bugPosition: pos.id as any })}
+                                    className={`py-1 px-1.5 text-center rounded-lg border text-[7.5px] font-mono font-bold cursor-pointer transition-all ${
+                                      isCurrent
+                                        ? 'bg-sky-500/20 border-sky-500/50 text-sky-300 shadow-sm'
+                                        : 'bg-slate-950 border-white/5 text-slate-400 hover:text-slate-300'
+                                    }`}
+                                  >
+                                    {pos.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 4. TELEMETRY & HUD METRICS TOGGLES */}
+                          <div className="pt-2 border-t border-white/5 space-y-1.5">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1">
+                              📊 HUD Telemetry & Display Elements
+                            </span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {[
+                                { key: 'showScoreBug', label: 'Main Score Bug', default: true },
+                                { key: 'showBallByBallDots', label: 'Ball-by-Ball Dots', default: true },
+                                { key: 'showStrikeRates', label: 'Batting SR & Bowler Econ', default: true },
+                                { key: 'showWinProbability', label: 'Win Probability Metric', default: false },
+                                { key: 'showSponsorBadge', label: 'Sponsor / League Badge', default: true },
+                                { key: 'showStatsPanel', label: 'Match Stats Summary', default: true },
+                                { key: 'showTicker', label: 'Scrolling News Ticker', default: true },
+                                { key: 'boundaryBlast', label: '⚡ Animated Stingers', default: true }
+                              ].map(item => {
+                                const isChecked = (activeOverlayConfig as any)[item.key] !== undefined 
+                                  ? !!(activeOverlayConfig as any)[item.key] 
+                                  : item.default;
+                                return (
+                                  <label
+                                    key={item.key}
+                                    className={`flex items-center gap-1.5 p-1.5 rounded-lg border text-[7.5px] font-bold cursor-pointer transition-all select-none ${
+                                      isChecked
+                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                        : 'bg-slate-950 border-white/5 text-slate-500'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => updateOverlayProp({ [item.key]: e.target.checked } as any)}
+                                      className="w-3 h-3 rounded accent-emerald-500 cursor-pointer"
+                                    />
+                                    <span className="truncate">{item.label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 5. SPONSOR / LEAGUE BRANDING */}
+                          <div className="pt-2 border-t border-white/5 space-y-1">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block">
+                              🏏 League / Sponsor Branding Tag
+                            </span>
+                            <input
+                              type="text"
+                              value={activeOverlayConfig.sponsorText || 'GULLY PREMIER LEAGUE'}
+                              onChange={(e) => updateOverlayProp({ sponsorText: e.target.value })}
+                              placeholder="e.g. TATA IPL 2025 • DLF CUP"
+                              className="w-full bg-slate-950 text-white rounded-lg text-[8.5px] px-2.5 py-1.5 border border-white/10 focus:border-amber-400 font-mono uppercase focus:outline-none"
+                            />
                           </div>
                         </div>
                       )}
@@ -8219,7 +8783,15 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                           <div className="truncate min-w-0 flex-1 text-left">
                             <h5 className="font-extrabold text-xs text-white flex items-center gap-1 truncate leading-none">
-                              {st.name}
+                              <button
+                                type="button"
+                                onClick={() => openCareerCardByName(st.name, currentInnings.battingTeam)}
+                                className="hover:underline hover:text-emerald-300 text-left font-extrabold text-xs text-white truncate cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
+                                title="View Career Stats & Gully Badges"
+                              >
+                                {st.name}
+                                <span className="text-[8px] text-amber-400">★</span>
+                              </button>
                               {!isSpectator && (
                                 <button onClick={() => setEditStrikerIndex(currentInnings.strikerIndex)} className="text-slate-550 hover:text-emerald-400 p-0 bg-transparent border-none cursor-pointer">
                                   <Edit size={9} />
@@ -8309,7 +8881,15 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                           <div className="truncate min-w-0 flex-1 text-left">
                             <h5 className="font-extrabold text-xs text-slate-300 flex items-center gap-1 truncate leading-none">
-                              {nst.name}
+                              <button
+                                type="button"
+                                onClick={() => openCareerCardByName(nst.name, currentInnings.battingTeam)}
+                                className="hover:underline hover:text-emerald-300 text-left font-extrabold text-xs text-slate-300 truncate cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
+                                title="View Career Stats & Gully Badges"
+                              >
+                                {nst.name}
+                                <span className="text-[8px] text-amber-400">★</span>
+                              </button>
                               {!isSpectator && (
                                 <button onClick={() => setEditNonStrikerIndex(currentInnings.nonStrikerIndex)} className="text-slate-550 hover:text-emerald-400 p-0 bg-transparent border-none cursor-pointer">
                                   <Edit size={9} />
@@ -8399,7 +8979,15 @@ export const CricketScoreboard: React.FC = () => {
                       <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest block leading-none mb-1">CURRENT ACTIVE BOWLER</span>
                       {editBowlerIndex === null ? (
                         <strong className="text-xs font-black text-amber-300 flex items-center gap-1 truncate">
-                          {bw.name}
+                          <button
+                            type="button"
+                            onClick={() => openCareerCardByName(bw.name, currentInnings.bowlingTeam)}
+                            className="hover:underline hover:text-amber-200 text-left font-black text-xs text-amber-300 truncate cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
+                            title="View Career Stats & Gully Badges"
+                          >
+                            {bw.name}
+                            <span className="text-[8px] text-emerald-400">★</span>
+                          </button>
                           {!isSpectator && (
                             <button onClick={() => setEditBowlerIndex(currentInnings.currentBowlerIndex)} className="text-slate-550 hover:text-emerald-400 p-0 bg-transparent border-none cursor-pointer">
                               <Edit size={9} />
@@ -8441,6 +9029,16 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 );
               })()}
+
+              {/* Local Sponsor Over Breakdown Banner */}
+              {match.id && (
+                <div className="shrink-0">
+                  <SponsorOverBanner
+                    matchId={match.id}
+                    currentOver={currentInnings ? Math.floor(currentInnings.ballsBowled / 6) : 0}
+                  />
+                </div>
+              )}
             </div>
 
             {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions >= 44x44px */}
@@ -10080,6 +10678,9 @@ export const CricketScoreboard: React.FC = () => {
         {/* Tie Resolution Modal (Option A: Super Over, Option B: Official Tie) */}
         {renderTieResolutionModal()}
 
+        {/* Shared Modals: Tournament Caps, Sponsor Management & Player Cards */}
+        {renderSharedOverlays()}
+
       </div>
     );
   }
@@ -10233,6 +10834,9 @@ export const CricketScoreboard: React.FC = () => {
             }}
           />
         </main>
+
+        {/* Shared Modals: Tournament Caps, Sponsor Management & Player Cards */}
+        {renderSharedOverlays()}
       </div>
     );
   }
@@ -13781,6 +14385,14 @@ export const CricketScoreboard: React.FC = () => {
                     {(() => {
                       const activeOverlayConfig = match.overlayConfig || {
                         template: 'broadcast-pro',
+                        theme: 'broadcast-pro',
+                        layout: 'ribbon-full',
+                        bugPosition: 'bottom-full',
+                        showBallByBallDots: true,
+                        showStrikeRates: true,
+                        showWinProbability: false,
+                        showSponsorBadge: true,
+                        sponsorText: 'GULLY PREMIER LEAGUE',
                         showStatsPanel: true,
                         showTicker: true,
                         tickerMessage: 'LIVE BROADCAST PRESENTATION',
@@ -13797,38 +14409,116 @@ export const CricketScoreboard: React.FC = () => {
                       return (
                         <>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                          {/* SUB CELL 1: SELECT DISPLAY TEMPLATES */}
-                          <div className="space-y-2.5">
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">1. Style Template Selection</span>
-                             <div className="grid grid-cols-2 gap-2">
-                              {[
-                                { id: 'broadcast-pro', label: 'Broadcast Pro', desc: 'ESPN Gradient Theme' },
-                                { id: 'neon-sport', label: 'Neon Cyber', desc: 'Sleek Emerald Edge' },
-                                { id: 'clean-white', label: 'Clean White', desc: 'Minimal Light Card' },
-                                { id: 'ipl-style', label: 'Vibrant IPL', desc: 'Purple Gradient Bold' },
-                                { id: 'score-bug-1900-200', label: 'Score Bug (1900x200)', desc: 'Giant Centered Bug' },
-                                { id: 'slanted-pro-design', label: 'Slanted Live Ribbon', desc: 'Dynamic Lower Third design' }
-                              ].map(t => {
-                                const isActive = activeOverlayConfig.template === t.id;
+                          {/* SUB CELL 1: BROADCAST THEMES & LAYOUTS */}
+                          <div className="space-y-4">
+                            <div>
+                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 flex items-center justify-between">
+                                <span>1A. Color Theme</span>
+                                <span className="text-amber-400 font-mono text-[8px]">7 PRESETS</span>
+                              </span>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {[
+                                  { id: 'broadcast-pro', label: 'Broadcast Pro', desc: 'ESPN Navy' },
+                                  { id: 'ipl-style', label: 'IPL Gold/Purple', desc: 'Royal League' },
+                                  { id: 'cricheroes-dark', label: 'CricHeroes Dark', desc: 'Cyan Tech' },
+                                  { id: 'neon-sport', label: 'Neon Cyber', desc: 'Fuchsia/Lime' },
+                                  { id: 'clean-white', label: 'Clean White', desc: 'Daylight Pro' },
+                                  { id: 'retro-gold', label: 'Classic Gold', desc: 'Heritage' },
+                                  { id: 'carbon-modern', label: 'Carbon Modern', desc: 'Matte & Red' }
+                                ].map(t => {
+                                  const isActive = (activeOverlayConfig.theme || activeOverlayConfig.template) === t.id;
 
-                                return (
-                                  <button
-                                    key={t.id}
-                                    onClick={() => {
-                                      const updated = { ...activeOverlayConfig, template: t.id as any };
-                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
-                                    }}
-                                    className={`p-2.5 text-left rounded-xl transition-all border outline-none cursor-pointer flex flex-col justify-between h-[68px] ${
-                                      isActive 
-                                        ? 'bg-slate-900 border-white/20 shadow-lg text-white font-black' 
-                                        : 'bg-slate-950/40 border-white/5 text-slate-400 hover:bg-slate-900/50'
-                                    }`}
-                                  >
-                                    <span className="text-[10px] uppercase tracking-tight block">{t.label}</span>
-                                    <span className="text-[8px] opacity-45 truncate block mt-0.5">{t.desc}</span>
-                                  </button>
-                                );
-                              })}
+                                  return (
+                                    <button
+                                      key={t.id}
+                                      onClick={() => {
+                                        const updated = { ...activeOverlayConfig, theme: t.id as any, template: t.id as any };
+                                        syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                      }}
+                                      className={`p-2 text-left rounded-xl transition-all border outline-none cursor-pointer flex flex-col justify-between ${
+                                        isActive 
+                                          ? 'bg-rose-500/20 border-rose-500/50 shadow-md text-white font-black' 
+                                          : 'bg-slate-950/40 border-white/5 text-slate-400 hover:bg-slate-900/50'
+                                      }`}
+                                    >
+                                      <span className="text-[9px] uppercase tracking-tight block font-bold">{t.label}</span>
+                                      <span className="text-[7.5px] text-slate-400 opacity-60 truncate block">{t.desc}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* 1B. GRAPHIC LAYOUT */}
+                            <div className="pt-2 border-t border-white/5">
+                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 flex items-center justify-between">
+                                <span>1B. Scoreboard Layout</span>
+                                <span className="text-rose-400 font-mono text-[8px]">6 DESIGNS</span>
+                              </span>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {[
+                                  { id: 'ribbon-full', label: 'Full Ribbon', desc: 'IPL Lower Third' },
+                                  { id: 'slanted-pro-design', label: 'Slanted Ribbon', desc: 'Angled Polygon' },
+                                  { id: 'docked-corner', label: 'Docked Bug', desc: 'Corner TV Box' },
+                                  { id: 'mobile-vertical', label: '9:16 Vertical', desc: 'Reels / Shorts' },
+                                  { id: 'minimal-pill', label: 'Minimal Pill', desc: 'Capsule HUD' },
+                                  { id: 'score-bug-1900-200', label: 'Giant Bug', desc: '1900x200 Massive' }
+                                ].map(l => {
+                                  const isActive = (activeOverlayConfig.layout || activeOverlayConfig.template) === l.id;
+
+                                  return (
+                                    <button
+                                      key={l.id}
+                                      onClick={() => {
+                                        const updated = { ...activeOverlayConfig, layout: l.id as any, template: l.id as any };
+                                        syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                      }}
+                                      className={`p-2 text-left rounded-xl transition-all border outline-none cursor-pointer flex flex-col justify-between ${
+                                        isActive 
+                                          ? 'bg-amber-500/20 border-amber-500/50 shadow-md text-amber-200 font-black' 
+                                          : 'bg-slate-950/40 border-white/5 text-slate-400 hover:bg-slate-900/50'
+                                      }`}
+                                    >
+                                      <span className="text-[9px] uppercase tracking-tight block font-bold">{l.label}</span>
+                                      <span className="text-[7.5px] text-slate-400 opacity-60 truncate block">{l.desc}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* 1C. SCREEN PLACEMENT */}
+                            <div className="pt-2 border-t border-white/5">
+                              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">
+                                1C. Screen Position
+                              </span>
+                              <div className="grid grid-cols-3 gap-1">
+                                {[
+                                  { id: 'bottom-full', label: 'Bottom Edge' },
+                                  { id: 'bottom-left', label: 'Bottom Left' },
+                                  { id: 'bottom-right', label: 'Bottom Right' },
+                                  { id: 'bottom-center', label: 'Bottom Center' },
+                                  { id: 'top-full', label: 'Top Bar' }
+                                ].map(pos => {
+                                  const isActive = (activeOverlayConfig.bugPosition || 'bottom-full') === pos.id;
+                                  return (
+                                    <button
+                                      key={pos.id}
+                                      onClick={() => {
+                                        const updated = { ...activeOverlayConfig, bugPosition: pos.id as any };
+                                        syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                      }}
+                                      className={`py-1 px-1 text-center rounded-lg border text-[8px] font-mono font-bold cursor-pointer transition-all ${
+                                        isActive
+                                          ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
+                                          : 'bg-slate-950 border-white/5 text-slate-400'
+                                      }`}
+                                    >
+                                      {pos.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           </div>
 
@@ -13836,9 +14526,13 @@ export const CricketScoreboard: React.FC = () => {
                           <div className="space-y-3.5">
                             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">2. Display Elements Settings</span>
                             
-                            <div className="space-y-1.5 text-xs uppercase font-black">
+                            <div className="space-y-1.5 text-xs uppercase font-black max-h-[220px] overflow-y-auto pr-1">
                               {[
                                 { key: 'showScoreBug', label: 'TV Score Bug Graphic' },
+                                { key: 'showBallByBallDots', label: 'Ball-by-Ball Over Dots' },
+                                { key: 'showStrikeRates', label: 'Batting SR & Bowler Econ' },
+                                { key: 'showWinProbability', label: 'Win Probability Metric' },
+                                { key: 'showSponsorBadge', label: 'Sponsor / League Badge' },
                                 { key: 'showStatsPanel', label: 'Match Stats Summary strip' },
                                 { key: 'showTicker', label: 'Scrolling News Ticker' },
                                 { key: 'boundaryBlast', label: '⚡ Boundary, six & wicket Blast' }
@@ -13858,7 +14552,9 @@ export const CricketScoreboard: React.FC = () => {
                                             ? 'bg-amber-500/10 border-amber-500/40 text-amber-400 font-extrabold shadow-[0_0_12px_rgba(245,158,11,0.2)] animate-pulse'
                                             : 'bg-slate-950/45 border-amber-500/10 text-slate-400 hover:text-amber-300'
                                           )
-                                        : 'bg-slate-950/45 border-white/5 text-slate-300'
+                                        : (isChecked
+                                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                            : 'bg-slate-950/45 border-white/5 text-slate-400')
                                     }`}
                                   >
                                     <input
@@ -13875,12 +14571,27 @@ export const CricketScoreboard: React.FC = () => {
                                         }
                                         syncMatch(prev => ({ ...prev, overlayConfig: updated }));
                                       }}
-                                      className={`rounded cursor-pointer w-3.5 h-3.5 ${isBlast ? 'accent-amber-500' : 'accent-rose-500'}`}
+                                      className={`rounded cursor-pointer w-3.5 h-3.5 ${isBlast ? 'accent-amber-500' : 'accent-emerald-500'}`}
                                     />
                                     <span>{opt.label}</span>
                                   </label>
                                 );
                               })}
+                            </div>
+
+                            {/* SPONSOR / LEAGUE BRANDING */}
+                            <div className="space-y-1 pt-1 border-t border-white/5">
+                              <span className="text-[8px] font-bold text-slate-400 uppercase block">League / Sponsor Tag</span>
+                              <input
+                                type="text"
+                                value={activeOverlayConfig.sponsorText || 'GULLY PREMIER LEAGUE'}
+                                onChange={(e) => {
+                                  const updated = { ...activeOverlayConfig, sponsorText: e.target.value };
+                                  syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                }}
+                                className="w-full bg-slate-950 text-white rounded-xl text-[10px] px-3 py-2 border border-white/5 hover:border-white/10 focus:outline-none focus:border-amber-400 uppercase font-mono"
+                                placeholder="e.g. TATA IPL • PREMIER LEAGUE"
+                              />
                             </div>
 
                             {/* TICKER TEXT INPUT */}
@@ -13987,14 +14698,27 @@ export const CricketScoreboard: React.FC = () => {
                                 })}
                               </div>
 
-                              {/* Live Animated Overlay Triggers */}
+                              {/* Live Animated Overlay Triggers & Event Stingers */}
                               <div className="pt-2.5 border-t border-white/5 space-y-2">
-                                <span className="text-[8px] font-black tracking-wider text-slate-450 uppercase block">Live Alert Animations</span>
-                                <div className="flex flex-col gap-1.5">
+                                <span className="text-[8px] font-black tracking-wider text-slate-400 uppercase block">Event Stingers & Popups</span>
+                                <div className="grid grid-cols-2 gap-1.5">
                                   {[
-                                    { id: 'six', label: 'Show SIX', style: 'border-orange-500/30 text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 shadow-[0_0_10px_rgba(249,115,22,0.15)]' },
-                                    { id: 'four', label: 'Show FOUR', style: 'border-cyan-500/30 text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.15)]' },
-                                    { id: 'wicket', label: 'Show WICKET', style: 'border-red-500/30 text-red-400 bg-red-500/10 hover:bg-red-500/20 shadow-[0_0_10px_rgba(239,68,68,0.15)]' }
+                                    { id: 'six', label: '🚀 SIX (96m)', style: 'border-amber-500/30 text-amber-400 bg-amber-500/10 hover:bg-amber-500/20' },
+                                    { id: 'four', label: '⚡ FOUR (136k)', style: 'border-cyan-500/30 text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20' },
+                                    { id: 'bowled', label: '💥 BOWLED', style: 'border-red-500/30 text-red-400 bg-red-500/10 hover:bg-red-500/20' },
+                                    { id: 'caught', label: '🧤 CAUGHT', style: 'border-orange-500/30 text-orange-400 bg-orange-500/10 hover:bg-orange-500/20' },
+                                    { id: 'run_out', label: '🎯 DIRECT HIT', style: 'border-rose-500/30 text-rose-400 bg-rose-500/10 hover:bg-rose-500/20' },
+                                    { id: 'lbw', label: '🔴 LBW DRS', style: 'border-red-600/30 text-red-400 bg-red-600/10 hover:bg-red-600/20' },
+                                    { id: 'stumped', label: '⚡ STUMPED', style: 'border-orange-600/30 text-orange-300 bg-orange-600/10 hover:bg-orange-600/20' },
+                                    { id: 'free_hit', label: '🚨 FREE HIT', style: 'border-yellow-500/30 text-yellow-300 bg-yellow-500/10 hover:bg-yellow-500/20' },
+                                    { id: 'hat_trick_ball', label: '⚠️ HAT-TRICK BALL', style: 'border-red-600/30 text-red-300 bg-red-600/10 hover:bg-red-600/20' },
+                                    { id: 'hat_trick', label: '👑 HAT-TRICK!', style: 'border-amber-400/30 text-amber-200 bg-amber-400/10 hover:bg-amber-400/20' },
+                                    { id: 'one_tip_hand', label: '✋ 1-TIP 1-HAND', style: 'border-sky-500/30 text-sky-300 bg-sky-500/10 hover:bg-sky-500/20' },
+                                    { id: 'lost_ball', label: '🏠 BALL IN HOUSE', style: 'border-orange-500/30 text-orange-300 bg-orange-500/10 hover:bg-orange-500/20' },
+                                    { id: 'car_hit', label: '🚗 CAR HIT (-5)', style: 'border-rose-500/30 text-rose-300 bg-rose-500/10 hover:bg-rose-500/20' },
+                                    { id: 'super_over', label: '⚡ SUPER OVER', style: 'border-cyan-500/30 text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20' },
+                                    { id: 'fifty', label: '🎖️ FIFTY (50)', style: 'border-amber-500/30 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20' },
+                                    { id: 'hundred', label: '👑 CENTURY (100)', style: 'border-yellow-400/30 text-yellow-200 bg-yellow-400/10 hover:bg-yellow-400/20' }
                                   ].map(alertType => (
                                     <button
                                       key={alertType.id}
@@ -14002,13 +14726,21 @@ export const CricketScoreboard: React.FC = () => {
                                         const updated = {
                                           ...activeOverlayConfig,
                                           manualAlertTrigger: {
-                                            type: alertType.id as 'six' | 'four' | 'wicket',
-                                            timestamp: Date.now()
+                                            type: alertType.id,
+                                            timestamp: Date.now(),
+                                            meta: {
+                                              batterName: match.teamA ? `${match.teamA} Striker` : 'Striker',
+                                              bowlerName: match.teamB ? `${match.teamB} Bowler` : 'Bowler',
+                                              runs: 50,
+                                              balls: 24,
+                                              distance: '96m',
+                                              speed: '138 km/h'
+                                            }
                                           }
                                         };
                                         syncMatch(prev => ({ ...prev, overlayConfig: updated }));
                                       }}
-                                      className={`w-full py-1.5 px-3 rounded-lg border text-[9px] font-black uppercase text-center cursor-pointer transition-all ${alertType.style}`}
+                                      className={`w-full py-1.5 px-2 rounded-lg border text-[8px] font-black uppercase text-center cursor-pointer transition-all ${alertType.style}`}
                                     >
                                       {alertType.label}
                                     </button>
@@ -17464,6 +18196,9 @@ export const CricketScoreboard: React.FC = () => {
         onApplyToss={handleApplySpinCoinToss}
         soundEnabled={soundEnabled}
       />
+
+      {/* Shared Modals: Tournament Caps, Sponsor Management & Player Cards */}
+      {renderSharedOverlays()}
 
       {/* Tie Resolution Modal (Option A: Super Over, Option B: Official Tie) */}
       {renderTieResolutionModal()}

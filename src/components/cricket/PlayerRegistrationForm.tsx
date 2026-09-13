@@ -17,6 +17,8 @@ import { db, handleFirestoreError, OperationType, auth, isFirestoreQuotaExhauste
 import { collection, addDoc } from "firebase/firestore";
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
 import { ConfettiCanvas } from "./ConfettiCanvas";
+import { uploadImageToStorage, STORAGE_FOLDERS } from "../../utils/imageUpload";
+import { CricketPlayerSilhouette } from "./CricketImageFallback";
 
 export interface CricketPlayer {
   id?: string;
@@ -110,6 +112,10 @@ export const PlayerRegistrationForm: React.FC<PlayerRegistrationFormProps> = ({ 
 
   // Drag and drop state
   const [dragActive, setDragActive] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoUploadProgress, setPhotoUploadProgress] = useState(0);
+  const [isUploadingGovtId, setIsUploadingGovtId] = useState(false);
+  const [govtIdUploadProgress, setGovtIdUploadProgress] = useState(0);
 
   // OTP Verification system state
   const [countryCode, setCountryCode] = useState("+91");
@@ -231,13 +237,30 @@ export const PlayerRegistrationForm: React.FC<PlayerRegistrationFormProps> = ({ 
         alert("Please upload a valid image file for your profile photo.");
         return;
       }
+      setIsUploadingPhoto(true);
+      setPhotoUploadProgress(0);
       try {
-        const resized = await resizeImage(file);
-        setProfilePhoto(resized.base64);
-        setProfilePhotoName(resized.name);
-      } catch (err) {
-        console.error("Error processing photo:", err);
-        alert("Error loading photo profile.");
+        const result = await uploadImageToStorage(file, {
+          folder: STORAGE_FOLDERS.PLAYERS,
+          maxWidth: 200,
+          quality: 0.85,
+          cropSquare: true,
+          onProgress: (pct) => setPhotoUploadProgress(pct)
+        });
+        setProfilePhoto(result.url);
+        setProfilePhotoName(file.name);
+      } catch (err: any) {
+        console.warn("Storage upload failed, falling back to local canvas:", err);
+        try {
+          const resized = await resizeImage(file);
+          setProfilePhoto(resized.base64);
+          setProfilePhotoName(resized.name);
+        } catch (resizeErr) {
+          console.error("Error processing photo:", resizeErr);
+          alert("Error loading photo profile.");
+        }
+      } finally {
+        setIsUploadingPhoto(false);
       }
     }
   };
@@ -252,34 +275,65 @@ export const PlayerRegistrationForm: React.FC<PlayerRegistrationFormProps> = ({ 
       return;
     }
 
+    setIsUploadingPhoto(true);
+    setPhotoUploadProgress(0);
     try {
-      const resized = await resizeImage(file);
-      setProfilePhoto(resized.base64);
-      setProfilePhotoName(resized.name);
-    } catch (err) {
-      console.error(err);
-      alert("Error resizing profile picture.");
+      const result = await uploadImageToStorage(file, {
+        folder: STORAGE_FOLDERS.PLAYERS,
+        maxWidth: 200,
+        quality: 0.85,
+        cropSquare: true,
+        onProgress: (pct) => setPhotoUploadProgress(pct)
+      });
+      setProfilePhoto(result.url);
+      setProfilePhotoName(file.name);
+    } catch (err: any) {
+      console.warn("Storage upload failed, falling back to local canvas:", err);
+      try {
+        const resized = await resizeImage(file);
+        setProfilePhoto(resized.base64);
+        setProfilePhotoName(resized.name);
+      } catch (resizeErr) {
+        console.error(resizeErr);
+        alert("Error processing profile picture.");
+      }
+    } finally {
+      setIsUploadingPhoto(false);
     }
   };
 
-  // Government ID upload (not resized)
-  const handleGovtIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Government ID upload (sends to Firebase Storage player_identity_docs)
+  const handleGovtIdChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      alert("ID document is too large. Max allowed size is 2MB.");
+    if (file.size > 5 * 1024 * 1024) {
+      alert("ID document is too large. Max allowed size is 5MB.");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        setGovtId(reader.result);
-        setGovtIdName(file.name);
-      }
-    };
-    reader.readAsDataURL(file);
+    setIsUploadingGovtId(true);
+    setGovtIdUploadProgress(0);
+    try {
+      const result = await uploadImageToStorage(file, {
+        folder: STORAGE_FOLDERS.DOCS,
+        onProgress: (pct) => setGovtIdUploadProgress(pct)
+      });
+      setGovtId(result.url);
+      setGovtIdName(file.name);
+    } catch (err: any) {
+      console.warn("Storage upload failed, reading as data URL:", err);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          setGovtId(reader.result);
+          setGovtIdName(file.name);
+        }
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingGovtId(false);
+    }
   };
 
   // OPT sequence trigger (Real Firebase Auth / Simulated fallback)
@@ -833,12 +887,28 @@ export const PlayerRegistrationForm: React.FC<PlayerRegistrationFormProps> = ({ 
                        <div className="text-slate-400 dark:text-slate-350">
                          <Upload size={16} className="inline mr-1 text-emerald-500 align-middle -mt-0.5" />
                          <span className="text-[10px] font-black uppercase tracking-wider">
-                           Drag and Drop photo here
+                           Drag & Drop or Select Portrait
                          </span>
                          <span className="text-[9px] font-semibold text-slate-450 dark:text-slate-400 block pt-0.5 leading-relaxed">
-                           Automatic canvas-based sizing compression rescales to highly performance-optimized 300x300 specs.
+                           Compresses in browser, stores in Firebase Cloud Storage, and generates public Download URL.
                          </span>
                        </div>
+
+                       {/* Uploading progress indicator */}
+                       {isUploadingPhoto && (
+                         <div className="w-full max-w-xs pt-1 space-y-1">
+                           <div className="flex justify-between text-[9px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                             <span>Uploading to Firebase Storage...</span>
+                             <span>{photoUploadProgress}%</span>
+                           </div>
+                           <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                             <div
+                               className="h-full bg-emerald-500 transition-all duration-200"
+                               style={{ width: `${photoUploadProgress}%` }}
+                             />
+                           </div>
+                         </div>
+                       )}
 
                        <div className="pt-2 flex flex-wrap gap-2 justify-center md:justify-start items-center">
                          <label className="inline-block px-3.5 py-1.5 bg-slate-900 dark:bg-slate-800 hover:bg-emerald-600 dark:hover:bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase cursor-pointer transition border border-transparent">
