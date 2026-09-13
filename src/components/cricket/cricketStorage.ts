@@ -244,7 +244,10 @@ export const KNOWN_DELETED_OR_AI_MATCH_IDS = [
   'match-1782016325671',
   'match-1788498354696',
   'match-1788598366521',
-  'test-realtime-check'
+  'match-1789287226767',
+  'test-realtime-check',
+  'node_test_match',
+  'test_123'
 ];
 
 /**
@@ -340,6 +343,12 @@ export function isDemoOrAIMatch(m: any): boolean {
   if (teamA.includes('demo') || teamB.includes('demo')) return true;
   if (teamA.includes('adelaide strikers') || teamB.includes('adelaide strikers')) return true;
   if (teamA === 'mumbai champions' && teamB === 'pune super warriors') return true;
+  if (
+    (teamA.includes('super kings') && teamB.includes('mumbai challengers')) ||
+    (teamA.includes('mumbai challengers') && teamB.includes('super kings'))
+  ) {
+    return true;
+  }
   if (teamA.includes('bot') || teamB.includes('bot')) return true;
   if (teamA.includes('ai team') || teamB.includes('ai team') || teamA.includes('ai bot') || teamB.includes('ai bot')) return true;
 
@@ -605,7 +614,8 @@ export function deleteLocalMatch(id: string): void {
 
 /**
  * Prunes matches from local storage that are explicitly marked deleted, AI generated, or invalid.
- * Preserves local and offline matches so user scoreboards are never unexpectedly purged.
+ * When validRemoteIds is provided (from live Firestore snapshot), any match that was previously synced
+ * or was present remotely but is now missing from validRemoteIds will be marked deleted and removed.
  */
 export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): void {
   if (typeof window === 'undefined') return;
@@ -625,6 +635,24 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
           ) {
             return false;
           }
+
+          // If validRemoteIds was passed (from a successful Firestore snapshot):
+          if (validRemoteIds !== undefined) {
+            if (!validRemoteIds.has(item.id)) {
+              // Check if it is a brand-new purely offline local draft (< 60s old and never synced)
+              const ageMs = Date.now() - (item.updatedAt || item.createdAt || 0);
+              const isFreshOfflineDraft = !item.syncedWithFirestore && ageMs < 60000 && item.status === 'draft';
+              if (!isFreshOfflineDraft) {
+                // Was deleted remotely on another device (e.g. laptop)
+                markMatchDeleted(item.id);
+                try {
+                  window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: item.id } }));
+                } catch (_) {}
+                return false;
+              }
+            }
+          }
+
           return true;
         });
         localStorage.setItem(LOCAL_REGISTRY_KEY, JSON.stringify(kept));
@@ -636,12 +664,27 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
     if (activeRaw) {
       const active = JSON.parse(activeRaw);
       if (active && active.id) {
+        let shouldPurgeActive = false;
         if (
           active.status === 'deleted' || 
           (active as any).isDeleted === true || 
           isMatchDeleted(active.id) || 
           isDemoOrAIMatch(active)
         ) {
+          shouldPurgeActive = true;
+        } else if (validRemoteIds !== undefined && !validRemoteIds.has(active.id)) {
+          const ageMs = Date.now() - (active.updatedAt || active.createdAt || 0);
+          const isFreshOfflineDraft = !active.syncedWithFirestore && ageMs < 60000 && active.status === 'draft';
+          if (!isFreshOfflineDraft) {
+            shouldPurgeActive = true;
+            markMatchDeleted(active.id);
+            try {
+              window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: active.id } }));
+            } catch (_) {}
+          }
+        }
+
+        if (shouldPurgeActive) {
           localStorage.removeItem(ACTIVE_MATCH_KEY);
         }
       }

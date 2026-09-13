@@ -11,6 +11,7 @@ import { MedPortalManagement } from './med/MedPortalManagement';
 import { MessPortalManagement } from './mess/MessPortalManagement';
 import { PlayerDirectoryDashboard } from './cricket/PlayerDirectoryDashboard';
 import { SpectatorSliderAdmin } from './cricket/SpectatorSliderAdmin';
+import { BroadcastThemeStudio } from './cricket/BroadcastThemeStudio';
 
 interface PasswordStrength {
   score: number; // 0 to 4
@@ -95,7 +96,7 @@ export const generateSecurePassword = (): string => {
 
 export const SuperAdmin: React.FC = () => {
   const { role, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings'>('site');
+  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings' | 'themestudio'>('site');
   const [users, setUsers] = useState<any[]>([]);
   const [shopOwners, setShopOwners] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -113,7 +114,7 @@ export const SuperAdmin: React.FC = () => {
   const [newSMPassword, setNewSMPassword] = useState('');
   const [creatingSM, setCreatingSM] = useState(false);
   const [showSMPass, setShowSMPass] = useState<Record<string, boolean>>({});
-  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'managers' | 'slider'>('players');
+  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'managers' | 'slider' | 'themestudio'>('players');
 
   // Account Security Tab States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -571,6 +572,7 @@ export const SuperAdmin: React.FC = () => {
 
   const TABS = [
     { id: 'site', label: 'Site CMS' },
+    { id: 'themestudio', label: '🎨 Broadcast Theme Studio' },
     { id: 'users', label: 'Users' },
     { id: 'analytics', label: 'Analytics' },
     { id: 'messages', label: 'Messages' },
@@ -662,6 +664,15 @@ export const SuperAdmin: React.FC = () => {
               exit={{ opacity: 0, y: -10 }}
             >
               <SiteManagement />
+            </motion.div>
+          ) : activeTab === 'themestudio' ? (
+            <motion.div
+              key="themestudio"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <BroadcastThemeStudio />
             </motion.div>
           ) : activeTab === 'analytics' ? (
             <motion.div
@@ -1263,6 +1274,13 @@ export const SuperAdmin: React.FC = () => {
                     >
                       Spectator 16:9 Slider
                     </button>
+                    <button
+                      onClick={() => setCricketSubTab('themestudio')}
+                      type="button"
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'themestudio' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                    >
+                      🎨 Theme Studio
+                    </button>
                   </div>
                 </div>
 
@@ -1270,6 +1288,8 @@ export const SuperAdmin: React.FC = () => {
                   <PlayerDirectoryDashboard forceAdminMode={true} />
                 ) : cricketSubTab === 'slider' ? (
                   <SpectatorSliderAdmin />
+                ) : cricketSubTab === 'themestudio' ? (
+                  <BroadcastThemeStudio />
                 ) : (
                   <div className="space-y-8">
                     {/* Score Manager creation form */}

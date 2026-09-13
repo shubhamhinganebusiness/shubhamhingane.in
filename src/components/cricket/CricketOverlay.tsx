@@ -86,7 +86,8 @@ export type BroadcastTheme =
   | 'neon-sport'
   | 'clean-white'
   | 'retro-gold'
-  | 'carbon-modern';
+  | 'carbon-modern'
+  | 'studio-custom';
 
 export type BroadcastLayout =
   | 'ribbon-full'
@@ -261,6 +262,36 @@ export const CricketOverlay: React.FC = () => {
   
   // Real-time Match State synced via Firestore & LocalStorage fallback
   const [match, setMatch] = useState<MatchState | null>(null);
+
+  // Superadmin Global Studio Theme listener
+  const [globalStudioTheme, setGlobalStudioTheme] = useState<any>(() => {
+    try {
+      const local = localStorage.getItem('cricket_broadcast_studio_theme');
+      return local ? JSON.parse(local) : null;
+    } catch (_) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = onSnapshot(doc(db, 'cricket_broadcast_theme', 'default'), (snap) => {
+        if (snap.exists()) {
+          setGlobalStudioTheme(snap.data());
+        }
+      });
+    } catch (_) {}
+
+    const onUpdate = (e: any) => {
+      if (e.detail) setGlobalStudioTheme(e.detail);
+    };
+    window.addEventListener('cricket_broadcast_theme_updated', onUpdate);
+    return () => {
+      if (unsub) unsub();
+      window.removeEventListener('cricket_broadcast_theme_updated', onUpdate);
+    };
+  }, []);
   
   // Flash animation states on score change to highlight boundaries
   const [lastBdryFlash, setLastBdryFlash] = useState<'4' | '6' | null>(null);
@@ -1371,17 +1402,25 @@ export const CricketOverlay: React.FC = () => {
   }
 
   // Active Broadcast Theme & Layout Resolution
-  const activeTheme = (activeConfig.theme || (
-    ['broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern'].includes(activeConfig.template)
-      ? activeConfig.template
-      : 'broadcast-pro'
-  )) as BroadcastTheme;
+  const activeTheme = (
+    searchParams.get('theme') ||
+    activeConfig.theme ||
+    (
+      ['broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern', 'studio-custom'].includes(activeConfig.template)
+        ? activeConfig.template
+        : 'broadcast-pro'
+    )
+  ) as BroadcastTheme;
 
-  const activeLayout = (activeConfig.layout || (
-    ['slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(activeConfig.template)
-      ? activeConfig.template
-      : 'ribbon-full'
-  )) as BroadcastLayout;
+  const activeLayout = (
+    searchParams.get('layout') ||
+    activeConfig.layout ||
+    (
+      ['slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(activeConfig.template)
+        ? activeConfig.template
+        : 'ribbon-full'
+    )
+  ) as BroadcastLayout;
 
   // Active Template Style configs mapper
   const isNeon = activeTheme === 'neon-sport';
@@ -1391,6 +1430,7 @@ export const CricketOverlay: React.FC = () => {
   const isCricHeroes = activeTheme === 'cricheroes-dark';
   const isRetro = activeTheme === 'retro-gold';
   const isCarbon = activeTheme === 'carbon-modern';
+  const isStudioCustom = activeTheme === 'studio-custom';
 
   let themeColors = {
     cardBg: 'bg-slate-950/92 border-slate-800/80 text-white backdrop-blur-xl shadow-2xl',
@@ -1406,7 +1446,21 @@ export const CricketOverlay: React.FC = () => {
     borderAccent: 'border-amber-500/40'
   };
 
-  if (isNeon) {
+  if (isStudioCustom && globalStudioTheme) {
+    themeColors = {
+      cardBg: 'bg-slate-950/95 border-sky-500/50 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)]',
+      ribbonBg: 'bg-slate-950/95 border-sky-500/50 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)]',
+      accentText: 'text-sky-400 font-black',
+      accentBg: 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-black shadow-lg',
+      titleText: 'text-white font-black',
+      pillDefault: 'bg-slate-900 border-sky-500/30 text-sky-200',
+      pillActive: 'bg-sky-500/20 border-sky-400 text-sky-300 font-black shadow-md',
+      headerGlow: 'border-l-4 border-sky-400 shadow-[0_0_20px_rgba(14,165,233,0.35)]',
+      tickerBg: 'bg-slate-950/95 border-t border-sky-500/30 text-amber-300 font-bold',
+      subCard: 'bg-slate-900/90 border-sky-500/20',
+      borderAccent: 'border-sky-500/50'
+    };
+  } else if (isNeon) {
     themeColors = {
       cardBg: 'bg-black/96 border-fuchsia-500/30 text-white shadow-[0_0_30px_rgba(217,70,239,0.25)] backdrop-blur-2xl',
       ribbonBg: 'bg-black/95 border-fuchsia-500/40 text-white shadow-[0_0_35px_rgba(217,70,239,0.3)] backdrop-blur-2xl',

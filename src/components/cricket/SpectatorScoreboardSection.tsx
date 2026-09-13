@@ -2535,8 +2535,8 @@ export const SpectatorScoreboardSection = ({
                       <>
                         <div 
                           ref={sliderRef}
-                          className="flex gap-3.5 sm:gap-6 overflow-x-auto pb-3 sm:pb-4 pt-1 snap-x snap-mandatory scroll-smooth scrollbar-none touch-pan-x"
-                          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
+                          className="flex gap-3.5 sm:gap-6 overflow-x-auto pb-3 sm:pb-4 pt-1 snap-x snap-mandatory scroll-smooth scrollbar-none touch-auto"
+                          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                         >
                           {liveMatches.map((m) => {
                             const currentInnings = m.currentInningsNum === 1 ? m.innings1 : (m.innings2 || m.innings1);
@@ -2602,7 +2602,8 @@ export const SpectatorScoreboardSection = ({
                               <div 
                                 key={m.id}
                                 onClick={() => selectMatch(m.id)}
-                                className="snap-start shrink-0 w-[calc(100vw-4.5rem)] max-w-[340px] sm:w-[370px] md:w-[390px] bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 hover:border-emerald-500/35 rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 shadow-lg hover:shadow-[0_20px_40px_rgba(0,0,0,0.55),0_0_20px_rgba(16,185,129,0.12)] hover:translate-y-[-3px] transition-all duration-300 cursor-pointer relative overflow-hidden text-white flex flex-col justify-between group"
+                                style={{ touchAction: 'pan-x pan-y' }}
+                                className="snap-start shrink-0 w-[calc(100vw-4.5rem)] max-w-[340px] sm:w-[370px] md:w-[390px] bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 hover:border-emerald-500/35 rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 shadow-lg hover:shadow-[0_20px_40px_rgba(0,0,0,0.55),0_0_20px_rgba(16,185,129,0.12)] hover:translate-y-[-3px] transition-all duration-300 cursor-pointer relative overflow-hidden text-white flex flex-col justify-between group touch-auto"
                               >
                                 {/* Interactive Background Glow Accent */}
                                 <div className="absolute top-0 right-0 w-36 h-36 bg-emerald-500/5 rounded-full blur-[40px] pointer-events-none group-hover:bg-emerald-500/10 transition-colors duration-300" />
@@ -2876,7 +2877,10 @@ export const SpectatorScoreboardSection = ({
                                         {currentOverBalls.length > 0 ? (
                                           <div className="flex items-center justify-between gap-1 bg-slate-900/60 p-1.5 rounded-xl border border-white/[0.03]">
                                             <span className="text-[7.5px] text-slate-500 font-black uppercase tracking-wider shrink-0 font-mono">This Over:</span>
-                                            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5">
+                                            <div 
+                                              className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5"
+                                              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
+                                            >
                                               {currentOverBalls.map((b, bIdx) => {
                                                 const pill = getPillData(b);
                                                 if (!pill.label || pill.color === 'hidden') return null;
@@ -3752,7 +3756,8 @@ export const SpectatorScoreboardSection = ({
                     initial={{ opacity: 0, y: 15, scale: 0.99 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     transition={{ duration: 0.25 }}
-                    className="lg:col-span-2 bg-slate-900 border border-slate-950 rounded-2xl sm:rounded-3xl md:rounded-[2.5rem] p-4 min-[400px]:p-6 md:p-8 text-white flex flex-col justify-between shadow-lg relative overflow-hidden min-h-[22rem] pb-6"
+                    style={{ touchAction: 'pan-y' }}
+                    className="lg:col-span-2 bg-slate-900 border border-slate-950 rounded-2xl sm:rounded-3xl md:rounded-[2.5rem] p-4 min-[400px]:p-6 md:p-8 text-white flex flex-col justify-between shadow-lg relative overflow-hidden min-h-[22rem] pb-6 touch-auto"
                   >
                     <div className="absolute bottom-0 left-0 right-0 h-2 bg-gradient-to-r from-emerald-500 via-emerald-600 to-emerald-500" />
                     

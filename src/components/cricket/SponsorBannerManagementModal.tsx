@@ -2,14 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Plus, Upload, Trash2, Edit2, Check, Sparkles, 
-  ExternalLink, Phone, ShieldCheck, Eye, EyeOff, Building2, Store, HeartPulse, Award
+  ExternalLink, Phone, ShieldCheck, Eye, EyeOff, Building2, Store, HeartPulse, Award, Image as ImageIcon
 } from 'lucide-react';
 import { 
   LocalCricketSponsor, 
   getLocalSponsors, 
   saveSponsorToStorage, 
   deleteSponsorFromStorage, 
-  fetchAllSponsors 
+  fetchAllSponsors,
+  subscribeToSponsors
 } from '../../utils/cricketSponsorsStorage';
 import { uploadImageToStorage, STORAGE_FOLDERS } from '../../utils/imageUpload';
 
@@ -34,17 +35,26 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
   const [phone, setPhone] = useState('');
   const [website, setWebsite] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
   const [displayOnOverBreakdown, setDisplayOnOverBreakdown] = useState(true);
   const [displayOnLiveStream, setDisplayOnLiveStream] = useState(true);
   const [displayOnScorecardPdf, setDisplayOnScorecardPdf] = useState(true);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingBanner, setUploadingBanner] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const bannerInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       loadSponsors();
+      const unsub = subscribeToSponsors((updated) => {
+        setSponsors(updated);
+      });
+      return () => {
+        unsub();
+      };
     }
   }, [isOpen]);
 
@@ -63,6 +73,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
     setPhone('');
     setWebsite('');
     setLogoUrl('https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80');
+    setBannerUrl('https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80');
     setDisplayOnOverBreakdown(true);
     setDisplayOnLiveStream(true);
     setDisplayOnScorecardPdf(true);
@@ -76,7 +87,8 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
     setTagline(sponsor.tagline || '');
     setPhone(sponsor.phone || '');
     setWebsite(sponsor.website || '');
-    setLogoUrl(sponsor.logoUrl);
+    setLogoUrl(sponsor.logoUrl || '');
+    setBannerUrl(sponsor.bannerUrl || sponsor.logoUrl || '');
     setDisplayOnOverBreakdown(sponsor.displayOnOverBreakdown);
     setDisplayOnLiveStream(sponsor.displayOnLiveStream);
     setDisplayOnScorecardPdf(sponsor.displayOnScorecardPdf);
@@ -88,21 +100,53 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
     if (!file) return;
 
     setUploadingLogo(true);
-    setUploadProgress(10);
+    setUploadProgress(15);
     try {
       const uploadResult = await uploadImageToStorage(file, {
         folder: STORAGE_FOLDERS.ADS,
+        cropSquare: true,
+        maxWidth: 400,
+        maxHeight: 400,
         onProgress: (progress) => {
           setUploadProgress(progress);
         }
       });
-      setLogoUrl(uploadResult.url);
+      if (uploadResult?.url) {
+        setLogoUrl(uploadResult.url);
+      }
     } catch (err: any) {
       alert('Failed to upload logo: ' + (err?.message || 'Error'));
     } finally {
       setUploadingLogo(false);
       setUploadProgress(0);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingBanner(true);
+    setUploadProgress(15);
+    try {
+      const uploadResult = await uploadImageToStorage(file, {
+        folder: STORAGE_FOLDERS.ADS,
+        maxWidth: 1280,
+        maxHeight: 720,
+        onProgress: (progress) => {
+          setUploadProgress(progress);
+        }
+      });
+      if (uploadResult?.url) {
+        setBannerUrl(uploadResult.url);
+      }
+    } catch (err: any) {
+      alert('Failed to upload banner: ' + (err?.message || 'Error'));
+    } finally {
+      setUploadingBanner(false);
+      setUploadProgress(0);
+      if (bannerInputRef.current) bannerInputRef.current.value = '';
     }
   };
 
@@ -119,6 +163,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
       phone: phone.trim(),
       website: website.trim(),
       logoUrl: logoUrl.trim() || 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80',
+      bannerUrl: bannerUrl.trim() || logoUrl.trim() || 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80',
       displayOnOverBreakdown,
       displayOnLiveStream,
       displayOnScorecardPdf,
@@ -126,13 +171,25 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
       createdAt: editingId ? (sponsors.find((s) => s.id === editingId)?.createdAt || Date.now()) : Date.now(),
     };
 
-    await saveSponsorToStorage(sponsorObj);
+    // Update state immediately so UI changes without delay
+    setSponsors((prev) => {
+      const idx = prev.findIndex((s) => s.id === sponsorObj.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = sponsorObj;
+        return copy;
+      }
+      return [sponsorObj, ...prev];
+    });
+
     setShowAddForm(false);
+    await saveSponsorToStorage(sponsorObj);
     loadSponsors();
   };
 
   const handleDelete = async (id: string) => {
     if (window.confirm('Delete this sponsor banner?')) {
+      setSponsors((prev) => prev.filter((s) => s.id !== id));
       await deleteSponsorFromStorage(id);
       loadSponsors();
     }
@@ -140,6 +197,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
 
   const handleToggleActive = async (sponsor: LocalCricketSponsor) => {
     const updated = { ...sponsor, isActive: !sponsor.isActive };
+    setSponsors((prev) => prev.map((s) => (s.id === sponsor.id ? updated : s)));
     await saveSponsorToStorage(updated);
     loadSponsors();
   };
@@ -166,7 +224,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                   Sponsor Banner Management
                 </h3>
                 <p className="text-[11px] text-white/80 font-medium">
-                  Add local bakeries, clinics, jewelers & politicians to overs, live overlays & PDF reports
+                  Update local business logos & advertisement banners for match overs, overlays & PDF reports
                 </p>
               </div>
             </div>
@@ -191,18 +249,18 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
           </div>
 
           {/* Body */}
-          <div className="p-5 max-h-[65vh] overflow-y-auto space-y-6">
+          <div className="p-5 max-h-[70vh] overflow-y-auto space-y-6">
             {/* Add / Edit Form Modal Subview */}
             {showAddForm && (
               <form onSubmit={handleSave} className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 space-y-4">
                 <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-3">
                   <h4 className="font-black text-xs uppercase tracking-wider text-slate-900 dark:text-white">
-                    {editingId ? 'Edit Sponsor Banner' : 'New Local Sponsor Banner'}
+                    {editingId ? 'Edit Sponsor & Banners' : 'New Local Sponsor & Banners'}
                   </h4>
                   <button
                     type="button"
                     onClick={() => setShowAddForm(false)}
-                    className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold"
+                    className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -269,32 +327,127 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
 
                   <div>
                     <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">
-                      Logo or Banner URL
+                      Website / Social Media Link
                     </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="https://..."
-                        value={logoUrl}
-                        onChange={(e) => setLogoUrl(e.target.value)}
-                        className="flex-1 px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white"
-                      />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        ref={fileInputRef}
-                        onChange={handleLogoUpload}
-                        className="hidden"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploadingLogo}
-                        className="px-3 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-xl text-xs font-bold text-slate-700 dark:text-white flex items-center gap-1 cursor-pointer"
-                      >
-                        <Upload size={13} />
-                        <span>{uploadingLogo ? `${uploadProgress}%` : 'Upload'}</span>
-                      </button>
+                    <input
+                      type="text"
+                      placeholder="https://instagram.com/..."
+                      value={website}
+                      onChange={(e) => setWebsite(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* LOGO & BANNER UPLOAD CONTROLS WITH LIVE PREVIEW */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3.5 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  {/* 1. Sponsor Logo (Square Emblem) */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-black text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span>1. Sponsor Logo (Square Icon)</span>
+                      <span className="text-[9px] text-slate-400 font-normal">Used in scorecards & lists</span>
+                    </label>
+
+                    <div className="flex items-center gap-3">
+                      <div className="w-16 h-16 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-900 shrink-0 relative flex items-center justify-center">
+                        {logoUrl ? (
+                          <img
+                            src={logoUrl}
+                            alt="Logo preview"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
+                            }}
+                          />
+                        ) : (
+                          <ImageIcon size={20} className="text-slate-400" />
+                        )}
+                      </div>
+
+                      <div className="flex-1 space-y-1.5">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Logo URL (https://...)"
+                            value={logoUrl}
+                            onChange={(e) => setLogoUrl(e.target.value)}
+                            className="flex-1 px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white"
+                          />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            ref={logoInputRef}
+                            onChange={handleLogoUpload}
+                            className="hidden"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => logoInputRef.current?.click()}
+                            disabled={uploadingLogo}
+                            className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all"
+                          >
+                            <Upload size={13} />
+                            <span>{uploadingLogo ? `${uploadProgress}%` : 'Upload'}</span>
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-400">
+                          Recommended: 1:1 square image (PNG/JPG/WebP)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Sponsor Banner (Wide Advertisement) */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase font-black text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span>2. Over & Live Banner (Wide 16:9)</span>
+                      <span className="text-[9px] text-slate-400 font-normal">Shown in over breaks & streams</span>
+                    </label>
+
+                    <div className="space-y-2">
+                      <div className="h-16 w-full rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-slate-100 dark:bg-slate-900 relative flex items-center justify-center">
+                        {bannerUrl ? (
+                          <img
+                            src={bannerUrl}
+                            alt="Banner preview"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as any).src = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
+                            }}
+                          />
+                        ) : (
+                          <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
+                            <ImageIcon size={14} />
+                            <span>No banner uploaded (will fallback to logo)</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Banner Image URL (https://...)"
+                          value={bannerUrl}
+                          onChange={(e) => setBannerUrl(e.target.value)}
+                          className="flex-1 px-2.5 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white"
+                        />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          ref={bannerInputRef}
+                          onChange={handleBannerUpload}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => bannerInputRef.current?.click()}
+                          disabled={uploadingBanner}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0 transition-all"
+                        >
+                          <Upload size={13} />
+                          <span>{uploadingBanner ? `${uploadProgress}%` : 'Upload'}</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -342,7 +495,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                     type="submit"
                     className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer"
                   >
-                    {editingId ? 'Update Sponsor' : 'Save Sponsor Banner'}
+                    {editingId ? 'Update Sponsor & Banner' : 'Save Sponsor Banner'}
                   </button>
                 </div>
               </form>
@@ -355,7 +508,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                   Active Local Sponsors ({sponsors.length})
                 </span>
                 <span className="text-[11px] font-bold text-slate-400">
-                  Shown automatically across match view & spectator screens
+                  Updates instantly across match views, overlays & mobile screens
                 </span>
               </div>
 
@@ -375,18 +528,42 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                       }`}
                     >
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                        <div className="flex items-center gap-3.5">
-                          <img
-                            src={sponsor.logoUrl}
-                            alt={sponsor.name}
-                            className="w-14 h-14 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 shrink-0"
-                            onError={(e) => {
-                              (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
-                            }}
-                          />
-                          <div>
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          {/* Logo Avatar */}
+                          <div className="relative shrink-0">
+                            <img
+                              src={sponsor.logoUrl}
+                              alt={sponsor.name}
+                              className="w-14 h-14 rounded-2xl object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                              onError={(e) => {
+                                (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
+                              }}
+                            />
+                            <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded text-[7.5px] font-black uppercase bg-slate-900 text-white shadow-xs">
+                              LOGO
+                            </span>
+                          </div>
+
+                          {/* Banner Preview Thumbnail */}
+                          {sponsor.bannerUrl && (
+                            <div className="relative shrink-0 hidden md:block">
+                              <img
+                                src={sponsor.bannerUrl}
+                                alt={`${sponsor.name} banner`}
+                                className="w-24 h-14 rounded-xl object-cover border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                                onError={(e) => {
+                                  (e.target as any).src = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
+                                }}
+                              />
+                              <span className="absolute -bottom-1 -right-1 px-1 py-0.2 rounded text-[7.5px] font-black uppercase bg-amber-600 text-white shadow-xs">
+                                BANNER
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                              <h4 className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
                                 {sponsor.name}
                               </h4>
                               <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/40">
@@ -395,7 +572,7 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                             </div>
 
                             {sponsor.tagline && (
-                              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-medium">
+                              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-medium truncate">
                                 {sponsor.tagline}
                               </p>
                             )}

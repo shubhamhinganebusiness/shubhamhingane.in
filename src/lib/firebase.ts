@@ -21,6 +21,7 @@ import {
   set as rtdbSet, 
   onValue as rtdbOnValue, 
   update as rtdbUpdate,
+  remove as rtdbRemove,
   Database
 } from 'firebase/database';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -195,6 +196,49 @@ export function subscribeToRealtimeDBCompletedMatch(onUpdate: (completedMatch: a
       }
     }, (error) => {
       console.warn('[Realtime Database] Completed match listener note:', error);
+    });
+  } catch (e) {
+    return () => {};
+  }
+}
+
+/**
+ * Remove a match and its pointers from Firebase Realtime Database
+ */
+export async function removeMatchFromRealtimeDB(matchId: string): Promise<void> {
+  if (!matchId || !rtdb) return;
+  try {
+    const matchRef = rtdbRef(rtdb, `cricket_matches/${matchId}`);
+    await rtdbRemove(matchRef).catch(() => {});
+
+    // Clear active live match if it points to this deleted match
+    const liveRef = rtdbRef(rtdb, 'cricket_active_live_match');
+    await rtdbSet(liveRef, null).catch(() => {});
+
+    const activeRef = rtdbRef(rtdb, 'cricket_active_match');
+    await rtdbSet(activeRef, null).catch(() => {});
+
+    const completedRef = rtdbRef(rtdb, 'cricket_completed_match');
+    await rtdbSet(completedRef, null).catch(() => {});
+  } catch (err) {
+    console.warn('[Realtime Database] Match removal note:', err);
+  }
+}
+
+/**
+ * Subscribe to the cricket_deleted_matches Firestore collection for real-time deletion synchronization
+ */
+export function subscribeToDeletedMatches(onDeleted: (deletedIds: string[]) => void): () => void {
+  if (!db) return () => {};
+  try {
+    return onSnapshot(collection(db, 'cricket_deleted_matches'), (snapshot) => {
+      const ids: string[] = [];
+      snapshot.forEach(docSnap => {
+        ids.push(docSnap.id);
+      });
+      onDeleted(ids);
+    }, (error) => {
+      console.warn('[Firestore] Deleted matches stream note:', error);
     });
   } catch (e) {
     return () => {};

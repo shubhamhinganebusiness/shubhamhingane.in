@@ -60,7 +60,8 @@ import {
   updatePlayerCareerStats,
   updateTournamentStandingsAfterMatch,
   extractLiveSummary,
-  publishLiveSummary
+  publishLiveSummary,
+  deleteMatchGlobally
 } from '../../services/cricketDb';
 import {
   CommentaryLanguage,
@@ -1095,9 +1096,9 @@ export const CricketScoreboard: React.FC = () => {
   };
 
   // Active Match Setup Inputs
-  const [teamA, setTeamA] = useState('Super Kings');
+  const [teamA, setTeamA] = useState('');
   const [teamALogoUrl, setTeamALogoUrl] = useState('');
-  const [teamB, setTeamB] = useState('Mumbai Challengers');
+  const [teamB, setTeamB] = useState('');
   const [teamBLogoUrl, setTeamBLogoUrl] = useState('');
   const [matchBannerUrl, setMatchBannerUrl] = useState('');
   const [editModalMatchBannerUrl, setEditModalMatchBannerUrl] = useState('');
@@ -1331,6 +1332,36 @@ export const CricketScoreboard: React.FC = () => {
 
   // State for active full-screen custom graphics overlay animation
   const [activeAnimation, setActiveAnimation] = useState<'six' | 'four' | 'wicket' | null>(null);
+
+  // Superadmin Studio Theme State (Global broadcast sync)
+  const [studioTheme, setStudioTheme] = useState<any>(() => {
+    try {
+      const local = localStorage.getItem('cricket_broadcast_studio_theme');
+      return local ? JSON.parse(local) : null;
+    } catch (_) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = onSnapshot(doc(db, 'cricket_broadcast_theme', 'default'), (snap) => {
+        if (snap.exists()) {
+          setStudioTheme(snap.data());
+        }
+      });
+    } catch (_) {}
+
+    const onUpdate = (e: any) => {
+      if (e.detail) setStudioTheme(e.detail);
+    };
+    window.addEventListener('cricket_broadcast_theme_updated', onUpdate);
+    return () => {
+      if (unsub) unsub();
+      window.removeEventListener('cricket_broadcast_theme_updated', onUpdate);
+    };
+  }, []);
 
   // Global keyboard listeners for "6", "4", "W" or "w" keys
   useEffect(() => {
@@ -5303,13 +5334,14 @@ export const CricketScoreboard: React.FC = () => {
   const performResetMatch = async (skipDelete = false) => {
     const oldId = match.id;
     if (oldId) {
-      deleteLocalMatch(oldId);
       if (!isSpectator && !skipDelete && match.status !== 'completed') {
         try {
-          await safeDeleteDoc(doc(db, 'cricket_matches', oldId));
+          await deleteMatchGlobally(oldId);
         } catch (e) {
-          console.warn('Error deleting discarded match from DB:', e);
+          console.warn('Error deleting discarded match:', e);
         }
+      } else {
+        deleteLocalMatch(oldId);
       }
     }
     if (latestStateToSaveRef.current?.id === oldId) {
@@ -5356,10 +5388,7 @@ export const CricketScoreboard: React.FC = () => {
     try {
       for (const past of matchHistory) {
         if (past.id) {
-          deleteLocalMatch(past.id);
-          try {
-            await safeDeleteDoc(doc(db, 'cricket_matches', past.id));
-          } catch (e) {}
+          await deleteMatchGlobally(past.id);
         }
       }
       setMatchHistory([]);
@@ -5374,7 +5403,7 @@ export const CricketScoreboard: React.FC = () => {
   const handleDeleteLiveCompletedMatch = async (id: string) => {
     if (!id) return;
     setMatchHistory(prev => prev.filter(m => m.id !== id));
-    deleteLocalMatch(id);
+    
     if (match.id === id) {
       setMatch({
         id: '',
@@ -5404,8 +5433,9 @@ export const CricketScoreboard: React.FC = () => {
       clearTimeout(savingTimeoutRef.current);
       savingTimeoutRef.current = null;
     }
+
     try {
-      await safeDeleteDoc(doc(db, 'cricket_matches', id));
+      await deleteMatchGlobally(id);
       showNotification('Match log permanently deleted.', 'success');
     } catch (err) {
       if (isQuotaError(err)) {
@@ -5418,15 +5448,12 @@ export const CricketScoreboard: React.FC = () => {
   // Delete live match from database
   const handleDeleteLiveMatch = async (id: string) => {
     if (!id) return;
-    // 1. Remove from all local React lists
+    // 1. Remove from all local React lists immediately
     setActiveLiveMatches(prev => prev.filter(m => m.id !== id));
     setMatchHistory(prev => prev.filter(m => m.id !== id));
     setSavedDrafts(prev => prev.filter(m => m.id !== id));
 
-    // 2. Permanently tombstone and remove from all localStorage / offline stores
-    deleteLocalMatch(id);
-
-    // 3. Clear pending autosaves & timers so debounced save doesn't resurrect it
+    // 2. Clear pending autosaves & timers so debounced save doesn't resurrect it
     if (latestStateToSaveRef.current?.id === id) {
       latestStateToSaveRef.current = null;
     }
@@ -5435,7 +5462,7 @@ export const CricketScoreboard: React.FC = () => {
       savingTimeoutRef.current = null;
     }
 
-    // 4. If this match is currently loaded on the scoreboard, reset UI to setup
+    // 3. If this match is currently loaded on the scoreboard, reset UI to setup
     if (match.id === id) {
       setMatch({
         id: '',
@@ -5456,14 +5483,14 @@ export const CricketScoreboard: React.FC = () => {
       }
     }
 
-    // 5. Clear autosaved preview banner if it refers to this match
+    // 4. Clear autosaved preview banner if it refers to this match
     if (localAutosavedMatch?.id === id) {
       setLocalAutosavedMatch(null);
     }
 
-    // 6. Delete from remote Firestore cleanly without conflicting pre-mutation
+    // 5. Delete across all stores, Realtime Database, Firestore, server, and create tombstone
     try {
-      await safeDeleteDoc(doc(db, 'cricket_matches', id));
+      await deleteMatchGlobally(id);
       showNotification('Active live match permanently deleted.', 'success');
     } catch (err) {
       if (isQuotaError(err)) {
@@ -5477,7 +5504,7 @@ export const CricketScoreboard: React.FC = () => {
   const handleDeleteDraft = async (id: string) => {
     if (!id) return;
     setSavedDrafts(prev => prev.filter(m => m.id !== id));
-    deleteLocalMatch(id);
+
     if (match.id === id) {
       setMatch({
         id: '',
@@ -5508,7 +5535,7 @@ export const CricketScoreboard: React.FC = () => {
       savingTimeoutRef.current = null;
     }
     try {
-      await safeDeleteDoc(doc(db, 'cricket_matches', id));
+      await deleteMatchGlobally(id);
       showNotification('Draft match permanently deleted.', 'success');
     } catch (err) {
       if (isQuotaError(err)) {
@@ -12981,7 +13008,7 @@ export const CricketScoreboard: React.FC = () => {
                     type="text"
                     value={teamA}
                     onChange={(e) => setTeamA(e.target.value)}
-                    placeholder="E.g. Super Kings"
+                    placeholder="E.g. Team A"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
                   />
 
@@ -13035,7 +13062,7 @@ export const CricketScoreboard: React.FC = () => {
                     type="text"
                     value={teamB}
                     onChange={(e) => setTeamB(e.target.value)}
-                    placeholder="E.g. Mumbai Challengers"
+                    placeholder="E.g. Team B"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
                   />
 
@@ -14412,12 +14439,49 @@ export const CricketScoreboard: React.FC = () => {
                           {/* SUB CELL 1: BROADCAST THEMES & LAYOUTS */}
                           <div className="space-y-4">
                             <div>
+                              {/* Superadmin Studio Theme Dynamic Banner */}
+                              {studioTheme && (
+                                <div className="mb-2.5 p-2 rounded-xl bg-gradient-to-r from-sky-500/20 via-indigo-500/15 to-transparent border border-sky-500/35 flex items-center justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <span className="text-[7.5px] font-black uppercase text-sky-400 tracking-wider block">Superadmin Live Theme</span>
+                                    <span className="text-[10px] font-black text-white truncate block">{studioTheme.name || 'Premier Star Sapphire'}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = {
+                                        ...activeOverlayConfig,
+                                        theme: 'studio-custom',
+                                        template: 'studio-custom',
+                                        layout: studioTheme.layout || activeOverlayConfig.layout,
+                                        bugPosition: studioTheme.bugPosition || activeOverlayConfig.bugPosition,
+                                        teamAColor: studioTheme.teamAColor || activeOverlayConfig.teamAColor,
+                                        teamBColor: studioTheme.teamBColor || activeOverlayConfig.teamBColor,
+                                        sponsorText: studioTheme.sponsorText || activeOverlayConfig.sponsorText,
+                                        tickerMessage: studioTheme.tickerMessage || activeOverlayConfig.tickerMessage,
+                                        showBallByBallDots: studioTheme.showBallByBallDots ?? activeOverlayConfig.showBallByBallDots,
+                                        showStrikeRates: studioTheme.showStrikeRates ?? activeOverlayConfig.showStrikeRates,
+                                        showWinProbability: studioTheme.showWinProbability ?? activeOverlayConfig.showWinProbability,
+                                        showSponsorBadge: studioTheme.showSponsorBadge ?? activeOverlayConfig.showSponsorBadge,
+                                        showTicker: studioTheme.showTicker ?? activeOverlayConfig.showTicker,
+                                        studioTheme: studioTheme
+                                      };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-black text-[8px] uppercase tracking-wider transition-all shadow shrink-0 cursor-pointer border-none"
+                                  >
+                                    ⚡ Apply
+                                  </button>
+                                </div>
+                              )}
+
                               <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 flex items-center justify-between">
                                 <span>1A. Color Theme</span>
-                                <span className="text-amber-400 font-mono text-[8px]">7 PRESETS</span>
+                                <span className="text-amber-400 font-mono text-[8px]">8 PRESETS</span>
                               </span>
                               <div className="grid grid-cols-2 gap-1.5">
                                 {[
+                                  { id: 'studio-custom', label: '🎨 Studio Theme', desc: studioTheme?.name || 'Superadmin' },
                                   { id: 'broadcast-pro', label: 'Broadcast Pro', desc: 'ESPN Navy' },
                                   { id: 'ipl-style', label: 'IPL Gold/Purple', desc: 'Royal League' },
                                   { id: 'cricheroes-dark', label: 'CricHeroes Dark', desc: 'Cyan Tech' },
@@ -14432,12 +14496,27 @@ export const CricketScoreboard: React.FC = () => {
                                     <button
                                       key={t.id}
                                       onClick={() => {
-                                        const updated = { ...activeOverlayConfig, theme: t.id as any, template: t.id as any };
+                                        const updated = { 
+                                          ...activeOverlayConfig, 
+                                          theme: t.id as any, 
+                                          template: t.id as any,
+                                          ...(t.id === 'studio-custom' && studioTheme ? {
+                                            studioTheme: studioTheme,
+                                            layout: studioTheme.layout || activeOverlayConfig.layout,
+                                            bugPosition: studioTheme.bugPosition || activeOverlayConfig.bugPosition,
+                                            teamAColor: studioTheme.teamAColor || activeOverlayConfig.teamAColor,
+                                            teamBColor: studioTheme.teamBColor || activeOverlayConfig.teamBColor,
+                                            sponsorText: studioTheme.sponsorText || activeOverlayConfig.sponsorText,
+                                            tickerMessage: studioTheme.tickerMessage || activeOverlayConfig.tickerMessage
+                                          } : {})
+                                        };
                                         syncMatch(prev => ({ ...prev, overlayConfig: updated }));
                                       }}
                                       className={`p-2 text-left rounded-xl transition-all border outline-none cursor-pointer flex flex-col justify-between ${
                                         isActive 
-                                          ? 'bg-rose-500/20 border-rose-500/50 shadow-md text-white font-black' 
+                                          ? t.id === 'studio-custom' 
+                                            ? 'bg-sky-500/25 border-sky-500 text-white font-black shadow-md' 
+                                            : 'bg-rose-500/20 border-rose-500/50 shadow-md text-white font-black' 
                                           : 'bg-slate-950/40 border-white/5 text-slate-400 hover:bg-slate-900/50'
                                       }`}
                                     >

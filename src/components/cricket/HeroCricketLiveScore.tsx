@@ -27,12 +27,14 @@ import {
   isMatchDeleted, 
   markMatchDeleted, 
   unmarkMatchDeleted, 
+  deleteLocalMatch,
   pruneDeletedMatchesFromStorage,
   saveMatchToRegistry,
   getAnyActiveOrRecentMatch,
-  isDemoOrAIMatch
+  isDemoOrAIMatch,
+  purgeCachedAIMatches
 } from './cricketStorage';
-import { db, rtdb } from '../../lib/firebase';
+import { db, rtdb, subscribeToDeletedMatches } from '../../lib/firebase';
 import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { ref as rtdbRef, onValue as rtdbOnValue } from 'firebase/database';
 import { useAuth } from '../AuthContext';
@@ -105,6 +107,9 @@ export const HeroCricketLiveScore: React.FC = () => {
 
   // Synchronize live and completed matches from LocalStorage, Firestore, and Realtime Database
   useEffect(() => {
+    // Proactively purge any cached synthetic / AI bot / deleted match records
+    purgeCachedAIMatches();
+
     // 1. Initial local match check
     const loadInitialLocal = () => {
       try {
@@ -178,16 +183,30 @@ export const HeroCricketLiveScore: React.FC = () => {
         const localLive: MatchState[] = [];
         const localCompleted: MatchState[] = [];
 
-        if (activeLocal && !(activeLocal as any).isDeleted && !isDemoOrAIMatch(activeLocal)) {
-          if (activeLocal.status === 'live') localLive.push(activeLocal);
-          else if (activeLocal.status === 'completed') localCompleted.push(activeLocal);
+        if (activeLocal && !(activeLocal as any).isDeleted && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal)) {
+          const isFreshDraft = !(activeLocal as any).syncedWithFirestore && (Date.now() - (activeLocal.updatedAt || 0) < 60000);
+          if (remoteIds.has(activeLocal.id) || isFreshDraft) {
+            if (activeLocal.status === 'live') localLive.push(activeLocal);
+            else if (activeLocal.status === 'completed') localCompleted.push(activeLocal);
+          } else {
+            // Remotely deleted
+            markMatchDeleted(activeLocal.id);
+            try { localStorage.removeItem('cricket_active_match'); } catch (_) {}
+          }
         }
         registry.forEach(lm => {
-          if (!(lm as any).isDeleted && !isDemoOrAIMatch(lm)) {
-            if (lm.status === 'live' && !localLive.some(a => a.id === lm.id)) {
-              localLive.push(lm);
-            } else if (lm.status === 'completed' && !localCompleted.some(c => c.id === lm.id)) {
-              localCompleted.push(lm);
+          if (!isMatchDeleted(lm.id) && !(lm as any).isDeleted && !isDemoOrAIMatch(lm)) {
+            const isFreshDraft = !(lm as any).syncedWithFirestore && (Date.now() - (lm.updatedAt || 0) < 60000);
+            if (remoteIds.has(lm.id) || isFreshDraft) {
+              if (lm.status === 'live' && !localLive.some(a => a.id === lm.id)) {
+                localLive.push(lm);
+              } else if (lm.status === 'completed' && !localCompleted.some(c => c.id === lm.id)) {
+                localCompleted.push(lm);
+              }
+            } else {
+              // Remotely deleted
+              markMatchDeleted(lm.id);
+              deleteLocalMatch(lm.id);
             }
           }
         });
@@ -224,6 +243,24 @@ export const HeroCricketLiveScore: React.FC = () => {
       console.warn('[HeroCricketLiveScore] Firestore setup:', e);
     }
 
+    // 2.1 Tombstone Stream Listener for immediate cross-device deletion sync
+    let unsubDeletedFirestore: (() => void) | null = null;
+    try {
+      unsubDeletedFirestore = subscribeToDeletedMatches((deletedIds) => {
+        if (deletedIds && deletedIds.length > 0) {
+          deletedIds.forEach(id => {
+            markMatchDeleted(id);
+            deleteLocalMatch(id);
+          });
+          setLiveMatches(prev => prev.filter(m => !deletedIds.includes(m.id)));
+          setRecentCompletedMatches(prev => prev.filter(m => !deletedIds.includes(m.id)));
+          setLastUpdated(Date.now());
+        }
+      });
+    } catch (e) {
+      console.warn('[HeroCricketLiveScore] Deleted matches stream setup:', e);
+    }
+
     // 3. Real-time Database (RTDB) listener for active & completed updates
     let unsubRtdb: (() => void) | null = null;
     let unsubCompletedRtdb: (() => void) | null = null;
@@ -231,6 +268,15 @@ export const HeroCricketLiveScore: React.FC = () => {
       const activeMatchRef = rtdbRef(rtdb, 'cricket_active_match');
       unsubRtdb = rtdbOnValue(activeMatchRef, (snapshot) => {
         const val = snapshot.val();
+        if (!val) {
+          // RTDB active match cleared
+          return;
+        }
+        if (val && isMatchDeleted(val.id)) {
+          setLiveMatches(prev => prev.filter(m => m.id !== val.id));
+          setLastUpdated(Date.now());
+          return;
+        }
         if (val && !isMatchDeleted(val.id) && !isDemoOrAIMatch(val)) {
           if (val.status === 'live') {
             setLiveMatches(prev => {
@@ -300,9 +346,31 @@ export const HeroCricketLiveScore: React.FC = () => {
       }
     };
 
+    const handleDeletedEvent = (e: any) => {
+      const deletedId = e?.detail?.id;
+      if (deletedId) {
+        markMatchDeleted(deletedId);
+        deleteLocalMatch(deletedId);
+        setLiveMatches(prev => prev.filter(m => m.id !== deletedId));
+        setRecentCompletedMatches(prev => prev.filter(m => m.id !== deletedId));
+        setLastUpdated(Date.now());
+      }
+    };
+
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'cricket_active_match' || e.key === 'cricket_matches_local_registry') {
         loadInitialLocal();
+      }
+      if (e.key === 'cricket_deleted_matches_registry') {
+        try {
+          const deletedMap = JSON.parse(e.newValue || '{}');
+          const deletedKeys = Object.keys(deletedMap);
+          if (deletedKeys.length > 0) {
+            setLiveMatches(prev => prev.filter(m => !deletedKeys.includes(m.id)));
+            setRecentCompletedMatches(prev => prev.filter(m => !deletedKeys.includes(m.id)));
+            setLastUpdated(Date.now());
+          }
+        } catch (_) {}
       }
       if (e.key === 'cricket_hidden_result_card_ids' || e.key === 'cricket_hide_completed_result_cards') {
         try {
@@ -323,14 +391,17 @@ export const HeroCricketLiveScore: React.FC = () => {
     };
 
     window.addEventListener('cricket_match_updated', handleUpdate);
+    window.addEventListener('cricket_match_deleted', handleDeletedEvent);
     window.addEventListener('cricket_match_result_visibility_changed', handleVisibilityChange);
     window.addEventListener('storage', handleStorage);
 
     return () => {
       if (unsubFirestore) unsubFirestore();
+      if (unsubDeletedFirestore) unsubDeletedFirestore();
       if (unsubRtdb) unsubRtdb();
       if (unsubCompletedRtdb) unsubCompletedRtdb();
       window.removeEventListener('cricket_match_updated', handleUpdate);
+      window.removeEventListener('cricket_match_deleted', handleDeletedEvent);
       window.removeEventListener('cricket_match_result_visibility_changed', handleVisibilityChange);
       window.removeEventListener('storage', handleStorage);
     };
@@ -503,7 +574,8 @@ export const HeroCricketLiveScore: React.FC = () => {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-emerald-500/40 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group"
+        style={{ touchAction: 'pan-y' }}
+        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-emerald-500/40 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group touch-auto"
       >
         {/* Stadium ambient light beam */}
         <div className="absolute -top-16 -right-16 w-56 h-56 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse" />

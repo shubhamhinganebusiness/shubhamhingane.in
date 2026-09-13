@@ -1,11 +1,12 @@
 import { db, safeSetDoc } from '../lib/firebase';
-import { collection, doc, getDocs, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, getDocs, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 export interface LocalCricketSponsor {
   id: string;
   name: string;
   category: 'title' | 'powered_by' | 'over_breakdown' | 'livestream' | 'scorecard_pdf' | 'all';
   logoUrl: string;
+  bannerUrl?: string;
   tagline?: string;
   phone?: string;
   website?: string;
@@ -26,6 +27,7 @@ export const DEFAULT_PRESET_SPONSORS: LocalCricketSponsor[] = [
     name: 'Shree Ganesh Jewellers',
     category: 'all',
     logoUrl: 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80',
+    bannerUrl: 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80',
     tagline: '916 Hallmarked Pure Gold & Diamond Ornaments • Near Gandhi Chowk',
     phone: '+91 98221 00000',
     sponsorTier: 'Title Sponsor',
@@ -40,6 +42,7 @@ export const DEFAULT_PRESET_SPONSORS: LocalCricketSponsor[] = [
     name: 'Sai Care Multispeciality Hospital',
     category: 'over_breakdown',
     logoUrl: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=300&auto=format&fit=crop&q=80',
+    bannerUrl: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=1200&auto=format&fit=crop&q=80',
     tagline: '24x7 Emergency Trauma Care & Sports Injury Center',
     phone: '+91 94220 12345',
     sponsorTier: 'Powered By',
@@ -54,6 +57,7 @@ export const DEFAULT_PRESET_SPONSORS: LocalCricketSponsor[] = [
     name: 'Raju Fresh Bakery & Sweets',
     category: 'over_breakdown',
     logoUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&auto=format&fit=crop&q=80',
+    bannerUrl: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=1200&auto=format&fit=crop&q=80',
     tagline: 'Fresh Cream Cakes, Snacks & Cold Drinks for Players',
     phone: '+91 97654 88888',
     sponsorTier: 'Associate Partner',
@@ -68,6 +72,7 @@ export const DEFAULT_PRESET_SPONSORS: LocalCricketSponsor[] = [
     name: 'Shivaji Sports & Cricket Kit House',
     category: 'livestream',
     logoUrl: 'https://images.unsplash.com/photo-1531415074868-036b1c5d53ec?w=300&auto=format&fit=crop&q=80',
+    bannerUrl: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=1200&auto=format&fit=crop&q=80',
     tagline: 'Premium Kashmir & English Willow Bats • Uniforms on Wholesale',
     phone: '+91 98900 54321',
     sponsorTier: 'Local Community Partner',
@@ -98,7 +103,7 @@ export function saveLocalSponsors(sponsors: LocalCricketSponsor[]): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(LOCAL_SPONSORS_KEY, JSON.stringify(sponsors));
-    window.dispatchEvent(new CustomEvent('cricket_sponsors_updated'));
+    window.dispatchEvent(new CustomEvent('cricket_sponsors_updated', { detail: { sponsors } }));
   } catch (err) {
     console.warn('[CricketSponsors] Local storage write error:', err);
   }
@@ -119,8 +124,14 @@ export async function fetchAllSponsors(): Promise<LocalCricketSponsor[]> {
     });
 
     if (remoteList.length > 0) {
-      saveLocalSponsors(remoteList);
-      return remoteList;
+      const current = getLocalSponsors();
+      const map = new Map<string, LocalCricketSponsor>();
+      DEFAULT_PRESET_SPONSORS.forEach(p => map.set(p.id, p));
+      current.forEach(c => map.set(c.id, c));
+      remoteList.forEach(r => map.set(r.id, { ...(map.get(r.id) || {}), ...r }));
+      const merged = Array.from(map.values());
+      saveLocalSponsors(merged);
+      return merged;
     }
   } catch (err) {
     console.info('[CricketSponsors] Firestore read note, using cached:', err);
@@ -130,25 +141,73 @@ export async function fetchAllSponsors(): Promise<LocalCricketSponsor[]> {
 }
 
 /**
+ * Subscribe to real-time sponsor updates across devices
+ */
+export function subscribeToSponsors(callback: (sponsors: LocalCricketSponsor[]) => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  try {
+    return onSnapshot(collection(db, 'cricket_sponsors'), (snap) => {
+      const remoteList: LocalCricketSponsor[] = [];
+      snap.forEach(d => {
+        const data = d.data() as LocalCricketSponsor;
+        if (data && data.name) {
+          remoteList.push({ ...data, id: d.id });
+        }
+      });
+      if (remoteList.length > 0) {
+        const current = getLocalSponsors();
+        const map = new Map<string, LocalCricketSponsor>();
+        DEFAULT_PRESET_SPONSORS.forEach(p => map.set(p.id, p));
+        current.forEach(c => map.set(c.id, c));
+        remoteList.forEach(r => map.set(r.id, { ...(map.get(r.id) || {}), ...r }));
+        const merged = Array.from(map.values());
+        saveLocalSponsors(merged);
+        callback(merged);
+      } else {
+        callback(getLocalSponsors());
+      }
+    }, (err) => {
+      console.warn('[CricketSponsors] onSnapshot stream note:', err);
+      callback(getLocalSponsors());
+    });
+  } catch (e) {
+    callback(getLocalSponsors());
+    return () => {};
+  }
+}
+
+/**
  * Save or update a sponsor document in Firestore & localStorage
  */
 export async function saveSponsorToStorage(sponsor: LocalCricketSponsor): Promise<void> {
-  // Update local list
+  // 1. Update local list immediately so UI updates without lag
   const current = getLocalSponsors();
   const existingIdx = current.findIndex((s) => s.id === sponsor.id);
   if (existingIdx >= 0) {
-    current[existingIdx] = sponsor;
+    current[existingIdx] = { ...current[existingIdx], ...sponsor };
   } else {
     current.unshift(sponsor);
   }
   saveLocalSponsors(current);
 
-  // Sync to Firestore
+  // 2. Sync to Firestore
   try {
     const docRef = doc(db, 'cricket_sponsors', sponsor.id);
     await safeSetDoc(docRef, sponsor);
   } catch (err) {
     console.warn('[CricketSponsors] Firestore safeSetDoc note:', err);
+    // Proxy fallback
+    try {
+      await fetch('/api/cricket/save-doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          collectionName: 'cricket_sponsors',
+          docId: sponsor.id,
+          data: sponsor
+        })
+      });
+    } catch (_) {}
   }
 }
 

@@ -1,4 +1,17 @@
-import { db, handleFirestoreError, OperationType, isQuotaError, recordFirestoreQuotaExhaustion } from '../lib/firebase';
+import { 
+  db, 
+  handleFirestoreError, 
+  OperationType, 
+  isQuotaError, 
+  recordFirestoreQuotaExhaustion,
+  safeDeleteDoc,
+  safeSetDoc,
+  removeMatchFromRealtimeDB
+} from '../lib/firebase';
+import { 
+  deleteLocalMatch, 
+  markMatchDeleted 
+} from '../components/cricket/cricketStorage';
 import { 
   doc, 
   collection, 
@@ -692,5 +705,51 @@ export async function atomicUpdateScore(
   } catch (err) {
     if (isQuotaError(err)) recordFirestoreQuotaExhaustion(2);
     console.warn('[cricketDb] atomicUpdateScore note:', err);
+  }
+}
+
+/**
+ * Permanently deletes a match across ALL storage and real-time tiers:
+ * 1. Local state, cache & tombstones (localStorage + sessionStorage)
+ * 2. Broadcasts deletion events locally and across tabs
+ * 3. Firestore cricket_matches & cricket_live_summaries
+ * 4. Firestore cricket_deleted_matches (tombstone for all other devices)
+ * 5. Realtime Database (active match pointers and matches list)
+ * 6. Backend Express server tombstone registry
+ */
+export async function deleteMatchGlobally(matchId: string): Promise<void> {
+  if (!matchId) return;
+
+  // 1. Local cleanup & tombstone
+  deleteLocalMatch(matchId);
+  markMatchDeleted(matchId);
+
+  // 2. Realtime Database removal (clears active match pointers & collection)
+  try {
+    await removeMatchFromRealtimeDB(matchId);
+  } catch (e) {
+    console.warn('[deleteMatchGlobally] RTDB error:', e);
+  }
+
+  // 3. Firestore documents removal & tombstone record
+  try {
+    await safeDeleteDoc(doc(db, 'cricket_matches', matchId));
+    await safeDeleteDoc(doc(db, 'cricket_live_summaries', matchId));
+    await safeSetDoc(doc(db, 'cricket_deleted_matches', matchId), {
+      id: matchId,
+      isDeleted: true,
+      deletedAt: Date.now()
+    });
+  } catch (e) {
+    console.warn('[deleteMatchGlobally] Firestore error:', e);
+  }
+
+  // 4. Server API deletion for server-side persistence & tombstones
+  try {
+    await fetch(`/api/cricket/matches/${encodeURIComponent(matchId)}`, {
+      method: 'DELETE'
+    });
+  } catch (e) {
+    // Non-fatal if offline
   }
 }

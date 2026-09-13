@@ -276,6 +276,18 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Serve static uploads directory for optimized CDN/static images
+  const uploadsDir = path.join(process.cwd(), "public", "uploads");
+  if (!fs.existsSync(uploadsDir)) {
+    try {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    } catch (_) {}
+  }
+  app.use("/uploads", express.static(uploadsDir, {
+    maxAge: "1y",
+    immutable: true
+  }));
+
   // Cricbuzz-grade Image Upload Architecture Endpoint:
   // 1. Organizes into logical Firebase Storage folders:
   //    - players/ (player profile photos, e.g. players/player_id_123.webp)
@@ -503,7 +515,41 @@ async function startServer() {
         }
       }
 
-      // Safe fallback data URL if bucket is unreachable
+      // High-performance static disk file saving: ensures persistent, clean URLs for uploads
+      try {
+        const publicUploadsPath = path.join(process.cwd(), "public", "uploads", storagePath);
+        const parentDir = path.dirname(publicUploadsPath);
+        if (!fs.existsSync(parentDir)) {
+          fs.mkdirSync(parentDir, { recursive: true });
+        }
+        fs.writeFileSync(publicUploadsPath, outputBuffer);
+
+        const distUploadsPath = path.join(process.cwd(), "dist", "uploads", storagePath);
+        if (fs.existsSync(path.join(process.cwd(), "dist"))) {
+          const distParentDir = path.dirname(distUploadsPath);
+          if (!fs.existsSync(distParentDir)) {
+            fs.mkdirSync(distParentDir, { recursive: true });
+          }
+          fs.writeFileSync(distUploadsPath, outputBuffer);
+        }
+
+        const localStaticUrl = `/uploads/${storagePath}`;
+        return res.json({
+          success: true,
+          url: localStaticUrl,
+          path: storagePath,
+          size: outputBuffer.length,
+          originalSize: inputBuffer.length,
+          contentType: outputContentType,
+          name: safeName,
+          folder: cleanFolder,
+          cacheControl: "public, max-age=31536000, immutable"
+        });
+      } catch (diskErr) {
+        console.warn("[Upload Route] Failed to save to local uploads dir:", diskErr);
+      }
+
+      // Safe fallback data URL if disk write failed
       const fallbackDataUrl = `data:${outputContentType};base64,${outputBuffer.toString("base64")}`;
       return res.json({
         success: true,
@@ -540,7 +586,10 @@ async function startServer() {
       'match-1782016325671',
       'match-1788498354696',
       'match-1788598366521',
-      'test-realtime-check'
+      'match-1789287226767',
+      'test-realtime-check',
+      'node_test_match',
+      'test_123'
     ];
     try {
       fs.writeFileSync(DELETED_MATCHES_FILE, JSON.stringify(seed, null, 2), "utf-8");
@@ -569,12 +618,17 @@ async function startServer() {
         }
       }
 
-      // Also attempt to delete doc in Firestore if possible
+      // Delete docs in Firestore and register real-time deletion tombstone
       try {
         const db = await getFirebaseDb();
         if (db) {
-          const { doc, deleteDoc } = await import("firebase/firestore");
+          const { doc, deleteDoc, setDoc } = await import("firebase/firestore");
           deleteDoc(doc(db, "cricket_matches", matchId)).catch(() => {});
+          deleteDoc(doc(db, "cricket_live_summaries", matchId)).catch(() => {});
+          setDoc(doc(db, "cricket_deleted_matches", matchId), {
+            id: matchId,
+            deletedAt: Date.now()
+          }).catch(() => {});
         }
       } catch (_) {}
 
@@ -947,6 +1001,7 @@ function cleanServerUndefined(obj: any): any {
         "cricket_players", 
         "cricket_sponsors", 
         "cricket_live_summaries", 
+        "cricket_deleted_matches",
         "score_managers"
       ];
       if (!allowedCollections.includes(collectionName)) {

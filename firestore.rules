@@ -265,6 +265,20 @@ service cloud.firestore {
       }
     }
 
+    match /cricket_deleted_matches/{matchId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
+    match /cricket_broadcast_theme/{themeId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
     // -------------------------------------------------------------------------
     // Ganpati Mandal: Digital Pavati & ERP Multi-Tenant Data
     // -------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Phone, ExternalLink } from 'lucide-react';
-import { LocalCricketSponsor, getLocalSponsors } from '../../utils/cricketSponsorsStorage';
+import { LocalCricketSponsor, getLocalSponsors, subscribeToSponsors } from '../../utils/cricketSponsorsStorage';
 
 interface SponsorOverBannerProps {
   overNumber?: number;
@@ -18,20 +18,51 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
   const [sponsors, setSponsors] = useState<LocalCricketSponsor[]>([]);
 
   useEffect(() => {
-    const list = getLocalSponsors().filter(
-      (s) => s.isActive && (s.displayOnOverBreakdown || s.category === 'all')
-    );
-    setSponsors(list);
-
-    const handleUpdate = () => {
-      const updated = getLocalSponsors().filter(
+    // Initial local load
+    const loadFromLocal = () => {
+      const list = getLocalSponsors().filter(
         (s) => s.isActive && (s.displayOnOverBreakdown || s.category === 'all')
       );
-      setSponsors(updated);
+      setSponsors(list);
+    };
+    loadFromLocal();
+
+    // Listen to in-tab custom events
+    const handleUpdate = (e?: Event) => {
+      const detailSponsors = (e as CustomEvent)?.detail?.sponsors;
+      if (Array.isArray(detailSponsors)) {
+        const filtered = detailSponsors.filter(
+          (s: LocalCricketSponsor) => s.isActive && (s.displayOnOverBreakdown || s.category === 'all')
+        );
+        setSponsors(filtered);
+      } else {
+        loadFromLocal();
+      }
+    };
+
+    // Cross-tab storage listener
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'gullyscore_local_sponsors_registry') {
+        loadFromLocal();
+      }
     };
 
     window.addEventListener('cricket_sponsors_updated', handleUpdate);
-    return () => window.removeEventListener('cricket_sponsors_updated', handleUpdate);
+    window.addEventListener('storage', handleStorage);
+
+    // Cross-device Firestore real-time listener
+    const unsub = subscribeToSponsors((all) => {
+      const filtered = all.filter(
+        (s) => s.isActive && (s.displayOnOverBreakdown || s.category === 'all')
+      );
+      setSponsors(filtered);
+    });
+
+    return () => {
+      window.removeEventListener('cricket_sponsors_updated', handleUpdate);
+      window.removeEventListener('storage', handleStorage);
+      unsub();
+    };
   }, []);
 
   if (sponsors.length === 0) return null;
@@ -41,6 +72,8 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
   const sponsor = sponsors[sponsorIndex] || sponsors[0];
 
   if (!sponsor) return null;
+
+  const displayImage = sponsor.bannerUrl || sponsor.logoUrl;
 
   if (variant === 'ticker') {
     return (
@@ -72,6 +105,54 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
             {sponsor.phone}
           </span>
         )}
+      </div>
+    );
+  }
+
+  if (variant === 'expanded' && sponsor.bannerUrl) {
+    return (
+      <div className={`rounded-2xl overflow-hidden border border-amber-300/60 dark:border-amber-700/40 relative group ${className}`}>
+        <img
+          src={sponsor.bannerUrl}
+          alt={sponsor.name}
+          className="w-full h-28 sm:h-36 object-cover"
+          onError={(e) => {
+            (e.target as any).src = 'https://images.unsplash.com/photo-1515562141207-7a88fb7ce338?w=1200&auto=format&fit=crop&q=80';
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex flex-col justify-end p-3.5 text-white">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <img
+                src={sponsor.logoUrl}
+                alt={sponsor.name}
+                className="w-8 h-8 rounded-lg object-cover border border-white/20 shrink-0"
+                onError={(e) => {
+                  (e.target as any).src = 'https://images.unsplash.com/photo-1535632066927-ab7c9ab60908?w=300&auto=format&fit=crop&q=80';
+                }}
+              />
+              <div className="min-w-0">
+                <span className="text-[9px] font-black uppercase tracking-wider text-amber-300">
+                  {overNumber !== undefined ? `Over ${overNumber} Powered by` : 'Official Partner'}:
+                </span>
+                <h5 className="font-black text-sm text-white truncate drop-shadow-sm">
+                  {sponsor.name}
+                </h5>
+                {sponsor.tagline && (
+                  <p className="text-[10.5px] text-white/90 truncate font-medium">
+                    {sponsor.tagline}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {sponsor.phone && (
+              <span className="text-xs font-mono font-bold px-2 py-1 rounded-lg bg-black/40 backdrop-blur-xs text-amber-300 border border-amber-400/30 shrink-0">
+                {sponsor.phone}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
