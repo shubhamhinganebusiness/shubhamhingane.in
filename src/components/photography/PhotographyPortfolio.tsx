@@ -22,8 +22,12 @@ import {
   BookOpen,
   CreditCard,
   Globe,
-  Info
+  Info,
+  Receipt,
+  FileText,
+  Printer
 } from 'lucide-react';
+import { PhotographyBillingDesk } from './PhotographyBillingDesk';
 
 // Define photography mock photos
 const PORTFOLIO_PHOTOS = [
@@ -221,11 +225,12 @@ export function PhotographyPortfolio() {
       </a>
 
       <!-- Desktop Navigation Menu -->
-      <nav class="hidden md:flex items-center gap-8 text-xs font-semibold tracking-widest uppercase">
+      <nav class="hidden md:flex items-center gap-7 text-xs font-semibold tracking-widest uppercase">
         <a href="#home" class="hover:text-[#D4AF37] transition-colors duration-200">Home</a>
         <a href="#services" class="hover:text-[#D4AF37] transition-colors duration-200">Services</a>
         <a href="#portfolio" class="hover:text-[#D4AF37] transition-colors duration-200">Portfolio</a>
         <a href="#testimonials" class="hover:text-[#D4AF37] transition-colors duration-200">Testimonials</a>
+        <a href="#billing" class="hover:text-[#D4AF37] text-[#D4AF37] transition-colors duration-200 font-bold">Billing & Print</a>
         <a href="#contact" class="hover:text-[#D4AF37] transition-colors duration-200">Contact</a>
       </nav>
 
@@ -555,6 +560,80 @@ export function PhotographyPortfolio() {
     </div>
   </section>
 
+  <!-- Studio Billing Desk & Print Station -->
+  <section id="billing" class="py-24 bg-brandDarker border-t border-gray-900">
+    <div class="max-w-7xl mx-auto px-6 md:px-12">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10 pb-6 border-b border-gray-900">
+        <div>
+          <span class="text-[9px] font-black text-[#D4AF37] uppercase tracking-[0.3em] block mb-1">STUDIO DESK SYSTEM</span>
+          <h2 class="font-serif text-3xl md:text-4xl font-black text-white">Client Billing & Print Station</h2>
+          <p class="text-xs text-gray-400 mt-1">Generate itemized client invoices, calculate GST & advance token amounts, and print luxury A4 invoices.</p>
+        </div>
+        <div>
+          <a href="#contact" class="px-5 py-2.5 bg-[#D4AF37] hover:bg-white text-black font-black uppercase tracking-wider text-xs rounded transition-all inline-block">
+            Book Frame Slot
+          </a>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="p-6 bg-brandDark border border-gray-900 rounded-2xl flex flex-col justify-between">
+          <div>
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-mono text-[#D4AF37] font-bold">LLS-2026-081</span>
+              <span class="px-2 py-0.5 bg-amber-950 text-amber-300 text-[9px] font-black uppercase rounded">Advance Paid</span>
+            </div>
+            <h4 class="font-serif text-lg font-bold text-white mt-2">Amit & Priyanka Sharma</h4>
+            <p class="text-xs text-gray-400 mt-1">Heritage 2-Day Wedding Shoot • Udaipur</p>
+            <div class="mt-4 pt-3 border-t border-gray-900 flex justify-between text-xs">
+              <span class="text-gray-500">Total: ₹2,92,640</span>
+              <span class="text-amber-400 font-bold">Due: ₹1,42,640</span>
+            </div>
+          </div>
+          <button onclick="window.print()" class="mt-4 w-full py-2.5 bg-[#D4AF37] hover:bg-white text-black text-xs font-black uppercase tracking-wider rounded transition-all cursor-pointer">
+            Print Invoice
+          </button>
+        </div>
+
+        <div class="p-6 bg-brandDark border border-gray-900 rounded-2xl flex flex-col justify-between">
+          <div>
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-mono text-[#D4AF37] font-bold">LLS-2026-082</span>
+              <span class="px-2 py-0.5 bg-emerald-950 text-emerald-300 text-[9px] font-black uppercase rounded">Paid In Full</span>
+            </div>
+            <h4 class="font-serif text-lg font-bold text-white mt-2">Sarah Mehta & Kabir Sen</h4>
+            <p class="text-xs text-gray-400 mt-1">Pre-Wedding Story Film • Mahabaleshwar</p>
+            <div class="mt-4 pt-3 border-t border-gray-900 flex justify-between text-xs">
+              <span class="text-gray-500">Total: ₹84,075</span>
+              <span class="text-emerald-400 font-bold">Settled</span>
+            </div>
+          </div>
+          <button onclick="window.print()" class="mt-4 w-full py-2.5 bg-[#D4AF37] hover:bg-white text-black text-xs font-black uppercase tracking-wider rounded transition-all cursor-pointer">
+            Print Invoice
+          </button>
+        </div>
+
+        <div class="p-6 bg-brandDark border border-gray-900 rounded-2xl flex flex-col justify-between">
+          <div>
+            <div class="flex justify-between items-start">
+              <span class="text-xs font-mono text-[#D4AF37] font-bold">LLS-2026-083</span>
+              <span class="px-2 py-0.5 bg-rose-950 text-rose-300 text-[9px] font-black uppercase rounded">Pending Due</span>
+            </div>
+            <h4 class="font-serif text-lg font-bold text-white mt-2">Nisha & Luke Coutinho</h4>
+            <p class="text-xs text-gray-400 mt-1">Autumn Editorial & Teaser • Pune</p>
+            <div class="mt-4 pt-3 border-t border-gray-900 flex justify-between text-xs">
+              <span class="text-gray-500">Total: ₹88,500</span>
+              <span class="text-rose-400 font-bold">Due: ₹88,500</span>
+            </div>
+          </div>
+          <button onclick="window.print()" class="mt-4 w-full py-2.5 bg-[#D4AF37] hover:bg-white text-black text-xs font-black uppercase tracking-wider rounded transition-all cursor-pointer">
+            Print Invoice
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Footer Layout -->
   <footer class="bg-brandDarker border-t border-gray-900 py-12 text-center text-xs text-gray-500">
     <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
@@ -778,16 +857,28 @@ export function PhotographyPortfolio() {
             <span className="text-[7.5px] font-black tracking-[0.55em] text-gray-500 uppercase mt-1">STUDIOS</span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-8 text-[10px] font-black tracking-[0.25em] uppercase text-gray-400">
+          <nav className="hidden md:flex items-center gap-7 text-[10px] font-black tracking-[0.22em] uppercase text-gray-400">
             <a href="#welcome" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200">Home</a>
             <a href="#offerings" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200">Offerings</a>
             <a href="#simulator" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200">Simulator</a>
             <a href="#visuals" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200">Curated Works</a>
             <a href="#testimonials" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200">Reviews</a>
+            <a href="#billing" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200 flex items-center gap-1 text-[#D4AF37]">
+              <Receipt size={11} /> Billing & Print
+            </a>
             <a href="#reserve" className="hover:text-[#D4AF37] transition-all hover:scale-105 duration-200">Reserve</a>
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <a 
+              href="#billing"
+              className="px-3.5 py-2 border border-[#D4AF37]/40 bg-[#D4AF37]/10 hover:bg-[#D4AF37] text-[#D4AF37] hover:text-black transition-all rounded text-[9.5px] font-black uppercase tracking-widest flex items-center gap-1.5 cursor-pointer shadow-lg shadow-[#D4AF37]/10"
+              title="Studio Billing Station & Invoice Printing"
+            >
+              <Receipt size={12} />
+              <span className="hidden sm:inline">Billing & Print</span>
+              <span className="sm:hidden">Bill</span>
+            </a>
             <button 
               id="header-create-id"
               onClick={() => navigate('/live/select-template')}
@@ -796,7 +887,7 @@ export function PhotographyPortfolio() {
               <CreditCard size={12} />
               <span>Create ID</span>
             </button>
-            <a href="#reserve" className="hidden sm:block px-5 py-2.5 bg-transparent border border-gray-800 hover:border-[#D4AF37] hover:text-[#D4AF37] transition-all rounded text-[9.5px] font-black uppercase tracking-widest">
+            <a href="#reserve" className="hidden lg:block px-5 py-2.5 bg-transparent border border-gray-800 hover:border-[#D4AF37] hover:text-[#D4AF37] transition-all rounded text-[9.5px] font-black uppercase tracking-widest">
               Book Frame Slot
             </a>
           </div>
@@ -1551,12 +1642,22 @@ export function PhotographyPortfolio() {
                       />
                     </div>
 
-                    <button 
-                      type="submit" 
-                      className="w-full py-4 bg-[#D4AF37] hover:bg-white text-black font-black uppercase tracking-widest text-[10px] rounded-xl transition-all duration-300 shadow-2xl cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
-                    >
-                      Transmit Booking Inquiry
-                    </button>
+                    <div className="space-y-3">
+                      <button 
+                        type="submit" 
+                        className="w-full py-4 bg-[#D4AF37] hover:bg-white text-black font-black uppercase tracking-widest text-[10px] rounded-xl transition-all duration-300 shadow-2xl cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
+                      >
+                        Transmit Booking Inquiry
+                      </button>
+
+                      <a
+                        href="#billing"
+                        className="w-full py-3 bg-black/60 hover:bg-[#D4AF37]/10 border border-gray-800 hover:border-[#D4AF37]/40 text-[#D4AF37] font-bold uppercase tracking-wider text-[9.5px] rounded-xl transition-all flex items-center justify-center gap-2"
+                      >
+                        <Receipt size={13} />
+                        <span>Or Open Studio Billing Station to Generate & Print Bill</span>
+                      </a>
+                    </div>
                   </form>
 
                   {/* Booking success overlay panel */}
@@ -1583,6 +1684,13 @@ export function PhotographyPortfolio() {
             </div>
           </div>
         </section>
+
+        {/* Studio Invoicing & Client Billing Station Section */}
+        <section id="billing" className="py-24 bg-[#080808] border-t border-gray-950 relative">
+          <div className="max-w-7xl mx-auto px-6 md:px-12">
+            <PhotographyBillingDesk />
+          </div>
+        </section>
       </main>
 
       {/* Footer copyright with neat Staging Developer Hub toggles at bottom */}
@@ -1601,6 +1709,7 @@ export function PhotographyPortfolio() {
               <a href="#offerings" className="hover:text-white transition-all">Our Services</a>
               <a href="#simulator" className="hover:text-white transition-all">Simulator</a>
               <a href="#visuals" className="hover:text-white transition-all">Curated Works</a>
+              <a href="#billing" className="hover:text-[#D4AF37] transition-all text-[#D4AF37]">Billing & Print</a>
             </div>
           </div>
 

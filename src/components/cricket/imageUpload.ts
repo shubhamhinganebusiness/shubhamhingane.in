@@ -1,5 +1,5 @@
 import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { app } from '../lib/firebase';
+import { app } from '../../lib/firebase';
 import { normalizeImageUrl, isGoogleDriveUrl, extractGoogleDriveId, handleSmartImageError } from './imageUrlHelper';
 
 export { normalizeImageUrl, isGoogleDriveUrl, extractGoogleDriveId, handleSmartImageError };

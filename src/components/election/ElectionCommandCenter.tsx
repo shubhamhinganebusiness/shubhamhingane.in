@@ -460,11 +460,11 @@ export const ElectionCommandCenter: React.FC = () => {
           // Parse voters based on ECI-like pattern structures
           // In standard ECI rolls, cards have names, gender, age, EPIC (ABC1234567)
           const epicPattern = /[A-Z]{3}\d{7}/gi;
-          const epicMatches = extractedText.match(epicPattern) || [];
+          const epicMatches: string[] = extractedText.match(epicPattern) || [];
 
           if (epicMatches.length > 0) {
             const cardTexts = extractedText.split(epicPattern);
-            epicMatches.forEach((epicCode, index) => {
+            epicMatches.forEach((epicCode: string, index: number) => {
               const cardStr = cardTexts[index + 1] || "";
               let name = "Unknown Name";
               

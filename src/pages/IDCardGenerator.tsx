@@ -11,6 +11,10 @@ import {
 } from '../types/idCard';
 import { IDCardPreview } from '../components/idcard/IDCardPreview';
 import { WizardIntro } from '../components/idcard/WizardIntro';
+import { PersonaSelector } from '../components/idcard/PersonaSelector';
+import { SecuritySpecsPanel } from '../components/idcard/SecuritySpecsPanel';
+import { BrandingAssetsPanel } from '../components/idcard/BrandingAssetsPanel';
+import { DemoProfile, DEMO_PROFILES } from '../utils/zenIdPresets';
 import { generateBulkPDF } from '../utils/idCardGenerator';
 import { 
   Sliders, 
@@ -31,7 +35,11 @@ import {
   Undo, 
   Redo, 
   Sparkles,
-  Info
+  Info,
+  Download,
+  ShieldCheck,
+  CreditCard,
+  FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -205,6 +213,83 @@ export const IDCardGenerator: React.FC = () => {
     setUndoHistory([...undoHistory, design]);
     setRedoHistory(redoHistory.slice(1));
     setDesign(next);
+  };
+
+  // 1-Click Archetype Persona Loader
+  const handleSelectPersona = (profile: DemoProfile) => {
+    updateDesignState({
+      ...design,
+      ...profile.design
+    });
+    setStudent({
+      ...student,
+      ...profile.student
+    });
+  };
+
+  // Instant Sample CSV for testing bulk generator
+  const handleDownloadSampleCsv = () => {
+    const sampleData = [
+      {
+        id: 'STU-2026-001',
+        name: 'Alexandre Rivera',
+        role: 'Student',
+        department: 'Computer Science',
+        bloodGroup: 'O+',
+        dob: '2004-09-18',
+        validUntil: '2028-06-30',
+        emergencyContact: '+1 (555) 439-0129'
+      },
+      {
+        id: 'FAC-2026-042',
+        name: 'Dr. Sarah Chen',
+        role: 'Faculty',
+        department: 'Neuroscience & AI',
+        bloodGroup: 'A+',
+        dob: '1984-03-22',
+        validUntil: '2030-12-31',
+        emergencyContact: '+1 (555) 892-3341'
+      },
+      {
+        id: 'STF-2026-108',
+        name: 'Marcus Vance',
+        role: 'Staff',
+        department: 'Cyber Infrastructure',
+        bloodGroup: 'B+',
+        dob: '1990-11-05',
+        validUntil: '2027-10-15',
+        emergencyContact: '+1 (555) 304-9821'
+      },
+      {
+        id: 'STU-2026-215',
+        name: 'Priya Sharma',
+        role: 'Student',
+        department: 'Biomedical Engineering',
+        bloodGroup: 'AB+',
+        dob: '2003-07-14',
+        validUntil: '2027-08-31',
+        emergencyContact: '+1 (555) 771-4092'
+      },
+      {
+        id: 'STU-2026-309',
+        name: 'Liam O\'Connor',
+        role: 'Student',
+        department: 'Materials Science',
+        bloodGroup: 'O-',
+        dob: '2004-01-30',
+        validUntil: '2028-06-30',
+        emergencyContact: '+1 (555) 238-6610'
+      }
+    ];
+
+    const csv = Papa.unparse(sampleData);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'ZenID_Pro_Sample_Roster.csv';
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // Base64 generic file compressor
@@ -438,11 +523,14 @@ export const IDCardGenerator: React.FC = () => {
           </Link>
           <div className="text-left">
             <h1 className="text-sm font-black uppercase text-slate-900 dark:text-white tracking-widest flex items-center gap-1.5 leading-none">
-              <Sparkles size={14} className="text-blue-500 animate-pulse" />
-              ZenID Design Studio
+              <ShieldCheck size={16} className="text-blue-600" />
+              ZenID Pro
+              <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 font-extrabold">
+                SUITE
+              </span>
             </h1>
-            <span className="text-[10px] text-gray-400 font-extrabold uppercase tracking-wider block mt-0.5">
-              Dual-Side Student / Faculty ID Cards Engine
+            <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider block mt-0.5">
+              Dual-Side ID Card Suite • CR80 ISO/IEC 7810
             </span>
           </div>
         </div>
@@ -525,14 +613,15 @@ export const IDCardGenerator: React.FC = () => {
         
         {/* Intro description */}
         <div className="text-center max-w-2xl mx-auto space-y-3">
-          <span className="px-4 py-1.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 font-black tracking-widest uppercase text-[10px] rounded-full">
-            REGULAR CR80 SIZE STANDARD
-          </span>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 font-extrabold tracking-wider uppercase text-[10px] rounded-full shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            CR80 Standard • 85.60 × 53.98 mm • 300 DPI Ready
+          </div>
           <h2 className="text-2xl md:text-4xl font-black text-slate-950 dark:text-white tracking-tight pt-1 leading-none">
-            {t.title}
+            ZenID Pro: Dual-Side ID Card Suite
           </h2>
-          <p className="text-xs md:text-sm font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            {t.subtitle}
+          <p className="text-xs md:text-sm font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
+            Industrial identity credentials with interactive 3D inspection, physical security seals, and high-DPI export
           </p>
         </div>
 
@@ -567,339 +656,80 @@ export const IDCardGenerator: React.FC = () => {
         {/* Dynamic active tab page contexts */}
         <div>
           {activeTab === 'design' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              
-              {/* Left Column Settings Sidebar controllers (col-span-5) */}
-              <div className="lg:col-span-6 space-y-8">
-                
-                {/* 1. Brand templates & Colors Card */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm space-y-6">
-                  <div className="flex items-center gap-3 border-b border-slate-50 dark:border-slate-800/60 pb-4">
-                    <div className="p-2 bg-blue-500/10 text-blue-600 rounded-xl">
-                      <Settings size={16} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
-                        {t.templates} & {t.colors}
-                      </h3>
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mt-0.5">
-                        Configure backgrounds and border aesthetics
-                      </p>
-                    </div>
-                  </div>
+            <div className="space-y-6">
+              {/* Top Archetype Persona Selector */}
+              <PersonaSelector
+                onSelectProfile={handleSelectPersona}
+                currentStudentId={student.id}
+              />
 
-                  {/* Template grid selector */}
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                      Select Base Template
-                    </label>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {([
-                        { id: 'modern', label: 'Modern Curved', desc: 'Diagonals & Orbs' },
-                        { id: 'classic', label: 'Classic School', desc: 'Colored Banner Head' },
-                        { id: 'minimal', label: 'Pure Minimalist', desc: 'Borders & Whitespace' },
-                        { id: 'corporate', label: 'Steel Corporate', desc: 'Dark Charcoal Header' }
-                      ] as const).map((style) => (
-                        <button
-                          key={style.id}
-                          onClick={() => updateDesignState({ ...design, templateStyle: style.id })}
-                          className={`p-4 rounded-2xl text-left border transition-all transform active:scale-95 cursor-pointer ${
-                            design.templateStyle === style.id
-                              ? 'border-blue-600 bg-blue-500/5 dark:bg-blue-600/5 shadow-sm'
-                              : 'border-slate-100 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/20'
-                          }`}
-                        >
-                          <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100 block">
-                            {style.label}
-                          </span>
-                          <span className="text-[9px] text-gray-400 dark:text-slate-500 font-bold block uppercase tracking-wider mt-0.5">
-                            {style.desc}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                {/* Left Column Controls */}
+                <div className="lg:col-span-6 space-y-6">
+                  {/* 1. Branding & Layout Panel */}
+                  <BrandingAssetsPanel
+                    design={design}
+                    onChange={updateDesignState}
+                    onImageUpload={handleImageSelector}
+                  />
 
-                  {/* Brand color pickers block */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-2">
-                      <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
-                        Primary Color
-                      </label>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="color"
-                          value={design.primaryColor}
-                          onChange={(e) => updateDesignState({ ...design, primaryColor: e.target.value })}
-                          className="h-10 w-10 p-0 border-0 rounded-xl cursor-pointer shadow-sm bg-transparent"
-                        />
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{design.primaryColor}</span>
+                  {/* 2. Security & Physical Specs Panel */}
+                  <SecuritySpecsPanel
+                    design={design}
+                    onChange={updateDesignState}
+                  />
+
+                  {/* 3. Cardholder Profile Panel */}
+                  <div className="bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-5 md:p-6 shadow-sm space-y-6">
+                    <div className="flex items-center gap-3 border-b border-slate-100 dark:border-zinc-800 pb-4">
+                      <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl">
+                        <Users size={16} />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                          Cardholder Identity & Credentials
+                        </h3>
+                        <p className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider mt-0.5">
+                          Personal credentials, portrait photograph, and security clearance
+                        </p>
                       </div>
                     </div>
 
+                    {/* Portrait Photo Picker */}
                     <div className="space-y-2">
-                      <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
-                        Secondary Color
-                      </label>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="color"
-                          value={design.secondaryColor}
-                          onChange={(e) => updateDesignState({ ...design, secondaryColor: e.target.value })}
-                          className="h-10 w-10 p-0 border-0 rounded-xl cursor-pointer shadow-sm bg-transparent"
-                        />
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{design.secondaryColor}</span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block">
-                        Text Color
-                      </label>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="color"
-                          value={design.textColor}
-                          onChange={(e) => updateDesignState({ ...design, textColor: e.target.value })}
-                          className="h-10 w-10 p-0 border-0 rounded-xl cursor-pointer shadow-sm bg-transparent"
-                        />
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{design.textColor}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Grid overlay rules and guides */}
-                  <div className="flex items-center justify-between border-t border-slate-50 dark:border-slate-800/60 pt-4">
-                    <div>
-                      <span className="text-xs font-black uppercase tracking-widest text-slate-800 dark:text-slate-100 block">
-                        {t.guides} Overlay
-                      </span>
-                      <span className="text-[9px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wider block mt-0.5">
-                        Superimpose grids for layout coordinate alignment
-                      </span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={design.showGrid}
-                        onChange={(e) => updateDesignState({ ...design, showGrid: e.target.checked })}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-slate-200 dark:bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
-                  </div>
-
-                  {/* Orientation choice */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                      Card Orientation
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {(['portrait', 'landscape'] as const).map((orient) => (
-                        <button
-                          key={orient}
-                          type="button"
-                          onClick={() => updateDesignState({ ...design, orientation: orient })}
-                          className={`py-3 px-4 rounded-xl text-left border font-black uppercase tracking-widest text-[9px] flex items-center justify-between transition-all transform active:scale-95 cursor-pointer ${
-                            design.orientation === orient
-                              ? 'border-blue-600 bg-blue-500/5 text-blue-600'
-                              : 'border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
-                          }`}
-                        >
-                          {orient}
-                          <span className={`w-2.5 h-2.5 rounded-full ${orient === 'portrait' ? 'aspect-[54/85.6] border border-current' : 'aspect-[85.6/54] border border-current'}`} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Watermark slide input */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        {t.watermark} Label
-                      </label>
-                      <span className="text-[10px] font-bold text-slate-500">{(design.watermarkOpacity * 100).toFixed(0)}%</span>
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="e.g. OFFICIAL ID"
-                      value={design.watermarkText}
-                      onChange={(e) => updateDesignState({ ...design, watermarkText: e.target.value })}
-                      className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl font-bold uppercase text-[10px] tracking-widest text-slate-800 dark:text-white"
-                    />
-                    <input
-                      type="range"
-                      min="0"
-                      max="0.4"
-                      step="0.02"
-                      value={design.watermarkOpacity}
-                      onChange={(e) => updateDesignState({ ...design, watermarkOpacity: parseFloat(e.target.value) })}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-
-                {/* 2. Official Authority Credentials (Logos, Sigs) Card */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm space-y-6">
-                  <div className="flex items-center gap-3 border-b border-slate-50 dark:border-slate-800/60 pb-4">
-                    <div className="p-2 bg-purple-500/10 text-purple-600 rounded-xl">
-                      <Settings size={16} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
-                        {t.schoolDetails}
-                      </h3>
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mt-0.5">
-                        Set institution name, upload school emblem and credentials sigs
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Institution Name */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                      Institution Name
-                    </label>
-                    <input
-                      type="text"
-                      value={design.institutionName}
-                      onChange={(e) => updateDesignState({ ...design, institutionName: e.target.value })}
-                      className="w-full px-4 py-3 border border-slate-100 dark:border-slate-800 rounded-2xl bg-slate-50 dark:bg-slate-800/40 font-extrabold text-xs text-slate-800 dark:text-slate-155 [text-transform:uppercase]"
-                    />
-                  </div>
-
-                  {/* Drag-n-Drop Logo Selector & Drag-n-Drop Signature Selector side by side */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    
-                    {/* Logo DropBox */}
-                    <div className="space-y-2">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                        {t.logoUpload} (150x150)
-                      </span>
-                      <div className="border border-dashed border-slate-200 dark:border-slate-850 p-4 rounded-2xl bg-slate-50/50 dark:bg-[#090911] text-center flex flex-col items-center justify-center relative min-h-[110px]">
-                        {design.institutionLogo ? (
-                          <div className="relative group">
-                            <img src={design.institutionLogo} alt="Institution Logo" className="h-14 w-14 object-contain rounded-lg bg-white p-1" />
-                            <button
-                              onClick={() => updateDesignState({ ...design, institutionLogo: '' })}
-                              className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full text-[8px] font-black cursor-pointer shadow-sm"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <label className="cursor-pointer flex flex-col items-center">
-                            <Upload size={18} className="text-gray-450 hover:scale-110 transition-transform mb-1.5" />
-                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Select Emblem</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => handleImageSelector(e, (base64) => updateDesignState({ ...design, institutionLogo: base64 }))}
-                            />
-                          </label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Portrait Photograph (CR80 Frame)
+                        </label>
+                        {student.photo && (
+                          <button
+                            type="button"
+                            onClick={() => setStudent({ ...student, photo: '' })}
+                            className="text-[10px] font-bold text-red-500 hover:text-red-600 cursor-pointer"
+                          >
+                            Remove Photo
+                          </button>
                         )}
                       </div>
-                    </div>
 
-                    {/* Signature DropBox */}
-                    <div className="space-y-2">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                        {t.signatureUpload}
-                      </span>
-                      <div className="border border-dashed border-slate-200 dark:border-slate-850 p-4 rounded-2xl bg-slate-50/50 dark:bg-[#090911] text-center flex flex-col items-center justify-center relative min-h-[110px]">
-                        {design.authorizedSignature ? (
-                          <div className="relative group">
-                            <img src={design.authorizedSignature} alt="Authorized Signature" className="h-12 w-20 object-contain rounded-lg bg-white p-1" />
-                            <button
-                              onClick={() => updateDesignState({ ...design, authorizedSignature: '' })}
-                              className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full text-[8px] font-black cursor-pointer shadow-sm"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <label className="cursor-pointer flex flex-col items-center">
-                            <Upload size={18} className="text-gray-450 hover:scale-110 transition-transform mb-1.5" />
-                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Select Signature</span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => handleImageSelector(e, (base64) => updateDesignState({ ...design, authorizedSignature: base64 }))}
-                            />
-                          </label>
-                        )}
-                      </div>
-                    </div>
-
-                  </div>
-
-                  {/* Field hide/show settings sliders */}
-                  <div className="grid grid-cols-2 gap-4 border-t border-slate-50 dark:border-slate-800/60 pt-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-350">
-                        Hide Card Back Barcode
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={design.hideBarcode}
-                        onChange={(e) => updateDesignState({ ...design, hideBarcode: e.target.checked })}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-350">
-                        Hide Card Back QR Code
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={design.hideQRCode}
-                        onChange={(e) => updateDesignState({ ...design, hideQRCode: e.target.checked })}
-                      />
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* 3. Individual Holder Profile Fields */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 md:p-8 shadow-sm space-y-6">
-                  <div className="flex items-center gap-3 border-b border-slate-50 dark:border-slate-800/60 pb-4">
-                    <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-xl">
-                      <Users size={16} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">
-                        {t.studentDetails}
-                      </h3>
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mt-0.5">
-                        Set specific holder fields data dynamically
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    
-                    {/* Portrait Photo SelectBox */}
-                    <div className="space-y-2 md:col-span-2">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block">
-                        {t.photoUpload} (200x200 Portrait Frame)
-                      </span>
-                      <div className="border border-dashed border-slate-200 dark:border-slate-850 p-4 rounded-2xl bg-slate-50/50 dark:bg-[#090911] text-center flex items-center justify-center gap-4 min-h-[90px]">
+                      <div className="flex items-center gap-4 p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50">
                         {student.photo ? (
-                          <div className="relative group shrink-0">
-                            <img src={student.photo} alt="Student Photograph" className="h-14 w-12 object-cover rounded-lg bg-slate-100 border border-slate-200" />
-                            <button
-                              onClick={() => setStudent({ ...student, photo: '' })}
-                              className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full text-[8px] font-black cursor-pointer shadow-sm"
-                            >
-                              ✕
-                            </button>
-                          </div>
+                          <img
+                            src={student.photo}
+                            alt="Cardholder"
+                            className="w-16 h-20 object-cover rounded-lg border border-slate-200 dark:border-zinc-700 shadow-2xs shrink-0"
+                          />
                         ) : (
-                          <label className="cursor-pointer shrink-0 p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-600 transition-all rounded-xl text-center flex items-center justify-center">
-                            <Upload size={14} className="text-blue-600 hover:scale-110 transition-transform mr-1.5" />
-                            <span className="text-[9px] font-black text-slate-800 dark:text-gray-200 uppercase tracking-widest">Upload photo</span>
+                          <div className="w-16 h-20 rounded-lg border border-dashed border-slate-300 dark:border-zinc-700 flex flex-col items-center justify-center text-slate-400 dark:text-zinc-500 shrink-0 bg-white dark:bg-zinc-800">
+                            <Users size={20} />
+                            <span className="text-[8px] font-bold mt-1">No Photo</span>
+                          </div>
+                        )}
+
+                        <div className="flex-1 space-y-2">
+                          <label className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 hover:border-blue-500 rounded-xl text-xs font-bold text-slate-700 dark:text-zinc-300 cursor-pointer transition-colors shadow-2xs">
+                            <Upload size={13} className="text-blue-500" />
+                            Upload Portrait
                             <input
                               type="file"
                               accept="image/*"
@@ -907,180 +737,178 @@ export const IDCardGenerator: React.FC = () => {
                               onChange={(e) => handleImageSelector(e, (base64) => setStudent({ ...student, photo: base64 }))}
                             />
                           </label>
-                        )}
-                        <p className="text-[9px] font-bold text-yellow-600 uppercase tracking-wider text-left bg-yellow-500/10 p-2.5 rounded-xl flex items-start gap-1">
-                          <Info size={12} className="shrink-0" />
-                          Recommended: Clean white portrait background with face visible. Image is auto-cropped and compressed.
-                        </p>
+                          <p className="text-[9px] text-slate-400 dark:text-zinc-500 font-medium">
+                            3:4 ratio portrait recommended. Automatically centered & scaled.
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Holder Full Name */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Holder Name
-                      </label>
-                      <input
-                        type="text"
-                        maxLength={24}
-                        value={student.name}
-                        onChange={(e) => setStudent({ ...student, name: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl font-bold uppercase text-[10px] tracking-widest text-slate-800 dark:text-white"
-                      />
-                      <span className="text-[9px] text-gray-400 font-extrabold block text-right">
-                        {student.name.length}/24 characters
-                      </span>
+                    {/* Inputs */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Full Name
+                        </label>
+                        <input
+                          type="text"
+                          value={student.name}
+                          onChange={(e) => setStudent({ ...student, name: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold uppercase text-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Role Classification
+                        </label>
+                        <select
+                          value={student.role}
+                          onChange={(e) => setStudent({ ...student, role: e.target.value as any })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold uppercase text-slate-800 dark:text-white"
+                        >
+                          <option value="Student">Student (Scholar)</option>
+                          <option value="Faculty">Faculty (Professor)</option>
+                          <option value="Staff">Executive Staff</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          ID Number / Badge ID
+                        </label>
+                        <input
+                          type="text"
+                          value={student.id}
+                          onChange={(e) => setStudent({ ...student, id: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold uppercase text-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Class / Department
+                        </label>
+                        <input
+                          type="text"
+                          value={student.department}
+                          onChange={(e) => setStudent({ ...student, department: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold uppercase text-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Blood Group
+                        </label>
+                        <select
+                          value={student.bloodGroup}
+                          onChange={(e) => setStudent({ ...student, bloodGroup: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold uppercase text-slate-800 dark:text-white"
+                        >
+                          {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => (
+                            <option key={bg} value={bg}>{bg}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Valid Until Expiry
+                        </label>
+                        <input
+                          type="date"
+                          value={student.validUntil}
+                          onChange={(e) => setStudent({ ...student, validUntil: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Date of Birth
+                        </label>
+                        <input
+                          type="date"
+                          value={student.dob}
+                          onChange={(e) => setStudent({ ...student, dob: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                          Emergency Contact
+                        </label>
+                        <input
+                          type="text"
+                          value={student.emergencyContact}
+                          onChange={(e) => setStudent({ ...student, emergencyContact: e.target.value })}
+                          className="w-full px-3 py-2 bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
+                        />
+                      </div>
                     </div>
 
-                    {/* Role selector */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Holder Role Status
-                      </label>
-                      <select
-                        value={student.role}
-                        onChange={(e) => setStudent({ ...student, role: e.target.value as any })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl font-extrabold text-[10.5px] uppercase tracking-widest text-slate-800 dark:text-white"
+                    {/* Actions */}
+                    <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 dark:border-zinc-800">
+                      <button
+                        onClick={handleSaveStudent}
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow-2xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        <option value="Student">Student (Minor)</option>
-                        <option value="Faculty">Faculty (Professor)</option>
-                        <option value="Staff">Official Staff</option>
-                      </select>
-                    </div>
-
-                    {/* Enrollment code */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        ID/Enrollment Number
-                      </label>
-                      <input
-                        type="text"
-                        value={student.id}
-                        onChange={(e) => setStudent({ ...student, id: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl font-bold uppercase text-[10px] tracking-widest text-slate-800 dark:text-white"
-                      />
-                    </div>
-
-                    {/* Department */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Class/Department
-                      </label>
-                      <input
-                        type="text"
-                        value={student.department}
-                        onChange={(e) => setStudent({ ...student, department: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl font-bold uppercase text-[10px] tracking-widest text-slate-800 dark:text-white"
-                      />
-                    </div>
-
-                    {/* Blood Group */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Blood Group
-                      </label>
-                      <select
-                        value={student.bloodGroup}
-                        onChange={(e) => setStudent({ ...student, bloodGroup: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl font-extrabold text-[10.5px] uppercase tracking-widest text-slate-800 dark:text-white"
+                        <Database size={13} />
+                        Save to Database
+                      </button>
+                      <button
+                        onClick={handleSaveTemplate}
+                        className="px-4 py-2.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-750 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-zinc-700"
                       >
-                        {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(group => (
-                          <option key={group} value={group}>{group}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Date Of Birth */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Date of Birth
-                      </label>
-                      <input
-                        type="date"
-                        value={student.dob}
-                        onChange={(e) => setStudent({ ...student, dob: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
-                      />
-                    </div>
-
-                    {/* Valid until */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Valid Until Expiry
-                      </label>
-                      <input
-                        type="date"
-                        value={student.validUntil}
-                        onChange={(e) => setStudent({ ...student, validUntil: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
-                      />
-                    </div>
-
-                    {/* Emergency Contact */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Emergency Contact
-                      </label>
-                      <input
-                        type="text"
-                        value={student.emergencyContact}
-                        onChange={(e) => setStudent({ ...student, emergencyContact: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 rounded-xl text-xs font-bold text-slate-800 dark:text-white"
-                      />
+                        <Save size={13} />
+                        Save Preset
+                      </button>
                     </div>
 
                   </div>
-
-                  {/* Primary Save triggers */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-4 border-t border-slate-50 dark:border-slate-800/60">
-                    <button
-                      onClick={handleSaveStudent}
-                      className="flex items-center justify-center gap-1.5 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase text-[10px] tracking-widest rounded-xl transition-all transform active:scale-95 cursor-pointer"
-                    >
-                      <Database size={13} className="stroke-[2.5]" />
-                      Register Record
-                    </button>
-                    <button
-                      onClick={handleSaveTemplate}
-                      className="flex items-center justify-center gap-1.5 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-black uppercase text-[10px] tracking-widest rounded-xl transition-all transform active:scale-95 cursor-pointer border border-slate-200 dark:border-slate-700"
-                    >
-                      <Save size={13} />
-                      Save Template
-                    </button>
-                  </div>
-
                 </div>
 
+                {/* Right Column Sticky Canvas Preview Stage */}
+                <div className="lg:col-span-6 lg:sticky lg:top-24">
+                  <IDCardPreview
+                    design={design}
+                    student={student}
+                    language={language}
+                    translations={t}
+                    onUpdateDesign={updateDesignState}
+                  />
+                </div>
               </div>
-
-              {/* Right Column previews stage (col-span-7) */}
-              <div className="lg:col-span-6 lg:sticky lg:top-24">
-                <IDCardPreview 
-                  design={design} 
-                  student={student} 
-                  language={language}
-                  translations={t}
-                  onUpdateDesign={updateDesignState}
-                />
-              </div>
-
             </div>
           )}
 
           {activeTab === 'bulk' && (
             <div className="max-w-4xl mx-auto bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 md:p-10 rounded-[2.5rem] shadow-sm space-y-8">
-              <div className="flex items-center gap-4 border-b border-slate-50 dark:border-slate-800/60 pb-6">
-                <div className="p-3 bg-blue-500/10 text-blue-600 rounded-2xl">
-                  <Upload size={24} />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-zinc-800 pb-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 text-blue-600 rounded-2xl">
+                    <FileSpreadsheet size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Batch Processing Engine
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block mt-0.5">
+                      Compile hundreds of dual-sided cards simultaneously into print-ready collated sheets
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-black uppercase tracking-widest text-slate-900 dark:text-white">
-                    {t.tabBulk} Dashboard
-                  </h3>
-                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block mt-0.5">
-                    Generate over 500+ ID cards simultaneously via CSV spreadsheet mappings
-                  </p>
-                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadSampleCsv}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors shadow-2xs self-start sm:self-auto"
+                >
+                  <Download size={14} className="text-blue-500" />
+                  Download Sample CSV
+                </button>
               </div>
 
               {/* Upload field action */}
