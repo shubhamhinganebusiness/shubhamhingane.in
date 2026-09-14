@@ -25,18 +25,20 @@ interface MilestoneRetainerManagerProps {
 }
 
 export const MilestoneRetainerManager: React.FC<MilestoneRetainerManagerProps> = ({
-  milestones,
+  milestones = [],
   totalAmount,
   billDate,
   onChange
 }) => {
+  const safeMilestones = Array.isArray(milestones) ? milestones : [];
+
   const handleApplyPreset = (preset: MilestonePresetType) => {
     const newMilestones = createMilestonePreset(preset, totalAmount, billDate);
     onChange(newMilestones);
   };
 
   const handleUpdateMilestone = (index: number, updates: Partial<PaymentMilestone>) => {
-    const updated = [...milestones];
+    const updated = [...safeMilestones];
     const target = { ...updated[index], ...updates };
 
     // If percentage was changed, re-calculate amount
@@ -59,24 +61,24 @@ export const MilestoneRetainerManager: React.FC<MilestoneRetainerManagerProps> =
 
     const newMilestone: PaymentMilestone = {
       id: newId,
-      title: `Milestone Stage ${milestones.length + 1}`,
+      title: `Milestone Stage ${safeMilestones.length + 1}`,
       percentage: 20,
       amount: Math.round(totalAmount * 0.2),
       dueDate: nextDate.toISOString().split('T')[0],
       isPaid: false,
       notes: ''
     };
-    onChange([...milestones, newMilestone]);
+    onChange([...safeMilestones, newMilestone]);
   };
 
   const handleRemoveMilestone = (index: number) => {
-    const updated = milestones.filter((_, i) => i !== index);
+    const updated = safeMilestones.filter((_, i) => i !== index);
     onChange(updated);
   };
 
-  const totalPercentage = milestones.reduce((sum, m) => sum + (Number(m.percentage) || 0), 0);
-  const totalMilestoneAmount = milestones.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
-  const paidMilestoneAmount = milestones.filter(m => m.isPaid).reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+  const totalPercentage = safeMilestones.reduce((sum, m) => sum + (Number(m.percentage) || 0), 0);
+  const totalMilestoneAmount = safeMilestones.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+  const paidMilestoneAmount = safeMilestones.filter(m => m.isPaid).reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
 
   return (
     <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-4">
@@ -90,7 +92,7 @@ export const MilestoneRetainerManager: React.FC<MilestoneRetainerManagerProps> =
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
               Retainer & Payment Milestone Schedule
               <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-[#D4AF37] font-mono">
-                {milestones.length} Stages
+                {safeMilestones.length} Stages
               </span>
             </h4>
             <p className="text-[11px] text-zinc-400">

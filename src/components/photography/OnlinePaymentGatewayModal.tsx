@@ -25,7 +25,7 @@ import {
 } from './photographyBillTypes';
 
 interface OnlinePaymentGatewayModalProps {
-  bill: PhotographyBill;
+  bill: PhotographyBill | null;
   isOpen: boolean;
   onClose: () => void;
   onPaymentSuccess: (transaction: OnlinePaymentTransaction, updatedMilestoneId?: string) => void;
@@ -42,25 +42,25 @@ export const OnlinePaymentGatewayModal: React.FC<OnlinePaymentGatewayModalProps>
   const [activeGateway, setActiveGateway] = useState<GatewayTab>('stripe');
   
   // Choose payment amount target: Full Balance or Next Retainer
-  const unpaidMilestone = bill.milestones?.find(m => !m.isPaid);
+  const unpaidMilestone = bill?.milestones?.find(m => !m.isPaid);
   const [targetType, setTargetType] = useState<'retainer' | 'full'>(
     unpaidMilestone && unpaidMilestone.amount > 0 ? 'retainer' : 'full'
   );
 
-  const paymentAmount = targetType === 'retainer' && unpaidMilestone
+  const paymentAmount = targetType === 'retainer' && unpaidMilestone && bill
     ? Math.min(unpaidMilestone.amount, bill.balanceDue)
-    : bill.balanceDue;
+    : (bill?.balanceDue || 0);
 
   // Form fields for Card / Stripe
   const [cardNumber, setCardNumber] = useState('4242 •••• •••• 4242');
   const [cardExpiry, setCardExpiry] = useState('12/28');
   const [cardCvc, setCardCvc] = useState('888');
-  const [cardName, setCardName] = useState(bill.clientName || 'Client Name');
+  const [cardName, setCardName] = useState(bill?.clientName || 'Client Name');
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSuccessData, setPaymentSuccessData] = useState<OnlinePaymentTransaction | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !bill) return null;
 
   const paymentUrl = `https://lensandlightstudios.in/pay/${bill.billNumber}`;
 

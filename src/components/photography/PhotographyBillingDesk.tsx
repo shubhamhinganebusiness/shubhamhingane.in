@@ -1684,22 +1684,26 @@ export const PhotographyBillingDesk: React.FC<PhotographyBillingDeskProps> = ({
       {/* ========================================================================= */}
       {/* MODAL: ONLINE PAYMENT GATEWAY (STRIPE, PAYPAL, SQUARE, UPI) */}
       {/* ========================================================================= */}
-      <OnlinePaymentGatewayModal
-        isOpen={!!payingBill}
-        bill={payingBill}
-        onClose={() => setPayingBill(null)}
-        onPaymentSuccess={handleOnlinePaymentSuccess}
-      />
+      {payingBill && (
+        <OnlinePaymentGatewayModal
+          isOpen={!!payingBill}
+          bill={payingBill}
+          onClose={() => setPayingBill(null)}
+          onPaymentSuccess={handleOnlinePaymentSuccess}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL: AUTO-REMINDER DISPATCHER (WHATSAPP, EMAIL, SMS) */}
       {/* ========================================================================= */}
-      <AutoReminderModal
-        isOpen={!!reminderBill}
-        bill={reminderBill}
-        onClose={() => setReminderBill(null)}
-        onSendReminder={handleSendReminder}
-      />
+      {reminderBill && (
+        <AutoReminderModal
+          isOpen={!!reminderBill}
+          bill={reminderBill}
+          onClose={() => setReminderBill(null)}
+          onSendReminder={handleSendReminder}
+        />
+      )}
 
     </div>
   );

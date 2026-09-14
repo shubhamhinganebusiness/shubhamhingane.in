@@ -32,7 +32,7 @@ import {
 } from './photographyBillTypes';
 
 interface PhotographyBillPrintModalProps {
-  bill: PhotographyBill;
+  bill: PhotographyBill | null;
   onClose: () => void;
   onEdit?: (bill: PhotographyBill) => void;
 }
@@ -45,6 +45,8 @@ export const PhotographyBillPrintModal: React.FC<PhotographyBillPrintModalProps>
   const [copied, setCopied] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
+
+  if (!bill) return null;
 
   const handlePrint = () => {
     window.print();

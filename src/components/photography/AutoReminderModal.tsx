@@ -24,7 +24,7 @@ import {
 } from './photographyBillTypes';
 
 interface AutoReminderModalProps {
-  bill: PhotographyBill;
+  bill: PhotographyBill | null;
   isOpen: boolean;
   onClose: () => void;
   onSendReminder: (log: ReminderLog) => void;
@@ -40,6 +40,7 @@ export const AutoReminderModal: React.FC<AutoReminderModalProps> = ({
   onSendReminder
 }) => {
   const [selectedStage, setSelectedStage] = useState<ReminderStage>(() => {
+    if (!bill) return 'upcoming';
     const dueDate = new Date(bill.dueDate);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -55,7 +56,7 @@ export const AutoReminderModal: React.FC<AutoReminderModalProps> = ({
   const [isSending, setIsSending] = useState(false);
   const [sentNotice, setSentNotice] = useState(false);
 
-  if (!isOpen) return null;
+  if (!isOpen || !bill) return null;
 
   const cleanPhone = bill.clientPhone.replace(/[^\d]/g, '');
   const paymentLink = `https://lensandlightstudios.in/pay/${bill.billNumber}`;
