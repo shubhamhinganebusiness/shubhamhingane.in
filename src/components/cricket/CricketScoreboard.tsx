@@ -6,7 +6,7 @@ import {
   ChevronRight, Smile, Settings, Volume2, VolumeX, Edit, Edit3, ChevronDown, ChevronUp, Sun, Moon, Info, HelpCircle,
   Share2, FileDown, PlusCircle, BarChart3, Radio, Flame, ShieldAlert, Award, Zap, Lock, UserPlus,
   Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2, Copy, ExternalLink, Send, Smartphone, Shield, Tv,
-  Camera, Image as ImageIcon
+  Camera, Image as ImageIcon, Ban, CheckCircle2, Unlock
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
@@ -5535,18 +5535,29 @@ export const CricketScoreboard: React.FC = () => {
   };
 
   const handleToggleHideLiveMatch = async (id: string, currentHiddenStatus: boolean) => {
+    const newHidden = !currentHiddenStatus;
+    setMatchHistory(prev => prev.map(m => m.id === id ? { ...m, isHidden: newHidden, hideResultCard: newHidden } : m));
+    
+    const nextHiddenIds = newHidden 
+      ? Array.from(new Set([...hiddenResultCardIds, id]))
+      : hiddenResultCardIds.filter(x => x !== id);
+    setHiddenResultCardIds(nextHiddenIds);
+    try {
+      localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(nextHiddenIds));
+    } catch (_) {}
+
     if (isFirestoreQuotaExhausted()) {
-      showNotification(`Match is now ${!currentHiddenStatus ? 'hidden' : 'visible'} (local).`, 'success');
+      showNotification(`Match is now ${newHidden ? 'hidden' : 'visible'} (local).`, 'success');
       return;
     }
     try {
       const matchDocRef = doc(db, 'cricket_matches', id);
-      await safeSetDoc(matchDocRef, { isHidden: !currentHiddenStatus }, { merge: true });
-      showNotification(`Match is now ${!currentHiddenStatus ? 'hidden' : 'visible'} to spectators.`, 'success');
+      await safeSetDoc(matchDocRef, { isHidden: newHidden, hideResultCard: newHidden }, { merge: true });
+      showNotification(`Match is now ${newHidden ? 'hidden' : 'visible'} to spectators.`, 'success');
     } catch (e) {
       if (isQuotaError(e)) {
         recordFirestoreQuotaExhaustion(60);
-        showNotification(`Match is now ${!currentHiddenStatus ? 'hidden' : 'visible'} (local).`, 'success');
+        showNotification(`Match is now ${newHidden ? 'hidden' : 'visible'} (local).`, 'success');
       } else {
         console.error('Failed to toggle hide live match:', e);
         showNotification('Failed to toggle visibility.', 'alert');
@@ -5555,22 +5566,68 @@ export const CricketScoreboard: React.FC = () => {
   };
 
   const handleToggleBlockLiveMatch = async (id: string, currentBlockedStatus: boolean) => {
+    const newBlocked = !currentBlockedStatus;
+    setMatchHistory(prev => prev.map(m => m.id === id ? { ...m, isBlocked: newBlocked } : m));
+
     if (isFirestoreQuotaExhausted()) {
-      showNotification(`Match is now ${!currentBlockedStatus ? 'blocked' : 'unblocked'} (local).`, 'success');
+      showNotification(`Match is now ${newBlocked ? 'blocked' : 'unblocked'} (local).`, 'success');
       return;
     }
     try {
       const matchDocRef = doc(db, 'cricket_matches', id);
-      await safeSetDoc(matchDocRef, { isBlocked: !currentBlockedStatus }, { merge: true });
-      showNotification(`Match is now ${!currentBlockedStatus ? 'blocked' : 'unblocked'}.`, 'success');
+      await safeSetDoc(matchDocRef, { isBlocked: newBlocked }, { merge: true });
+      showNotification(`Match is now ${newBlocked ? 'blocked' : 'unblocked'}.`, 'success');
     } catch (e) {
       if (isQuotaError(e)) {
         recordFirestoreQuotaExhaustion(60);
-        showNotification(`Match is now ${!currentBlockedStatus ? 'blocked' : 'unblocked'} (local).`, 'success');
+        showNotification(`Match is now ${newBlocked ? 'blocked' : 'unblocked'} (local).`, 'success');
       } else {
         console.error('Failed to toggle block live match:', e);
         showNotification('Failed to toggle match restrictions.', 'alert');
       }
+    }
+  };
+
+  const handleBatchHideCompletedMatches = async (hide: boolean) => {
+    if (matchHistory.length === 0) return;
+    setMatchHistory(prev => prev.map(m => ({ ...m, isHidden: hide, hideResultCard: hide })));
+
+    if (hide) {
+      const allIds = Array.from(new Set([...hiddenResultCardIds, ...matchHistory.map(m => m.id).filter(Boolean)]));
+      setHiddenResultCardIds(allIds);
+      try { localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(allIds)); } catch (_) {}
+    } else {
+      const histIds = new Set(matchHistory.map(m => m.id));
+      const remaining = hiddenResultCardIds.filter(id => !histIds.has(id));
+      setHiddenResultCardIds(remaining);
+      try { localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(remaining)); } catch (_) {}
+    }
+
+    try {
+      for (const m of matchHistory) {
+        if (m.id) {
+          await safeSetDoc(doc(db, 'cricket_matches', m.id), { isHidden: hide, hideResultCard: hide }, { merge: true });
+        }
+      }
+      showNotification(`All completed records are now ${hide ? 'hidden from spectators' : 'visible to spectators'}.`, 'success');
+    } catch (e) {
+      console.error('Failed to batch toggle hide:', e);
+    }
+  };
+
+  const handleBatchBlockCompletedMatches = async (block: boolean) => {
+    if (matchHistory.length === 0) return;
+    setMatchHistory(prev => prev.map(m => ({ ...m, isBlocked: block })));
+
+    try {
+      for (const m of matchHistory) {
+        if (m.id) {
+          await safeSetDoc(doc(db, 'cricket_matches', m.id), { isBlocked: block }, { merge: true });
+        }
+      }
+      showNotification(`All completed records are now ${block ? 'blocked from spectators' : 'unblocked'}.`, 'success');
+    } catch (e) {
+      console.error('Failed to batch toggle block:', e);
     }
   };
 
@@ -11454,6 +11511,127 @@ export const CricketScoreboard: React.FC = () => {
                     )}
                   </div>
 
+                  {/* BULK CONTROLS BAR FOR ALL COMPLETED RECORD MATCHES */}
+                  {matchHistory.length > 0 && (
+                    <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-md">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <ShieldAlert size={16} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                              All Completed Records Management
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[9px] font-mono font-bold">
+                              {matchHistory.length} Matches
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-medium">
+                            Batch actions for hiding, blocking, or deleting across all completed record matches
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Hide All / Unhide All Completed Records */}
+                        <div className="flex bg-slate-950 p-0.5 rounded-xl border border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => handleBatchHideCompletedMatches(true)}
+                            className="px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 rounded-lg text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border-none"
+                            title="Hide all completed match records from spectators"
+                            id="btn-batch-hide-completed"
+                          >
+                            <EyeOff size={11} className="text-amber-400" />
+                            <span>Hide All</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleBatchHideCompletedMatches(false)}
+                            className="px-2.5 py-1.5 hover:bg-slate-800 text-slate-300 rounded-lg text-[9px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border-none"
+                            title="Make all completed match records visible to spectators"
+                            id="btn-batch-unhide-completed"
+                          >
+                            <Eye size={11} className="text-emerald-400" />
+                            <span>Unhide All</span>
+                          </button>
+                        </div>
+
+                        {/* Block All / Unblock All Completed Records */}
+                        <div className="flex bg-slate-950 p-0.5 rounded-xl border border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => handleBatchBlockCompletedMatches(true)}
+                            className="px-2.5 py-1.5 hover:bg-rose-950/60 text-rose-300 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border-none"
+                            title="Block all completed match records from spectator access"
+                            id="btn-batch-block-completed"
+                          >
+                            <Ban size={11} className="text-rose-400" />
+                            <span>Block All</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleBatchBlockCompletedMatches(false)}
+                            className="px-2.5 py-1.5 hover:bg-emerald-950/60 text-emerald-300 rounded-lg text-[9px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border-none"
+                            title="Unblock all completed match records"
+                            id="btn-batch-unblock-completed"
+                          >
+                            <Unlock size={11} className="text-emerald-400" />
+                            <span>Unblock All</span>
+                          </button>
+                        </div>
+
+                        {/* Dedicated Public Page Link */}
+                        <a
+                          href="#/completed-matches"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm no-underline border border-emerald-400/30 transition-all"
+                          title="Open Dedicated All Completed Matches Archive Page"
+                        >
+                          <span>Public Page</span>
+                          <ExternalLink size={10} />
+                        </a>
+
+                        {/* Delete All Records button with confirmation */}
+                        {clearHistoryConfirm ? (
+                          <div className="flex items-center gap-1.5 p-1 bg-rose-950/90 border border-rose-600 rounded-xl">
+                            <span className="text-[9px] font-bold text-rose-200 px-1">Delete all {matchHistory.length} records?</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleClearHistory();
+                                setClearHistoryConfirm(false);
+                              }}
+                              className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-black text-[8px] uppercase tracking-wider cursor-pointer border-none"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setClearHistoryConfirm(false)}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[8px] font-bold uppercase tracking-wider cursor-pointer border-none"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setClearHistoryConfirm(true)}
+                            className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer border-none shadow-sm transition-all"
+                            title="Permanently delete all completed match records"
+                            id="btn-delete-all-completed"
+                          >
+                            <Trash2 size={11} />
+                            <span>Delete All</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Empty state handlers */}
                   {matchHistory.length === 0 ? (
                     <div className="text-center py-10">
@@ -11493,13 +11671,19 @@ export const CricketScoreboard: React.FC = () => {
                                   {past.oversLimit} Overs
                                 </span>
                                 <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md flex items-center gap-1 ${
-                                  hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true
+                                  hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || past.isHidden
                                     ? 'bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/40'
                                     : 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40'
                                 }`}>
-                                  {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? <EyeOff size={10} /> : <Eye size={10} />}
-                                  <span>{hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? 'Card Hidden' : 'Card Visible'}</span>
+                                  {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || past.isHidden ? <EyeOff size={10} /> : <Eye size={10} />}
+                                  <span>{hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || past.isHidden ? 'Hidden' : 'Visible'}</span>
                                 </span>
+                                {past.isBlocked && (
+                                  <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded-md flex items-center gap-1 bg-rose-600 text-white border border-rose-600 shadow-sm animate-pulse">
+                                    <Ban size={10} />
+                                    <span>Blocked</span>
+                                  </span>
+                                )}
                               </div>
                               <span className="text-[9px] font-mono font-bold text-slate-400 shrink-0">{past.date}</span>
                             </div>
@@ -11593,29 +11777,20 @@ export const CricketScoreboard: React.FC = () => {
                                 </button>
 
                                 <button
-                                  onClick={async () => {
-                                    const isCurrentlyHidden = hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true;
-                                    const nextIds = isCurrentlyHidden 
-                                      ? hiddenResultCardIds.filter(id => id !== past.id)
-                                      : [...hiddenResultCardIds, past.id];
-                                    setHiddenResultCardIds(nextIds);
-                                    try {
-                                      localStorage.setItem('cricket_hidden_result_card_ids', JSON.stringify(nextIds));
-                                    } catch (_) {}
-                                    try {
-                                      await setDoc(doc(db, 'cricket_matches', past.id), { hideResultCard: !isCurrentlyHidden }, { merge: true });
-                                    } catch (_) {}
-                                    window.dispatchEvent(new CustomEvent('cricket_match_result_visibility_changed', { detail: { matchId: past.id, isHidden: !isCurrentlyHidden } }));
-                                    showNotification(!isCurrentlyHidden ? 'Match card hidden after result' : 'Match card unhidden after result', 'info');
+                                  type="button"
+                                  onClick={() => {
+                                    const isCurrentlyHidden = hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || !!past.isHidden;
+                                    handleToggleHideLiveMatch(past.id, isCurrentlyHidden);
                                   }}
                                   className={`px-2.5 py-1.5 rounded-xl font-bold text-[9px] uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-1 shadow-sm ${
-                                    hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true
+                                    hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || past.isHidden
                                       ? 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50'
                                       : 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/50'
                                   }`}
-                                  title={hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? "Match card is hidden after result. Click to Unhide." : "Match card is visible after result. Click to Hide."}
+                                  title={hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || past.isHidden ? "Match is hidden from spectators. Click to Unhide." : "Match is visible to spectators. Click to Hide."}
+                                  id={`btn-hide-toggle-${past.id}`}
                                 >
-                                  {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true ? (
+                                  {hiddenResultCardIds.includes(past.id) || (past as any).hideResultCard === true || past.isHidden ? (
                                     <>
                                       <EyeOff size={11} />
                                       <span>Hidden</span>
@@ -11624,6 +11799,31 @@ export const CricketScoreboard: React.FC = () => {
                                     <>
                                       <Eye size={11} />
                                       <span>Visible</span>
+                                    </>
+                                  )}
+                                </button>
+
+                                {/* Block / Unblock Toggle */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBlockLiveMatch(past.id, !!past.isBlocked)}
+                                  className={`px-2.5 py-1.5 rounded-xl font-black text-[9px] uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-1 shadow-sm ${
+                                    past.isBlocked
+                                      ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-rose-500/20'
+                                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                                  }`}
+                                  title={past.isBlocked ? "Match is currently blocked from spectators. Click to Unblock." : "Block this match from spectator access."}
+                                  id={`btn-block-toggle-${past.id}`}
+                                >
+                                  {past.isBlocked ? (
+                                    <>
+                                      <Unlock size={11} />
+                                      <span>Unblock</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Ban size={11} className="text-rose-500" />
+                                      <span>Block</span>
                                     </>
                                   )}
                                 </button>

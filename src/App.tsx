@@ -57,6 +57,7 @@ const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Lo
 const SuperAdmin = lazy(() => import('./components/SuperAdmin').then(m => ({ default: m.SuperAdmin })));
 const SchoolERPApp = lazy(() => import('./components/school-erp/SchoolERPApp').then(m => ({ default: m.SchoolERPApp })));
 const CricketScoreboard = lazy(() => import('./components/cricket/CricketScoreboard').then(m => ({ default: m.CricketScoreboard })));
+const CompletedMatchesPage = lazy(() => import('./pages/CompletedMatchesPage').then(m => ({ default: m.CompletedMatchesPage })));
 const SpectatorScoreboardSection = lazy(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.SpectatorScoreboardSection })));
 const LiveMatchGlobalBanner = lazy(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.LiveMatchGlobalBanner })));
 const CricketAuction = lazy(() => import('./components/cricket/CricketAuction').then(m => ({ default: m.CricketAuction })));
@@ -340,6 +341,10 @@ function AppContent() {
           <Route path="/cricket-details" element={<SpectatorScoreboardSection />} />
           <Route path="/live/cricket-detail" element={<SpectatorScoreboardSection />} />
           <Route path="/cricket-spectator" element={<SpectatorScoreboardSection />} />
+          <Route path="/completed-matches" element={<CompletedMatchesPage />} />
+          <Route path="/live/completed-matches" element={<CompletedMatchesPage />} />
+          <Route path="/cricket-completed-matches" element={<CompletedMatchesPage />} />
+          <Route path="/cricket-completed-records" element={<CompletedMatchesPage />} />
           <Route path="/live/cricket-auction" element={<CricketAuction />} />
           <Route path="/live/cricket-overlay" element={<CricketOverlay />} />
           <Route path="/live/cricket-overlay/:managerId" element={<CricketOverlay />} />

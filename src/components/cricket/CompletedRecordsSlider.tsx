@@ -11,9 +11,14 @@ import {
   Download, 
   Send, 
   Eye, 
+  EyeOff,
   Sparkles, 
   Megaphone,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Ban,
+  Unlock,
+  Trash2,
+  AlertCircle
 } from 'lucide-react';
 import { MatchState, Innings } from './CricketScoreboard';
 import { db } from '../../lib/firebase';
@@ -34,6 +39,8 @@ export interface SponsorAdSlide {
   title?: string;
   order?: number;
   isActive?: boolean;
+  linkUrl?: string;
+  link?: string;
 }
 
 const DEFAULT_STADIUM_IMAGES = [
@@ -109,7 +116,7 @@ const getMatchPotm = (mItem: any) => {
 // Displays the official match banner and seamlessly rotates through
 // super admin added advertisement banners from spectator_slider_images.
 // =========================================================================
-interface CardBannerSlide {
+export interface CardBannerSlide {
   id: string;
   imageUrl: string;
   title: string;
@@ -117,7 +124,7 @@ interface CardBannerSlide {
   tag: string;
 }
 
-const MatchCardBannerSlider: React.FC<{
+export const MatchCardBannerSlider: React.FC<{
   match: MatchState;
   fallbackImg: string;
   adminAds: SponsorAdSlide[];
@@ -343,14 +350,30 @@ const MatchCardBannerSlider: React.FC<{
 
 // Sub-component for individual completed match card in the slider
 // Designed with a responsive 2-column horizontal split on laptops/desktops to fit perfectly on screen without vertical scrolling
-const CompletedMatchCard: React.FC<{
+export const CompletedMatchCard: React.FC<{
   match: MatchState;
   index: number;
   adminAds: SponsorAdSlide[];
   onSelectMatch: (matchId: string) => void;
   onExportPDF?: (match: MatchState) => void;
   onShareWhatsApp: (match: MatchState, e: React.MouseEvent) => void;
-}> = ({ match: m, index, adminAds, onSelectMatch, onExportPDF, onShareWhatsApp }) => {
+  isAdmin?: boolean;
+  onToggleHide?: (matchId: string, currentHidden: boolean) => void;
+  onToggleBlock?: (matchId: string, currentBlocked: boolean) => void;
+  onDeleteMatch?: (matchId: string) => void;
+}> = ({ 
+  match: m, 
+  index, 
+  adminAds, 
+  onSelectMatch, 
+  onExportPDF, 
+  onShareWhatsApp,
+  isAdmin = false,
+  onToggleHide,
+  onToggleBlock,
+  onDeleteMatch
+}) => {
+  const [deleteConfirm, setDeleteConfirm] = useState<boolean>(false);
   const inn1 = m.mainMatchState?.innings1 || m.innings1;
   const inn2 = m.mainMatchState?.innings2 || m.innings2;
 
@@ -473,13 +496,35 @@ const CompletedMatchCard: React.FC<{
       <div className="w-full md:w-[56%] lg:w-[58%] p-3.5 sm:p-4.5 flex flex-col justify-between">
         <div>
           {/* Header Title & Matchup Details */}
-          <div className="mb-2.5">
-            <h3 className="text-base sm:text-lg lg:text-xl font-black text-white tracking-tight group-hover/card:text-emerald-400 transition-colors leading-tight line-clamp-1">
-              {winnerText}
-            </h3>
-            <p className="text-slate-400 text-[11px] font-medium leading-normal line-clamp-1">
-              {m.teamA} vs {m.teamB} {m.tournamentName ? `• 🏆 ${m.tournamentName}` : ''} {m.groundName || m.venue ? `• 📍 ${m.groundName || m.venue}` : ''}
-            </p>
+          <div className="mb-2.5 flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-base sm:text-lg lg:text-xl font-black text-white tracking-tight group-hover/card:text-emerald-400 transition-colors leading-tight line-clamp-1">
+                {winnerText}
+              </h3>
+              <p className="text-slate-400 text-[11px] font-medium leading-normal line-clamp-1">
+                {m.teamA} vs {m.teamB} {m.tournamentName ? `• 🏆 ${m.tournamentName}` : ''} {m.groundName || m.venue ? `• 📍 ${m.groundName || m.venue}` : ''}
+              </p>
+            </div>
+
+            {/* Admin Status Badges */}
+            {isAdmin && (
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider flex items-center gap-1 ${
+                  m.isHidden || (m as any).hideResultCard
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                }`}>
+                  {m.isHidden || (m as any).hideResultCard ? <EyeOff size={9} /> : <Eye size={9} />}
+                  <span>{m.isHidden || (m as any).hideResultCard ? 'Hidden' : 'Visible'}</span>
+                </span>
+                {m.isBlocked && (
+                  <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider flex items-center gap-1 bg-rose-600 text-white border border-rose-500 animate-pulse">
+                    <Ban size={9} />
+                    <span>Blocked</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Team Battle Scoreboard Grid (Live Match Styling) */}
@@ -554,8 +599,8 @@ const CompletedMatchCard: React.FC<{
         </div>
 
         {/* Actions & Buttons Row */}
-        <div className="flex items-center justify-between pt-2.5 border-t border-white/[0.08]">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between pt-2.5 border-t border-white/[0.08] gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {/* WhatsApp Share Button */}
             <button
               type="button"
@@ -582,6 +627,90 @@ const CompletedMatchCard: React.FC<{
                 <span>PDF</span>
               </button>
             )}
+
+            {/* Admin Management Controls: Hide, Block, Delete */}
+            {isAdmin && (
+              <div className="flex items-center gap-1">
+                {onToggleHide && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleHide(m.id, !!(m.isHidden || (m as any).hideResultCard));
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[8px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border ${
+                      m.isHidden || (m as any).hideResultCard
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700/80'
+                    }`}
+                    title={m.isHidden || (m as any).hideResultCard ? "Match is hidden from spectators. Click to unhide." : "Click to hide match from spectators."}
+                  >
+                    {m.isHidden || (m as any).hideResultCard ? <EyeOff size={9} className="text-amber-400" /> : <Eye size={9} className="text-emerald-400" />}
+                    <span>{m.isHidden || (m as any).hideResultCard ? 'Hidden' : 'Hide'}</span>
+                  </button>
+                )}
+
+                {onToggleBlock && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleBlock(m.id, !!m.isBlocked);
+                    }}
+                    className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border ${
+                      m.isBlocked
+                        ? 'bg-rose-600 text-white border-rose-500 hover:bg-rose-700'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700/80'
+                    }`}
+                    title={m.isBlocked ? "Match is blocked from spectators. Click to unblock." : "Click to block match from spectators."}
+                  >
+                    {m.isBlocked ? <Unlock size={9} /> : <Ban size={9} className="text-rose-400" />}
+                    <span>{m.isBlocked ? 'Blocked' : 'Block'}</span>
+                  </button>
+                )}
+
+                {onDeleteMatch && (
+                  deleteConfirm ? (
+                    <div className="flex items-center gap-1 p-0.5 bg-rose-950/95 border border-rose-600 rounded-lg">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteMatch(m.id);
+                          setDeleteConfirm(false);
+                        }}
+                        className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[7.5px] font-black uppercase tracking-wider cursor-pointer border-none"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirm(false);
+                        }}
+                        className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[7.5px] font-bold uppercase tracking-wider cursor-pointer border-none"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteConfirm(true);
+                      }}
+                      className="px-2 py-1 bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-400 border border-rose-500/30 rounded-lg text-[8px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all"
+                      title="Permanently delete this completed match record"
+                    >
+                      <Trash2 size={9} />
+                      <span>Delete</span>
+                    </button>
+                  )
+                )}
+              </div>
+            )}
           </div>
 
           {/* View Scorecard Full Details */}
@@ -591,7 +720,7 @@ const CompletedMatchCard: React.FC<{
               e.stopPropagation();
               onSelectMatch(m.id);
             }}
-            className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-[9px] font-black uppercase tracking-widest hover:gap-1.5 transition-all cursor-pointer border-none bg-transparent font-mono"
+            className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-[9px] font-black uppercase tracking-widest hover:gap-1.5 transition-all cursor-pointer border-none bg-transparent font-mono shrink-0 ml-auto"
           >
             Full Scorecard
             <ArrowRight size={12} />
@@ -756,6 +885,16 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* View All Matches Page Link */}
+            <a
+              href="#/completed-matches"
+              className="px-2.5 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[9px] font-mono font-bold uppercase tracking-wider border border-emerald-400/40 flex items-center gap-1 shadow-sm no-underline transition-all"
+              title="View all completed match records on dedicated page"
+            >
+              <span>View All Matches</span>
+              <ArrowRight size={10} />
+            </a>
+
             {/* Auto-Slide Toggle */}
             <button
               type="button"

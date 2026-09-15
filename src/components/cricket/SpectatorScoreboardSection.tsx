@@ -3152,9 +3152,22 @@ export const SpectatorScoreboardSection = ({
                 {/* Completed history matches */}
             <div className="space-y-3 pt-3 mt-4 sm:mt-6 border-t border-slate-200 dark:border-slate-800/60">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-2">
-                <div className="flex items-center gap-2">
-                  <Trophy size={14} className="text-amber-500 animate-bounce" />
-                  <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Completed Records ({completedMatches.length})</h3>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <Trophy size={14} className="text-amber-500 animate-bounce" />
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Completed Records ({completedMatches.length})</h3>
+                  </div>
+
+                  {/* View All Matches Button Redirecting to All Completed Match Record Page */}
+                  <Link
+                    to="/completed-matches"
+                    id="btn-spectator-view-all-completed-matches"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider shadow-sm hover:shadow-emerald-500/30 transition-all cursor-pointer no-underline border border-emerald-400/30 font-mono"
+                    title="Open Dedicated All Completed Matches Page"
+                  >
+                    <span>View All Matches</span>
+                    <ArrowRight size={11} />
+                  </Link>
                 </div>
                 
                 <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">

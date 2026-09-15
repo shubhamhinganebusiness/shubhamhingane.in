@@ -12,6 +12,7 @@ import { MessPortalManagement } from './mess/MessPortalManagement';
 import { PlayerDirectoryDashboard } from './cricket/PlayerDirectoryDashboard';
 import { SpectatorSliderAdmin } from './cricket/SpectatorSliderAdmin';
 import { BroadcastThemeStudio } from './cricket/BroadcastThemeStudio';
+import { CompletedMatchesAdminManager } from './cricket/CompletedMatchesAdminManager';
 
 interface PasswordStrength {
   score: number; // 0 to 4
@@ -96,7 +97,7 @@ export const generateSecurePassword = (): string => {
 
 export const SuperAdmin: React.FC = () => {
   const { role, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings' | 'themestudio'>('site');
+  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings' | 'themestudio' | 'completed_matches'>('site');
   const [users, setUsers] = useState<any[]>([]);
   const [shopOwners, setShopOwners] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -114,7 +115,7 @@ export const SuperAdmin: React.FC = () => {
   const [newSMPassword, setNewSMPassword] = useState('');
   const [creatingSM, setCreatingSM] = useState(false);
   const [showSMPass, setShowSMPass] = useState<Record<string, boolean>>({});
-  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'managers' | 'slider' | 'themestudio'>('players');
+  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'completed_matches' | 'managers' | 'slider' | 'themestudio'>('players');
 
   // Account Security Tab States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -579,7 +580,8 @@ export const SuperAdmin: React.FC = () => {
     { id: 'enterprise', label: 'Agro Enterprise' },
     { id: 'med', label: 'Med Portal' },
     { id: 'mess', label: 'Mess Management' },
-    { id: 'cricket', label: 'Player Approvals' },
+    { id: 'cricket', label: 'Cricket & Players' },
+    { id: 'completed_matches', label: 'Completed Matches Toolbar' },
     { id: 'slider', label: 'Spectator Slider (16:9)' },
     { id: 'settings', label: 'Settings' },
   ] as const;
@@ -1261,6 +1263,13 @@ export const SuperAdmin: React.FC = () => {
                       Player Approvals
                     </button>
                     <button
+                      onClick={() => setCricketSubTab('completed_matches')}
+                      type="button"
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'completed_matches' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                    >
+                      Completed Matches Toolbar
+                    </button>
+                    <button
                       onClick={() => setCricketSubTab('managers')}
                       type="button"
                       className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'managers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
@@ -1286,6 +1295,8 @@ export const SuperAdmin: React.FC = () => {
 
                 {cricketSubTab === 'players' ? (
                   <PlayerDirectoryDashboard forceAdminMode={true} />
+                ) : cricketSubTab === 'completed_matches' ? (
+                  <CompletedMatchesAdminManager />
                 ) : cricketSubTab === 'slider' ? (
                   <SpectatorSliderAdmin />
                 ) : cricketSubTab === 'themestudio' ? (
@@ -1465,6 +1476,15 @@ export const SuperAdmin: React.FC = () => {
                   </div>
                 )}
               </div>
+            </motion.div>
+          ) : activeTab === 'completed_matches' ? (
+            <motion.div
+              key="completed_matches"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <CompletedMatchesAdminManager />
             </motion.div>
           ) : activeTab === 'slider' ? (
             <motion.div
