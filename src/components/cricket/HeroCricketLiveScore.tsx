@@ -9,7 +9,9 @@ import {
   Eye, 
   EyeOff,
   Play, 
+  Pause,
   Sparkles,
+  ChevronLeft,
   ChevronRight,
   Shield,
   Activity,
@@ -428,6 +430,54 @@ export const HeroCricketLiveScore: React.FC = () => {
     return unhiddenCompletedMatches[completedIndex % unhiddenCompletedMatches.length] || unhiddenCompletedMatches[0];
   }, [unhiddenCompletedMatches, completedIndex]);
 
+  // Match Result Card Slider State and Handlers
+  const [slideDirection, setSlideDirection] = useState<number>(1);
+  const [isAutoPlay, setIsAutoPlay] = useState<boolean>(true);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchEndX, setTouchEndX] = useState<number | null>(null);
+
+  const handlePrevResult = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (unhiddenCompletedMatches.length <= 1) return;
+    setSlideDirection(-1);
+    setCompletedIndex(prev => (prev > 0 ? prev - 1 : unhiddenCompletedMatches.length - 1));
+  };
+
+  const handleNextResult = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (unhiddenCompletedMatches.length <= 1) return;
+    setSlideDirection(1);
+    setCompletedIndex(prev => (prev + 1) % unhiddenCompletedMatches.length);
+  };
+
+  const handleGoToResult = (index: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (index === completedIndex) return;
+    setSlideDirection(index > completedIndex ? 1 : -1);
+    setCompletedIndex(index);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.targetTouches[0].clientX);
+    setTouchEndX(null);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    setTouchEndX(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchStartX || !touchEndX) return;
+    const distance = touchStartX - touchEndX;
+    if (distance > 45) {
+      handleNextResult();
+    } else if (distance < -45) {
+      handlePrevResult();
+    }
+    setTouchStartX(null);
+    setTouchEndX(null);
+  };
+
   // Hide action for score managers directly on the homepage
   const handleHideCompletedMatch = async (matchId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -543,6 +593,65 @@ export const HeroCricketLiveScore: React.FC = () => {
   const hasLiveMatch = !!(activeMatch && activeMatch.status === 'live' && matchDetails);
   const hasCompletedMatch = !!activeCompletedMatch;
 
+  // Auto-slide effect for Match Result Card Slider
+  useEffect(() => {
+    if (!isAutoPlay || isHovered || unhiddenCompletedMatches.length <= 1) return;
+    if (hasLiveMatch && viewTab === 'live') return;
+
+    const timer = setInterval(() => {
+      setSlideDirection(1);
+      setCompletedIndex(prev => (prev + 1) % unhiddenCompletedMatches.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [isAutoPlay, isHovered, unhiddenCompletedMatches.length, hasLiveMatch, viewTab]);
+
+  // Top Tab Switcher when both Live and Results exist
+  const renderTabSwitcher = () => {
+    if (!hasLiveMatch || !hasCompletedMatch) return null;
+    return (
+      <div className="flex items-center justify-between gap-2 mb-2.5 w-full max-w-xl mx-auto lg:mx-0">
+        <div className="inline-flex items-center p-1 rounded-2xl bg-slate-900/90 border border-white/10 shadow-lg backdrop-blur-md">
+          <button
+            type="button"
+            onClick={() => setViewTab('live')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer border-none ${
+              viewTab === 'live'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/25'
+                : 'text-slate-400 hover:text-white bg-transparent'
+            }`}
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+            </span>
+            <span>Live Match ({liveMatches.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setViewTab('result')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer border-none ${
+              viewTab === 'result'
+                ? 'bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 shadow-md shadow-amber-500/25'
+                : 'text-slate-400 hover:text-white bg-transparent'
+            }`}
+          >
+            <Trophy size={13} className={viewTab === 'result' ? 'text-slate-950' : 'text-amber-400'} />
+            <span>Match Results ({unhiddenCompletedMatches.length})</span>
+          </button>
+        </div>
+
+        {viewTab === 'result' && unhiddenCompletedMatches.length > 1 && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-mono font-bold text-amber-300 bg-slate-900/80 px-2.5 py-1 rounded-xl border border-amber-500/20 shadow-sm">
+              {completedIndex + 1} / {unhiddenCompletedMatches.length}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // If neither a live match nor an unhidden completed match exists, hide hero card
   if (!hasLiveMatch && !hasCompletedMatch) {
     return null;
@@ -571,15 +680,17 @@ export const HeroCricketLiveScore: React.FC = () => {
     } = matchDetails;
 
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 15, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        style={{ touchAction: 'pan-y' }}
-        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-emerald-500/40 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group touch-auto"
-      >
+      <div className="w-full max-w-xl mx-auto lg:mx-0">
+        {renderTabSwitcher()}
+        <motion.div
+          initial={{ opacity: 0, y: 15, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+          onMouseEnter={() => setIsHovered(true)}
+          onMouseLeave={() => setIsHovered(false)}
+          style={{ touchAction: 'pan-y' }}
+          className="w-full mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-emerald-500/40 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group touch-auto"
+        >
         {/* Stadium ambient light beam */}
         <div className="absolute -top-16 -right-16 w-56 h-56 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse" />
         <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none -z-10" />
@@ -791,6 +902,7 @@ export const HeroCricketLiveScore: React.FC = () => {
           </div>
         </div>
       </motion.div>
+    </div>
     );
   }
 
@@ -854,15 +966,49 @@ export const HeroCricketLiveScore: React.FC = () => {
     m.innings2?.bowlers?.forEach(bw => checkBowler(bw, m.innings2?.bowlingTeam || m.teamA));
 
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 15, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.4, ease: 'easeOut' }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        style={{ touchAction: 'pan-y' }}
-        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-amber-500/40 shadow-2xl shadow-amber-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group touch-auto"
-      >
+      <div className="w-full max-w-xl mx-auto lg:mx-0 relative mb-6 group/slider">
+        {renderTabSwitcher()}
+
+        {/* Floating Side Navigation Arrows for Result Slider */}
+        {unhiddenCompletedMatches.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={handlePrevResult}
+              className="absolute -left-3.5 sm:-left-4 top-1/2 -translate-y-1/2 z-30 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-slate-900/90 hover:bg-slate-800 text-amber-300 hover:text-amber-200 border border-amber-500/40 hover:border-amber-400/80 backdrop-blur-md flex items-center justify-center shadow-xl transition-all hover:scale-110 active:scale-95 cursor-pointer group/btn"
+              aria-label="Previous Match Result"
+              title="Previous Match Result"
+            >
+              <ChevronLeft size={18} className="group-hover/btn:-translate-x-0.5 transition-transform" />
+            </button>
+            <button
+              type="button"
+              onClick={handleNextResult}
+              className="absolute -right-3.5 sm:-right-4 top-1/2 -translate-y-1/2 z-30 w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-slate-900/90 hover:bg-slate-800 text-amber-300 hover:text-amber-200 border border-amber-500/40 hover:border-amber-400/80 backdrop-blur-md flex items-center justify-center shadow-xl transition-all hover:scale-110 active:scale-95 cursor-pointer group/btn"
+              aria-label="Next Match Result"
+              title="Next Match Result"
+            >
+              <ChevronRight size={18} className="group-hover/btn:translate-x-0.5 transition-transform" />
+            </button>
+          </>
+        )}
+
+        <AnimatePresence custom={slideDirection} mode="wait">
+          <motion.div
+            key={m.id}
+            custom={slideDirection}
+            initial={{ opacity: 0, x: slideDirection * 35, scale: 0.98 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -slideDirection * 35, scale: 0.98 }}
+            transition={{ duration: 0.28, ease: 'easeOut' }}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            style={{ touchAction: 'pan-y' }}
+            className="w-full relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-amber-500/40 shadow-2xl shadow-amber-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group touch-auto"
+          >
         {/* Stadium ambient light beam in victory gold */}
         <div className="absolute -top-16 -right-16 w-56 h-56 bg-amber-500/15 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse" />
         <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none -z-10" />
@@ -1195,6 +1341,49 @@ export const HeroCricketLiveScore: React.FC = () => {
           </div>
         </div>
       </motion.div>
+    </AnimatePresence>
+
+    {/* Result Slider Pagination Dots & Auto-slide Toggle */}
+    {unhiddenCompletedMatches.length > 1 && (
+      <div className="flex items-center justify-between px-2 pt-2.5">
+        <button
+          type="button"
+          onClick={() => setIsAutoPlay(prev => !prev)}
+          className={`px-2.5 py-1 rounded-xl text-[10px] font-bold border transition-colors cursor-pointer flex items-center gap-1.5 ${
+            isAutoPlay 
+              ? 'bg-amber-500/15 text-amber-300 border-amber-500/30' 
+              : 'bg-white/5 text-slate-400 border-white/10'
+          }`}
+          title={isAutoPlay ? 'Auto-slide is playing (pauses on card hover)' : 'Auto-slide is paused'}
+        >
+          {isAutoPlay ? <Play size={10} className="text-amber-400 fill-amber-400" /> : <Pause size={10} />}
+          <span>{isAutoPlay ? 'Auto-Slide' : 'Paused'}</span>
+        </button>
+
+        <div className="flex items-center gap-1.5 bg-slate-900/90 px-3 py-1.5 rounded-full border border-white/10 shadow-sm backdrop-blur-sm">
+          {unhiddenCompletedMatches.map((match, idx) => (
+            <button
+              key={match.id}
+              type="button"
+              onClick={(e) => handleGoToResult(idx, e)}
+              className={`transition-all duration-300 border-none cursor-pointer p-0 ${
+                idx === completedIndex
+                  ? 'w-6 h-2 rounded-full bg-gradient-to-r from-amber-400 to-yellow-300 shadow-sm shadow-amber-400/50'
+                  : 'w-2 h-2 rounded-full bg-slate-700 hover:bg-slate-500'
+              }`}
+              title={`Result ${idx + 1}: ${match.teamA} vs ${match.teamB}`}
+            />
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1 text-[11px] font-mono font-bold text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded-xl border border-white/10">
+          <span className="text-amber-300">{completedIndex + 1}</span>
+          <span>/</span>
+          <span>{unhiddenCompletedMatches.length}</span>
+        </div>
+      </div>
+    )}
+  </div>
     );
   }
 
