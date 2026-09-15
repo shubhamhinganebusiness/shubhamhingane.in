@@ -388,16 +388,8 @@ export function generateLocalizedCricketCommentary(
   const targetLang = lang === 'mr' ? 'mr' : lang === 'hi' ? 'hi' : 'en';
 
   const appendWinProb = (text: string): string => {
-    if (text.includes('[AI')) return text;
-    // CRITICAL USER DIRECTIVE: Do not show win probability on every delivery! Only show at crucial moments.
-    if (!options?.isCrucialTime) return text;
-    const wp = options?.winProbability;
-    if (!wp || !wp.teamA || !wp.teamB) return text;
-    const pA = Math.round(wp.probA ?? 50);
-    const pB = Math.round(wp.probB ?? 50);
-    if (targetLang === 'mr') return `${text} [AI विजयाची शक्यता: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
-    if (targetLang === 'hi') return `${text} [AI जीत की संभावना: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
-    return `${text} [AI Win Probability: ${wp.teamA} ${pA}% | ${wp.teamB} ${pB}%]`;
+    // Win probability removed from AI live commentary per user directive
+    return text;
   };
 
   if (type === 'dot' || val === 0) {
@@ -706,6 +698,16 @@ export function translateCommentaryText(text: string, lang: CommentaryLanguage):
 }
 
 /**
+ * Strips any AI Win Probability brackets from commentary strings
+ */
+export function stripWinProbabilityFromCommentary(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\s*\[AI\s*(?:Win Probability|जीत की संभावना|विजयाची शक्यता)[^\]]*\]/gi, '')
+    .trim();
+}
+
+/**
  * Extracts commentary description in the user's selected language
  */
 export function getCommentaryText(
@@ -718,32 +720,32 @@ export function getCommentaryText(
   // 1. Direct translation matching
   if (comm.translations) {
     if (currentLang === 'mr' && comm.translations.mr && comm.translations.mr.trim()) {
-      return comm.translations.mr;
+      return stripWinProbabilityFromCommentary(comm.translations.mr);
     }
     if (currentLang === 'hi' && comm.translations.hi && comm.translations.hi.trim()) {
-      return comm.translations.hi;
+      return stripWinProbabilityFromCommentary(comm.translations.hi);
     }
     if (currentLang === 'en' && comm.translations.en && comm.translations.en.trim()) {
-      return comm.translations.en;
+      return stripWinProbabilityFromCommentary(comm.translations.en);
     }
   }
 
   // 2. Custom field fallback (e.g. description_mr, commentary_hi)
   if (currentLang === 'mr' && (comm.description_mr || comm.commentary_mr)) {
-    return comm.description_mr || comm.commentary_mr;
+    return stripWinProbabilityFromCommentary(comm.description_mr || comm.commentary_mr);
   }
   if (currentLang === 'hi' && (comm.description_hi || comm.commentary_hi)) {
-    return comm.description_hi || comm.commentary_hi;
+    return stripWinProbabilityFromCommentary(comm.description_hi || comm.commentary_hi);
   }
   if (currentLang === 'en' && (comm.description_en || comm.commentary_en)) {
-    return comm.description_en || comm.commentary_en;
+    return stripWinProbabilityFromCommentary(comm.description_en || comm.commentary_en);
   }
 
   const baseDesc = comm.description || '';
-  if (currentLang === 'en') return baseDesc;
+  if (currentLang === 'en') return stripWinProbabilityFromCommentary(baseDesc);
 
   // 3. Smart translator fallback for unilingual records
-  return translateCommentaryText(baseDesc, currentLang);
+  return stripWinProbabilityFromCommentary(translateCommentaryText(baseDesc, currentLang));
 }
 
 /**

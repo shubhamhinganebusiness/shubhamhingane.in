@@ -55,7 +55,6 @@ import {
   getCommentaryText,
   CommentaryLanguageSelector
 } from './modules/commentaryLanguage';
-import { WinProbabilityCard } from './modules/WinProbabilityCard';
 import { SpectatorImageSlider } from './SpectatorImageSlider';
 
 // Struct definitions matching those in CricketScoreboard.tsx
@@ -844,18 +843,73 @@ export const SpectatorScoreboardSection = ({
   const [prevPredA, setPrevPredA] = useState<number | null>(null);
   const [showPlayerRegistration, setShowPlayerRegistration] = useState(false);
   const [showMatchResultModal, setShowMatchResultModal] = useState(false);
-  const [hasDismissedResultModal, setHasDismissedResultModal] = useState<string | null>(null);
+  const [hasDismissedResultModal, setHasDismissedResultModal] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('last_dismissed_result_modal_id');
+    } catch (_) {
+      return null;
+    }
+  });
 
-  // Automatically show match result popup modal when a match is completed
+  // Track initial mount and match statuses so popup NEVER appears on visit or refresh,
+  // never appears on homepage, and never appears during live matches.
+  const initialMountTrackedRef = useRef(false);
+  const prevMatchStatusMapRef = useRef<{ [matchId: string]: string }>({});
+
+  // Show match result popup modal strictly when appropriate:
+  // - NEVER on homepage
+  // - NEVER on initial site visit or after refreshing the site
+  // - NEVER during live matches
+  // - ONLY on spectator scoreboard detail page when a live match concludes in real-time,
+  //   or when explicitly requested by user clicking "Match Result" / "View Pop-up ↗"
   useEffect(() => {
-    if (selectedMatch && selectedMatch.status === 'completed') {
-      if (hasDismissedResultModal !== selectedMatch.id) {
+    if (homepageMode) {
+      if (showMatchResultModal) setShowMatchResultModal(false);
+      return;
+    }
+
+    if (!selectedMatch || !selectedMatch.id) {
+      return;
+    }
+
+    const matchId = selectedMatch.id;
+    const currentStatus = selectedMatch.status;
+    const prevStatus = prevMatchStatusMapRef.current[matchId];
+
+    // On initial mount / site visit / page refresh: record state and NEVER auto-show popup
+    if (!initialMountTrackedRef.current) {
+      initialMountTrackedRef.current = true;
+      prevMatchStatusMapRef.current[matchId] = currentStatus;
+      if (currentStatus === 'completed') {
+        try {
+          sessionStorage.setItem(`result_modal_dismissed_${matchId}`, 'true');
+        } catch (_) {}
+      }
+      return;
+    }
+
+    // First time seeing this match ID during current session
+    if (!prevStatus) {
+      prevMatchStatusMapRef.current[matchId] = currentStatus;
+      return;
+    }
+
+    // Live transition to completed during active spectator session:
+    if (
+      currentStatus === 'completed' &&
+      prevStatus !== 'completed' &&
+      hasDismissedResultModal !== matchId
+    ) {
+      const alreadyDismissed = typeof window !== 'undefined' && sessionStorage.getItem(`result_modal_dismissed_${matchId}`) === 'true';
+      if (!alreadyDismissed) {
         setShowMatchResultModal(true);
       }
-    } else {
+    } else if (currentStatus !== 'completed') {
       setShowMatchResultModal(false);
     }
-  }, [selectedMatch?.id, selectedMatch?.status, hasDismissedResultModal]);
+
+    prevMatchStatusMapRef.current[matchId] = currentStatus;
+  }, [selectedMatch?.id, selectedMatch?.status, homepageMode, hasDismissedResultModal]);
 
   // States for live connections and auto-refresh indicators
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -1252,12 +1306,25 @@ export const SpectatorScoreboardSection = ({
     };
     window.addEventListener('cricket_match_deleted', handleMatchDeleted);
 
+    const handleSelectMatchEvent = (e: any) => {
+      const matchId = e?.detail?.matchId;
+      if (matchId) {
+        setLocalSelectedMatchId(matchId);
+        const matchObj = getLocalMatchById(matchId) || allMatches.find(m => m.id === matchId);
+        if (matchObj) {
+          setSelectedMatch(matchObj);
+        }
+      }
+    };
+    window.addEventListener('cricket_select_match', handleSelectMatchEvent);
+
     return () => {
       unsub();
       unsubRtdbList();
       unsubCompleted();
       unsubSync();
       window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
+      window.removeEventListener('cricket_select_match', handleSelectMatchEvent);
     };
   }, []);
 
@@ -5361,11 +5428,6 @@ export const SpectatorScoreboardSection = ({
 
                     </div>
 
-                    {/* Predictive Win Probability Commentary inside AI Commentary */}
-                    <WinProbabilityCard
-                      match={selectedMatch}
-                      userLanguage={spectatorCommentaryLang}
-                    />
 
                     {/*🎙️ AI Commentary Booth & CricBrain Analyst Desk */}
                     <div className="bg-gradient-to-br from-emerald-650 to-emerald-800 dark:from-slate-900 dark:to-emerald-950/40 text-white rounded-[2.5rem] p-6 lg:p-8 shadow-xl space-y-6">
@@ -5943,7 +6005,7 @@ export const SpectatorScoreboardSection = ({
 
         {/* Match Result Pop-up Modal (Requirement 3) */}
         <AnimatePresence>
-          {showMatchResultModal && selectedMatch && selectedMatch.status === 'completed' && (
+          {showMatchResultModal && !homepageMode && selectedMatch && selectedMatch.status === 'completed' && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -5951,6 +6013,10 @@ export const SpectatorScoreboardSection = ({
               className="fixed inset-0 z-[140] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto"
               onClick={() => {
                 setHasDismissedResultModal(selectedMatch.id);
+                try {
+                  sessionStorage.setItem('last_dismissed_result_modal_id', selectedMatch.id);
+                  sessionStorage.setItem(`result_modal_dismissed_${selectedMatch.id}`, 'true');
+                } catch (_) {}
                 setShowMatchResultModal(false);
               }}
             >
@@ -5970,6 +6036,10 @@ export const SpectatorScoreboardSection = ({
                 <button
                   onClick={() => {
                     setHasDismissedResultModal(selectedMatch.id);
+                    try {
+                      sessionStorage.setItem('last_dismissed_result_modal_id', selectedMatch.id);
+                      sessionStorage.setItem(`result_modal_dismissed_${selectedMatch.id}`, 'true');
+                    } catch (_) {}
                     setShowMatchResultModal(false);
                   }}
                   className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer border-none"
@@ -6079,6 +6149,10 @@ export const SpectatorScoreboardSection = ({
                   <button
                     onClick={() => {
                       setHasDismissedResultModal(selectedMatch.id);
+                      try {
+                        sessionStorage.setItem('last_dismissed_result_modal_id', selectedMatch.id);
+                        sessionStorage.setItem(`result_modal_dismissed_${selectedMatch.id}`, 'true');
+                      } catch (_) {}
                       setShowMatchResultModal(false);
                     }}
                     className="w-full sm:flex-1 py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer border-none shadow-lg shadow-amber-500/25"

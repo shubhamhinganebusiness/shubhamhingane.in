@@ -87,7 +87,6 @@ import {
   MatchContextualTone,
   ContextualToneInfo
 } from './modules/commentaryLanguage';
-import { WinProbabilityCard } from './modules/WinProbabilityCard';
 import { calculateWinProbabilityDetails } from './modules/winProbabilityEngine';
 import { OfflineSyncStatusBadge } from './OfflineSyncStatusBadge';
 import { enqueueMatchBallSave, processOfflineScoringQueue, isNetworkOnline } from '../../utils/offlineScoringQueue';
@@ -3983,12 +3982,7 @@ export const CricketScoreboard: React.FC = () => {
         )
       : ballDesc;
 
-    let localizedEnWithProb = generatedEn;
-    if (isCrucialMoment && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
-      const pA = Math.round(deliveryWinProb.probA ?? 50);
-      const pB = Math.round(deliveryWinProb.probB ?? 50);
-      localizedEnWithProb += ` [AI Win Probability: ${deliveryWinProb.teamA} ${pA}% | ${deliveryWinProb.teamB} ${pB}%]`;
-    }
+    const localizedEnWithProb = generatedEn;
 
     const ballCommEntry = {
       id: `c-${Date.now()}`,
@@ -4509,12 +4503,7 @@ export const CricketScoreboard: React.FC = () => {
       ? `रिटायर्ड हर्ट: ${dismissedBatter.name} दुखापतीमुळे मैदानाबाहेर गेले आहेत (${dismissedBatter.runs} धावा, ${dismissedBatter.balls} चेंडू). ${finalBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
       : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb, isCrucialTime: isWicketCrucial });
 
-    let localizedEnWithProb = commentaryDescription;
-    if (!isRetiredHurt && isWicketCrucial && deliveryWinProb && deliveryWinProb.teamA && deliveryWinProb.teamB) {
-      const pA = Math.round(deliveryWinProb.probA ?? 50);
-      const pB = Math.round(deliveryWinProb.probB ?? 50);
-      localizedEnWithProb += ` [AI Win Probability: ${deliveryWinProb.teamA} ${pA}% | ${deliveryWinProb.teamB} ${pB}%]`;
-    }
+    const localizedEnWithProb = commentaryDescription;
 
     const deliveryCommId = `c-${Date.now()}`;
     const normalWicketComm = {
@@ -9634,12 +9623,6 @@ export const CricketScoreboard: React.FC = () => {
                       return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />;
                     })()}
 
-                    {/* Predictive Win Probability Commentary inside AI Commentary */}
-                    <WinProbabilityCard
-                      match={match}
-                      userLanguage={userCommentaryLang}
-                      className="border-slate-800 bg-slate-900/90 text-slate-100 my-1"
-                    />
 
                     <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin max-h-[300px]">
                       {(!currentInnings.commentaryList || currentInnings.commentaryList.length === 0) ? (
