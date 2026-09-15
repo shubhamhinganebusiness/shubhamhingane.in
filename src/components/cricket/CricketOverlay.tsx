@@ -12,6 +12,7 @@ import { db } from '../../lib/firebase';
 import { doc, onSnapshot, collection, query, where, limit } from 'firebase/firestore';
 import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch } from './cricketStorage';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
+import { getThemeBackground } from './BroadcastThemeStudio';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -283,13 +284,38 @@ export const CricketOverlay: React.FC = () => {
       });
     } catch (_) {}
 
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('cricket_theme_channel');
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'theme_updated' && event.data?.theme) {
+          setGlobalStudioTheme(event.data.theme);
+        }
+      };
+    } catch (_) {}
+
     const onUpdate = (e: any) => {
       if (e.detail) setGlobalStudioTheme(e.detail);
     };
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'cricket_broadcast_studio_theme' && e.newValue) {
+        try {
+          setGlobalStudioTheme(JSON.parse(e.newValue));
+        } catch (_) {}
+      }
+    };
+
     window.addEventListener('cricket_broadcast_theme_updated', onUpdate);
+    window.addEventListener('storage', onStorage);
+
     return () => {
       if (unsub) unsub();
+      if (bc) {
+        try { bc.close(); } catch (_) {}
+      }
       window.removeEventListener('cricket_broadcast_theme_updated', onUpdate);
+      window.removeEventListener('storage', onStorage);
     };
   }, []);
   
@@ -1448,8 +1474,8 @@ export const CricketOverlay: React.FC = () => {
 
   if (isStudioCustom && globalStudioTheme) {
     themeColors = {
-      cardBg: 'bg-slate-950/95 border-sky-500/50 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)]',
-      ribbonBg: 'bg-slate-950/95 border-sky-500/50 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)]',
+      cardBg: 'border-sky-500/50 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.85)]',
+      ribbonBg: 'border-sky-500/50 text-white backdrop-blur-2xl shadow-[0_20px_50px_rgba(0,0,0,0.9)]',
       accentText: 'text-sky-400 font-black',
       accentBg: 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-black shadow-lg',
       titleText: 'text-white font-black',
@@ -1550,6 +1576,20 @@ export const CricketOverlay: React.FC = () => {
   const activeTeamColor = (currentInnings?.battingTeam || '') === (match?.teamA || '') 
     ? activeConfig.teamAColor 
     : activeConfig.teamBColor;
+
+  // Studio Custom Background (supports both solid colors and gradient options configured in Super Admin Broadcast Theme Studio)
+  const studioBgStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (isStudioCustom && globalStudioTheme) {
+      const bg = getThemeBackground(globalStudioTheme);
+      return {
+        background: bg,
+        opacity: globalStudioTheme.bgOpacity ?? 0.95,
+        borderColor: globalStudioTheme.borderColor || undefined,
+        color: globalStudioTheme.textColor || undefined,
+      };
+    }
+    return undefined;
+  }, [isStudioCustom, globalStudioTheme]);
 
   // Render custom scoreboard design template image overlay dynamically
   const renderCustomOverlayImage = () => {
@@ -2028,6 +2068,7 @@ export const CricketOverlay: React.FC = () => {
         <div 
           id="modern-broadcast-ribbon"
           className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-6' : 'bottom-6'} left-1/2 -translate-x-1/2 w-[98%] max-w-[1900px] h-[82px] select-none font-sans z-30 flex items-stretch rounded-2xl border ${themeColors.borderAccent || 'border-white/10'} ${themeColors.ribbonBg || themeColors.cardBg} overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.85)]`}
+          style={studioBgStyle}
         >
           {/* Boundary Flash Strip */}
           {lastBdryFlash === '4' && (
@@ -2434,7 +2475,9 @@ export const CricketOverlay: React.FC = () => {
           activeConfig.bugPosition === 'bottom-center' ? 'bottom-16 left-1/2 -translate-x-1/2' :
           activeConfig.bugPosition === 'top-full' ? 'top-16 left-16' :
           'bottom-16 left-16'
-        } w-[680px] rounded-[2rem] border overflow-hidden ${themeColors.cardBg} ${themeColors.headerGlow} z-30 shadow-2xl`}>
+        } w-[680px] rounded-[2rem] border overflow-hidden ${themeColors.cardBg} ${themeColors.headerGlow} z-30 shadow-2xl`}
+          style={studioBgStyle}
+        >
           
           {/* Dynamic Boundary Flash strip overlay */}
           {lastBdryFlash === '4' && (
@@ -2723,7 +2766,10 @@ export const CricketOverlay: React.FC = () => {
       {activeConfig.showScoreBug && activeLayout === 'score-bug-1900-200' && (
         <div 
           className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[1900px] h-[200px] rounded-[2rem] border overflow-hidden flex items-stretch shadow-[0_20px_60px_rgba(0,0,0,0.95)] ${themeColors.cardBg}`} 
-          style={{ borderColor: activeTeamColor }}
+          style={{ 
+            borderColor: isStudioCustom && globalStudioTheme?.borderColor ? globalStudioTheme.borderColor : activeTeamColor,
+            ...(studioBgStyle || {})
+          }}
           id="giant-centered-score-bug"
         >
           {/* Dynamic Boundary Flash strip overlay */}
@@ -2993,7 +3039,10 @@ export const CricketOverlay: React.FC = () => {
           )}
 
           {/* Main outer container - maintains a standard, unskewed layout perspective */}
-          <div className="w-full h-full flex items-stretch overflow-hidden bg-black/45 backdrop-blur-md rounded-xl border border-slate-900/80 shadow-[0_15px_45px_rgba(0,0,0,0.85)]">
+          <div 
+            className="w-full h-full flex items-stretch overflow-hidden bg-black/45 backdrop-blur-md rounded-xl border border-slate-900/80 shadow-[0_15px_45px_rgba(0,0,0,0.85)]"
+            style={studioBgStyle}
+          >
             
             {/* PILL 1: SLANTED ORANGE BATSMAN SECTION (11% width) */}
             <div 

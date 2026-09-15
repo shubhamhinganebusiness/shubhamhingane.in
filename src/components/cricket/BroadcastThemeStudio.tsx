@@ -21,7 +21,8 @@ import {
   Zap,
   Radio,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ArrowRightLeft
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
@@ -44,6 +45,14 @@ export interface BroadcastStudioTheme {
   borderStyle: 'sharp' | 'rounded' | 'pill';
   fontFamily: 'sans' | 'mono' | 'condensed' | 'serif';
 
+  // Background Gradient Options
+  bgType?: 'solid' | 'gradient';
+  bgGradient?: string;
+  bgGradientFrom?: string;
+  bgGradientTo?: string;
+  bgGradientVia?: string;
+  bgGradientDirection?: string; // '90deg' | '135deg' | '180deg' | '45deg' | '225deg' | 'radial'
+
   // Team Brand Colors
   teamAColor: string;
   teamBColor: string;
@@ -62,6 +71,54 @@ export interface BroadcastStudioTheme {
   updatedBy?: string;
 }
 
+export interface BroadcastGradientPreset {
+  id: string;
+  name: string;
+  desc: string;
+  from: string;
+  to: string;
+  via?: string;
+  direction: string;
+}
+
+export const BROADCAST_GRADIENT_PRESETS: BroadcastGradientPreset[] = [
+  { id: 'midnight-sapphire', name: 'Midnight Sapphire', desc: 'ESPN Pro Deep Navy', from: '#0b0f19', to: '#1e293b', direction: '135deg' },
+  { id: 'star-sports-navy', name: 'Star Sports Electric', desc: 'Cyan & Dark Navy', from: '#030712', to: '#075985', direction: '135deg' },
+  { id: 'ipl-regal-violet', name: 'IPL Regal Velvet', desc: 'BCCI Velvet Violet', from: '#0f0a28', to: '#3b0764', direction: '135deg' },
+  { id: 'crimson-fire', name: 'Crimson Flame', desc: 'Stadium High Voltage Red', from: '#180509', to: '#7f1d1d', direction: '135deg' },
+  { id: 'cyber-emerald', name: 'Cyber Matrix Green', desc: 'Pitch Green & Emerald', from: '#022c22', to: '#065f46', direction: '135deg' },
+  { id: 'carbon-titanium', name: 'Carbon Titanium', desc: 'Matte Stealth Graphite', from: '#09090b', to: '#27272a', direction: '135deg' },
+  { id: 'heritage-gold', name: 'Heritage Amber Gold', desc: "Lord's & Ashes Classic", from: '#1c1305', to: '#78350f', direction: '135deg' },
+  { id: 'deep-ocean-teal', name: 'Ocean Deep Teal', desc: 'Pacific T20 Deep Teal', from: '#042f2e', to: '#0d9488', direction: '135deg' },
+  { id: 'sunset-blaze', name: 'Sunset Crimson Gold', desc: 'Dusk Stadium Ambient', from: '#450a0a', to: '#b45309', direction: '135deg' },
+  { id: 'neon-cyber-punk', name: 'Neon Cyberpunk', desc: 'Night Game Ultraviolet', from: '#18032b', to: '#831843', direction: '135deg' },
+  { id: 'frost-white', name: 'Daylight Silver Frost', desc: 'High Definition Clear White', from: '#ffffff', to: '#cbd5e1', direction: '135deg' },
+  { id: 'slate-minimal', name: 'Broadcast Slate Pro', desc: 'Minimalist Studio Slate', from: '#0f172a', to: '#334155', direction: '135deg' }
+];
+
+export const computeGradientCss = (direction: string, from: string, to: string, via?: string): string => {
+  if (direction === 'radial') {
+    return via 
+      ? `radial-gradient(circle, ${from} 0%, ${via} 50%, ${to} 100%)`
+      : `radial-gradient(circle, ${from} 0%, ${to} 100%)`;
+  }
+  return via 
+    ? `linear-gradient(${direction}, ${from} 0%, ${via} 50%, ${to} 100%)`
+    : `linear-gradient(${direction}, ${from} 0%, ${to} 100%)`;
+};
+
+export const getThemeBackground = (theme: Partial<BroadcastStudioTheme> | null | undefined): string => {
+  if (!theme) return '#0b0f19';
+  if (theme.bgType === 'gradient') {
+    if (theme.bgGradient) return theme.bgGradient;
+    const dir = theme.bgGradientDirection || '135deg';
+    const from = theme.bgGradientFrom || theme.bgColor || '#0b0f19';
+    const to = theme.bgGradientTo || '#1e293b';
+    return computeGradientCss(dir, from, to, theme.bgGradientVia);
+  }
+  return theme.bgColor || '#0b0f19';
+};
+
 export const DEFAULT_BROADCAST_STUDIO_THEME: BroadcastStudioTheme = {
   id: 'global-studio-theme',
   name: 'Premier Star Sapphire',
@@ -72,6 +129,11 @@ export const DEFAULT_BROADCAST_STUDIO_THEME: BroadcastStudioTheme = {
   secondaryAccent: '#f59e0b', // Amber Gold
   bgColor: '#0b0f19',
   bgOpacity: 0.95,
+  bgType: 'solid',
+  bgGradientFrom: '#0b0f19',
+  bgGradientTo: '#1e293b',
+  bgGradientDirection: '135deg',
+  bgGradient: 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)',
   textColor: '#ffffff',
   textMutedColor: '#94a3b8',
   borderColor: '#38bdf8',
@@ -235,6 +297,89 @@ export const BroadcastThemeStudio: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedGradient, setCopiedGradient] = useState(false);
+  const [showThreeStops, setShowThreeStops] = useState(false);
+
+  const handleToggleBgType = (type: 'solid' | 'gradient') => {
+    setTheme(prev => {
+      if (type === 'gradient') {
+        const from = prev.bgGradientFrom || prev.bgColor || '#0b0f19';
+        const to = prev.bgGradientTo || '#1e293b';
+        const dir = prev.bgGradientDirection || '135deg';
+        const computed = computeGradientCss(dir, from, to, prev.bgGradientVia);
+        return {
+          ...prev,
+          bgType: 'gradient',
+          bgGradientFrom: from,
+          bgGradientTo: to,
+          bgGradientDirection: dir,
+          bgGradient: computed
+        };
+      } else {
+        return {
+          ...prev,
+          bgType: 'solid'
+        };
+      }
+    });
+  };
+
+  const updateGradientField = (field: 'from' | 'to' | 'via' | 'direction', value: string) => {
+    setTheme(prev => {
+      const from = field === 'from' ? value : (prev.bgGradientFrom || prev.bgColor || '#0b0f19');
+      const to = field === 'to' ? value : (prev.bgGradientTo || '#1e293b');
+      const dir = field === 'direction' ? value : (prev.bgGradientDirection || '135deg');
+      const via = field === 'via' ? (value || undefined) : prev.bgGradientVia;
+      const computed = computeGradientCss(dir, from, to, via);
+      return {
+        ...prev,
+        bgType: 'gradient',
+        bgGradientFrom: from,
+        bgGradientTo: to,
+        bgGradientDirection: dir,
+        bgGradientVia: via,
+        bgGradient: computed
+      };
+    });
+  };
+
+  const handleSwapGradientColors = () => {
+    setTheme(prev => {
+      const oldFrom = prev.bgGradientFrom || prev.bgColor || '#0b0f19';
+      const oldTo = prev.bgGradientTo || '#1e293b';
+      const dir = prev.bgGradientDirection || '135deg';
+      const computed = computeGradientCss(dir, oldTo, oldFrom, prev.bgGradientVia);
+      return {
+        ...prev,
+        bgType: 'gradient',
+        bgGradientFrom: oldTo,
+        bgGradientTo: oldFrom,
+        bgGradient: computed
+      };
+    });
+  };
+
+  const handleApplyGradientPreset = (preset: BroadcastGradientPreset) => {
+    setTheme(prev => {
+      const computed = computeGradientCss(preset.direction, preset.from, preset.to, preset.via);
+      return {
+        ...prev,
+        bgType: 'gradient',
+        bgGradientFrom: preset.from,
+        bgGradientTo: preset.to,
+        bgGradientVia: preset.via,
+        bgGradientDirection: preset.direction,
+        bgGradient: computed
+      };
+    });
+  };
+
+  const handleCopyGradientCss = () => {
+    const css = getThemeBackground(theme);
+    navigator.clipboard.writeText(`background: ${css};`);
+    setCopiedGradient(true);
+    setTimeout(() => setCopiedGradient(false), 2000);
+  };
 
   // Live simulation interactive test stinger alert
   const [activeStinger, setActiveStinger] = useState<{ type: 'four' | 'six' | 'wicket' | 'fifty' | 'freehit'; text: string } | null>(null);
@@ -493,7 +638,7 @@ export const BroadcastThemeStudio: React.FC = () => {
                 <div 
                   className="px-8 py-5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border-2 flex items-center gap-4 text-white"
                   style={{
-                    backgroundColor: theme.bgColor,
+                    background: getThemeBackground(theme),
                     borderColor: activeStinger.type === 'wicket' ? '#ef4444' : activeStinger.type === 'six' ? '#d946ef' : theme.primaryAccent,
                     boxShadow: `0 0 35px ${theme.primaryAccent}60`
                   }}
@@ -519,7 +664,7 @@ export const BroadcastThemeStudio: React.FC = () => {
             <div 
               className={`w-full overflow-hidden transition-all shadow-2xl border ${cornerClass} ${fontClass}`}
               style={{
-                backgroundColor: theme.bgColor,
+                background: getThemeBackground(theme),
                 opacity: theme.bgOpacity,
                 borderColor: `${theme.borderColor}80`,
                 boxShadow: `0 15px 40px rgba(0,0,0,0.7), 0 0 20px ${theme.borderColor}30`
@@ -661,7 +806,10 @@ export const BroadcastThemeStudio: React.FC = () => {
               {theme.showTicker && (
                 <div 
                   className="px-3 sm:px-5 py-1.5 text-[10px] sm:text-[11px] font-bold tracking-wider uppercase border-t border-white/10 flex items-center justify-between overflow-hidden"
-                  style={{ backgroundColor: `${theme.bgColor}E6`, color: theme.secondaryAccent }}
+                  style={{ 
+                    background: theme.bgType === 'gradient' ? 'rgba(0,0,0,0.45)' : `${theme.bgColor}E6`, 
+                    color: theme.secondaryAccent 
+                  }}
                 >
                   <div className="truncate flex items-center gap-2">
                     <Sparkles size={12} className="shrink-0 animate-pulse" />
@@ -762,7 +910,7 @@ export const BroadcastThemeStudio: React.FC = () => {
                   <div className="mt-2.5 flex items-center gap-1">
                     <span className="w-3.5 h-3.5 rounded-full border border-black/20" style={{ backgroundColor: p.config.primaryAccent }} />
                     <span className="w-3.5 h-3.5 rounded-full border border-black/20" style={{ backgroundColor: p.config.secondaryAccent }} />
-                    <span className="w-3.5 h-3.5 rounded-full border border-black/20" style={{ backgroundColor: p.config.bgColor }} />
+                    <span className="w-3.5 h-3.5 rounded-full border border-black/20" style={{ background: getThemeBackground(p.config) }} />
                   </div>
                 </button>
               );
@@ -856,33 +1004,407 @@ export const BroadcastThemeStudio: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Container Background Color */}
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Score Bug Canvas Background
-                    </label>
-                    <span className="text-xs font-mono font-bold text-slate-500">{theme.bgColor}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="color"
-                      value={theme.bgColor}
-                      onChange={(e) => setTheme(prev => ({ ...prev, bgColor: e.target.value }))}
-                      className="w-12 h-10 rounded-lg cursor-pointer border border-slate-300 dark:border-slate-700 bg-transparent"
-                    />
-                    <div className="flex flex-wrap gap-1.5">
-                      {['#0b0f19', '#0d1117', '#0f0a28', '#111318', '#1c1305', '#ffffff', '#030712'].map(c => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setTheme(prev => ({ ...prev, bgColor: c }))}
-                          className="w-6 h-6 rounded-full border border-black/10 cursor-pointer transition-transform hover:scale-110"
-                          style={{ backgroundColor: c }}
-                        />
-                      ))}
+                {/* Score Bug Canvas Background: Solid vs Gradient Studio */}
+                <div className="col-span-1 md:col-span-2 lg:col-span-3 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                  {/* Header with Mode Switcher */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800/80">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-sky-500/10 dark:bg-sky-400/10 text-sky-600 dark:text-sky-400">
+                        <Palette size={18} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-slate-100">
+                            Score Bug Canvas Background
+                          </label>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/20">
+                            {theme.bgType === 'gradient' ? `Gradient (${theme.bgGradientDirection || '135deg'})` : 'Solid Color'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Configure whether the score bug canvas uses a solid matte hue or a multi-stop broadcast TV gradient blend
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Mode Toggle: Solid Color vs Gradient Blend */}
+                    <div className="flex items-center p-1 rounded-xl bg-slate-200/70 dark:bg-slate-900 border border-slate-300/60 dark:border-slate-800 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBgType('solid')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border-none ${
+                          theme.bgType !== 'gradient'
+                            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm font-black'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-transparent'
+                        }`}
+                      >
+                        <span className="w-2.5 h-2.5 rounded-full border border-slate-400/60" style={{ backgroundColor: theme.bgColor || '#0b0f19' }} />
+                        Solid Color
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBgType('gradient')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border-none ${
+                          theme.bgType === 'gradient'
+                            ? 'bg-gradient-to-r from-sky-500 to-indigo-600 text-white shadow-sm font-black'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-transparent'
+                        }`}
+                      >
+                        <Sparkles size={12} className={theme.bgType === 'gradient' ? 'text-amber-300' : ''} />
+                        Gradient Blend
+                      </button>
                     </div>
                   </div>
+
+                  {/* SOLID COLOR CONTROLS */}
+                  {theme.bgType !== 'gradient' ? (
+                    <div className="space-y-4 pt-1">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="color"
+                            value={theme.bgColor}
+                            onChange={(e) => setTheme(prev => ({ ...prev, bgColor: e.target.value }))}
+                            className="w-14 h-12 rounded-xl cursor-pointer border-2 border-slate-300 dark:border-slate-700 bg-transparent p-0.5 shadow-sm"
+                          />
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Selected HEX</span>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <input
+                                type="text"
+                                value={theme.bgColor}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (/^#[0-9A-Fa-f]{0,8}$/.test(val) || val === '') {
+                                    setTheme(prev => ({ ...prev, bgColor: val }));
+                                  }
+                                }}
+                                className="w-24 px-2 py-1 rounded-lg text-xs font-mono font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 outline-none uppercase"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(theme.bgColor);
+                                  setCopiedGradient(true);
+                                  setTimeout(() => setCopiedGradient(false), 2000);
+                                }}
+                                className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                                title="Copy Hex Code"
+                              >
+                                {copiedGradient ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-w-[260px]">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                            Curated Broadcast Hues
+                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { hex: '#0b0f19', name: 'Obsidian Navy' },
+                              { hex: '#0d1117', name: 'Deep Slate' },
+                              { hex: '#0f0a28', name: 'Regal Violet' },
+                              { hex: '#111318', name: 'Carbon Matte' },
+                              { hex: '#1c1305', name: 'Amber Gold' },
+                              { hex: '#022c22', name: 'Cyber Pitch' },
+                              { hex: '#180509', name: 'Crimson Arena' },
+                              { hex: '#030712', name: 'OLED Black' },
+                              { hex: '#082f49', name: 'Sky Navy' },
+                              { hex: '#ffffff', name: 'Daylight White' }
+                            ].map(c => (
+                              <button
+                                key={c.hex}
+                                type="button"
+                                onClick={() => setTheme(prev => ({ ...prev, bgColor: c.hex }))}
+                                className={`group relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer ${
+                                  theme.bgColor.toLowerCase() === c.hex.toLowerCase()
+                                    ? 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-500/5'
+                                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-900 hover:border-slate-400 dark:hover:border-slate-600'
+                                }`}
+                              >
+                                <span
+                                  className="w-4 h-4 rounded-full border border-black/20 shrink-0"
+                                  style={{ backgroundColor: c.hex }}
+                                />
+                                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                                  {c.name}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* GRADIENT BLEND CONTROLS */
+                    <div className="space-y-4 pt-1">
+                      {/* 1. 1-CLICK BROADCAST TV GRADIENT PRESETS */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                            <Sparkles size={12} className="text-amber-400" />
+                            1-Click Broadcast TV Gradient Presets (12 Options)
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                          {BROADCAST_GRADIENT_PRESETS.map(gp => {
+                            const currentFrom = (theme.bgGradientFrom || theme.bgColor || '').toLowerCase();
+                            const currentTo = (theme.bgGradientTo || '').toLowerCase();
+                            const isPresetActive = currentFrom === gp.from.toLowerCase() && currentTo === gp.to.toLowerCase();
+                            const previewGrad = computeGradientCss(gp.direction, gp.from, gp.to, gp.via);
+
+                            return (
+                              <button
+                                key={gp.id}
+                                type="button"
+                                onClick={() => handleApplyGradientPreset(gp)}
+                                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 group ${
+                                  isPresetActive
+                                    ? 'border-sky-500 bg-sky-500/10 ring-2 ring-sky-500/30'
+                                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/90 hover:border-slate-300 dark:hover:border-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span
+                                    className="w-5 h-5 rounded-full border border-white/20 shadow-sm shrink-0"
+                                    style={{ background: previewGrad }}
+                                  />
+                                  {isPresetActive && (
+                                    <Check size={12} className="text-sky-500 font-bold shrink-0" />
+                                  )}
+                                </div>
+                                <div>
+                                  <span className="text-[11px] font-bold text-slate-800 dark:text-slate-100 truncate block">
+                                    {gp.name}
+                                  </span>
+                                  <span className="text-[9px] text-slate-400 truncate block">
+                                    {gp.desc}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 2. GRADIENT DIRECTION & ANGLE SELECTOR */}
+                      <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            Gradient Direction & Angle
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-sky-500 uppercase">
+                            {theme.bgGradientDirection || '135deg'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                          {[
+                            { id: '90deg', label: '→ Horizontal', desc: 'Left to Right' },
+                            { id: '135deg', label: '↘ Diagonal', desc: 'Top-L to Bot-R' },
+                            { id: '180deg', label: '↓ Vertical', desc: 'Top to Bottom' },
+                            { id: '45deg', label: '↗ Angle Up', desc: 'Bot-L to Top-R' },
+                            { id: '225deg', label: '↙ Angle Down', desc: 'Top-R to Bot-L' },
+                            { id: 'radial', label: '🔘 Radial Glow', desc: 'Center Outward' }
+                          ].map(dir => {
+                            const isSelected = (theme.bgGradientDirection || '135deg') === dir.id;
+                            return (
+                              <button
+                                key={dir.id}
+                                type="button"
+                                onClick={() => updateGradientField('direction', dir.id)}
+                                className={`px-2.5 py-2 rounded-xl border text-center transition-all cursor-pointer ${
+                                  isSelected
+                                    ? 'border-sky-500 bg-sky-500/15 text-sky-600 dark:text-sky-300 font-black shadow-sm'
+                                    : 'border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-800/40 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                                }`}
+                              >
+                                <span className="text-[11px] font-bold block">{dir.label}</span>
+                                <span className="text-[8.5px] opacity-70 block truncate">{dir.desc}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 3. COLOR STOPS BUILDER */}
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        {/* Start Color Stop */}
+                        <div className="sm:col-span-5 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                              Start Color (From)
+                            </label>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {theme.bgGradientFrom || theme.bgColor || '#0b0f19'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={theme.bgGradientFrom || theme.bgColor || '#0b0f19'}
+                              onChange={(e) => updateGradientField('from', e.target.value)}
+                              className="w-12 h-10 rounded-lg cursor-pointer border border-slate-300 dark:border-slate-700 bg-transparent shrink-0"
+                            />
+                            <input
+                              type="text"
+                              value={theme.bgGradientFrom || theme.bgColor || '#0b0f19'}
+                              onChange={(e) => updateGradientField('from', e.target.value)}
+                              className="w-24 px-2 py-1.5 rounded-lg text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 uppercase outline-none"
+                            />
+                            <div className="flex items-center gap-1">
+                              {['#0b0f19', '#030712', '#0f0a28', '#09090b', '#180509', '#022c22'].map(c => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => updateGradientField('from', c)}
+                                  className="w-5 h-5 rounded-full border border-black/20 transition-transform hover:scale-110 cursor-pointer"
+                                  style={{ backgroundColor: c }}
+                                  title={c}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SWAP / REVERSE BUTTON */}
+                        <div className="sm:col-span-2 flex flex-col items-center justify-center">
+                          <button
+                            type="button"
+                            onClick={handleSwapGradientColors}
+                            className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                            title="Swap Gradient Colors"
+                          >
+                            <ArrowRightLeft size={14} className="text-sky-500" />
+                            <span className="hidden sm:inline text-[10px]">Swap</span>
+                          </button>
+                        </div>
+
+                        {/* End Color Stop */}
+                        <div className="sm:col-span-5 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                              End Color (To)
+                            </label>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              {theme.bgGradientTo || '#1e293b'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={theme.bgGradientTo || '#1e293b'}
+                              onChange={(e) => updateGradientField('to', e.target.value)}
+                              className="w-12 h-10 rounded-lg cursor-pointer border border-slate-300 dark:border-slate-700 bg-transparent shrink-0"
+                            />
+                            <input
+                              type="text"
+                              value={theme.bgGradientTo || '#1e293b'}
+                              onChange={(e) => updateGradientField('to', e.target.value)}
+                              className="w-24 px-2 py-1.5 rounded-lg text-xs font-mono font-bold bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 uppercase outline-none"
+                            />
+                            <div className="flex items-center gap-1">
+                              {['#1e293b', '#075985', '#3b0764', '#27272a', '#7f1d1d', '#065f46'].map(c => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => updateGradientField('to', c)}
+                                  className="w-5 h-5 rounded-full border border-black/20 transition-transform hover:scale-110 cursor-pointer"
+                                  style={{ backgroundColor: c }}
+                                  title={c}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* OPTIONAL 3-STOP ACCENT (VIA) TOGGLE */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-white/70 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="toggleThreeStops"
+                            checked={showThreeStops || Boolean(theme.bgGradientVia)}
+                            onChange={(e) => {
+                              setShowThreeStops(e.target.checked);
+                              if (!e.target.checked) {
+                                updateGradientField('via', '');
+                              } else {
+                                updateGradientField('via', theme.primaryAccent || '#0ea5e9');
+                              }
+                            }}
+                            className="w-4 h-4 rounded text-sky-500 accent-sky-500 cursor-pointer"
+                          />
+                          <label htmlFor="toggleThreeStops" className="text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                            Add 3-Color Midpoint Accent Stop (Via)
+                          </label>
+                        </div>
+
+                        {(showThreeStops || theme.bgGradientVia) && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">Mid Accent:</span>
+                            <input
+                              type="color"
+                              value={theme.bgGradientVia || theme.primaryAccent || '#0ea5e9'}
+                              onChange={(e) => updateGradientField('via', e.target.value)}
+                              className="w-8 h-8 rounded-lg cursor-pointer border border-slate-300 dark:border-slate-700 bg-transparent"
+                            />
+                            <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">
+                              {theme.bgGradientVia || theme.primaryAccent}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowThreeStops(false);
+                                updateGradientField('via', '');
+                              }}
+                              className="text-[10px] text-rose-500 hover:text-rose-600 font-bold underline cursor-pointer ml-1"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 4. LIVE CANVAS GRADIENT PREVIEW RIBBON */}
+                      <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-400 flex items-center gap-1.5">
+                            <Eye size={13} className="text-sky-400" />
+                            Real-time Canvas Background Preview
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyGradientCss}
+                            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-sky-300 hover:text-white font-mono text-[10px] font-bold transition-all flex items-center gap-1 border border-slate-700 cursor-pointer"
+                          >
+                            {copiedGradient ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
+                            {copiedGradient ? 'CSS Copied!' : 'Copy CSS'}
+                          </button>
+                        </div>
+
+                        <div
+                          className="w-full h-12 rounded-xl border border-white/20 shadow-inner flex items-center justify-between px-4 transition-all"
+                          style={{
+                            background: getThemeBackground(theme),
+                            opacity: theme.bgOpacity
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                            <span className="text-xs font-black uppercase tracking-wider text-white drop-shadow">
+                              Score Bug Preview Strip
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-white/80 bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm truncate max-w-[280px]">
+                            {getThemeBackground(theme)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Opacity Slider */}

@@ -168,12 +168,6 @@ export const GullyScoreLogin: React.FC = () => {
     }
   };
 
-  const handleFillDemoAdmin = () => {
-    setIdentifier('admin');
-    setPassword('Shubham@7719');
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative overflow-hidden font-sans select-none selection:bg-amber-400 selection:text-slate-950">
       {/* Background ambient lighting */}
@@ -307,7 +301,7 @@ export const GullyScoreLogin: React.FC = () => {
                     required
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="e.g. admin or scorekeeper_name"
+                    placeholder="Enter username or mobile number"
                     className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs font-semibold text-white placeholder:text-slate-600 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all"
                   />
                 </div>
@@ -368,25 +362,9 @@ export const GullyScoreLogin: React.FC = () => {
               </button>
             </form>
 
-            {/* Quick Demo Credentials Assistant */}
-            <div className="mt-6 p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 text-left">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
-                  Test / Demo Account
-                </span>
-                <button
-                  type="button"
-                  onClick={handleFillDemoAdmin}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase tracking-wider border border-emerald-500/30 cursor-pointer transition-all"
-                >
-                  Auto-Fill Demo
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1.5 font-mono">
-                User: <span className="text-amber-300 font-bold">admin</span> &bull; Pass: <span className="text-amber-300 font-bold">Shubham@7719</span>
-              </p>
-              <p className="text-[10px] text-slate-500 mt-2">
-                New scorekeepers can also be provisioned by the Super Admin in the Admin Console.
+            <div className="mt-6 p-3.5 rounded-2xl bg-slate-950/40 border border-slate-800/60 text-left">
+              <p className="text-[11px] text-slate-400">
+                Official scorekeeper access is authorized and provisioned by the Super Admin in the Admin Console.
               </p>
             </div>
           </div>
