@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, 
   Calendar, 
@@ -11,11 +11,14 @@ import {
   Download, 
   Send, 
   Eye, 
-  Sparkles,
-  MapPin,
+  Sparkles, 
+  Megaphone,
   Image as ImageIcon
 } from 'lucide-react';
 import { MatchState, Innings } from './CricketScoreboard';
+import { db } from '../../lib/firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { DEFAULT_PRESET_SPONSORS } from '../../utils/cricketSponsorsStorage';
 
 interface CompletedRecordsSliderProps {
   matches: MatchState[];
@@ -23,6 +26,14 @@ interface CompletedRecordsSliderProps {
   onExportPDF?: (match: MatchState) => void;
   isScoreManager?: boolean;
   homepageMode?: boolean;
+}
+
+export interface SponsorAdSlide {
+  id: string;
+  imageUrl: string;
+  title?: string;
+  order?: number;
+  isActive?: boolean;
 }
 
 const DEFAULT_STADIUM_IMAGES = [
@@ -93,17 +104,253 @@ const getMatchPotm = (mItem: any) => {
   return null;
 };
 
+// =========================================================================
+// MINI BANNER & SPONSOR ADVERT SLIDER FOR EACH COMPLETED MATCH CARD
+// Displays the official match banner and seamlessly rotates through
+// super admin added advertisement banners from spectator_slider_images.
+// =========================================================================
+interface CardBannerSlide {
+  id: string;
+  imageUrl: string;
+  title: string;
+  isMatchBanner: boolean;
+  tag: string;
+}
+
+const MatchCardBannerSlider: React.FC<{
+  match: MatchState;
+  fallbackImg: string;
+  adminAds: SponsorAdSlide[];
+  onSelectMatch: (matchId: string) => void;
+  onShareWhatsApp: (match: MatchState, e: React.MouseEvent) => void;
+}> = ({ match: m, fallbackImg, adminAds, onSelectMatch, onShareWhatsApp }) => {
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [imgErrorMap, setImgErrorMap] = useState<Record<string, boolean>>({});
+
+  const hasCustomBanner = Boolean(m.matchBannerUrl && m.matchBannerUrl.trim());
+  const officialBannerImg = hasCustomBanner ? m.matchBannerUrl! : fallbackImg;
+
+  // Build the list of slides for this card:
+  // Slide 1: The official match banner
+  // Slides 2+: Super admin added advertisement banners from spectator_slider_images
+  const slides: CardBannerSlide[] = [
+    {
+      id: `match-banner-${m.id}`,
+      imageUrl: officialBannerImg,
+      title: `${m.teamA} vs ${m.teamB}`,
+      isMatchBanner: true,
+      tag: hasCustomBanner ? 'Match Banner' : 'Match Stadium'
+    }
+  ];
+
+  // Append super admin advertisement banners
+  if (adminAds && adminAds.length > 0) {
+    adminAds.forEach((ad, idx) => {
+      slides.push({
+        id: ad.id || `ad-${idx}`,
+        imageUrl: ad.imageUrl,
+        title: ad.title || 'Official Sponsor',
+        isMatchBanner: false,
+        tag: 'Sponsor Ad'
+      });
+    });
+  } else {
+    // If no super admin banners are uploaded yet, use authentic preset tournament sponsor banners
+    DEFAULT_PRESET_SPONSORS.filter(s => s.bannerUrl && s.isActive).slice(0, 2).forEach((s) => {
+      slides.push({
+        id: `preset-${s.id}`,
+        imageUrl: s.bannerUrl!,
+        title: s.name,
+        isMatchBanner: false,
+        tag: 'Sponsor Ad'
+      });
+    });
+  }
+
+  // Auto-play slider interval (every 4.5 seconds per slide)
+  const nextSlide = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (slides.length <= 1) return;
+    setCurrentIndex((prev) => (prev + 1) % slides.length);
+  }, [slides.length]);
+
+  const prevSlide = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (slides.length <= 1) return;
+    setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
+  }, [slides.length]);
+
+  useEffect(() => {
+    if (isPaused || slides.length <= 1) return;
+    const interval = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % slides.length);
+    }, 4500);
+    return () => clearInterval(interval);
+  }, [isPaused, slides.length]);
+
+  const currentSlide = slides[currentIndex] || slides[0];
+  const hasError = imgErrorMap[currentSlide.id];
+  const currentDisplayImg = hasError ? fallbackImg : currentSlide.imageUrl;
+
+  return (
+    <div 
+      className="rounded-xl overflow-hidden aspect-[16/9] w-full bg-slate-950 border border-slate-800 shadow-md relative group/banner select-none"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onTouchStart={() => setIsPaused(true)}
+      onTouchEnd={() => setIsPaused(false)}
+    >
+      {/* Blurred dynamic background glow so edges never look empty */}
+      <img 
+        src={currentDisplayImg}
+        alt=""
+        aria-hidden="true"
+        className="absolute inset-0 w-full h-full object-cover blur-md opacity-35 scale-105 pointer-events-none transition-all duration-700"
+      />
+      
+      {/* Foreground Banner: object-contain ensures 100% of the match banner and sponsor advertisement is completely visible without cropping */}
+      <AnimatePresence initial={false} mode="wait">
+        <motion.div
+          key={currentSlide.id}
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.98 }}
+          transition={{ duration: 0.35, ease: "easeOut" }}
+          className="relative z-10 w-full h-full flex items-center justify-center"
+        >
+          <img 
+            src={currentDisplayImg}
+            alt={currentSlide.title}
+            onError={() => setImgErrorMap(prev => ({ ...prev, [currentSlide.id]: true }))}
+            className="w-full h-full object-contain transition-transform duration-500"
+            referrerPolicy="no-referrer"
+            loading="lazy"
+          />
+        </motion.div>
+      </AnimatePresence>
+
+      {/* Subtle Gradient Overlays */}
+      <div className="absolute inset-0 z-10 bg-gradient-to-t from-slate-950/70 via-transparent to-slate-950/30 pointer-events-none" />
+
+      {/* Top Banner & Sponsor Category Badge */}
+      <div className="absolute top-2 left-2 right-2 z-20 flex items-center justify-between pointer-events-none">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {currentSlide.isMatchBanner ? (
+            <span className="px-2 py-0.5 rounded bg-emerald-950/80 backdrop-blur-md text-[8px] font-mono font-black text-emerald-300 border border-emerald-500/40 uppercase tracking-wider flex items-center gap-1 shadow-sm">
+              <ImageIcon size={9} className="text-emerald-400" />
+              {currentSlide.tag}
+            </span>
+          ) : (
+            <span className="px-2 py-0.5 rounded bg-amber-950/85 backdrop-blur-md text-[8px] font-mono font-black text-amber-300 border border-amber-500/40 uppercase tracking-wider flex items-center gap-1 shadow-sm animate-pulse">
+              <Megaphone size={9} className="text-amber-400" />
+              {currentSlide.tag}
+            </span>
+          )}
+
+          {/* Ad / Sponsor Title Pill */}
+          {!currentSlide.isMatchBanner && currentSlide.title && (
+            <span className="px-2 py-0.5 rounded bg-slate-900/80 backdrop-blur-md text-[8px] font-bold text-slate-200 border border-white/10 uppercase tracking-wider truncate max-w-[120px] shadow-sm hidden sm:inline-block">
+              {currentSlide.title}
+            </span>
+          )}
+        </div>
+
+        {/* Slide Counter (e.g., 1/3) */}
+        {slides.length > 1 && (
+          <span className="px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md text-[8px] font-mono font-bold text-slate-300 border border-white/15 tracking-wider shadow-sm">
+            {currentIndex + 1} / {slides.length}
+          </span>
+        )}
+      </div>
+
+      {/* Navigation Arrows for Banner & Ads Slider */}
+      {slides.length > 1 && (
+        <>
+          <button
+            type="button"
+            onClick={prevSlide}
+            aria-label="Previous banner slide"
+            className="absolute left-1.5 top-1/2 -translate-y-1/2 z-25 w-6 h-6 rounded-full bg-black/70 hover:bg-black text-white flex items-center justify-center opacity-0 group-hover/banner:opacity-100 transition-opacity border border-white/20 cursor-pointer shadow-lg active:scale-95"
+          >
+            <ChevronLeft size={14} />
+          </button>
+
+          <button
+            type="button"
+            onClick={nextSlide}
+            aria-label="Next banner slide"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 z-25 w-6 h-6 rounded-full bg-black/70 hover:bg-black text-white flex items-center justify-center opacity-0 group-hover/banner:opacity-100 transition-opacity border border-white/20 cursor-pointer shadow-lg active:scale-95"
+          >
+            <ChevronRight size={14} />
+          </button>
+        </>
+      )}
+
+      {/* Bottom Slider Pagination Dots */}
+      {slides.length > 1 && (
+        <div className="absolute bottom-1.5 inset-x-0 z-20 flex items-center justify-center gap-1 pointer-events-auto">
+          {slides.map((slide, idx) => (
+            <button
+              key={slide.id}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setCurrentIndex(idx);
+              }}
+              aria-label={`Go to slide ${idx + 1}`}
+              className={`transition-all duration-300 border-none cursor-pointer p-0 ${
+                idx === currentIndex
+                  ? slide.isMatchBanner
+                    ? 'w-4 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/80'
+                    : 'w-4 h-1.5 rounded-full bg-amber-400 shadow-sm shadow-amber-400/80'
+                  : 'w-1.5 h-1.5 rounded-full bg-white/40 hover:bg-white/70'
+              }`}
+              title={slide.title}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Hover Action Overlay over the Banner (Scorecard & Share) */}
+      <div className="absolute inset-0 z-30 bg-slate-950/75 backdrop-blur-[2px] opacity-0 group-hover/banner:opacity-100 transition-all duration-300 flex items-center justify-center gap-2.5">
+        <button 
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectMatch(m.id);
+          }}
+          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all transform hover:scale-105 shadow-xl cursor-pointer border-none flex items-center gap-1.5 font-black text-[10px] uppercase tracking-wider"
+          title="View Full Detailed Scorecard"
+        >
+          <Eye size={14} />
+          <span>Scorecard</span>
+        </button>
+
+        <button 
+          type="button"
+          onClick={(e) => onShareWhatsApp(m, e)}
+          className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 rounded-xl transition-all transform hover:scale-105 shadow-xl cursor-pointer flex items-center gap-1.5 font-black text-[10px] uppercase tracking-wider"
+          title="Share Result on WhatsApp"
+        >
+          <Send size={13} />
+          <span>Share</span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // Sub-component for individual completed match card in the slider
 // Designed with a responsive 2-column horizontal split on laptops/desktops to fit perfectly on screen without vertical scrolling
 const CompletedMatchCard: React.FC<{
   match: MatchState;
   index: number;
+  adminAds: SponsorAdSlide[];
   onSelectMatch: (matchId: string) => void;
   onExportPDF?: (match: MatchState) => void;
   onShareWhatsApp: (match: MatchState, e: React.MouseEvent) => void;
-}> = ({ match: m, index, onSelectMatch, onExportPDF, onShareWhatsApp }) => {
-  const [imgError, setImgError] = useState(false);
-
+}> = ({ match: m, index, adminAds, onSelectMatch, onExportPDF, onShareWhatsApp }) => {
   const inn1 = m.mainMatchState?.innings1 || m.innings1;
   const inn2 = m.mainMatchState?.innings2 || m.innings2;
 
@@ -158,10 +405,7 @@ const CompletedMatchCard: React.FC<{
   const totalMatchBalls = team1Balls + team2Balls;
   const overallRunRate = totalMatchBalls > 0 ? ((totalMatchRuns / totalMatchBalls) * 6).toFixed(2) : '0.00';
 
-  // Has custom banner
-  const hasCustomBanner = Boolean(!imgError && m.matchBannerUrl && m.matchBannerUrl.trim());
   const fallbackImg = DEFAULT_STADIUM_IMAGES[index % DEFAULT_STADIUM_IMAGES.length];
-  const displayImage = hasCustomBanner ? m.matchBannerUrl! : fallbackImg;
 
   return (
     <motion.div
@@ -177,7 +421,7 @@ const CompletedMatchCard: React.FC<{
       <div className="absolute -bottom-12 -left-12 w-36 h-36 bg-teal-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-teal-500/15 transition-colors duration-500" />
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 opacity-70 group-hover:opacity-100 transition-opacity" />
 
-      {/* ================= LEFT COLUMN: MATCH BANNER & STATUS (42% width on laptop) ================= */}
+      {/* ================= LEFT COLUMN: MATCH BANNER & SPONSOR AD SLIDER (42% width on laptop) ================= */}
       <div className="w-full md:w-[44%] lg:w-[42%] p-3.5 sm:p-4.5 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-800/80 bg-slate-950/40">
         <div>
           {/* Top Status & Category Badges Row */}
@@ -200,62 +444,14 @@ const CompletedMatchCard: React.FC<{
             )}
           </div>
 
-          {/* Fully Visible Match Banner Container (16:9 Aspect Ratio) */}
-          <div className="rounded-xl overflow-hidden aspect-[16/9] w-full bg-slate-950 border border-slate-800 shadow-md relative group/banner">
-            {/* Blurred background glow so edges never look empty or black */}
-            <img 
-              src={displayImage}
-              alt=""
-              aria-hidden="true"
-              className="absolute inset-0 w-full h-full object-cover blur-md opacity-30 scale-105 pointer-events-none"
-            />
-            
-            {/* Foreground Banner: object-contain ensures 100% of the banner graphic & text is fully shown without cropping */}
-            <img 
-              src={displayImage}
-              alt={`${m.teamA} vs ${m.teamB} Match Banner`}
-              onError={() => setImgError(true)}
-              className="relative z-10 w-full h-full object-contain group-hover/card:scale-102 transition-transform duration-500"
-              referrerPolicy="no-referrer"
-            />
-
-            {/* Subtle Gradient Overlay */}
-            <div className="absolute inset-0 z-10 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent pointer-events-none" />
-
-            {/* Tag at bottom left */}
-            <div className="absolute bottom-1.5 left-2 z-20 flex items-center gap-1">
-              <span className="px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-sm text-[7.5px] font-mono font-bold text-amber-300 border border-white/15 uppercase tracking-wider flex items-center gap-1">
-                <ImageIcon size={8} className="text-amber-400" />
-                {hasCustomBanner ? '1280 × 720' : 'BANNER'}
-              </span>
-            </div>
-
-            {/* Hover Action Overlay over the Banner */}
-            <div className="absolute inset-0 z-30 bg-slate-950/75 backdrop-blur-[2px] opacity-0 group-hover/banner:opacity-100 group-hover/card:opacity-100 transition-all duration-300 flex items-center justify-center gap-2.5">
-              <button 
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectMatch(m.id);
-                }}
-                className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-all transform hover:scale-105 shadow-xl cursor-pointer border-none flex items-center gap-1.5 font-black text-[10px] uppercase tracking-wider"
-                title="View Full Detailed Scorecard"
-              >
-                <Eye size={14} />
-                <span>Scorecard</span>
-              </button>
-
-              <button 
-                type="button"
-                onClick={(e) => onShareWhatsApp(m, e)}
-                className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 border border-emerald-500/30 rounded-xl transition-all transform hover:scale-105 shadow-xl cursor-pointer flex items-center gap-1.5 font-black text-[10px] uppercase tracking-wider"
-                title="Share Result on WhatsApp"
-              >
-                <Send size={13} />
-                <span>Share</span>
-              </button>
-            </div>
-          </div>
+          {/* Interactive Banner & Super Admin Sponsor Advertisements Slider */}
+          <MatchCardBannerSlider
+            match={m}
+            fallbackImg={fallbackImg}
+            adminAds={adminAds}
+            onSelectMatch={onSelectMatch}
+            onShareWhatsApp={onShareWhatsApp}
+          />
         </div>
 
         {/* Left Bottom Match Stats Summary Bar */}
@@ -415,6 +611,40 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
   const [isAutoPlay, setIsAutoPlay] = useState<boolean>(true);
   const [isHovered, setIsHovered] = useState<boolean>(false);
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  
+  // Real-time listener for super admin added advertisement banners from spectator_slider_images
+  const [adminAds, setAdminAds] = useState<SponsorAdSlide[]>([]);
+
+  useEffect(() => {
+    try {
+      const q = query(collection(db, 'spectator_slider_images'), orderBy('order', 'asc'));
+      const unsub = onSnapshot(
+        q,
+        (snapshot) => {
+          const items: SponsorAdSlide[] = [];
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (data.isActive !== false && data.imageUrl) {
+              items.push({
+                id: docSnap.id,
+                imageUrl: data.imageUrl,
+                title: data.title || '',
+                order: typeof data.order === 'number' ? data.order : 100,
+                isActive: true
+              });
+            }
+          });
+          setAdminAds(items);
+        },
+        (error) => {
+          console.warn('CompletedRecordsSlider: could not load spectator_slider_images:', error);
+        }
+      );
+      return () => unsub();
+    } catch (err) {
+      console.warn('CompletedRecordsSlider: listener setup error:', err);
+    }
+  }, []);
 
   // Smooth scroll handler for carousel navigation
   const scroll = (direction: 'left' | 'right') => {
@@ -517,6 +747,12 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
               <Trophy size={11} className="text-amber-400" />
               {matches.length} Concluded Matches
             </span>
+            {adminAds.length > 0 && (
+              <span className="px-2 py-0.5 bg-amber-500/15 text-amber-300 rounded-full text-[8.5px] font-mono font-bold uppercase tracking-wider border border-amber-500/30 hidden sm:inline-flex items-center gap-1">
+                <Sparkles size={9} className="text-amber-400" />
+                {adminAds.length} Sponsor Ads Active
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -599,6 +835,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
             key={match.id}
             match={match}
             index={idx}
+            adminAds={adminAds}
             onSelectMatch={onSelectMatch}
             onExportPDF={onExportPDF}
             onShareWhatsApp={handleShareWhatsApp}
