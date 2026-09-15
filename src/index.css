@@ -3,6 +3,8 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-heading: "Montserrat", sans-serif;
+  --font-cormorant: "Cormorant Garamond", Georgia, serif;
+  --font-cinzel: "Cinzel", Georgia, serif;
   --color-primary: #ff014f;
   
   /* Bind CSS variables to Tailwind theme */

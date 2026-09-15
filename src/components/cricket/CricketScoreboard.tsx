@@ -11579,7 +11579,8 @@ export const CricketScoreboard: React.FC = () => {
                                     const t2Overs = past.innings2 ? `${Math.floor(past.innings2.ballsBowled / 6)}.${past.innings2.ballsBowled % 6}` : '0.0';
                                     const team1Score = past.innings1 ? `${past.innings1.battingTeam || past.teamA}: ${past.innings1.runs}/${past.innings1.wickets} (${t1Overs} ov)` : '';
                                     const team2Score = past.innings2 ? `${past.innings2.battingTeam || past.teamB}: ${past.innings2.runs}/${past.innings2.wickets} (${t2Overs} ov)` : '';
-                                    const matchUrl = `${window.location.origin}/?matchId=${past.id}&spectator=true`;
+                                    const origin = window.location.origin.includes('ais-dev-') ? window.location.origin.replace('ais-dev-', 'ais-pre-') : window.location.origin;
+                                    const matchUrl = `${origin}/?matchId=${past.id}&spectator=true`;
                                     const shareText = `🏏 *CRICKET MATCH RESULT* 🏆\n*${past.teamA} vs ${past.teamB}*\n\n🔥 *Result:* ${winnerText}\n📊 ${team1Score}\n📊 ${team2Score}\n\n👉 *View Full Scorecard & Highlights:*\n${matchUrl}`;
                                     const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
                                     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');

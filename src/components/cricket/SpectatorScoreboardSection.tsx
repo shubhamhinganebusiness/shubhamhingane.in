@@ -1838,7 +1838,11 @@ export const SpectatorScoreboardSection = ({
 
   const handleCopyLink = () => {
     if (!selectedMatch) return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?matchId=${selectedMatch.id}&spectator=true`;
+    let origin = window.location.origin;
+    if (origin.includes('ais-dev-')) {
+      origin = origin.replace('ais-dev-', 'ais-pre-');
+    }
+    const shareUrl = `${origin}${window.location.pathname}?matchId=${selectedMatch.id}&spectator=true`;
     copyToClipboard(shareUrl)
       .then(() => {
         setCopiedNotification(true);
@@ -1851,7 +1855,11 @@ export const SpectatorScoreboardSection = ({
 
   const handleShareWhatsApp = () => {
     if (!selectedMatch) return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?matchId=${selectedMatch.id}&spectator=true`;
+    let origin = window.location.origin;
+    if (origin.includes('ais-dev-')) {
+      origin = origin.replace('ais-dev-', 'ais-pre-');
+    }
+    const shareUrl = `${origin}${window.location.pathname}?matchId=${selectedMatch.id}&spectator=true`;
     const isCompleted = selectedMatch.status === 'completed';
     const headline = isCompleted
       ? `🏆 ${selectedMatch.winner ? `${selectedMatch.winner} Won!` : 'Match Result:'} ${selectedMatch.teamA} vs ${selectedMatch.teamB}`
@@ -3138,181 +3146,193 @@ export const SpectatorScoreboardSection = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4 w-full">
-                  {filteredCompletedMatches.slice(0, 5).map((m) => (
-                    <div 
-                      key={m.id}
-                      onClick={() => selectMatch(m.id)}
-                      className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl p-6 shadow-sm hover:scale-[1.01] transition-transform cursor-pointer relative overflow-hidden group text-slate-850 dark:text-slate-100"
-                    >
-                      <div className="absolute top-0 right-0 p-3 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[8px] font-black uppercase tracking-widest rounded-bl-xl flex items-center gap-1">
-                        <Trophy size={8} />
-                        RESULT
-                      </div>
-                      <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-1">
-                        {m.date || 'Past Match'}
-                      </span>
+                  {filteredCompletedMatches.slice(0, 5).map((m) => {
+                    const inn1 = m.mainMatchState?.innings1 || m.innings1;
+                    const inn2 = m.mainMatchState?.innings2 || m.innings2;
 
-                      {m.matchBannerUrl && (
-                        <div className="mb-3.5 rounded-2xl overflow-hidden w-full bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-md relative group/banner flex items-center justify-center min-h-[160px] sm:min-h-[200px]">
-                          {/* Ambient backdrop glow so banner is fully visible without empty black voids */}
-                          <div 
-                            className="absolute inset-0 bg-cover bg-center blur-md opacity-25 scale-105 pointer-events-none"
-                            style={{ backgroundImage: `url(${m.matchBannerUrl})` }}
-                          />
-                          {/* Uncropped, 100% visible match banner */}
-                          <img 
-                            src={m.matchBannerUrl} 
-                            alt={`${m.teamA} vs ${m.teamB} Banner`} 
-                            className="relative z-10 w-full h-auto max-h-[360px] object-contain rounded-xl transition-transform duration-300 group-hover/banner:scale-[1.01]" 
-                            referrerPolicy="no-referrer" 
-                          />
-                          <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 to-transparent pointer-events-none z-10" />
-                          <span className="absolute bottom-2 left-2.5 z-20 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-xs text-[8.5px] font-mono font-bold text-amber-300 border border-white/10 shadow-xs">
-                            Match Banner (16:9)
-                          </span>
+                    const team1 = inn1?.battingTeam || m.teamA || 'Team A';
+                    const team2 = inn2?.battingTeam || m.teamB || 'Team B';
+
+                    const isTie = m.winner === 'Tie' || m.winReason?.toLowerCase().includes('tie') || m.isSuperOver || m.mainMatchState || (m.superOverNumber && m.superOverNumber > 0);
+                    const isTeam1Winner = !isTie && m.winner && (m.winner.toLowerCase().trim() === team1.toLowerCase().trim() || m.winner.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim());
+                    const isTeam2Winner = !isTie && m.winner && (m.winner.toLowerCase().trim() === team2.toLowerCase().trim() || m.winner.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim());
+
+                    const team1Score = inn1 && inn1.runs !== undefined ? `${inn1.runs}/${inn1.wickets}` : null;
+                    const team1Overs = inn1 && inn1.ballsBowled !== undefined ? `${Math.floor(inn1.ballsBowled / 6)}.${inn1.ballsBowled % 6}` : null;
+
+                    const team2Score = inn2 && inn2.runs !== undefined ? `${inn2.runs}/${inn2.wickets}` : null;
+                    const team2Overs = inn2 && inn2.ballsBowled !== undefined ? `${Math.floor(inn2.ballsBowled / 6)}.${inn2.ballsBowled % 6}` : null;
+
+                    const potm = getMatchPotm(m);
+
+                    return (
+                      <div 
+                        key={m.id}
+                        onClick={() => selectMatch(m.id)}
+                        className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 shadow-lg hover:shadow-[0_20px_40px_rgba(0,0,0,0.55),0_0_25px_rgba(245,158,11,0.15)] hover:translate-y-[-2px] transition-all duration-300 cursor-pointer relative overflow-hidden text-white flex flex-col justify-between group touch-auto"
+                      >
+                        {/* Top accent bar */}
+                        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 opacity-70 group-hover:opacity-100 transition-opacity" />
+                        {/* Ambient glow */}
+                        <div className="absolute top-0 right-0 w-44 h-44 bg-amber-500/5 rounded-full blur-[45px] pointer-events-none group-hover:bg-amber-500/10 transition-colors duration-300" />
+
+                        {/* Card Header: Date, Tournament & Result Badge */}
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 font-mono">
+                              <Calendar size={10} className="text-slate-500" />
+                              {m.date || 'Past Match'}
+                            </span>
+                            {m.tournamentName && (
+                              <span className="text-[9px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded-md border border-white/10 truncate max-w-[150px]">
+                                🏆 {m.tournamentName}
+                              </span>
+                            )}
+                          </div>
+                          <div className="bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[9px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1 shrink-0 shadow-sm">
+                            <Trophy size={10} className="text-amber-400" />
+                            RESULT
+                          </div>
                         </div>
-                      )}
 
-                      <div className="flex items-center gap-3 text-lg font-black tracking-tight mb-2 group-hover:text-amber-500 transition-colors">
-                        <span>{m.teamA}</span>
-                        <span className="text-slate-455 dark:text-slate-650 text-xs font-normal">vs</span>
-                        <span>{m.teamB}</span>
-                      </div>
+                        {/* 16:9 Match Banner if uploaded */}
+                        {m.matchBannerUrl && (
+                          <div className="mb-4 rounded-xl sm:rounded-2xl overflow-hidden w-full bg-slate-950 border border-white/10 shadow-md relative group/banner flex items-center justify-center min-h-[160px] sm:min-h-[200px]">
+                            <div 
+                              className="absolute inset-0 bg-cover bg-center blur-md opacity-25 scale-105 pointer-events-none"
+                              style={{ backgroundImage: `url(${m.matchBannerUrl})` }}
+                            />
+                            <img 
+                              src={m.matchBannerUrl} 
+                              alt={`${m.teamA} vs ${m.teamB} Banner`} 
+                              className="relative z-10 w-full h-auto max-h-[360px] object-contain rounded-xl transition-transform duration-500 group-hover/banner:scale-[1.01]" 
+                              referrerPolicy="no-referrer" 
+                            />
+                            <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 to-transparent pointer-events-none z-10" />
+                            <span className="absolute bottom-2 left-2.5 z-20 px-2 py-0.5 rounded-md bg-black/70 backdrop-blur-xs text-[8.5px] font-mono font-bold text-amber-300 border border-white/10 shadow-xs">
+                              Match Banner (16:9)
+                            </span>
+                          </div>
+                        )}
 
-                      {/* Main Match Scores breakdown if available */}
-                      {((m.innings1 && m.innings1.runs !== undefined) || (m.mainMatchState && m.mainMatchState.innings1)) && (
-                        <div className="flex flex-wrap items-center gap-2 mb-2.5 text-xs font-mono font-bold text-slate-600 dark:text-slate-300">
-                          {(() => {
-                            const inn1 = m.mainMatchState?.innings1 || m.innings1;
-                            const inn2 = m.mainMatchState?.innings2 || m.innings2;
-                            return (
-                              <>
-                                {inn1 && inn1.battingTeam && (
-                                  <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
-                                    {inn1.battingTeam}: <strong className="text-slate-900 dark:text-white">{inn1.runs}/{inn1.wickets}</strong> ({Math.floor((inn1.ballsBowled || 0) / 6)}.{(inn1.ballsBowled || 0) % 6} ov)
-                                  </span>
-                                )}
-                                {inn2 && inn2.battingTeam && (
-                                  <span className="px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
-                                    {inn2.battingTeam}: <strong className="text-slate-900 dark:text-white">{inn2.runs}/{inn2.wickets}</strong> ({Math.floor((inn2.ballsBowled || 0) / 6)}.{(inn2.ballsBowled || 0) % 6} ov)
-                                  </span>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-
-                      {/* Match Result & Tie / Super Over breakdown */}
-                      {(() => {
-                        const isTie = m.winner === 'Tie' || m.winReason?.toLowerCase().includes('tie') || m.isSuperOver || m.mainMatchState || (m.superOverNumber && m.superOverNumber > 0);
-                        const isSuperOver = m.isSuperOver || m.mainMatchState || (m.superOverNumber && m.superOverNumber > 0) || m.winReason?.toLowerCase().includes('super over');
-
-                        if (isTie) {
-                          return (
-                            <div className="mb-3 space-y-1.5">
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 border border-amber-500/30 rounded-lg text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-                                <span>🤝 MATCH TIED!</span>
-                                <span className="font-normal font-sans text-slate-500 dark:text-slate-400">
-                                  (Scores Level{m.mainMatchState?.innings1 ? `: ${m.mainMatchState.innings1.runs} vs ${m.mainMatchState.innings2?.runs || m.mainMatchState.innings1.runs}` : ''})
-                                </span>
-                              </div>
-
-                              {isSuperOver && (
-                                <div className="p-2.5 bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-transparent border border-amber-500/30 rounded-xl text-[10px] font-black text-amber-700 dark:text-amber-300 flex flex-wrap items-center gap-2">
-                                  <span className="px-2 py-0.5 bg-amber-400 text-slate-950 font-black rounded text-[9px] uppercase tracking-wider flex items-center gap-1">
-                                    <Zap size={10} className="fill-slate-950" /> Super Over Result
-                                  </span>
-                                  <span>
-                                    {m.winner === 'Tie'
-                                      ? 'Super Over also Ended in a Tie!'
-                                      : `🏆 ${m.winner} won in Super Over!`}
-                                  </span>
-                                  {m.winReason && (
-                                    <span className="text-slate-500 dark:text-slate-400 font-sans font-medium">
-                                      ({m.winReason})
-                                    </span>
-                                  )}
-                                  {m.mainMatchState && m.innings1 && m.innings2 && (
-                                    <span className="font-mono text-[9px] text-slate-600 dark:text-slate-300 block w-full">
-                                      SO Scores: {m.innings1.battingTeam} {m.innings1.runs}/{m.innings1.wickets} vs {m.innings2.battingTeam} {m.innings2.runs}/{m.innings2.wickets}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
-                              {!isSuperOver && m.winReason && (
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium font-sans">
-                                  Resolution: {m.winReason}
-                                </p>
-                              )}
+                        {/* Head-to-Head Teams Battle Grid (Matches Live Card styling) */}
+                        <div className="flex items-center justify-between gap-2 sm:gap-4 mb-4">
+                          {/* Team A Details */}
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center font-black text-xs shrink-0 shadow-md transition-all ${
+                              isTeam1Winner
+                                ? 'bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 ring-2 ring-amber-400/40'
+                                : 'bg-gradient-to-br from-indigo-600 to-indigo-800 text-white border border-indigo-400/20'
+                            }`}>
+                              {(m.teamA || 'Team A').toUpperCase().substring(0, 2)}
                             </div>
-                          );
-                        }
+                            <div className="min-w-0 leading-tight text-left">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="text-xs sm:text-sm font-black tracking-tight text-white block truncate">{m.teamA || 'Team A'}</span>
+                                {isTeam1Winner && (
+                                  <span className="text-[8px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.2 rounded uppercase shrink-0">
+                                    WIN
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs sm:text-sm font-mono font-black text-amber-400 block truncate">
+                                {team1Score ? `${team1Score} ${team1Overs ? `(${team1Overs} ov)` : ''}` : 'Score N/A'}
+                              </span>
+                            </div>
+                          </div>
 
-                        return (
-                          <p className="text-[10px] text-amber-600 dark:text-amber-400 font-black mb-3">
-                            🏆 {`${m.winner} Match Winner`}
-                            {m.winReason && <span className="text-slate-450 font-medium font-sans ml-1">({m.winReason})</span>}
-                          </p>
-                        );
-                      })()}
+                          {/* Versus Pill */}
+                          <span className="text-[8.5px] sm:text-[9px] font-mono font-black uppercase text-slate-400 border border-white/10 bg-slate-950 px-2 py-1 rounded-lg shrink-0">VS</span>
 
-                      {/* Man of the Match (Player of the Match) on the card */}
-                      {(() => {
-                        const potm = getMatchPotm(m);
-                        if (!potm) return null;
-                        return (
+                          {/* Team B Details */}
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1 justify-end text-right">
+                            <div className="min-w-0 leading-tight text-right">
+                              <div className="flex items-center justify-end gap-1.5 truncate">
+                                {isTeam2Winner && (
+                                  <span className="text-[8px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.2 rounded uppercase shrink-0">
+                                    WIN
+                                  </span>
+                                )}
+                                <span className="text-xs sm:text-sm font-black tracking-tight text-white block truncate">{m.teamB || 'Team B'}</span>
+                              </div>
+                              <span className="text-xs sm:text-sm font-mono font-black text-amber-400 block truncate justify-end">
+                                {team2Score ? `${team2Score} ${team2Overs ? `(${team2Overs} ov)` : ''}` : 'Score N/A'}
+                              </span>
+                            </div>
+                            <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center font-black text-xs shrink-0 shadow-md transition-all ${
+                              isTeam2Winner
+                                ? 'bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 ring-2 ring-amber-400/40'
+                                : 'bg-gradient-to-br from-amber-600 to-amber-800 text-white border border-amber-400/20'
+                            }`}>
+                              {(m.teamB || 'Team B').toUpperCase().substring(0, 2)}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Match Result Equation Banner */}
+                        <div className="mb-3 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/15 border border-amber-500/30 text-amber-200 text-xs font-bold flex items-center justify-between gap-2 shadow-inner">
+                          <span className="flex items-center gap-1.5 text-white font-black truncate">
+                            <Trophy size={13} className="text-amber-400 shrink-0" />
+                            {isTie ? 'Match Tied!' : `${m.winner} ${m.winReason || 'Won the Match'}`}
+                          </span>
+                          {m.oversLimit && (
+                            <span className="text-[10px] font-mono text-amber-300/80 shrink-0 bg-white/5 px-2 py-0.5 rounded">
+                              {m.oversLimit} Ov Match
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Man of the Match (Player of the Match) on the card */}
+                        {potm && (
                           <div className="mb-3 px-3 py-2 bg-gradient-to-r from-amber-500/10 via-yellow-500/5 to-transparent border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 shadow-xs">
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 flex items-center justify-center shrink-0 shadow-xs">
                                 <Award size={14} className="text-slate-950 stroke-[2.5]" />
                               </div>
                               <div className="min-w-0">
-                                <span className="text-[8.5px] uppercase font-black tracking-wider text-amber-600 dark:text-amber-400 block leading-tight">
-                                  Man of the Match (POTM)
+                                <span className="text-[8.5px] uppercase font-black tracking-wider text-amber-400 block leading-tight">
+                                  Player of the Match
                                 </span>
-                                <strong className="text-xs sm:text-sm font-black text-slate-900 dark:text-white truncate block leading-tight">
+                                <strong className="text-xs sm:text-sm font-black text-white truncate block leading-tight">
                                   {potm.name}
                                 </strong>
                               </div>
                             </div>
                             <div className="text-right shrink-0">
-                              <span className="text-[10px] font-mono font-black text-amber-600 dark:text-amber-400 block">
+                              <span className="text-[10px] font-mono font-black text-amber-400 block">
                                 {potm.runs > 0 ? `${potm.runs} Runs` : ''}
                                 {potm.runs > 0 && potm.wickets > 0 ? ' • ' : ''}
                                 {potm.wickets > 0 ? `${potm.wickets} Wkts` : ''}
                               </span>
-                              {potm.points && (
-                                <span className="text-[8.5px] font-mono font-bold text-slate-400 dark:text-slate-500 block">
-                                  {potm.points} Rating pts
-                                </span>
-                              )}
                             </div>
                           </div>
-                        );
-                      })()}
+                        )}
 
-                      <div className="pt-3 border-t border-slate-50 dark:border-slate-850 text-[10px] font-bold text-slate-400 flex justify-between items-center">
-                        <span className="group-hover:text-amber-600 transition-colors">See Detailed scorecard & Commentary →</span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleExportMatchPDF(m);
-                            }}
-                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border-none shadow-sm"
-                            title="Download Scoreboard PDF"
-                          >
-                            <Download size={9} />
-                            <span>Download Scoreboard</span>
-                          </button>
-                          <span className="text-[9px] font-mono text-slate-400 dark:text-slate-650">ID: {m.id.substring(0,8)}...</span>
+                        {/* Card Footer: View Scorecard Action & Export */}
+                        <div className="pt-3 border-t border-white/10 text-xs font-bold text-slate-400 flex justify-between items-center">
+                          <span className="text-amber-400/90 group-hover:text-amber-300 transition-colors flex items-center gap-1 font-semibold text-[11px]">
+                            <span>View Full Scorecard & Commentary</span>
+                            <ArrowRight size={12} className="group-hover:translate-x-1 transition-transform" />
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleExportMatchPDF(m);
+                              }}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border-none shadow-sm"
+                              title="Download Scoreboard PDF"
+                            >
+                              <Download size={10} />
+                              <span>PDF</span>
+                            </button>
+                            <span className="text-[9px] font-mono text-slate-500">ID: {m.id.substring(0,8)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {filteredCompletedMatches.length > 5 && (
                     <p className="text-center text-[10px] font-bold text-slate-400">
                       And {filteredCompletedMatches.length - 5} other past matches found in list.

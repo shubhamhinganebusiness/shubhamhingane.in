@@ -18,7 +18,9 @@ import {
   Calendar,
   MapPin,
   Award,
-  CheckCircle2
+  CheckCircle2,
+  Star,
+  Zap
 } from 'lucide-react';
 import { MatchState } from './CricketScoreboard';
 import { 
@@ -452,7 +454,8 @@ export const HeroCricketLiveScore: React.FC = () => {
     const t2Overs = m.innings2 ? `${Math.floor(m.innings2.ballsBowled / 6)}.${m.innings2.ballsBowled % 6}` : '0.0';
     const team1Score = m.innings1 ? `${m.innings1.battingTeam || m.teamA}: ${m.innings1.runs}/${m.innings1.wickets} (${t1Overs} ov)` : '';
     const team2Score = m.innings2 ? `${m.innings2.battingTeam || m.teamB}: ${m.innings2.runs}/${m.innings2.wickets} (${t2Overs} ov)` : '';
-    const matchUrl = `${window.location.origin}/?matchId=${m.id}&spectator=true`;
+    const origin = window.location.origin.includes('ais-dev-') ? window.location.origin.replace('ais-dev-', 'ais-pre-') : window.location.origin;
+    const matchUrl = `${origin}/?matchId=${m.id}&spectator=true`;
     const shareText = `🏏 *CRICKET MATCH RESULT* 🏆\n*${m.teamA} vs ${m.teamB}*\n\n🔥 *Result:* ${winnerText}\n📊 ${team1Score}\n📊 ${team2Score}\n\n👉 *View Full Match Scorecard & Highlights:*\n${matchUrl}`;
     const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
@@ -791,7 +794,7 @@ export const HeroCricketLiveScore: React.FC = () => {
     );
   }
 
-  // 2. RENDER ENHANCED MATCH RESULT RECORD CARD
+  // 2. RENDER ENHANCED MATCH RESULT RECORD CARD (MATCHES LIVE CARD QUALITY & STRUCTURE)
   if (activeCompletedMatch) {
     const m = activeCompletedMatch;
     const team1 = m.innings1?.battingTeam || m.teamA || 'Team 1';
@@ -807,9 +810,48 @@ export const HeroCricketLiveScore: React.FC = () => {
     const team2Balls = m.innings2?.ballsBowled ?? 0;
     const team2Overs = `${Math.floor(team2Balls / 6)}.${team2Balls % 6}`;
 
-    const winnerText = m.winner === 'Tie' ? 'Match Tied!' : `${m.winner} ${m.winReason || 'Won the Match'}`;
-    const isTeam1Winner = m.winner && (m.winner.toLowerCase() === team1.toLowerCase() || m.winner.toLowerCase() === (m.teamA || '').toLowerCase());
-    const isTeam2Winner = m.winner && (m.winner.toLowerCase() === team2.toLowerCase() || m.winner.toLowerCase() === (m.teamB || '').toLowerCase());
+    const isTie = m.winner === 'Tie' || m.winReason?.toLowerCase().includes('tie');
+    const isTeam1Winner = !isTie && m.winner && (m.winner.toLowerCase().trim() === team1.toLowerCase().trim() || m.winner.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim());
+    const isTeam2Winner = !isTie && m.winner && (m.winner.toLowerCase().trim() === team2.toLowerCase().trim() || m.winner.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim());
+
+    const winningTeam = isTeam1Winner ? team1 : isTeam2Winner ? team2 : (m.winner || team1);
+    const opponentTeam = isTeam1Winner ? team2 : isTeam2Winner ? team1 : (team1.toLowerCase() === winningTeam.toLowerCase() ? team2 : team1);
+
+    const winnerRuns = isTeam1Winner ? team1Runs : isTeam2Winner ? team2Runs : team1Runs;
+    const winnerWickets = isTeam1Winner ? team1Wickets : isTeam2Winner ? team2Wickets : team1Wickets;
+    const winnerOvers = isTeam1Winner ? team1Overs : isTeam2Winner ? team2Overs : team1Overs;
+
+    const opponentRuns = isTeam1Winner ? team2Runs : isTeam2Winner ? team1Runs : team2Runs;
+    const opponentWickets = isTeam1Winner ? team2Wickets : isTeam2Winner ? team1Wickets : team2Wickets;
+    const opponentOvers = isTeam1Winner ? team2Overs : isTeam2Winner ? team1Overs : team2Overs;
+
+    const winnerText = isTie ? 'Match Tied!' : `${m.winner} ${m.winReason || 'Won the Match'}`;
+
+    // Extract top match performers
+    const potm = m.playerOfTheMatch as any;
+
+    let bestBatter: { name: string; runs: number; balls: number; team: string; fours?: number; sixes?: number } | null = null;
+    const checkBatter = (b: any, tName: string) => {
+      if (!b || !b.name) return;
+      if (!bestBatter || (b.runs ?? 0) > bestBatter.runs) {
+        bestBatter = { name: b.name, runs: b.runs ?? 0, balls: b.balls ?? 0, team: tName, fours: b.fours, sixes: b.sixes };
+      }
+    };
+    m.innings1?.batsmen?.forEach(b => checkBatter(b, m.innings1?.battingTeam || m.teamA));
+    m.innings2?.batsmen?.forEach(b => checkBatter(b, m.innings2?.battingTeam || m.teamB));
+
+    let bestBowler: { name: string; wickets: number; runsConceded: number; oversStr: string; team: string } | null = null;
+    const checkBowler = (bw: any, tName: string) => {
+      if (!bw || !bw.name) return;
+      const ov = `${Math.floor((bw.ballsBowled || 0) / 6)}.${(bw.ballsBowled || 0) % 6}`;
+      if (!bestBowler || (bw.wickets ?? 0) > bestBowler.wickets || ((bw.wickets ?? 0) === bestBowler.wickets && (bw.runsConceded ?? 999) < bestBowler.runsConceded)) {
+        if ((bw.wickets ?? 0) > 0 || (bw.ballsBowled ?? 0) > 0) {
+          bestBowler = { name: bw.name, wickets: bw.wickets ?? 0, runsConceded: bw.runsConceded ?? 0, oversStr: ov, team: tName };
+        }
+      }
+    };
+    m.innings1?.bowlers?.forEach(bw => checkBowler(bw, m.innings1?.bowlingTeam || m.teamB));
+    m.innings2?.bowlers?.forEach(bw => checkBowler(bw, m.innings2?.bowlingTeam || m.teamA));
 
     return (
       <motion.div
@@ -818,9 +860,10 @@ export const HeroCricketLiveScore: React.FC = () => {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-amber-500/40 shadow-2xl shadow-amber-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group"
+        style={{ touchAction: 'pan-y' }}
+        className="w-full max-w-xl mb-6 relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-zinc-950 to-slate-900 text-white border border-amber-500/40 shadow-2xl shadow-amber-950/30 backdrop-blur-xl ring-1 ring-white/10 select-none group touch-auto"
       >
-        {/* Ambient Trophy Gold Glow */}
+        {/* Stadium ambient light beam in victory gold */}
         <div className="absolute -top-16 -right-16 w-56 h-56 bg-amber-500/15 rounded-full blur-3xl pointer-events-none -z-10 animate-pulse" />
         <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none -z-10" />
 
@@ -846,11 +889,11 @@ export const HeroCricketLiveScore: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setViewTab('live')}
-                    className="px-2.5 py-1 rounded-full bg-emerald-500/90 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-md"
+                    className="px-2.5 py-1 rounded-full bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all shadow-md"
                     title="Switch to Active Live Match"
                   >
                     <Radio size={10} className="animate-pulse" />
-                    <span>Live Match</span>
+                    <span>Live ({liveMatches.length})</span>
                   </button>
                 )}
 
@@ -860,6 +903,7 @@ export const HeroCricketLiveScore: React.FC = () => {
                       type="button"
                       onClick={() => setCompletedIndex(prev => (prev > 0 ? prev - 1 : unhiddenCompletedMatches.length - 1))}
                       className="text-slate-300 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                      aria-label="Previous result"
                     >
                       ◀
                     </button>
@@ -870,6 +914,7 @@ export const HeroCricketLiveScore: React.FC = () => {
                       type="button"
                       onClick={() => setCompletedIndex(prev => (prev + 1) % unhiddenCompletedMatches.length)}
                       className="text-slate-300 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                      aria-label="Next result"
                     >
                       ▶
                     </button>
@@ -882,13 +927,17 @@ export const HeroCricketLiveScore: React.FC = () => {
           /* Card Header without banner */
           <div className="px-5 py-3.5 bg-white/[0.04] border-b border-white/10 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-3 py-1 rounded-full border border-amber-500/40 flex items-center gap-1.5 shadow-sm">
-                <Trophy size={12} className="text-amber-400" />
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400 shadow-sm shadow-amber-400/50" />
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
+                <Trophy size={11} className="text-amber-400" />
                 MATCH RESULT
               </span>
-              {m.oversLimit && (
-                <span className="text-[10px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-md border border-white/10">
-                  {m.oversLimit} Overs
+              {m.tournamentName && (
+                <span className="text-[10px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded-md border border-white/10 truncate max-w-[120px] sm:max-w-[170px]" title={m.tournamentName}>
+                  🏆 {m.tournamentName}
                 </span>
               )}
             </div>
@@ -898,7 +947,7 @@ export const HeroCricketLiveScore: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setViewTab('live')}
-                  className="px-2.5 py-1 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all"
+                  className="px-2.5 py-1 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-sm"
                   title="Switch to Active Live Match"
                 >
                   <Radio size={10} className="animate-pulse text-emerald-400" />
@@ -912,6 +961,7 @@ export const HeroCricketLiveScore: React.FC = () => {
                     type="button"
                     onClick={() => setCompletedIndex(prev => (prev > 0 ? prev - 1 : unhiddenCompletedMatches.length - 1))}
                     className="text-slate-400 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                    aria-label="Previous result"
                   >
                     ◀
                   </button>
@@ -922,108 +972,188 @@ export const HeroCricketLiveScore: React.FC = () => {
                     type="button"
                     onClick={() => setCompletedIndex(prev => (prev + 1) % unhiddenCompletedMatches.length)}
                     className="text-slate-400 hover:text-white text-[10px] px-1 border-none bg-transparent cursor-pointer font-bold"
+                    aria-label="Next result"
                   >
                     ▶
                   </button>
                 </div>
               )}
+
+              {isScoreManager && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/live/cricket-scoreboard')}
+                  className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[10px] font-black uppercase tracking-wider border border-amber-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                  title="Scorekeeper Management Console"
+                >
+                  <Shield size={11} className="text-amber-400" />
+                  <span>Scorer Hub</span>
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* Card Body: Result Highlights & Head-to-Head Scores */}
+        {/* Card Body: Head-to-Head Decisive Scores & High-Impact Typography (Mirrors Live Match Card) */}
         <div className="p-5 space-y-4">
-          {/* Winner Headline Banner */}
-          <div className="p-3.5 bg-gradient-to-r from-amber-500/20 via-yellow-500/10 to-amber-500/20 border border-amber-500/35 rounded-2xl flex items-center justify-between gap-3 shadow-inner">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center shrink-0 shadow-lg shadow-amber-500/30">
-                <Trophy size={18} />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[9px] uppercase font-black text-amber-400 tracking-widest block">
-                  Official Match Result
+          <div className="flex items-center justify-between gap-4">
+            {/* Winning Team Crest & Names */}
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="relative shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 via-yellow-400 to-amber-600 p-0.5 shadow-lg shadow-amber-500/25">
+                  <div className="w-full h-full bg-slate-950 rounded-[0.85rem] flex items-center justify-center font-black text-amber-300 text-base">
+                    {winningTeam.slice(0, 2).toUpperCase()}
+                  </div>
+                </div>
+                <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-400 border-2 border-slate-950 flex items-center justify-center text-[8px] font-bold text-slate-950 shadow-sm">
+                  {isTie ? '🤝' : '🏆'}
                 </span>
-                <h4 className="text-sm sm:text-base font-black text-white truncate tracking-tight">
-                  {winnerText}
-                </h4>
+              </div>
+
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-base sm:text-lg font-black text-white truncate tracking-tight">
+                    {winningTeam}
+                  </span>
+                  <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 shrink-0">
+                    {isTie ? 'Tied' : 'Winner'}
+                  </span>
+                </div>
+                <span className="text-xs font-semibold text-slate-400 truncate">
+                  vs <strong className="text-slate-300 font-bold">{opponentTeam}</strong>
+                </span>
               </div>
             </div>
-            {m.date && (
-              <div className="text-right shrink-0">
-                <span className="text-[10px] font-mono font-bold text-slate-400 flex items-center gap-1">
-                  <Calendar size={11} className="text-slate-500" />
-                  {m.date}
+
+            {/* Decisive Score Digits Display (matching live score font-mono & glow!) */}
+            <div className="text-right shrink-0 flex flex-col items-end">
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl sm:text-4xl font-black tracking-tight text-amber-400 font-mono drop-shadow-[0_0_15px_rgba(245,158,11,0.35)]">
+                  {winnerRuns}/{winnerWickets}
                 </span>
               </div>
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-300 mt-0.5 font-mono">
+                <span className="bg-white/10 px-2 py-0.5 rounded-md">{winnerOvers}/{m.oversLimit || 5} Ov</span>
+                <span className="text-slate-500">•</span>
+                <span className="text-slate-400">{opponentTeam.slice(0, 4)}: {opponentRuns}/{opponentWickets}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Victory Result Equation Bar (Mirrors the Chase / Target Bar in Live Card) */}
+          <div className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/15 border border-amber-500/35 text-amber-200 text-xs font-bold flex flex-wrap items-center justify-between gap-1 shadow-inner">
+            <span className="flex items-center gap-1.5 text-white font-black">
+              <Trophy size={13} className="text-amber-400 shrink-0" />
+              {winnerText}
+            </span>
+            {m.date && (
+              <span className="text-slate-400 font-mono text-[11px] flex items-center gap-1">
+                <Calendar size={11} className="text-slate-500" />
+                {m.date}
+              </span>
             )}
           </div>
 
-          {/* Head to Head Innings Score Comparison */}
-          <div className="space-y-2.5">
-            {/* Team 1 Score Row */}
-            <div className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+          {/* Both Innings Compact Comparison Cards */}
+          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+            <div className={`p-2.5 rounded-xl border flex flex-col justify-between transition-colors ${
               isTeam1Winner 
-                ? 'bg-amber-500/10 border-amber-500/30 shadow-md shadow-amber-950/20' 
-                : 'bg-white/[0.03] border-white/5'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' 
+                : 'bg-white/[0.03] border-white/5 text-slate-300'
             }`}>
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center font-black text-xs text-white shrink-0">
-                  {team1.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="text-sm font-bold text-white truncate">{team1}</span>
-                    {isTeam1Winner && (
-                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 shadow-sm shrink-0">
-                        🏆 WINNER
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono">1st Innings</span>
-                </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-bold text-xs truncate max-w-[100px] text-white">{team1}</span>
+                {isTeam1Winner && <span className="text-[8px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black shrink-0">WIN</span>}
               </div>
-              <div className="text-right shrink-0">
-                <div className="text-lg sm:text-xl font-black font-mono text-white">
-                  {team1Runs}/{team1Wickets}
-                </div>
-                <div className="text-[10px] font-mono text-slate-400">
-                  {team1Overs} / {m.oversLimit || 5} ov
-                </div>
+              <div className="mt-1 flex items-baseline justify-between">
+                <span className="font-black text-sm text-white">{team1Runs}/{team1Wickets}</span>
+                <span className="text-[10px] text-slate-400">{team1Overs} ov</span>
               </div>
             </div>
 
-            {/* Team 2 Score Row */}
-            <div className={`p-3 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+            <div className={`p-2.5 rounded-xl border flex flex-col justify-between transition-colors ${
               isTeam2Winner 
-                ? 'bg-amber-500/10 border-amber-500/30 shadow-md shadow-amber-950/20' 
-                : 'bg-white/[0.03] border-white/5'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' 
+                : 'bg-white/[0.03] border-white/5 text-slate-300'
             }`}>
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center font-black text-xs text-white shrink-0">
-                  {team2.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="text-sm font-bold text-white truncate">{team2}</span>
-                    {isTeam2Winner && (
-                      <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 shadow-sm shrink-0">
-                        🏆 WINNER
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono">2nd Innings</span>
-                </div>
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-bold text-xs truncate max-w-[100px] text-white">{team2}</span>
+                {isTeam2Winner && <span className="text-[8px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black shrink-0">WIN</span>}
               </div>
-              <div className="text-right shrink-0">
-                <div className="text-lg sm:text-xl font-black font-mono text-white">
-                  {team2Runs}/{team2Wickets}
-                </div>
-                <div className="text-[10px] font-mono text-slate-400">
-                  {team2Overs} / {m.oversLimit || 5} ov
-                </div>
+              <div className="mt-1 flex items-baseline justify-between">
+                <span className="font-black text-sm text-white">{team2Runs}/{team2Wickets}</span>
+                <span className="text-[10px] text-slate-400">{team2Overs} ov</span>
               </div>
             </div>
           </div>
+
+          {/* Match Key Performers Spotlight (Mirrors Striker & Bowler in Live Card) */}
+          {(bestBatter || bestBowler) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-white/10 text-xs">
+              {/* Best Batter */}
+              {bestBatter && (
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.04] border border-amber-500/30">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="text-amber-400 text-sm">🏏</span>
+                    <div className="flex flex-col truncate">
+                      <span className="font-bold text-white text-xs truncate">
+                        {bestBatter.name}
+                      </span>
+                      <span className="text-[10px] text-amber-300 font-semibold truncate">
+                        Top Scorer • {bestBatter.team}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="font-mono font-bold text-white text-xs shrink-0">
+                    {bestBatter.runs} <span className="text-[10px] text-slate-400 font-normal">({bestBatter.balls}b)</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Best Bowler */}
+              {bestBowler && (
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.04] border border-white/5 hover:border-white/10 transition-colors">
+                  <div className="flex items-center gap-2 truncate">
+                    <span className="text-teal-400 text-sm">🎯</span>
+                    <div className="flex flex-col truncate">
+                      <span className="font-bold text-white text-xs truncate">
+                        {bestBowler.name}
+                      </span>
+                      <span className="text-[10px] text-teal-300 font-semibold truncate">
+                        Best Bowler • {bestBowler.team}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="font-mono font-bold text-white text-xs shrink-0">
+                    {bestBowler.wickets}/{bestBowler.runsConceded}
+                    <span className="text-[10px] text-slate-400 font-normal ml-1">
+                      ({bestBowler.oversStr} ov)
+                    </span>
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Player of the Match Honor Tag (if designated) */}
+          {potm && (
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-transparent border border-amber-500/30 text-xs">
+              <div className="flex items-center gap-2 truncate">
+                <span className="text-yellow-300 text-sm">🌟</span>
+                <div className="flex flex-col truncate">
+                  <span className="font-bold text-white text-xs truncate">
+                    {potm.name || potm}
+                  </span>
+                  <span className="text-[10px] text-yellow-300/90 font-mono font-semibold">
+                    Player of the Match {potm.runs ? `• ${potm.runs} runs` : ''} {potm.wickets ? `• ${potm.wickets} wkts` : ''}
+                  </span>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[9px] font-black rounded uppercase tracking-wider shrink-0">
+                POTM
+              </span>
+            </div>
+          )}
 
           {/* Action Bar: Detail Scoreboard, WhatsApp Share & Scorekeeper Hide Toggle */}
           <div className="pt-2 flex flex-col sm:flex-row gap-2">
@@ -1034,18 +1164,18 @@ export const HeroCricketLiveScore: React.FC = () => {
                 e.stopPropagation();
                 handleOpenDetailScoreboard(m.id);
               }}
-              className="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 cursor-pointer border-none"
+              className="flex-1 py-3 px-5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-amber-500/25 hover:shadow-amber-500/40 hover:scale-[1.01] active:scale-[0.99] cursor-pointer border-none"
               title="View full detailed scorecard for this concluded match"
             >
               <span>View Full Scorecard</span>
-              <ArrowRight size={14} />
+              <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
             </button>
 
             <button
               id="hero-share-result-whatsapp-btn"
               type="button"
               onClick={(e) => handleShareResultWhatsApp(m, e)}
-              className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-950/40 cursor-pointer border-none shrink-0"
+              className="py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-950/40 hover:scale-[1.01] active:scale-[0.99] cursor-pointer border-none shrink-0"
               title="Share match result on WhatsApp (includes match banner automatically)"
             >
               <Send size={14} className="text-emerald-200" />
