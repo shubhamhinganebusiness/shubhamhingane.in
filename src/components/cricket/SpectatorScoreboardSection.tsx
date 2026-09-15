@@ -3150,7 +3150,7 @@ export const SpectatorScoreboardSection = ({
                 )}
 
                 {/* Completed history matches */}
-            <div className="space-y-4 pt-4 mt-8 border-t border-slate-200 dark:border-slate-800/60">
+            <div className="space-y-3 pt-3 mt-4 sm:mt-6 border-t border-slate-200 dark:border-slate-800/60">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-2">
                 <div className="flex items-center gap-2">
                   <Trophy size={14} className="text-amber-500 animate-bounce" />
