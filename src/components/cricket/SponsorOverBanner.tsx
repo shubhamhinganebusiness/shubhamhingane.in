@@ -169,7 +169,7 @@ export const SponsorOverBanner: React.FC<SponsorOverBannerProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                {overNumber !== undefined ? `Over ${overNumber} Powered by` : 'Official Tournament Sponsor'}:
+                {overNumber !== undefined ? `Over ${overNumber} Powered by` : 'Tournament Sponsor'}:
               </span>
               <h5 className="font-black text-xs text-slate-900 dark:text-white truncate">
                 {sponsor.name}

@@ -10,7 +10,7 @@ export interface LocalCricketSponsor {
   tagline?: string;
   phone?: string;
   website?: string;
-  sponsorTier: 'Title Sponsor' | 'Powered By' | 'Associate Partner' | 'Local Community Partner';
+  sponsorTier: 'Title Sponsor' | 'Powered By' | 'Associate Partner' | string;
   displayOnOverBreakdown: boolean;
   displayOnLiveStream: boolean;
   displayOnScorecardPdf: boolean;
@@ -75,7 +75,7 @@ export const DEFAULT_PRESET_SPONSORS: LocalCricketSponsor[] = [
     bannerUrl: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=1200&auto=format&fit=crop&q=80',
     tagline: 'Premium Kashmir & English Willow Bats • Uniforms on Wholesale',
     phone: '+91 98900 54321',
-    sponsorTier: 'Local Community Partner',
+    sponsorTier: 'Associate Partner',
     displayOnOverBreakdown: false,
     displayOnLiveStream: true,
     displayOnScorecardPdf: true,

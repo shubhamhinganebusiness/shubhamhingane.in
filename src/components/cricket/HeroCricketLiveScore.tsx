@@ -303,10 +303,8 @@ export const HeroCricketLiveScore: React.FC = () => {
 
   const hasLiveMatch = !!(activeMatch && activeMatch.status === 'live' && matchDetails);
 
-  // Strictly do NOT show anything in Hero if there is no active live match
-  if (!hasLiveMatch || !activeMatch || !matchDetails) {
-    return null;
-  }
+  // Never show any scoreboard on the hero section (spectator scoreboard is shown in dedicated section below)
+  return null;
 
   const {
     battingTeam,

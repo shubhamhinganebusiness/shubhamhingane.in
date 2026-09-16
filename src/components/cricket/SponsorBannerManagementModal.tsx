@@ -325,7 +325,6 @@ export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModal
                       <option value="Title Sponsor">Title Sponsor (Headline Gold)</option>
                       <option value="Powered By">Powered By Sponsor</option>
                       <option value="Associate Partner">Associate Partner</option>
-                      <option value="Local Community Partner">Local Community Partner</option>
                     </select>
                   </div>
                 </div>

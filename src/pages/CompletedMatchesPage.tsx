@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, ArrowLeft, Search, Filter, Calendar, Award, 
   Eye, Share2, Sparkles, Send, Download, ExternalLink,
-  ChevronRight, Activity, Flame, Shield, ArrowUpDown, 
+  ChevronRight, Flame, Shield, ArrowUpDown, 
   CheckCircle2, RefreshCw, LayoutGrid, List, Table, ArrowRight
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -117,16 +117,44 @@ export const CompletedMatchesPage: React.FC = () => {
           if (valid.length > 0) {
             setAdminAds(valid);
           } else {
-            setAdminAds(DEFAULT_PRESET_SPONSORS);
+            setAdminAds(DEFAULT_PRESET_SPONSORS.map(s => ({
+              id: s.id,
+              imageUrl: (s as any).bannerUrl || (s as any).imageUrl || '',
+              sponsorName: s.name,
+              targetUrl: '',
+              active: true,
+              order: 0
+            })));
           }
         } else {
-          setAdminAds(DEFAULT_PRESET_SPONSORS);
+          setAdminAds(DEFAULT_PRESET_SPONSORS.map(s => ({
+            id: s.id,
+            imageUrl: (s as any).bannerUrl || (s as any).imageUrl || '',
+            sponsorName: s.name,
+            targetUrl: '',
+            active: true,
+            order: 0
+          })));
         }
       }, () => {
-        setAdminAds(DEFAULT_PRESET_SPONSORS);
+        setAdminAds(DEFAULT_PRESET_SPONSORS.map(s => ({
+          id: s.id,
+          imageUrl: (s as any).bannerUrl || (s as any).imageUrl || '',
+          sponsorName: s.name,
+          targetUrl: '',
+          active: true,
+          order: 0
+        })));
       });
     } catch (_) {
-      setAdminAds(DEFAULT_PRESET_SPONSORS);
+      setAdminAds(DEFAULT_PRESET_SPONSORS.map(s => ({
+        id: s.id,
+        imageUrl: (s as any).bannerUrl || (s as any).imageUrl || '',
+        sponsorName: s.name,
+        targetUrl: '',
+        active: true,
+        order: 0
+      })));
     }
 
     return () => {
@@ -212,7 +240,7 @@ export const CompletedMatchesPage: React.FC = () => {
           highestScore = inn1.runs;
           highestScoreTeam = inn1.battingTeam || m.teamA;
         }
-        inn1.battingStats?.forEach(b => {
+        ((inn1.batsmen || (inn1 as any).battingStats || []) as any[]).forEach(b => {
           totalFours += b.fours || 0;
           totalSixes += b.sixes || 0;
         });
@@ -224,7 +252,7 @@ export const CompletedMatchesPage: React.FC = () => {
           highestScore = inn2.runs;
           highestScoreTeam = inn2.battingTeam || m.teamB;
         }
-        inn2.battingStats?.forEach(b => {
+        ((inn2.batsmen || (inn2 as any).battingStats || []) as any[]).forEach(b => {
           totalFours += b.fours || 0;
           totalSixes += b.sixes || 0;
         });
@@ -302,17 +330,8 @@ export const CompletedMatchesPage: React.FC = () => {
             {/* Quick Navigation Links */}
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <Link
-                to="/live/cricket-scoreboard"
-                className="px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-emerald-400 border border-slate-700/80 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm no-underline"
-                id="btn-goto-scoreboard"
-              >
-                <Activity size={12} />
-                <span>Scoreboard</span>
-              </Link>
-
-              <Link
                 to="/cricket-details"
-                className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:shadow-emerald-500/20 transition-all no-underline"
+                className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:shadow-emerald-500/20 transition-all no-underline"
                 id="btn-goto-spectator"
               >
                 <Eye size={12} />

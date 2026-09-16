@@ -1,12 +1,11 @@
 import React from 'react';
-import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Receipt, Sparkles, LogIn, Trophy, Globe } from 'lucide-react';
+import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Sparkles, LogIn, Trophy, Globe, Radio, History } from 'lucide-react';
 import { TypingText } from './TypingText';
 import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSiteSettings } from '../hooks/useCMS';
 import { useNavigate } from 'react-router-dom';
 import { LanguageModal } from './LanguageModal';
-import { HeroCricketLiveScore } from './cricket/HeroCricketLiveScore';
 
 export const Hero = () => {
   const { t, language, setLanguage } = useLanguage();
@@ -240,9 +239,6 @@ export const Hero = () => {
             </div>
           )}
 
-          {/* GullyScore: Local Cricket Match Scoreboard Live Score Widget */}
-          <HeroCricketLiveScore />
-
           {/* Action Buttons Hub with primary visual guides */}
           <div className="flex flex-wrap gap-3 mb-3 w-full sm:w-auto">
             <motion.button 
@@ -258,19 +254,19 @@ export const Hero = () => {
             </motion.button>
 
             <motion.button 
-              id="hero-digital-pavati"
-              onClick={() => navigate('/live/ganpati-mandal')}
+              id="hero-gully-score-login"
+              onClick={() => navigate('/cricket-login')}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-primary/20 hover:brightness-110 transition-all duration-300 flex items-center gap-2.5 group cursor-pointer w-full sm:w-auto justify-center border border-white/20"
-              title="Ganpati Mandal: Digital Pavati & ERP Live Demo"
+              className="relative overflow-hidden px-6 py-2.5 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-emerald-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2.5 group cursor-pointer w-full sm:w-auto justify-center border border-emerald-400/40"
+              title="Gully Scoreboard & Tournament Manager Login"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <span className="text-sm relative z-10">🚩</span>
-              <Receipt size={14} className="text-white/90 animate-pulse relative z-10" />
+              <Trophy size={14} className="text-amber-300 group-hover:scale-110 transition-transform relative z-10" />
               <span className="relative z-10 font-black">
-                {language === 'mr' ? 'डिजिटल पावती पुस्तक' : language === 'hi' ? 'डिजिटल पावती बुक' : 'Digital Pavati Book'}
+                {language === 'mr' ? 'गुल्ली स्कोअर लॉगिन' : language === 'hi' ? 'गल्ली स्कोर लॉगिन' : 'Gully Score Login'}
               </span>
+              <LogIn size={13} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
             </motion.button>
           </div>
 
@@ -320,23 +316,22 @@ export const Hero = () => {
             {/* QUICK LINKS */}
             <div className="flex-1">
               <span className="uppercase tracking-[2px] text-gray-500 dark:text-gray-400 text-[11px] font-black block mb-2">
-                {language === 'mr' ? 'त्वरित दुवे' : language === 'hi' ? 'त्वरित लिंक' : 'QUICK ACCESS'}
+                {language === 'mr' ? 'मागील सामने' : language === 'hi' ? 'पिछले मैच' : 'PAST MATCHES'}
               </span>
               <div className="flex flex-wrap gap-2.5">
-                {/* Direct One-Click Gully Score Board Login */}
                 <motion.button 
-                  id="hero-quick-access-cricket-login"
+                  id="hero-quick-access-completed-matches"
                   whileHover={{ y: -2, scale: 1.02 }}
                   whileTap={{ scale: 0.97 }}
-                  onClick={() => navigate('/cricket-login')}
-                  className="h-10 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm shadow-emerald-600/25 flex items-center justify-center gap-2 font-bold hover:brightness-110 transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer border border-emerald-400/40 group"
-                  title="Direct 1-Click Login to Gully Scoreboard & Tournament Manager"
+                  onClick={() => navigate('/completed-matches')}
+                  className="h-10 px-4 rounded-xl bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-gray-700 dark:text-gray-200 hover:text-primary hover:border-primary/50 dark:hover:border-primary/50 shadow-xs flex items-center justify-center gap-2 font-bold transition-all duration-300 text-xs uppercase tracking-wider cursor-pointer group"
+                  title="View All Past Matches & Completed Records"
                 >
-                  <Trophy size={14} className="text-amber-300 group-hover:scale-110 transition-transform" />
+                  <History size={14} className="text-primary group-hover:rotate-[-45deg] transition-transform" />
                   <span>
-                    {language === 'mr' ? 'गुल्ली स्कोअर लॉगिन' : language === 'hi' ? 'गल्ली स्कोर लॉगिन' : 'Gully Score Login'}
+                    {language === 'mr' ? 'सर्व मागील सामने पहा' : language === 'hi' ? 'सभी पिछले मैच देखें' : 'View All Past Matches'}
                   </span>
-                  <LogIn size={13} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform" />
+                  <ArrowRight size={13} className="text-gray-400 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
                 </motion.button>
               </div>
             </div>

@@ -5,7 +5,6 @@ import { useLanguage } from './LanguageContext';
 import { HireMeModal } from './HireMeModal';
 import { useAuth } from './AuthContext';
 import { useSiteSettings } from '../hooks/useCMS';
-import { isMatchDeleted, markMatchDeleted } from './cricket/cricketStorage';
 
 export const Navbar = () => {
   const [isOpen, setIsOpen] = React.useState(false);
@@ -14,78 +13,6 @@ export const Navbar = () => {
   const { user, role, logout } = useAuth();
   const location = useLocation();
   const { settings, loading } = useSiteSettings();
-  const [liveMatch, setLiveMatch] = React.useState<any>(null);
-
-  React.useEffect(() => {
-    let unsub: (() => void) | undefined;
-    import('../lib/firebase').then(({ db }) => {
-      import('firebase/firestore').then(({ collection, onSnapshot, query, where }) => {
-        const q = query(
-          collection(db, 'cricket_matches'),
-          where('status', '==', 'live')
-        );
-        unsub = onSnapshot(q, (snap) => {
-          if (!snap.empty) {
-            const validMatches = snap.docs
-              .map(d => ({ ...d.data(), id: d.id } as any))
-              .filter(m => {
-                if (!m || m.status !== 'live') return false;
-                if (m.status === 'deleted' || (m as any).isDeleted === true || isMatchDeleted(m.id)) {
-                  markMatchDeleted(m.id);
-                  return false;
-                }
-                if (m.isHidden || m.isBlocked) return false;
-                if (!m.teamA?.trim() || !m.teamB?.trim()) return false;
-                // Only consider matches active within the last 24 hours
-                const lastActivity = m.updatedAt || (m.date ? new Date(m.date).getTime() : 0) || 0;
-                if (lastActivity && Date.now() - lastActivity > 24 * 60 * 60 * 1000) {
-                  return false;
-                }
-                return true;
-              });
-
-            if (validMatches.length > 0) {
-              validMatches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-              setLiveMatch(validMatches[0]);
-            } else {
-              setLiveMatch(null);
-            }
-          } else {
-            setLiveMatch(null);
-          }
-        }, () => {
-          setLiveMatch(null);
-        });
-      });
-    });
-
-    // Also listen to local sync events to immediately clear notification if match is deleted or concluded
-    const handleMatchEvent = (e: any) => {
-      const match = e?.detail?.match;
-      const eventType = e?.detail?.eventType;
-      if (eventType === 'delete' || (match && (match.status !== 'live' || isMatchDeleted(match.id)))) {
-        setLiveMatch((prev: any) => (prev && match && prev.id === match.id ? null : prev));
-      } else if (match && match.status === 'live' && !isMatchDeleted(match.id)) {
-        if (match.teamA?.trim() && match.teamB?.trim()) {
-          setLiveMatch(match);
-        }
-      }
-    };
-    const handleMatchDeleted = (e: any) => {
-      const id = e?.detail?.id;
-      if (id) {
-        setLiveMatch((prev: any) => (prev && prev.id === id ? null : prev));
-      }
-    };
-    window.addEventListener('cricket_match_updated', handleMatchEvent);
-    window.addEventListener('cricket_match_deleted', handleMatchDeleted);
-
-    return () => {
-      if (unsub) unsub();
-      window.removeEventListener('cricket_match_updated', handleMatchEvent);
-      window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
-    };
-  }, []);
 
   React.useEffect(() => {
     const handleOpenHireModal = () => setIsHireModalOpen(true);
@@ -181,35 +108,10 @@ export const Navbar = () => {
                     )
                   ))}
                 </div>
-
-                <div className="flex items-center gap-4">
-                  {liveMatch && (
-                    <Link
-                      to={`/live/cricket-details?matchId=${liveMatch.id}`}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-full text-xs font-black uppercase tracking-wider shadow-md shadow-rose-500/25 transition-all animate-pulse no-underline"
-                      title="Live cricket match in progress - Click to view real-time scoreboard"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-white animate-ping shrink-0" />
-                      <span className="hidden xl:inline">{liveMatch.teamA || 'Team A'} vs {liveMatch.teamB || 'Team B'}</span>
-                      <span className="xl:hidden">LIVE MATCH</span>
-                    </Link>
-                  )}
-                </div>
               </div>
             </div>
 
             <div className="md:hidden flex items-center gap-3">
-              {liveMatch && (
-                <Link
-                  to={`/live/cricket-details?matchId=${liveMatch.id}`}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-600 text-white rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm animate-pulse no-underline"
-                  title="Live match in progress"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping shrink-0" />
-                  <span>LIVE</span>
-                </Link>
-              )}
-
               <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="text-gray-600 hover:text-primary transition-colors focus:outline-none p-1.5 cursor-pointer"
@@ -224,16 +126,6 @@ export const Navbar = () => {
         {isOpen && (
           <div className="md:hidden bg-white shadow-xl animate-in fade-in slide-in-from-top-4">
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-              {liveMatch && (
-                <Link
-                  to={`/live/cricket-details?matchId=${liveMatch.id}`}
-                  onClick={() => setIsOpen(false)}
-                  className="flex items-center gap-2 px-4 py-3 bg-rose-600 text-white font-black text-xs uppercase tracking-wider rounded-xl mb-3 shadow-md animate-pulse justify-center no-underline"
-                >
-                  <span className="w-2 h-2 rounded-full bg-white animate-ping shrink-0" />
-                  <span>LIVE MATCH: {liveMatch.teamA || 'Team A'} vs {liveMatch.teamB || 'Team B'}</span>
-                </Link>
-              )}
               {navLinks.map((link) => (
                 link.href.startsWith('/#') ? (
                   <a

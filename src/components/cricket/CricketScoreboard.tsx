@@ -93,7 +93,6 @@ import { enqueueMatchBallSave, processOfflineScoringQueue, isNetworkOnline } fro
 import { CareerPlayerCardModal, PlayerCareerStats } from './CareerPlayerCardModal';
 import { LiveTournamentLeaderboardWidget } from './LiveTournamentLeaderboardWidget';
 import { SponsorBannerManagementModal } from './SponsorBannerManagementModal';
-import { SponsorOverBanner } from './SponsorOverBanner';
 
 // Types & Interfaces
 export interface Batsman {
@@ -7024,7 +7023,7 @@ export const CricketScoreboard: React.FC = () => {
                   ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed' 
                   : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black'
               }`}
-              title="Undo last action (limited to last 5)"
+              title="Undo last action (Instant without confirmation prompt)"
             >
               <Undo size={12} />
               <span className="hidden xs:inline">Undo </span><span>({undoStack.length})</span>
@@ -9102,16 +9101,6 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 );
               })()}
-
-              {/* Local Sponsor Over Breakdown Banner */}
-              {match.id && (
-                <div className="shrink-0">
-                  <SponsorOverBanner
-                    matchId={match.id}
-                    currentOver={currentInnings ? Math.floor(currentInnings.ballsBowled / 6) : 0}
-                  />
-                </div>
-              )}
             </div>
 
             {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions >= 44x44px */}
@@ -9945,6 +9934,25 @@ export const CricketScoreboard: React.FC = () => {
           </button>
 
         </div>
+
+        {/* FLOATING INSTANT UNDO BUTTON FOR GROUND SCORERS (ZERO CONFIRMATION DIALOGS) */}
+        {currentInnings && match.status === 'live' && undoStack.length > 0 && (
+          <div className="fixed bottom-14 sm:bottom-6 right-3 sm:right-6 z-40 select-none animate-fadeIn">
+            <button
+              type="button"
+              onClick={handleUndoAction}
+              className="h-11 sm:h-12 px-3.5 sm:px-4 rounded-full shadow-2xl flex items-center gap-2 font-black text-xs uppercase tracking-wider transition-all active:scale-90 border-2 border-amber-300 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-amber-500/30 cursor-pointer"
+              title="Instant Undo Last Ball (Zero Confirmation Dialogs)"
+              id="floating-instant-undo-btn"
+            >
+              <Undo size={16} className="font-black stroke-[2.5]" />
+              <span className="font-black">Undo Last Ball</span>
+              <span className="bg-slate-950 text-amber-300 font-mono text-[11px] px-2 py-0.5 rounded-full font-black ml-0.5 shadow-inner">
+                {undoStack.length}
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* MODAL OVERLAYS & VERIFICATIONS */}
         {/* Verification / Wicket Replay card overlay */}

@@ -581,11 +581,11 @@ export const CompletedMatchesAdminManager: React.FC = () => {
         </div>
 
         {/* Status Filters */}
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-1 bg-gray-100 p-1 rounded-xl w-full md:w-auto">
           <button
             type="button"
             onClick={() => setStatusFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border-none ${
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border-none ${
               statusFilter === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'
             }`}
           >
@@ -594,7 +594,7 @@ export const CompletedMatchesAdminManager: React.FC = () => {
           <button
             type="button"
             onClick={() => setStatusFilter('visible')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border-none ${
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border-none ${
               statusFilter === 'visible' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'
             }`}
           >
@@ -603,7 +603,7 @@ export const CompletedMatchesAdminManager: React.FC = () => {
           <button
             type="button"
             onClick={() => setStatusFilter('hidden')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border-none ${
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border-none ${
               statusFilter === 'hidden' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'
             }`}
           >
@@ -612,7 +612,7 @@ export const CompletedMatchesAdminManager: React.FC = () => {
           <button
             type="button"
             onClick={() => setStatusFilter('blocked')}
-            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer border-none ${
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer border-none ${
               statusFilter === 'blocked' ? 'bg-white text-rose-700 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'
             }`}
           >

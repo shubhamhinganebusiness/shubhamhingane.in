@@ -109,6 +109,10 @@ const hideOnRoutes = [
   '/cricket-overlay',
   '/cricket-login',
   '/live/cricket-login',
+  '/completed-matches',
+  '/live/completed-matches',
+  '/cricket-completed-matches',
+  '/cricket-completed-records',
   '/live/video-streamer-recorder',
   '/live/id-card-generator',
   '/live/instant-id-builder',
@@ -275,7 +279,7 @@ const HomePage = () => {
       )}
 
       {isVisible('portfolio') && (
-        <Suspense fallback={<SectionSkeleton height="450px" />}>
+        <Suspense fallback={<SectionSkeleton height="100vh" />}>
           <Portfolio />
         </Suspense>
       )}

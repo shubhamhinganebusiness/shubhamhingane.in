@@ -3,7 +3,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { updatePassword } from 'firebase/auth';
 import { collection, doc, setDoc, getDoc, getDocs, query, orderBy, deleteDoc, where } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutDashboard, Plus, Users, Trash2, ShieldCheck, Mail, Database, Settings as SettingsIcon, AlertCircle, MessageSquare, Phone, Clock, Store, Edit2, Eye, EyeOff, X, Sparkles, RefreshCw, Lock, Check, ShieldAlert, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Plus, Users, Trash2, ShieldCheck, Mail, Database, Settings as SettingsIcon, AlertCircle, MessageSquare, Phone, Clock, Store, Edit2, Eye, EyeOff, X, Sparkles, RefreshCw, Lock, Check, ShieldAlert, ChevronDown, Globe, Palette, BarChart3, Briefcase, Activity, UtensilsCrossed, Trophy, CheckCircle2, SlidersHorizontal, LogOut, Grid } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { SiteManagement } from './SiteManagement';
 import { AdminAnalytics } from './AdminAnalytics';
@@ -572,89 +572,116 @@ export const SuperAdmin: React.FC = () => {
   }
 
   const TABS = [
-    { id: 'site', label: 'Site CMS' },
-    { id: 'themestudio', label: '🎨 Broadcast Theme Studio' },
-    { id: 'users', label: 'Users' },
-    { id: 'analytics', label: 'Analytics' },
-    { id: 'messages', label: 'Messages' },
-    { id: 'enterprise', label: 'Agro Enterprise' },
-    { id: 'med', label: 'Med Portal' },
-    { id: 'mess', label: 'Mess Management' },
-    { id: 'cricket', label: 'Cricket & Players' },
-    { id: 'completed_matches', label: 'Completed Matches Toolbar' },
-    { id: 'slider', label: 'Spectator Slider (16:9)' },
-    { id: 'settings', label: 'Settings' },
+    { id: 'site', label: 'Site CMS', icon: Globe, description: 'Content & Pages' },
+    { id: 'themestudio', label: 'Theme Studio', icon: Palette, description: 'Broadcast Graphics' },
+    { id: 'users', label: 'Users & Roles', icon: Users, description: 'Accounts & Access', count: users.length },
+    { id: 'analytics', label: 'Analytics', icon: BarChart3, description: 'Traffic & Activity' },
+    { id: 'messages', label: 'Messages', icon: MessageSquare, description: 'Visitor Inquiries', count: messages.length },
+    { id: 'enterprise', label: 'Agro Enterprise', icon: Briefcase, description: 'Dairy & Partners' },
+    { id: 'med', label: 'Med Portal', icon: Activity, description: 'Hospital Suites' },
+    { id: 'mess', label: 'Mess Mgmt', icon: UtensilsCrossed, description: 'Kitchens & Menus' },
+    { id: 'cricket', label: 'Cricket & Players', icon: Trophy, description: 'Rosters & Scoring' },
+    { id: 'completed_matches', label: 'Match Archives', icon: CheckCircle2, description: 'Completed Records' },
+    { id: 'slider', label: 'Spectator Slider', icon: SlidersHorizontal, description: '16:9 Promotions' },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon, description: 'Security & Passwords' },
   ] as const;
+
+  const currentTabInfo = TABS.find(t => t.id === activeTab) || TABS[0];
 
   return (
     <div className="min-h-screen bg-gray-50 pt-20 sm:pt-24 pb-12 px-3 sm:px-6 w-full max-w-full overflow-x-hidden">
-      <div className="max-w-6xl mx-auto space-y-6 sm:space-y-8">
-        <div className="bg-white rounded-2xl sm:rounded-[2.5rem] p-4 sm:p-6 md:p-8 shadow-sm border border-gray-100 flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4 sm:gap-6">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="p-3 sm:p-4 bg-primary/10 rounded-2xl text-primary shrink-0">
-                <ShieldCheck size={28} className="sm:w-8 sm:h-8" />
-              </div>
-              <div>
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-gray-900 tracking-tight">Super Admin Panel</h1>
-                <p className="text-gray-500 font-medium text-xs sm:text-sm">Manage Site Content & Users</p>
-              </div>
+      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+        
+        {/* TOP HEADER: Branding, Status & Sign Out */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-sm border border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="p-3 sm:p-3.5 bg-primary/10 rounded-2xl text-primary shrink-0 ring-1 ring-primary/20">
+              <ShieldCheck size={28} className="sm:w-8 sm:h-8" />
             </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-gray-900 tracking-tight">Super Admin Panel</h1>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-200">
+                  Super Admin Cockpit
+                </span>
+              </div>
+              <p className="text-gray-500 font-medium text-xs sm:text-sm mt-0.5">
+                Active Section: <span className="font-bold text-gray-800">{currentTabInfo.label}</span> • {currentTabInfo.description}
+              </p>
+            </div>
+          </div>
 
+          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
+            <div className="text-right hidden md:block">
+              <p className="text-xs font-bold text-gray-900 leading-tight">
+                {auth.currentUser?.email || (JSON.parse(localStorage.getItem('erp_virtual_user') || '{}')).email || 'Super Administrator'}
+              </p>
+              <p className="text-[10px] text-gray-400 font-medium">All privileges granted</p>
+            </div>
             <button 
               onClick={() => logout()}
-              className="xl:hidden px-3.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer border-none"
-              title="Sign Out"
+              className="px-4 py-2.5 bg-gray-100 hover:bg-rose-50 hover:text-rose-600 text-gray-700 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 shrink-0 cursor-pointer border border-gray-200/60"
+              title="Sign Out from Admin Console"
             >
-              Sign Out
+              <LogOut size={15} />
+              <span>Sign Out</span>
             </button>
           </div>
+        </div>
 
-          {/* Mobile Quick Dropdown for 1-tap switching */}
-          <div className="block xl:hidden w-full">
-            <div className="relative">
-              <select
-                value={activeTab}
-                onChange={(e) => setActiveTab(e.target.value as any)}
-                className="w-full bg-gray-100 hover:bg-gray-150 border border-gray-200 text-gray-900 font-bold text-xs sm:text-sm rounded-xl px-4 py-2.5 appearance-none focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
-              >
-                {TABS.map(tab => (
-                  <option key={tab.id} value={tab.id}>
-                    {tab.label}
-                  </option>
-                ))}
-              </select>
-              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
-                <ChevronDown size={16} />
-              </div>
+        {/* ALL OPTIONS VISIBLE GRID (ZERO HORIZONTAL SCROLLING) */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-5 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between px-1 pb-3 mb-3 border-b border-gray-100 text-xs font-bold text-gray-500">
+            <div className="flex items-center gap-2">
+              <Grid size={15} className="text-primary" />
+              <span className="uppercase tracking-wider text-[11px] font-black text-gray-700">Dashboard Modules ({TABS.length})</span>
             </div>
+            <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100">
+              ✓ All 12 options visible directly
+            </span>
           </div>
 
-          {/* Horizontally Scrollable Tab Bar */}
-          <div className="w-full xl:w-auto overflow-x-auto no-scrollbar scroll-smooth py-1 -mx-1 px-1">
-            <div className="flex items-center bg-gray-100 p-1.5 rounded-2xl gap-1 w-max min-w-full sm:min-w-0">
-              {TABS.map(tab => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 sm:gap-2.5">
+            {TABS.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
                 <button
                   key={tab.id}
+                  id={`super-admin-tab-${tab.id}`}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`whitespace-nowrap px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer border-none ${
-                    activeTab === tab.id
-                      ? 'bg-white text-primary shadow-sm'
-                      : 'text-gray-500 hover:text-gray-900 bg-transparent'
+                  className={`flex items-center gap-2.5 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl transition-all cursor-pointer text-left border relative group select-none min-h-[56px] ${
+                    isActive
+                      ? 'bg-primary/10 border-primary/40 text-primary shadow-sm ring-2 ring-primary/25'
+                      : 'bg-gray-50/70 hover:bg-gray-100/90 border-gray-200/70 text-gray-700 hover:text-gray-900'
                   }`}
                 >
-                  {tab.label}
+                  <div className={`p-2 rounded-xl shrink-0 transition-colors ${
+                    isActive 
+                      ? 'bg-primary text-white shadow-sm' 
+                      : 'bg-white text-gray-500 border border-gray-200/70 group-hover:text-primary group-hover:border-primary/30'
+                  }`}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-xs truncate ${isActive ? 'font-black text-primary' : 'font-bold text-gray-800'}`}>
+                      {tab.label}
+                    </div>
+                    <div className="text-[10px] text-gray-400 font-medium truncate hidden xs:block">
+                      {tab.description}
+                    </div>
+                  </div>
+                  {tab.count !== undefined && tab.count > 0 && (
+                    <span className={`text-[9.5px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${
+                      isActive ? 'bg-primary text-white' : 'bg-gray-200 text-gray-700 group-hover:bg-primary/20 group-hover:text-primary'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
-
-          <button 
-            onClick={() => logout()}
-            className="hidden xl:inline-flex px-6 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-all shrink-0 cursor-pointer border-none"
-          >
-            Sign Out
-          </button>
         </div>
 
         <AnimatePresence mode="wait">
@@ -1253,40 +1280,40 @@ export const SuperAdmin: React.FC = () => {
                     </p>
                   </div>
                   
-                  {/* Sub tab selectors */}
-                  <div className="flex items-center gap-1.5 sm:gap-2 bg-gray-100 p-1 rounded-2xl overflow-x-auto max-w-full no-scrollbar">
+                  {/* Sub tab selectors - All visible, no horizontal scrolling */}
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 bg-gray-100 p-1.5 rounded-2xl w-full lg:w-auto">
                     <button
                       onClick={() => setCricketSubTab('players')}
                       type="button"
-                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'players' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'players' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Player Approvals
                     </button>
                     <button
                       onClick={() => setCricketSubTab('completed_matches')}
                       type="button"
-                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'completed_matches' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'completed_matches' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Completed Matches Toolbar
                     </button>
                     <button
                       onClick={() => setCricketSubTab('managers')}
                       type="button"
-                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'managers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'managers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Scorekeepers & Managers
                     </button>
                     <button
                       onClick={() => setCricketSubTab('slider')}
                       type="button"
-                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'slider' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'slider' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       Spectator 16:9 Slider
                     </button>
                     <button
                       onClick={() => setCricketSubTab('themestudio')}
                       type="button"
-                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer whitespace-nowrap ${cricketSubTab === 'themestudio' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'themestudio' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
                       🎨 Theme Studio
                     </button>
