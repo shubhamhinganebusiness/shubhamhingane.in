@@ -46,9 +46,37 @@ export default defineConfig(({mode}) => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
-              if (id.includes('firebase')) {
-                return 'firebase_pkg';
+              // React & routing core (stable runtime)
+              if (
+                id.includes('/react/') || 
+                id.includes('react-dom') || 
+                id.includes('react-router') || 
+                id.includes('react-router-dom') || 
+                id.includes('scheduler')
+              ) {
+                return 'react_core_pkg';
               }
+              // Granular Firebase sub-libraries
+              if (id.includes('firestore')) {
+                return 'firebase_firestore_pkg';
+              }
+              if (id.includes('database')) {
+                return 'firebase_rtdb_pkg';
+              }
+              if (id.includes('auth')) {
+                return 'firebase_auth_pkg';
+              }
+              if (id.includes('storage')) {
+                return 'firebase_storage_pkg';
+              }
+              if (id.includes('firebase')) {
+                return 'firebase_core_pkg';
+              }
+              // Icons
+              if (id.includes('lucide-react')) {
+                return 'lucide_icons_pkg';
+              }
+              // Heavy feature modules
               if (id.includes('xlsx')) {
                 return 'xlsx_pkg';
               }
@@ -58,7 +86,7 @@ export default defineConfig(({mode}) => {
               if (id.includes('html5-qrcode')) {
                 return 'qrcode_pkg';
               }
-              if (id.includes('recharts')) {
+              if (id.includes('recharts') || id.includes('d3-')) {
                 return 'charts_pkg';
               }
               if (id.includes('framer-motion') || id.includes('motion')) {
@@ -66,6 +94,9 @@ export default defineConfig(({mode}) => {
               }
               if (id.includes('@google/genai')) {
                 return 'google_genai_pkg';
+              }
+              if (id.includes('canvas-confetti')) {
+                return 'confetti_pkg';
               }
               return 'vendor_pkg';
             }

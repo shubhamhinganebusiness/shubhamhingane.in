@@ -98,72 +98,83 @@ export const HeroCricketLiveScore: React.FC = () => {
 
     loadInitialLocal();
 
-    // 2. Firestore listener for live matches
+    // Defer heavy remote Firestore & RTDB listeners until after initial paint & idle
     let unsubFirestore: (() => void) | null = null;
-    try {
-      unsubFirestore = onSnapshot(collection(db, 'cricket_matches'), (snapshot) => {
-        const remoteLive: MatchState[] = [];
-        snapshot.forEach(d => {
-          const m = d.data() as MatchState;
-          if (m && m.id && !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && m.status === 'live') {
-            remoteLive.push(m);
+    let unsubDeletedFirestore: (() => void) | null = null;
+    let unsubRtdb: (() => void) | null = null;
+    let deferTimer: any = null;
+
+    const startRemoteListeners = () => {
+      // 2. Firestore listener for live matches
+      try {
+        unsubFirestore = onSnapshot(collection(db, 'cricket_matches'), (snapshot) => {
+          const remoteLive: MatchState[] = [];
+          snapshot.forEach(d => {
+            const m = d.data() as MatchState;
+            if (m && m.id && !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && m.status === 'live') {
+              remoteLive.push(m);
+            }
+          });
+          setLiveMatches(remoteLive);
+          setLastUpdated(Date.now());
+        }, (err) => {
+          console.warn('[HeroCricketLiveScore] Firestore snapshot listener:', err);
+        });
+      } catch (e) {
+        console.warn('[HeroCricketLiveScore] Firestore setup warning:', e);
+      }
+
+      // 2.1 Tombstone Stream Listener for deletion sync
+      try {
+        unsubDeletedFirestore = subscribeToDeletedMatches((deletedIds) => {
+          if (deletedIds && deletedIds.length > 0) {
+            deletedIds.forEach(id => {
+              markMatchDeleted(id);
+              deleteLocalMatch(id);
+            });
+            setLiveMatches(prev => prev.filter(m => !deletedIds.includes(m.id)));
+            setLastUpdated(Date.now());
           }
         });
-        setLiveMatches(remoteLive);
-        setLastUpdated(Date.now());
-      }, (err) => {
-        console.warn('[HeroCricketLiveScore] Firestore snapshot listener:', err);
-      });
-    } catch (e) {
-      console.warn('[HeroCricketLiveScore] Firestore setup warning:', e);
-    }
+      } catch (e) {
+        console.warn('[HeroCricketLiveScore] Deleted matches stream setup:', e);
+      }
 
-    // 2.1 Tombstone Stream Listener for deletion sync
-    let unsubDeletedFirestore: (() => void) | null = null;
-    try {
-      unsubDeletedFirestore = subscribeToDeletedMatches((deletedIds) => {
-        if (deletedIds && deletedIds.length > 0) {
-          deletedIds.forEach(id => {
-            markMatchDeleted(id);
-            deleteLocalMatch(id);
-          });
-          setLiveMatches(prev => prev.filter(m => !deletedIds.includes(m.id)));
-          setLastUpdated(Date.now());
-        }
-      });
-    } catch (e) {
-      console.warn('[HeroCricketLiveScore] Deleted matches stream setup:', e);
-    }
-
-    // 3. Real-time Database (RTDB) listener for active live match
-    let unsubRtdb: (() => void) | null = null;
-    try {
-      const activeMatchRef = rtdbRef(rtdb, 'cricket_active_match');
-      unsubRtdb = rtdbOnValue(activeMatchRef, (snapshot) => {
-        const val = snapshot.val();
-        if (!val) return;
-        if (val && isMatchDeleted(val.id)) {
-          setLiveMatches(prev => prev.filter(m => m.id !== val.id));
-          setLastUpdated(Date.now());
-          return;
-        }
-        if (val && !isMatchDeleted(val.id) && !isDemoOrAIMatch(val)) {
-          if (val.status === 'live') {
-            setLiveMatches(prev => {
-              const exists = prev.some(m => m.id === val.id);
-              if (exists) {
-                return prev.map(m => m.id === val.id ? { ...m, ...val } : m);
-              }
-              return [val, ...prev];
-            });
-          } else {
+      // 3. Real-time Database (RTDB) listener for active live match
+      try {
+        const activeMatchRef = rtdbRef(rtdb, 'cricket_active_match');
+        unsubRtdb = rtdbOnValue(activeMatchRef, (snapshot) => {
+          const val = snapshot.val();
+          if (!val) return;
+          if (val && isMatchDeleted(val.id)) {
             setLiveMatches(prev => prev.filter(m => m.id !== val.id));
+            setLastUpdated(Date.now());
+            return;
           }
-          setLastUpdated(Date.now());
-        }
-      });
-    } catch (e) {
-      console.warn('[HeroCricketLiveScore] RTDB sync listener:', e);
+          if (val && !isMatchDeleted(val.id) && !isDemoOrAIMatch(val)) {
+            if (val.status === 'live') {
+              setLiveMatches(prev => {
+                const exists = prev.some(m => m.id === val.id);
+                if (exists) {
+                  return prev.map(m => m.id === val.id ? { ...m, ...val } : m);
+                }
+                return [val, ...prev];
+              });
+            } else {
+              setLiveMatches(prev => prev.filter(m => m.id !== val.id));
+            }
+            setLastUpdated(Date.now());
+          }
+        });
+      } catch (e) {
+        console.warn('[HeroCricketLiveScore] RTDB sync listener:', e);
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      deferTimer = (window as any).requestIdleCallback(startRemoteListeners, { timeout: 1200 });
+    } else {
+      deferTimer = setTimeout(startRemoteListeners, 600);
     }
 
     // 4. In-window CustomEvent & Storage listener
@@ -215,6 +226,13 @@ export const HeroCricketLiveScore: React.FC = () => {
     window.addEventListener('storage', handleStorage);
 
     return () => {
+      if (deferTimer) {
+        if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+          (window as any).cancelIdleCallback(deferTimer);
+        } else {
+          clearTimeout(deferTimer);
+        }
+      }
       if (unsubFirestore) unsubFirestore();
       if (unsubDeletedFirestore) unsubDeletedFirestore();
       if (unsubRtdb) unsubRtdb();
@@ -519,3 +537,5 @@ export const HeroCricketLiveScore: React.FC = () => {
     </div>
   );
 };
+
+export default HeroCricketLiveScore;

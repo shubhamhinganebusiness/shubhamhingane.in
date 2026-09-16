@@ -186,6 +186,61 @@ const SectionSkeleton = ({ height = "400px" }: { height?: string }) => (
   </div>
 );
 
+// Performance optimization: Defer heavy below-the-fold components until viewport scroll or idle
+const DeferredSection: React.FC<{ children: React.ReactNode; fallback?: React.ReactNode; minHeight?: string }> = ({
+  children,
+  fallback = null,
+  minHeight = '150px'
+}) => {
+  const [shouldRender, setShouldRender] = React.useState(false);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (shouldRender) return;
+
+    let observer: IntersectionObserver | null = null;
+    let idleTimer: any = null;
+
+    if (typeof window !== 'undefined' && 'IntersectionObserver' in window && containerRef.current) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            setShouldRender(true);
+            observer?.disconnect();
+          }
+        },
+        { rootMargin: '350px' }
+      );
+      observer.observe(containerRef.current);
+    } else {
+      setShouldRender(true);
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleTimer = (window as any).requestIdleCallback(() => setShouldRender(true), { timeout: 2500 });
+    } else {
+      idleTimer = setTimeout(() => setShouldRender(true), 1500);
+    }
+
+    return () => {
+      observer?.disconnect();
+      if (idleTimer) {
+        if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+          (window as any).cancelIdleCallback(idleTimer);
+        } else {
+          clearTimeout(idleTimer);
+        }
+      }
+    };
+  }, [shouldRender]);
+
+  return (
+    <div ref={containerRef} style={shouldRender ? undefined : { minHeight }}>
+      {shouldRender ? children : fallback}
+    </div>
+  );
+};
+
 const HomePage = () => {
   const { settings, loading } = useSiteSettings();
   
@@ -201,11 +256,11 @@ const HomePage = () => {
     <>
       <Hero />
       
-
-      
-      <Suspense fallback={null}>
-        <SpectatorScoreboardSection homepageMode={true} />
-      </Suspense>
+      <DeferredSection minHeight="200px">
+        <Suspense fallback={null}>
+          <SpectatorScoreboardSection homepageMode={true} />
+        </Suspense>
+      </DeferredSection>
 
       {isVisible('features') && (
         <Suspense fallback={<SectionSkeleton height="320px" />}>

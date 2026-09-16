@@ -8,10 +8,6 @@ import {
 } from 'lucide-react';
 import { useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
 
-// jsPDF imports
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
 // Firestore & Realtime Database imports
 import { 
   db, 
@@ -2039,9 +2035,14 @@ export const SpectatorScoreboardSection = ({
     generateLedgerPDF(resolvedMatch);
   };
 
-  const generateLedgerPDF = (selectedMatch: any) => {
+  const generateLedgerPDF = async (selectedMatch: any) => {
     try {
       showToast('Generating Scoreboard PDF...');
+      const [{ jsPDF }, autoTableModule] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable')
+      ]);
+      const autoTable = (autoTableModule as any).default || autoTableModule;
       const doc = new jsPDF();
       
       // Set PDF properties to make it read-only and secured

@@ -5,8 +5,8 @@ import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSiteSettings } from '../hooks/useCMS';
 import { useNavigate } from 'react-router-dom';
-import { HeroCricketLiveScore } from './cricket/HeroCricketLiveScore';
 import { LanguageModal } from './LanguageModal';
+import { HeroCricketLiveScore } from './cricket/HeroCricketLiveScore';
 
 export const Hero = () => {
   const { t, language, setLanguage } = useLanguage();
