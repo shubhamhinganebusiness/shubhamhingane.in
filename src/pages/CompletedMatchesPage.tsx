@@ -7,9 +7,10 @@ import {
   CheckCircle2, RefreshCw, LayoutGrid, List, Table, ArrowRight
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { db } from '../lib/firebase';
+import { db, subscribeToDeletedMatches } from '../lib/firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { MatchState } from '../components/cricket/CricketScoreboard';
+import { isMatchDeleted, markMatchDeleted, deleteLocalMatch } from '../components/cricket/cricketStorage';
 import { CompletedMatchCard, SponsorAdSlide } from '../components/cricket/CompletedRecordsSlider';
 import { DEFAULT_PRESET_SPONSORS } from '../utils/cricketSponsorsStorage';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from '../components/cricket/MatchAwardsCertificateModal';
@@ -178,41 +179,26 @@ export const CompletedMatchesPage: React.FC = () => {
             !matchObj.isHidden &&
             !matchObj.isBlocked &&
             !(matchObj as any).hideResultCard &&
-            !(matchObj as any).isDeleted
+            !(matchObj as any).isDeleted &&
+            !isMatchDeleted(matchObj.id)
           ) {
             loaded.push(matchObj);
           }
         });
 
-        // If firestore returned results, update state
-        if (loaded.length > 0) {
-          setMatches(loaded);
-        } else {
-          // Fallback to local storage registry if Firestore is empty or offline
-          try {
-            const rawLocal = localStorage.getItem('cricket_matches_local_registry');
-            if (rawLocal) {
-              const localParsed = JSON.parse(rawLocal);
-              if (Array.isArray(localParsed)) {
-                const completedLocal = localParsed.filter(
-                  (m: any) => m.status === 'completed' && !m.isHidden && !m.isBlocked && !m.hideResultCard && !m.isDeleted
-                );
-                setMatches(completedLocal);
-              }
-            }
-          } catch (_) {}
-        }
+        // Remote Firestore snapshot is single source of truth
+        setMatches(loaded);
         setLoading(false);
       }, (error) => {
         console.warn('CompletedMatchesPage snapshot notice:', error?.message || error);
-        // Fallback to local registry
+        // Fallback to local registry only on network error
         try {
           const rawLocal = localStorage.getItem('cricket_matches_local_registry');
           if (rawLocal) {
             const localParsed = JSON.parse(rawLocal);
             if (Array.isArray(localParsed)) {
               const completedLocal = localParsed.filter(
-                (m: any) => m.status === 'completed' && !m.isHidden && !m.isBlocked && !m.hideResultCard && !m.isDeleted
+                (m: any) => m.status === 'completed' && !m.isHidden && !m.isBlocked && !m.hideResultCard && !m.isDeleted && m.status !== 'deleted' && !isMatchDeleted(m.id)
               );
               setMatches(completedLocal);
             }
@@ -224,6 +210,37 @@ export const CompletedMatchesPage: React.FC = () => {
       console.warn('Could not attach Firestore listener:', e);
       setLoading(false);
     }
+
+    // Subscribe to remote deleted matches tombstones
+    const unsubscribeDeleted = subscribeToDeletedMatches((deletedIds) => {
+      if (deletedIds && deletedIds.length > 0) {
+        deletedIds.forEach(id => {
+          markMatchDeleted(id);
+          deleteLocalMatch(id);
+        });
+        setMatches(prev => prev.filter(m => !deletedIds.includes(m.id) && !isMatchDeleted(m.id)));
+      }
+    });
+
+    const handleMatchDeleted = (e: any) => {
+      const id = e?.detail?.id;
+      if (id) {
+        markMatchDeleted(id);
+        deleteLocalMatch(id);
+        setMatches(prev => prev.filter(m => m.id !== id && !isMatchDeleted(m.id)));
+      }
+    };
+    window.addEventListener('cricket_match_deleted', handleMatchDeleted);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (
+        e.key === 'cricket_deleted_matches_registry' ||
+        e.key === 'cricket_matches_local_registry'
+      ) {
+        setMatches(prev => prev.filter(m => !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted'));
+      }
+    };
+    window.addEventListener('storage', handleStorage);
 
     // Fetch sponsor ads for banners
     try {
@@ -289,6 +306,9 @@ export const CompletedMatchesPage: React.FC = () => {
     return () => {
       if (unsubscribeMatches) unsubscribeMatches();
       if (unsubscribeAds) unsubscribeAds();
+      unsubscribeDeleted();
+      window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 

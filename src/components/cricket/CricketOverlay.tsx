@@ -13,6 +13,7 @@ import { doc, onSnapshot, collection, query, where, limit } from 'firebase/fires
 import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch } from './cricketStorage';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 import { getThemeBackground } from './BroadcastThemeStudio';
+import { StarTVScorebug } from './StarTVScorebug';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -91,6 +92,8 @@ export type BroadcastTheme =
   | 'studio-custom';
 
 export type BroadcastLayout =
+  | 'star-tv-broadcast'
+  | 'single-line'
   | 'ribbon-full'
   | 'slanted-pro-design'
   | 'docked-corner'
@@ -431,7 +434,7 @@ export const CricketOverlay: React.FC = () => {
           : fallback.theme
       ),
       layout: match.overlayConfig.layout || (
-        ['slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(match.overlayConfig.template as string)
+        ['single-line', 'slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(match.overlayConfig.template as string)
           ? match.overlayConfig.template
           : fallback.layout
       ),
@@ -1440,11 +1443,12 @@ export const CricketOverlay: React.FC = () => {
 
   const activeLayout = (
     searchParams.get('layout') ||
+    (isStudioCustom && globalStudioTheme?.layout ? globalStudioTheme.layout : null) ||
     activeConfig.layout ||
     (
-      ['slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(activeConfig.template)
+      ['star-tv-broadcast', 'single-line', 'slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(activeConfig.template)
         ? activeConfig.template
-        : 'ribbon-full'
+        : (globalStudioTheme?.layout || 'star-tv-broadcast')
     )
   ) as BroadcastLayout;
 
@@ -2062,9 +2066,74 @@ export const CricketOverlay: React.FC = () => {
       </AnimatePresence>
 
       {/* =========================================================================
-          3A. MODERN EDGE-TO-EDGE BROADCAST LOWER THIRD RIBBON (IPL / T20 WORLD CUP)
+          3-STAR. STAR TV PRO SCOREBUG (OFFICIAL TELEVISION REFERENCE DESIGN)
           ========================================================================= */}
-      {activeConfig.showScoreBug && activeLayout === 'ribbon-full' && (
+      {activeConfig.showScoreBug && activeLayout === 'star-tv-broadcast' && (
+        <div 
+          id="star-tv-pro-scorebug"
+          className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-6' : 'bottom-6'} left-1/2 -translate-x-1/2 w-[98%] max-w-[1400px] z-30 transition-all`}
+        >
+          {/* Boundary Flash Strip */}
+          {lastBdryFlash === '4' && (
+            <div className="absolute inset-x-0 -top-2.5 h-2 bg-sky-400 animate-pulse z-50 rounded-full shadow-[0_0_16px_rgba(56,189,248,0.9)]" />
+          )}
+          {lastBdryFlash === '6' && (
+            <div className="absolute inset-x-0 -top-2.5 h-2 bg-amber-400 animate-pulse z-50 rounded-full shadow-[0_0_20px_rgba(251,191,36,1)]" />
+          )}
+
+          <StarTVScorebug 
+            battingTeamName={currentInnings.battingTeam}
+            battingTeamSubtext={inningsNum === 1 ? 'BAT FIRST' : '2ND INNINGS'}
+            battingTeamColor={
+              currentInnings.battingTeam === match.teamA 
+                ? (globalStudioTheme?.teamAColor || activeConfig.teamAColor || '#0143a3') 
+                : (globalStudioTheme?.teamBColor || activeConfig.teamBColor || '#c8102e')
+            }
+            battingTeamLogo={currentInnings.battingTeam === match.teamA ? match.teamALogo : match.teamBLogo}
+            strikerName={battingStats?.striker.name || 'STRIKER'}
+            strikerRuns={battingStats?.striker.runs ?? 0}
+            strikerBalls={battingStats?.striker.balls ?? 0}
+            nonStrikerName={battingStats?.nonStriker?.name || 'NON-STRIKER'}
+            nonStrikerRuns={battingStats?.nonStriker?.runs ?? 0}
+            nonStrikerBalls={battingStats?.nonStriker?.balls ?? 0}
+            score={currentInnings.runs}
+            wickets={currentInnings.wickets}
+            overs={formatOvers(currentInnings.ballsBowled)}
+            oversLimit={match.oversLimit}
+            bowlerName={bowlingStats?.name || 'BOWLER'}
+            bowlerFigures={bowlingStats ? `${bowlingStats.wickets}/${bowlingStats.runs}` : '0/0'}
+            bowlerOvers={bowlingStats ? formatOvers(bowlingStats.balls) : '0.0'}
+            bowlerEcon={bowlingStats && bowlingStats.balls > 0 ? Number(((bowlingStats.runs / bowlingStats.balls) * 6).toFixed(1)) : 0}
+            thisOverBalls={currentOverBalls.slice(0, 6).map(b => {
+              const d = getPillDetails(b);
+              let type: 'dot' | 'run' | 'four' | 'six' | 'wicket' | 'extra' = 'dot';
+              if (d.label === '4') type = 'four';
+              else if (d.label === '6') type = 'six';
+              else if (d.label === 'W' || d.label.includes('W')) type = 'wicket';
+              else if (d.label.includes('WD') || d.label.includes('NB') || d.label.includes('B') || d.label.includes('LB')) type = 'extra';
+              else if (parseInt(d.label, 10) > 0) type = 'run';
+              return { label: d.label, type };
+            })}
+            bowlingTeamName={currentInnings.battingTeam === match.teamA ? match.teamB : match.teamA}
+            bowlingTeamSubtext="BOWLING"
+            bowlingTeamColor={
+              currentInnings.battingTeam === match.teamA 
+                ? (globalStudioTheme?.teamBColor || activeConfig.teamBColor || '#c8102e') 
+                : (globalStudioTheme?.teamAColor || activeConfig.teamAColor || '#0143a3')
+            }
+            bowlingTeamLogo={currentInnings.battingTeam === match.teamA ? match.teamBLogo : match.teamALogo}
+            isLive={match.status === 'live'}
+            targetRuns={match.targetRuns}
+            remainingRuns={match.targetRuns ? Math.max(0, match.targetRuns - currentInnings.runs) : undefined}
+            remainingBalls={match.oversLimit ? Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled) : undefined}
+          />
+        </div>
+      )}
+
+      {/* =========================================================================
+          3A. MODERN EDGE-TO-EDGE BROADCAST LOWER THIRD RIBBON / SINGLE LINE (IPL / T20 WORLD CUP)
+          ========================================================================= */}
+      {activeConfig.showScoreBug && (activeLayout === 'ribbon-full' || activeLayout === 'single-line') && (
         <div 
           id="modern-broadcast-ribbon"
           className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-6' : 'bottom-6'} left-1/2 -translate-x-1/2 w-[98%] max-w-[1900px] h-[82px] select-none font-sans z-30 flex items-stretch rounded-2xl border ${themeColors.borderAccent || 'border-white/10'} ${themeColors.ribbonBg || themeColors.cardBg} overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.85)]`}

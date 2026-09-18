@@ -26,12 +26,13 @@ import {
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { StarTVScorebug } from './StarTVScorebug';
 
 export interface BroadcastStudioTheme {
   id: string;
   name: string;
   presetBase: string;
-  layout: 'ribbon-full' | 'slanted-pro-design' | 'docked-corner' | 'minimal-pill' | 'score-bug-1900-200' | 'mobile-vertical';
+  layout: 'star-tv-broadcast' | 'single-line' | 'ribbon-full' | 'slanted-pro-design' | 'docked-corner' | 'minimal-pill' | 'score-bug-1900-200' | 'mobile-vertical';
   bugPosition: 'bottom-full' | 'bottom-left' | 'bottom-right' | 'bottom-center' | 'top-full';
   
   // Custom Color Palette
@@ -53,9 +54,13 @@ export interface BroadcastStudioTheme {
   bgGradientVia?: string;
   bgGradientDirection?: string; // '90deg' | '135deg' | '180deg' | '45deg' | '225deg' | 'radial'
 
-  // Team Brand Colors
+  // Team Brand Colors & Labels
   teamAColor: string;
   teamBColor: string;
+  teamAName?: string;
+  teamASubtext?: string;
+  teamBName?: string;
+  teamBSubtext?: string;
 
   // Features & Overlays
   showBallByBallDots: boolean;
@@ -121,38 +126,85 @@ export const getThemeBackground = (theme: Partial<BroadcastStudioTheme> | null |
 
 export const DEFAULT_BROADCAST_STUDIO_THEME: BroadcastStudioTheme = {
   id: 'global-studio-theme',
-  name: 'Premier Star Sapphire',
-  presetBase: 'broadcast-pro',
-  layout: 'ribbon-full',
-  bugPosition: 'bottom-full',
-  primaryAccent: '#0ea5e9', // Sky Cyan
-  secondaryAccent: '#f59e0b', // Amber Gold
-  bgColor: '#0b0f19',
-  bgOpacity: 0.95,
+  name: 'Star TV Pro Scorebug (Official Reference)',
+  presetBase: 'star-tv-broadcast',
+  layout: 'star-tv-broadcast',
+  bugPosition: 'bottom-center',
+  primaryAccent: '#0284c7', // Sky Blue / Cyan
+  secondaryAccent: '#ef4444', // Crimson Red
+  bgColor: '#ffffff',
+  bgOpacity: 1.0,
   bgType: 'solid',
-  bgGradientFrom: '#0b0f19',
-  bgGradientTo: '#1e293b',
-  bgGradientDirection: '135deg',
-  bgGradient: 'linear-gradient(135deg, #0b0f19 0%, #1e293b 100%)',
-  textColor: '#ffffff',
-  textMutedColor: '#94a3b8',
+  bgGradientFrom: '#0143a3',
+  bgGradientTo: '#002266',
+  bgGradientDirection: '180deg',
+  bgGradient: 'linear-gradient(180deg, #0143a3 0%, #002266 100%)',
+  textColor: '#0f172a',
+  textMutedColor: '#64748b',
   borderColor: '#38bdf8',
-  borderStyle: 'sharp',
+  borderStyle: 'rounded',
   fontFamily: 'sans',
-  teamAColor: '#ea002a',
-  teamBColor: '#00529b',
+  teamAColor: '#0143a3', // Royal Sapphire Blue (Team A)
+  teamBColor: '#c8102e', // Crimson Red (Team B)
+  teamAName: 'TEAM A',
+  teamASubtext: 'BAT FIRST',
+  teamBName: 'TEAM B',
+  teamBSubtext: 'BOWLING',
   showBallByBallDots: true,
   showStrikeRates: true,
   showWinProbability: true,
   showSponsorBadge: true,
-  sponsorText: 'GULLY PREMIER LEAGUE 2026',
-  showTicker: true,
-  tickerMessage: 'LIVE BROADCAST • GULLY SCOREBOARD TV GRAPHICS • HIGH DEFINITION 1080P',
+  sponsorText: 'LIVE CRICKET BROADCAST',
+  showTicker: false,
+  tickerMessage: 'LIVE BROADCAST • TELEVISION SCOREBUG • HIGH DEFINITION 1080P',
   boundaryBlast: true,
   updatedAt: Date.now()
 };
 
 export const STUDIO_PRESETS: { id: string; label: string; desc: string; config: Partial<BroadcastStudioTheme> }[] = [
+  {
+    id: 'star-tv-broadcast',
+    label: '⭐ Star TV Pro Scorebug (Official Reference)',
+    desc: 'Exact TV match design: Slanted Royal Blue & Crimson polygons with Elevated Center Shield Score & Ball Dots',
+    config: {
+      presetBase: 'star-tv-broadcast',
+      name: 'Star TV Pro Scorebug',
+      primaryAccent: '#0284c7',
+      secondaryAccent: '#ef4444',
+      bgColor: '#ffffff',
+      bgOpacity: 1.0,
+      textColor: '#0f172a',
+      textMutedColor: '#64748b',
+      borderColor: '#38bdf8',
+      borderStyle: 'rounded',
+      fontFamily: 'sans',
+      teamAColor: '#0143a3',
+      teamBColor: '#c8102e',
+      teamAName: 'TEAM A',
+      teamASubtext: 'BAT FIRST',
+      teamBName: 'TEAM B',
+      teamBSubtext: 'BOWLING',
+      layout: 'star-tv-broadcast'
+    }
+  },
+  {
+    id: 'single-line-master',
+    label: 'Single-Line TV Master',
+    desc: 'Ultra-Sleek Single Line Ribbon — All details in 1 continuous row',
+    config: {
+      presetBase: 'single-line-master',
+      primaryAccent: '#0ea5e9',
+      secondaryAccent: '#f59e0b',
+      bgColor: '#0b0f19',
+      bgOpacity: 0.95,
+      textColor: '#ffffff',
+      textMutedColor: '#94a3b8',
+      borderColor: '#38bdf8',
+      borderStyle: 'rounded',
+      fontFamily: 'sans',
+      layout: 'single-line'
+    }
+  },
   {
     id: 'broadcast-pro',
     label: 'Premier Star Sapphire',
@@ -168,7 +220,7 @@ export const STUDIO_PRESETS: { id: string; label: string; desc: string; config: 
       borderColor: '#38bdf8',
       borderStyle: 'sharp',
       fontFamily: 'sans',
-      layout: 'ribbon-full'
+      layout: 'single-line'
     }
   },
   {
@@ -572,27 +624,72 @@ export const BroadcastThemeStudio: React.FC = () => {
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-            <span className="text-[9px] font-black uppercase text-slate-400 px-2">Backdrop:</span>
-            {[
-              { id: 'stadium', label: '🏟️ Stadium' },
-              { id: 'chroma', label: '🟩 Green Screen' },
-              { id: 'dark', label: '⬛ Dark Deck' },
-              { id: 'transparent', label: '🏁 Transparent' }
-            ].map(b => (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick Layout Mode Switcher */}
+            <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
               <button
-                key={b.id}
                 type="button"
-                onClick={() => setBackdropMode(b.id as any)}
-                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all border-none cursor-pointer ${
-                  backdropMode === b.id 
-                    ? 'bg-sky-500 text-white shadow-sm' 
+                onClick={() => setTheme(prev => ({ ...prev, layout: 'star-tv-broadcast' }))}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                  theme.layout === 'star-tv-broadcast'
+                    ? 'bg-sky-500 text-white shadow-sm ring-1 ring-white/30'
                     : 'text-slate-400 hover:text-white bg-transparent'
                 }`}
+                title="Display Star TV Pro scorebug matching the reference design"
               >
-                {b.label}
+                <Sparkles size={11} className={theme.layout === 'star-tv-broadcast' ? 'text-amber-300' : ''} />
+                <span>⭐ Star TV (Reference)</span>
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => setTheme(prev => ({ ...prev, layout: 'single-line' }))}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                  theme.layout === 'single-line' || theme.layout === 'ribbon-full'
+                    ? 'bg-sky-500 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white bg-transparent'
+                }`}
+                title="Display all scorebug details in a single horizontal television line"
+              >
+                <Zap size={11} className={theme.layout === 'single-line' || theme.layout === 'ribbon-full' ? 'text-amber-300' : ''} />
+                <span>Single-Line</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTheme(prev => ({ ...prev, layout: 'docked-corner' }))}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                  theme.layout === 'docked-corner'
+                    ? 'bg-sky-500 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white bg-transparent'
+                }`}
+                title="Display compact docked corner box"
+              >
+                <span>Corner Box</span>
+              </button>
+            </div>
+
+            {/* Backdrop Switcher */}
+            <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+              <span className="text-[9px] font-black uppercase text-slate-400 px-1.5 hidden sm:inline-block">Backdrop:</span>
+              {[
+                { id: 'stadium', label: '🏟️ Stadium' },
+                { id: 'chroma', label: '🟩 Green' },
+                { id: 'dark', label: '⬛ Dark' },
+                { id: 'transparent', label: '🏁 Alpha' }
+              ].map(b => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setBackdropMode(b.id as any)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all border-none cursor-pointer ${
+                    backdropMode === b.id 
+                      ? 'bg-sky-500 text-white shadow-sm' 
+                      : 'text-slate-400 hover:text-white bg-transparent'
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -660,120 +757,218 @@ export const BroadcastThemeStudio: React.FC = () => {
           </AnimatePresence>
 
           {/* LIVE SCORE BUG SIMULATOR (Dynamic based on theme config) */}
-          <div className="p-3 sm:p-6 w-full z-20">
-            <div 
-              className={`w-full overflow-hidden transition-all shadow-2xl border ${cornerClass} ${fontClass}`}
-              style={{
-                background: getThemeBackground(theme),
-                opacity: theme.bgOpacity,
-                borderColor: `${theme.borderColor}80`,
-                boxShadow: `0 15px 40px rgba(0,0,0,0.7), 0 0 20px ${theme.borderColor}30`
-              }}
-            >
-              {/* Top Score Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-5 py-2.5 sm:py-3.5 border-b border-white/10">
-                {/* Batting Team Badge & Score */}
-                <div className="flex items-center gap-3">
-                  <div 
-                    className="px-2.5 py-1 rounded font-black text-xs sm:text-sm tracking-wider uppercase text-white shadow"
-                    style={{ backgroundColor: theme.teamAColor }}
-                  >
-                    IND
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight" style={{ color: theme.textColor }}>
-                      168/3
-                    </span>
-                    <span className="text-xs sm:text-sm font-bold opacity-80" style={{ color: theme.textMutedColor }}>
-                      (16.4 Ov)
-                    </span>
-                    <span className="hidden sm:inline-block text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-white/10 text-emerald-400">
-                      CRR: 10.08
-                    </span>
-                  </div>
-                </div>
-
-                {/* Bowling Team Target / State */}
-                <div className="flex items-center gap-3">
-                  <div className="text-right hidden sm:block">
-                    <span className="text-[10px] uppercase font-bold tracking-wider block opacity-75" style={{ color: theme.textMutedColor }}>
-                      Target: 195 • Need 27 off 20b
-                    </span>
-                    {theme.showWinProbability && (
-                      <div className="flex items-center gap-1.5 justify-end mt-0.5">
-                        <span className="text-[9px] font-mono font-bold text-sky-400">WIN: IND 68%</span>
-                        <div className="w-16 h-1.5 bg-white/20 rounded-full overflow-hidden">
-                          <div className="w-[68%] h-full bg-sky-400" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div 
-                    className="px-2.5 py-1 rounded font-black text-xs sm:text-sm tracking-wider uppercase text-white shadow"
-                    style={{ backgroundColor: theme.teamBColor }}
-                  >
-                    AUS
-                  </div>
-                </div>
+          <div className={`w-full z-20 transition-all ${
+            theme.bugPosition === 'top-full'
+              ? 'p-2 sm:p-4 absolute top-0 inset-x-0'
+              : theme.bugPosition === 'bottom-left'
+              ? 'p-2 sm:p-4 max-w-4xl'
+              : theme.bugPosition === 'bottom-right'
+              ? 'p-2 sm:p-4 max-w-4xl ml-auto'
+              : theme.bugPosition === 'bottom-center'
+              ? 'p-2 sm:p-4 max-w-5xl mx-auto'
+              : 'p-2 sm:p-4 md:p-6 w-full'
+          }`}>
+            {theme.layout === 'star-tv-broadcast' ? (
+              /* ENHANCED LIVE TV BROADCAST SCOREBUG (REFERENCE DESIGN) */
+              <div className="w-full">
+                <StarTVScorebug 
+                  battingTeamName={theme.teamAName || 'TEAM A'}
+                  battingTeamSubtext={theme.teamASubtext || 'BAT FIRST'}
+                  battingTeamColor={theme.teamAColor || '#0143a3'}
+                  strikerName="ROHIT SHARMA"
+                  strikerRuns={45}
+                  strikerBalls={32}
+                  nonStrikerName="VIRAT KOHLI"
+                  nonStrikerRuns={28}
+                  nonStrikerBalls={18}
+                  score={78}
+                  wickets={1}
+                  overs="10.2"
+                  bowlerName="JASPRIT BUMRAH"
+                  bowlerFigures="0/14"
+                  bowlerOvers="1.2"
+                  thisOverBalls={['1', '0', '4', '0', '1']}
+                  bowlingTeamName={theme.teamBName || 'TEAM B'}
+                  bowlingTeamSubtext={theme.teamBSubtext || 'BOWLING'}
+                  bowlingTeamColor={theme.teamBColor || '#c8102e'}
+                  activeStinger={activeStinger}
+                />
               </div>
+            ) : theme.layout === 'docked-corner' ? (
+              /* DOCKED COMPACT CORNER BOX */
+              <div 
+                className={`w-full max-w-md overflow-hidden transition-all shadow-2xl border ${cornerClass} ${fontClass}`}
+                style={{
+                  background: getThemeBackground(theme),
+                  opacity: theme.bgOpacity,
+                  borderColor: `${theme.borderColor}80`,
+                  boxShadow: `0 15px 40px rgba(0,0,0,0.7), 0 0 20px ${theme.borderColor}30`
+                }}
+              >
+                <div className="flex items-center justify-between p-3 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded text-xs font-black text-white" style={{ backgroundColor: theme.teamAColor }}>IND</span>
+                    <span className="text-xl font-black font-mono" style={{ color: theme.textColor }}>168/3</span>
+                    <span className="text-xs font-bold opacity-80" style={{ color: theme.textMutedColor }}>(16.4 ov)</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/10 text-emerald-400">CRR 10.08</span>
+                </div>
+                <div className="p-3 grid grid-cols-2 gap-2 text-xs border-b border-white/10">
+                  <div>
+                    <span className="font-extrabold block text-white">V. Kohli* 64 (38)</span>
+                    <span className="text-[10px] font-mono text-slate-400">S. Yadav 42 (21)</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-extrabold block text-emerald-400">P. Cummins 2/32</span>
+                    <span className="text-[10px] font-mono text-slate-400">TGT 195 (Need 27)</span>
+                  </div>
+                </div>
+                {theme.showBallByBallDots && (
+                  <div className="px-3 py-1.5 bg-black/20 flex items-center justify-between text-[9px] font-mono">
+                    <span className="text-slate-400 font-bold uppercase">THIS OVER:</span>
+                    <div className="flex items-center gap-1">
+                      {['1', '4', '0', '6', 'W', '2'].map((b, i) => (
+                        <span key={i} className={`w-4 h-4 rounded-full flex items-center justify-center font-black ${
+                          b === '4' ? 'bg-sky-500 text-white' : b === '6' ? 'bg-fuchsia-600 text-white' : b === 'W' ? 'bg-rose-600 text-white' : 'bg-white/15 text-white'
+                        }`}>
+                          {b}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* SINGLE LINE SCOREBUG - ALL DETAILS SHOWN IN ONE HORIZONTAL CONTINUOUS LINE */
+              <div 
+                className={`w-full overflow-hidden transition-all shadow-2xl border ${cornerClass} ${fontClass}`}
+                style={{
+                  background: getThemeBackground(theme),
+                  opacity: theme.bgOpacity,
+                  borderColor: `${theme.borderColor}80`,
+                  boxShadow: `0 15px 40px rgba(0,0,0,0.7), 0 0 20px ${theme.borderColor}30`
+                }}
+              >
+                {/* Boundary Alert Flush Top Stripe */}
+                {activeStinger && (
+                  <div 
+                    className="h-1.5 w-full animate-pulse"
+                    style={{ backgroundColor: theme.primaryAccent, boxShadow: `0 0 14px ${theme.primaryAccent}` }}
+                  />
+                )}
 
-              {/* Lower Section: Batsmen, Bowler, and Ball by Ball */}
-              <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/10 text-xs sm:text-sm">
-                {/* Batsmen Module */}
-                <div className="p-2.5 sm:p-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      <span className="font-extrabold truncate" style={{ color: theme.textColor }}>
-                        V. Kohli *
+                {/* THE MASTER SINGLE LINE ROW */}
+                <div className="flex items-center justify-between gap-2.5 sm:gap-3.5 px-3 sm:px-4 py-2 sm:py-2.5 w-full overflow-x-auto custom-scrollbar select-none whitespace-nowrap">
+                  
+                  {/* 1. MATCH & LIVE STATUS + BATTING TEAM + SCORE + OVERS + CRR */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Live Indicator */}
+                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-600 text-white font-black text-[9px] shadow-[0_0_10px_rgba(220,38,38,0.7)] animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                      <span>LIVE</span>
+                    </div>
+
+                    {/* Batting Team Pill */}
+                    <div 
+                      className="px-2.5 py-1 rounded font-black text-xs sm:text-sm tracking-wider uppercase text-white shadow shrink-0"
+                      style={{ backgroundColor: theme.teamAColor }}
+                    >
+                      IND
+                    </div>
+
+                    {/* Batting Score & Overs & CRR */}
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-xl sm:text-2xl font-black font-mono tracking-tight" style={{ color: theme.textColor }}>
+                        168/3
+                      </span>
+                      <span className="text-xs sm:text-sm font-bold opacity-80 font-mono" style={{ color: theme.textMutedColor }}>
+                        (16.4 Ov)
+                      </span>
+                      <span className="text-[9.5px] font-mono font-black px-1.5 py-0.5 rounded bg-white/10 text-emerald-400 shrink-0">
+                        CRR 10.08
                       </span>
                     </div>
-                    <span className="text-[11px] font-mono opacity-80 block" style={{ color: theme.textMutedColor }}>
-                      {theme.showStrikeRates ? '64* (38) • SR: 168.4' : '64* (38)'}
-                    </span>
                   </div>
-                  <div className="text-right min-w-0">
-                    <span className="font-extrabold truncate block" style={{ color: theme.textColor }}>
-                      S. Yadav
-                    </span>
-                    <span className="text-[11px] font-mono opacity-80 block" style={{ color: theme.textMutedColor }}>
-                      {theme.showStrikeRates ? '42 (21) • SR: 200.0' : '42 (21)'}
-                    </span>
-                  </div>
-                </div>
 
-                {/* Bowler Module */}
-                <div className="p-2.5 sm:p-3 flex items-center justify-between gap-3">
-                  <div>
-                    <span className="text-[9px] uppercase font-bold tracking-wider block opacity-75" style={{ color: theme.textMutedColor }}>
-                      BOWLER
+                  {/* VERTICAL DIVIDER */}
+                  <div className="h-7 w-px bg-white/20 shrink-0" />
+
+                  {/* 2. ACTIVE BATSMEN: STRIKER & NON-STRIKER */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    {/* Striker */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+                      <span className="text-xs sm:text-sm font-extrabold" style={{ color: theme.textColor }}>
+                        V. Kohli*
+                      </span>
+                      <span className="text-xs sm:text-sm font-mono font-black text-amber-300">
+                        64<span className="text-[10px] font-normal opacity-75 ml-0.5 text-slate-300">(38)</span>
+                      </span>
+                      {theme.showStrikeRates && (
+                        <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-amber-400/20 text-amber-300 font-bold shrink-0">
+                          SR 168.4
+                        </span>
+                      )}
+                      <span className="text-[9px] font-mono opacity-70 hidden xl:inline-block" style={{ color: theme.textMutedColor }}>
+                        4x4 • 2x6
+                      </span>
+                    </div>
+
+                    <span className="text-white/30 text-xs shrink-0">•</span>
+
+                    {/* Non-Striker */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs sm:text-sm font-bold opacity-90" style={{ color: theme.textColor }}>
+                        S. Yadav
+                      </span>
+                      <span className="text-xs sm:text-sm font-mono font-black text-slate-200">
+                        42<span className="text-[10px] font-normal opacity-75 ml-0.5 text-slate-300">(21)</span>
+                      </span>
+                      {theme.showStrikeRates && (
+                        <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-white/10 text-slate-300 font-bold shrink-0">
+                          SR 200.0
+                        </span>
+                      )}
+                      <span className="text-[9px] font-mono opacity-70 hidden xl:inline-block" style={{ color: theme.textMutedColor }}>
+                        3x4 • 2x6
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* VERTICAL DIVIDER */}
+                  <div className="h-7 w-px bg-white/20 shrink-0" />
+
+                  {/* 3. CURRENT BOWLER */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/10 text-slate-300 font-mono">
+                      BOWL
                     </span>
-                    <span className="font-extrabold" style={{ color: theme.textColor }}>
+                    <span className="text-xs sm:text-sm font-extrabold" style={{ color: theme.textColor }}>
                       P. Cummins
                     </span>
-                  </div>
-                  <div className="text-right font-mono">
-                    <span className="font-extrabold text-sm" style={{ color: theme.primaryAccent }}>
-                      3.4 - 0 - 32 - 2
+                    <span className="text-xs sm:text-sm font-mono font-black text-emerald-400">
+                      2/32
+                      <span className="text-[10px] font-normal opacity-80 ml-1 text-slate-300">(3.4 Ov)</span>
                     </span>
-                    <span className="text-[10px] block opacity-75" style={{ color: theme.textMutedColor }}>
-                      Econ: 8.72
+                    <span className="text-[9px] font-mono opacity-80 hidden lg:inline-block" style={{ color: theme.textMutedColor }}>
+                      Econ 8.7
                     </span>
                   </div>
-                </div>
 
-                {/* Ball-by-ball Over Module */}
-                <div className="p-2.5 sm:p-3 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="text-[9px] uppercase font-bold tracking-wider block opacity-75" style={{ color: theme.textMutedColor }}>
-                      THIS OVER
+                  {/* VERTICAL DIVIDER */}
+                  <div className="h-7 w-px bg-white/20 shrink-0" />
+
+                  {/* 4. THIS OVER BALL-BY-BALL DOTS & OVER RUNS */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 font-mono">
+                      OVER
                     </span>
                     {theme.showBallByBallDots && (
-                      <div className="flex items-center gap-1.5 mt-1">
+                      <div className="flex items-center gap-1">
                         {['1', '4', '0', '6', 'W', '2'].map((b, i) => (
                           <span
                             key={i}
-                            className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[10px] font-mono shadow-sm ${
+                            className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center font-black text-[9px] sm:text-[10px] font-mono shadow-sm ${
                               b === '4'
                                 ? 'bg-sky-500 text-white'
                                 : b === '6'
@@ -788,39 +983,83 @@ export const BroadcastThemeStudio: React.FC = () => {
                         ))}
                       </div>
                     )}
+                    <span 
+                      className="px-1.5 py-0.5 rounded font-black text-[9px] tracking-wider uppercase shrink-0"
+                      style={{ 
+                        backgroundColor: `${theme.primaryAccent}25`,
+                        color: theme.primaryAccent,
+                        border: `1px solid ${theme.primaryAccent}60`
+                      }}
+                    >
+                      +13 RUNS
+                    </span>
                   </div>
+
+                  {/* VERTICAL DIVIDER */}
+                  <div className="h-7 w-px bg-white/20 shrink-0" />
+
+                  {/* 5. TARGET & EQUATION / WIN PROBABILITY */}
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9.5px] font-mono font-bold uppercase tracking-wider text-slate-300">
+                          TGT 195 • NEED 27 (20b)
+                        </span>
+                        <span className="text-[8.5px] font-mono px-1 rounded bg-white/10 text-amber-300">
+                          RRR 8.1
+                        </span>
+                      </div>
+                      {theme.showWinProbability && (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[8.5px] font-mono font-bold text-sky-400">WIN: IND 68%</span>
+                          <div className="w-14 h-1.5 bg-white/20 rounded-full overflow-hidden">
+                            <div className="w-[68%] h-full bg-sky-400 rounded-full" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* VERTICAL DIVIDER */}
+                  <div className="h-7 w-px bg-white/20 shrink-0" />
+
+                  {/* 6. OPPONENT TEAM & SPONSOR BADGE */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div 
+                      className="px-2.5 py-1 rounded font-black text-xs sm:text-sm tracking-wider uppercase text-white shadow shrink-0"
+                      style={{ backgroundColor: theme.teamBColor }}
+                    >
+                      AUS
+                    </div>
+                    {theme.showSponsorBadge && (
+                      <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-black/40 border border-white/10 text-[9px] font-black text-amber-400 uppercase tracking-wider shrink-0">
+                        <span>🏆</span>
+                        <span className="truncate max-w-[110px]">{theme.sponsorText || 'GPL 2026'}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* TICKER RUNNING RIBBON (IF ENABLED) */}
+                {theme.showTicker && (
                   <div 
-                    className="px-2.5 py-1 rounded font-black text-[10px] tracking-wider uppercase"
+                    className="px-3 sm:px-4 py-1 text-[9.5px] sm:text-[10px] font-bold tracking-wider uppercase border-t border-white/10 flex items-center justify-between overflow-hidden"
                     style={{ 
-                      backgroundColor: `${theme.primaryAccent}25`,
-                      color: theme.primaryAccent,
-                      border: `1px solid ${theme.primaryAccent}60`
+                      background: theme.bgType === 'gradient' ? 'rgba(0,0,0,0.5)' : `${theme.bgColor}F0`, 
+                      color: theme.secondaryAccent 
                     }}
                   >
-                    13 RUNS
+                    <div className="truncate flex items-center gap-2">
+                      <Sparkles size={11} className="shrink-0 animate-pulse" />
+                      <span>{theme.tickerMessage || 'LIVE BROADCAST • GULLY SCOREBOARD TV GRAPHICS • HIGH DEFINITION 1080P'}</span>
+                    </div>
+                    <span className="text-[8.5px] font-mono shrink-0 opacity-75 hidden sm:inline-block">
+                      TV GRAPHICS ENGINE 4.2
+                    </span>
                   </div>
-                </div>
+                )}
               </div>
-
-              {/* Ticker Banner */}
-              {theme.showTicker && (
-                <div 
-                  className="px-3 sm:px-5 py-1.5 text-[10px] sm:text-[11px] font-bold tracking-wider uppercase border-t border-white/10 flex items-center justify-between overflow-hidden"
-                  style={{ 
-                    background: theme.bgType === 'gradient' ? 'rgba(0,0,0,0.45)' : `${theme.bgColor}E6`, 
-                    color: theme.secondaryAccent 
-                  }}
-                >
-                  <div className="truncate flex items-center gap-2">
-                    <Sparkles size={12} className="shrink-0 animate-pulse" />
-                    <span>{theme.tickerMessage || 'LIVE BROADCAST • GULLY PREMIER LEAGUE 2026'}</span>
-                  </div>
-                  <span className="text-[9px] font-mono shrink-0 opacity-75 hidden sm:inline-block">
-                    TV GRAPHICS ENGINE 4.2
-                  </span>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
@@ -1432,15 +1671,37 @@ export const BroadcastThemeStudio: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Team A Brand Color */}
+                {/* Team A Brand Color & Label */}
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Team A Brand Emblem Color
+                      Team A (Batting) Emblem & Name
                     </label>
                     <span className="text-xs font-mono font-bold text-slate-500">{theme.teamAColor}</span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Team A Name</label>
+                      <input
+                        type="text"
+                        value={theme.teamAName || 'TEAM A'}
+                        onChange={(e) => setTheme(prev => ({ ...prev, teamAName: e.target.value }))}
+                        className="w-full px-3 py-1.5 rounded-lg text-xs font-black bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 uppercase"
+                        placeholder="e.g. TEAM A or IND"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Team A Status Text</label>
+                      <input
+                        type="text"
+                        value={theme.teamASubtext || 'BAT FIRST'}
+                        onChange={(e) => setTheme(prev => ({ ...prev, teamASubtext: e.target.value }))}
+                        className="w-full px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 uppercase"
+                        placeholder="e.g. BAT FIRST"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 pt-1">
                     <input
                       type="color"
                       value={theme.teamAColor}
@@ -1448,28 +1709,51 @@ export const BroadcastThemeStudio: React.FC = () => {
                       className="w-12 h-10 rounded-lg cursor-pointer border border-slate-300 dark:border-slate-700 bg-transparent"
                     />
                     <div className="flex flex-wrap gap-1.5">
-                      {['#ea002a', '#dc2626', '#b91c1c', '#f97316', '#e11d48', '#be123c'].map(c => (
+                      {['#0143a3', '#002266', '#ea002a', '#dc2626', '#b91c1c', '#f97316', '#e11d48'].map(c => (
                         <button
                           key={c}
                           type="button"
                           onClick={() => setTheme(prev => ({ ...prev, teamAColor: c }))}
                           className="w-6 h-6 rounded-full border border-black/10 cursor-pointer transition-transform hover:scale-110"
                           style={{ backgroundColor: c }}
+                          title={c}
                         />
                       ))}
                     </div>
                   </div>
                 </div>
 
-                {/* Team B Brand Color */}
+                {/* Team B Brand Color & Label */}
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Team B Brand Emblem Color
+                      Team B (Bowling) Emblem & Name
                     </label>
                     <span className="text-xs font-mono font-bold text-slate-500">{theme.teamBColor}</span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Team B Name</label>
+                      <input
+                        type="text"
+                        value={theme.teamBName || 'TEAM B'}
+                        onChange={(e) => setTheme(prev => ({ ...prev, teamBName: e.target.value }))}
+                        className="w-full px-3 py-1.5 rounded-lg text-xs font-black bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 uppercase"
+                        placeholder="e.g. TEAM B or AUS"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Team B Status Text</label>
+                      <input
+                        type="text"
+                        value={theme.teamBSubtext || 'BOWLING'}
+                        onChange={(e) => setTheme(prev => ({ ...prev, teamBSubtext: e.target.value }))}
+                        className="w-full px-3 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 uppercase"
+                        placeholder="e.g. BOWLING"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 pt-1">
                     <input
                       type="color"
                       value={theme.teamBColor}
@@ -1477,13 +1761,14 @@ export const BroadcastThemeStudio: React.FC = () => {
                       className="w-12 h-10 rounded-lg cursor-pointer border border-slate-300 dark:border-slate-700 bg-transparent"
                     />
                     <div className="flex flex-wrap gap-1.5">
-                      {['#00529b', '#2563eb', '#1d4ed8', '#0284c7', '#0891b2', '#4338ca'].map(c => (
+                      {['#c8102e', '#680816', '#00529b', '#2563eb', '#1d4ed8', '#0284c7', '#0891b2'].map(c => (
                         <button
                           key={c}
                           type="button"
                           onClick={() => setTheme(prev => ({ ...prev, teamBColor: c }))}
                           className="w-6 h-6 rounded-full border border-black/10 cursor-pointer transition-transform hover:scale-110"
                           style={{ backgroundColor: c }}
+                          title={c}
                         />
                       ))}
                     </div>
@@ -1501,6 +1786,8 @@ export const BroadcastThemeStudio: React.FC = () => {
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {[
+                      { id: 'star-tv-broadcast', label: '⭐ Star TV Pro (Official Reference)', desc: 'Slanted Royal Blue & Crimson polygons with Elevated Center Shield Score & Ball Dots' },
+                      { id: 'single-line', label: '⚡ Single-Line Scorebug (Recommended)', desc: 'All match details, batters, bowler & ball dots in 1 continuous TV line' },
                       { id: 'ribbon-full', label: 'Full Ribbon', desc: 'Standard IPL / World Cup Lower Third' },
                       { id: 'slanted-pro-design', label: 'Slanted Pro Ribbon', desc: 'Angled Polygons & Sports Chamfers' },
                       { id: 'docked-corner', label: 'Docked Corner Bug', desc: 'Corner Compact Broadcast Box' },

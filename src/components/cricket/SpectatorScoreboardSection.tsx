@@ -17,7 +17,8 @@ import {
   subscribeToRealtimeDBMatchesList,
   subscribeToRealtimeDBCompletedMatch,
   subscribeToCricketMatchesCollection,
-  subscribeToCricketMatchDoc
+  subscribeToCricketMatchDoc,
+  subscribeToDeletedMatches
 } from '../../lib/firebase';
 import { subscribeToLiveSummary } from '../../services/cricketDb';
 import { liveFanOutClient } from './modules/LiveFanOutClient';
@@ -459,7 +460,6 @@ export const LiveMatchGlobalBanner = () => {
         }
         remoteIds.add(m.id);
       });
-      pruneDeletedMatchesFromStorage(remoteIds);
       // Sort most recently updated first
       active.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
       setLiveMatches(active);
@@ -470,7 +470,12 @@ export const LiveMatchGlobalBanner = () => {
     const handleDeletedEvent = (e: any) => {
       const id = e?.detail?.id;
       if (id) {
-        setLiveMatches(prev => prev.filter(m => m.id !== id));
+        queueMicrotask(() => {
+          setLiveMatches(prev => {
+            if (!prev.some(m => m.id === id)) return prev;
+            return prev.filter(m => m.id !== id);
+          });
+        });
       }
     };
     window.addEventListener('cricket_match_deleted', handleDeletedEvent);
@@ -736,15 +741,11 @@ export const LiveMatchGlobalBanner = () => {
 };
 
 export const SpectatorScoreboardSection = ({ 
-  homepageMode = false,
-  bannerMode = false
+  homepageMode = false
 }: { 
   homepageMode?: boolean;
   bannerMode?: boolean;
 }) => {
-  if (bannerMode) {
-    return <LiveMatchGlobalBanner />;
-  }
   const [searchParams, setSearchParams] = useSearchParams();
   const { settings: cmsSettings, loading: cmsSettingsLoading } = useSiteSettings();
   const { isScoreManager } = useAuth();
@@ -790,11 +791,13 @@ export const SpectatorScoreboardSection = ({
   
   const [allMatches, setAllMatches] = useState<MatchState[]>(() => {
     try {
-      return getLocalMatches();
+      return getLocalMatches().filter(m => m && !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && !(m as any).isDeleted && m.status !== 'deleted');
     } catch (_) {
       return [];
     }
   });
+  const remoteCompletedMatchIdsRef = useRef<Set<string> | null>(null);
+  const isFirestoreCollectionLoadedRef = useRef<boolean>(false);
   const [hasInitialMatchesLoaded, setHasInitialMatchesLoaded] = useState(false);
   const [localSelectedMatchId, setLocalSelectedMatchId] = useState<string>(() => {
     if (homepageMode) return '';
@@ -1179,6 +1182,7 @@ export const SpectatorScoreboardSection = ({
       setLastRefreshed(new Date());
       const remoteMatches: MatchState[] = [];
       const remoteIds = new Set<string>();
+      const remoteCompletedIds = new Set<string>();
 
       snap.forEach((docSnap: any) => {
         const data = docSnap.data();
@@ -1193,15 +1197,21 @@ export const SpectatorScoreboardSection = ({
 
         remoteMatches.push(m);
         remoteIds.add(m.id);
+        if (m.status === 'completed') {
+          remoteCompletedIds.add(m.id);
+        }
       });
+
+      remoteCompletedMatchIdsRef.current = remoteCompletedIds;
+      isFirestoreCollectionLoadedRef.current = true;
 
       // Prune any deleted matches from local storage on this spectator device
       pruneDeletedMatchesFromStorage(remoteIds);
 
       // Merge with any active or local matches stored in localStorage
-      const localMatches = getLocalMatches().filter(lm => lm.status !== 'deleted' && !(lm as any).isDeleted && !isDemoOrAIMatch(lm));
+      const localMatches = getLocalMatches().filter(lm => lm.status !== 'deleted' && !(lm as any).isDeleted && !isMatchDeleted(lm.id) && !isDemoOrAIMatch(lm));
       const activeLocal = getActiveMatch();
-      if (activeLocal && activeLocal.status !== 'deleted' && !(activeLocal as any).isDeleted && !isDemoOrAIMatch(activeLocal) && !localMatches.some(l => l.id === activeLocal.id)) {
+      if (activeLocal && activeLocal.status !== 'deleted' && !(activeLocal as any).isDeleted && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal) && !localMatches.some(l => l.id === activeLocal.id)) {
         localMatches.push(activeLocal);
       }
 
@@ -1209,11 +1219,25 @@ export const SpectatorScoreboardSection = ({
       remoteMatches.forEach(rm => matchMap.set(rm.id, rm));
       localMatches.forEach(lm => {
         if (!matchMap.has(lm.id)) {
-          matchMap.set(lm.id, lm);
+          // If a completed match is NOT in Firestore, it was deleted by an admin.
+          // Never resurrect completed records that do not exist on the remote database.
+          if (lm.status === 'completed' && !remoteIds.has(lm.id)) {
+            markMatchDeleted(lm.id);
+            deleteLocalMatch(lm.id);
+            return;
+          }
+          if (!isMatchDeleted(lm.id) && !(lm as any).isDeleted && lm.status !== 'deleted') {
+            matchMap.set(lm.id, lm);
+          }
         }
       });
 
-      const combined = Array.from(matchMap.values());
+      const combined = Array.from(matchMap.values()).filter(m => 
+        !isMatchDeleted(m.id) && 
+        !(m as any).isDeleted && 
+        m.status !== 'deleted' &&
+        !(m.status === 'completed' && !remoteCompletedIds.has(m.id))
+      );
 
       // Sort matches: live matches first, ordered by latest update / date
       combined.sort((a, b) => {
@@ -1243,18 +1267,29 @@ export const SpectatorScoreboardSection = ({
         const map = new Map<string, MatchState>();
         prev.forEach(p => {
           if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted && !isDemoOrAIMatch(p)) {
+            if (p.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(p.id)) {
+              return;
+            }
             map.set(p.id, p);
           }
         });
         rtdbMatches.forEach(rm => {
           if (rm && rm.id && !isMatchDeleted(rm.id) && rm.status !== 'deleted' && !(rm as any).isDeleted && !isDemoOrAIMatch(rm)) {
+            if (rm.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(rm.id)) {
+              return;
+            }
             const existing = map.get(rm.id);
             if (!existing || (rm.updatedAt || 0) >= (existing.updatedAt || 0) || rm.status === 'completed') {
               map.set(rm.id, { ...(existing || {}), ...rm });
             }
           }
         });
-        const combined = Array.from(map.values());
+        const combined = Array.from(map.values()).filter(m => 
+          !isMatchDeleted(m.id) && 
+          !(m as any).isDeleted && 
+          m.status !== 'deleted' &&
+          !(m.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(m.id))
+        );
         combined.sort((a, b) => {
           if (a.status === 'live' && b.status !== 'live') return -1;
           if (b.status === 'live' && a.status !== 'live') return 1;
@@ -1268,24 +1303,101 @@ export const SpectatorScoreboardSection = ({
 
     // Realtime Database completed match listener for instant match result propagation across devices
     const unsubCompleted = subscribeToRealtimeDBCompletedMatch((completedMatch: any) => {
-      if (completedMatch && completedMatch.id && !isDemoOrAIMatch(completedMatch)) {
-        setAllMatches(prev => {
-          const idx = prev.findIndex(m => m.id === completedMatch.id);
-          if (idx >= 0) {
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], ...completedMatch, status: 'completed' };
-            return copy;
+      if (
+        !completedMatch || 
+        !completedMatch.id || 
+        isDemoOrAIMatch(completedMatch) || 
+        isMatchDeleted(completedMatch.id) || 
+        (completedMatch as any).isDeleted || 
+        completedMatch.status === 'deleted'
+      ) {
+        if (completedMatch?.id) {
+          markMatchDeleted(completedMatch.id);
+          deleteLocalMatch(completedMatch.id);
+          if (remoteCompletedMatchIdsRef.current) {
+            remoteCompletedMatchIdsRef.current.delete(completedMatch.id);
           }
-          return [completedMatch, ...prev];
-        });
-        setSelectedMatch(current => {
-          if (current && current.id === completedMatch.id) {
-            return { ...current, ...completedMatch, status: 'completed' };
+          liveFanOutClient.purgeMatch(completedMatch.id);
+          setAllMatches(prev => prev.filter(m => m && m.id !== completedMatch.id && !isMatchDeleted(m.id)));
+        }
+        return;
+      }
+
+      // If Firestore has loaded, completed match MUST exist in Firestore
+      if (isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(completedMatch.id)) {
+        markMatchDeleted(completedMatch.id);
+        deleteLocalMatch(completedMatch.id);
+        if (remoteCompletedMatchIdsRef.current) {
+          remoteCompletedMatchIdsRef.current.delete(completedMatch.id);
+        }
+        liveFanOutClient.purgeMatch(completedMatch.id);
+        setAllMatches(prev => prev.filter(m => m && m.id !== completedMatch.id && !isMatchDeleted(m.id)));
+        return;
+      }
+
+      setAllMatches(prev => {
+        const idx = prev.findIndex(m => m.id === completedMatch.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = { ...copy[idx], ...completedMatch, status: 'completed' };
+          return copy;
+        }
+        return [completedMatch, ...prev];
+      });
+      setSelectedMatch(current => {
+        if (current && current.id === completedMatch.id) {
+          return { ...current, ...completedMatch, status: 'completed' };
+        }
+        return current;
+      });
+    });
+
+    // Real-time listener for Firestore cricket_deleted_matches tombstone collection
+    const unsubDeleted = subscribeToDeletedMatches((deletedIds) => {
+      if (deletedIds && deletedIds.length > 0) {
+        deletedIds.forEach(id => {
+          markMatchDeleted(id);
+          deleteLocalMatch(id);
+          if (remoteCompletedMatchIdsRef.current) {
+            remoteCompletedMatchIdsRef.current.delete(id);
           }
-          return current;
+          liveFanOutClient.purgeMatch(id);
         });
+        setAllMatches(prev => prev.filter(m => m && !deletedIds.includes(m.id) && !isMatchDeleted(m.id)));
+        setSelectedMatch(current => (current && (deletedIds.includes(current.id) || isMatchDeleted(current.id)) ? null : current));
       }
     });
+
+    // Initial server tombstone fetch to purge any matches deleted while offline or on another tab
+    fetch('/api/cricket/deleted-matches')
+      .then(res => res.json())
+      .then(data => {
+        if (data && Array.isArray(data.deletedIds) && data.deletedIds.length > 0) {
+          data.deletedIds.forEach((id: string) => {
+            markMatchDeleted(id);
+            deleteLocalMatch(id);
+            if (remoteCompletedMatchIdsRef.current) {
+              remoteCompletedMatchIdsRef.current.delete(id);
+            }
+            liveFanOutClient.purgeMatch(id);
+          });
+          setAllMatches(prev => prev.filter(m => m && !data.deletedIds.includes(m.id) && !isMatchDeleted(m.id)));
+          setSelectedMatch(current => (current && (data.deletedIds.includes(current.id) || isMatchDeleted(current.id)) ? null : current));
+        }
+      })
+      .catch(() => {});
+
+    // Cross-tab storage listener to react when admin deletes matches in another tab
+    const handleStorage = (e: StorageEvent) => {
+      if (
+        e.key === 'cricket_deleted_matches_registry' ||
+        e.key === 'cricket_matches_local_registry' ||
+        e.key === 'cricket_active_match'
+      ) {
+        setAllMatches(prev => prev.filter(m => m && !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted'));
+      }
+    };
+    window.addEventListener('storage', handleStorage);
 
     // Subscribe to cross-tab / cross-component match sync
     const unsubSync = subscribeToMatchSync(() => {
@@ -1293,9 +1405,29 @@ export const SpectatorScoreboardSection = ({
       if (active.length > 0) {
         setAllMatches(prev => {
           const map = new Map<string, MatchState>();
-          prev.forEach(p => { if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted && !isDemoOrAIMatch(p)) map.set(p.id, p); });
-          active.forEach(a => { if (map.has(a.id) && !isMatchDeleted(a.id) && a.status !== 'deleted' && !(a as any).isDeleted && !isDemoOrAIMatch(a)) map.set(a.id, { ...map.get(a.id)!, ...a }); });
-          return Array.from(map.values());
+          prev.forEach(p => { 
+            if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted && !isDemoOrAIMatch(p)) {
+              if (p.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(p.id)) {
+                return;
+              }
+              map.set(p.id, p);
+            }
+          });
+          active.forEach(a => { 
+            if (map.has(a.id) && !isMatchDeleted(a.id) && a.status !== 'deleted' && !(a as any).isDeleted && !isDemoOrAIMatch(a)) {
+              if (a.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(a.id)) {
+                map.delete(a.id);
+                return;
+              }
+              map.set(a.id, { ...map.get(a.id)!, ...a });
+            }
+          });
+          return Array.from(map.values()).filter(m => 
+            !isMatchDeleted(m.id) && 
+            !(m as any).isDeleted && 
+            m.status !== 'deleted' &&
+            !(m.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(m.id))
+          );
         });
       }
       setSelectedMatch(current => (current && (isMatchDeleted(current.id) || current.status === 'deleted' || (current as any).isDeleted || isDemoOrAIMatch(current)) ? null : current));
@@ -1309,11 +1441,18 @@ export const SpectatorScoreboardSection = ({
         const map = new Map<string, MatchState>();
         prev.forEach(p => {
           if (!isMatchDeleted(p.id) && p.status !== 'deleted' && !(p as any).isDeleted && !isDemoOrAIMatch(p)) {
+            if (p.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(p.id)) {
+              return;
+            }
             map.set(p.id, p);
           }
         });
         feedData.matches.forEach(fm => {
           if (fm && fm.id && !isMatchDeleted(fm.id)) {
+            // Live fan-out feed is ONLY for live matches; completed matches must come from authoritative Firestore
+            if (fm.status === 'completed') {
+              return;
+            }
             const existing = map.get(fm.id);
             if (!existing) {
               // Minimal representation
@@ -1371,7 +1510,12 @@ export const SpectatorScoreboardSection = ({
             }
           }
         });
-        return Array.from(map.values());
+        return Array.from(map.values()).filter(m => 
+          !isMatchDeleted(m.id) && 
+          !(m as any).isDeleted && 
+          m.status !== 'deleted' &&
+          !(m.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(m.id))
+        );
       });
       setHasInitialMatchesLoaded(true);
     });
@@ -1379,8 +1523,13 @@ export const SpectatorScoreboardSection = ({
     const handleMatchDeleted = (e: any) => {
       const id = e?.detail?.id;
       if (id) {
-        setAllMatches(prev => prev.filter(m => m.id !== id));
-        setSelectedMatch(current => (current && current.id === id ? null : current));
+        markMatchDeleted(id);
+        if (remoteCompletedMatchIdsRef.current) {
+          remoteCompletedMatchIdsRef.current.delete(id);
+        }
+        liveFanOutClient.purgeMatch(id);
+        setAllMatches(prev => prev.filter(m => m && m.id !== id && !isMatchDeleted(m.id)));
+        setSelectedMatch(current => (current && (current.id === id || isMatchDeleted(current.id)) ? null : current));
       }
     };
     window.addEventListener('cricket_match_deleted', handleMatchDeleted);
@@ -1403,6 +1552,8 @@ export const SpectatorScoreboardSection = ({
       unsubRtdbList();
       unsubCompleted();
       unsubSync();
+      unsubDeleted();
+      window.removeEventListener('storage', handleStorage);
       window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
       window.removeEventListener('cricket_select_match', handleSelectMatchEvent);
     };
@@ -1745,6 +1896,12 @@ export const SpectatorScoreboardSection = ({
   const completedMatches = useMemo(() => allMatches.filter(m => {
     if (!m || m.status !== 'completed' || m.isHidden || m.isBlocked) return false;
     if ((m as any).hideResultCard === true) return false;
+    if ((m as any).isDeleted === true || m.status === 'deleted' || isMatchDeleted(m.id)) return false;
+    // Authoritative check: Once remote Firestore matches collection has synced,
+    // completed records MUST exist in the remote database. If missing from remote, it was deleted by an admin.
+    if (isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(m.id)) {
+      return false;
+    }
     try {
       const localHidden = JSON.parse(localStorage.getItem('cricket_hidden_result_card_ids') || '[]');
       if (Array.isArray(localHidden) && localHidden.includes(m.id)) return false;

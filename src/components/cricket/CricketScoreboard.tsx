@@ -41,7 +41,7 @@ import { DLSCalculatorModal } from './DLSCalculatorModal';
 import { SpinCoinModal, SpinCoinResult } from './SpinCoinModal';
 import { VoiceAssistedScorer } from './VoiceAssistedScorer';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
-import { computeFighterOfTheMatch } from '../../utils/certificateVerification';
+import { computeFighterOfTheMatch, extractSquadPlayersForCertificates } from '../../utils/certificateVerification';
 import { 
   deleteLocalMatch, 
   isMatchDeleted, 
@@ -911,9 +911,9 @@ export const CricketScoreboard: React.FC = () => {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [showCertificateModal, setShowCertificateModal] = useState(false);
   const [certificateAwardType, setCertificateAwardType] = useState<AwardType>('potm');
-  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | null>(null);
+  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | 'squad_pdf' | null>(null);
 
-  const handleDownloadAwardCertificate = (award: AwardType = 'potm', format?: 'png' | 'pdf') => {
+  const handleDownloadAwardCertificate = (award: AwardType = 'potm', format?: 'png' | 'pdf' | 'squad_pdf') => {
     setCertificateAwardType(award);
     setCertificateDownloadFormat(format || null);
     setShowCertificateModal(true);
@@ -6120,6 +6120,7 @@ export const CricketScoreboard: React.FC = () => {
         points: matchPerformanceHighlights.bestBowler.wickets * 25,
       } : undefined,
       fighterOfTheMatch: fighter || undefined,
+      squadPlayers: extractSquadPlayersForCertificates(match),
     };
   }, [match, playerOfTheMatch, matchPerformanceHighlights]);
 
@@ -8474,10 +8475,12 @@ export const CricketScoreboard: React.FC = () => {
                           <div className="pt-2 border-t border-white/5">
                             <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
                               <span>📐 Scoreboard Graphic Layout</span>
-                              <span className="text-rose-400 font-mono text-[7px]">6 DESIGNS</span>
+                              <span className="text-rose-400 font-mono text-[7px]">8 DESIGNS</span>
                             </span>
                             <div className="grid grid-cols-2 gap-1.5">
                               {[
+                                { id: 'star-tv-broadcast', label: '⭐ Star TV Pro', desc: 'Official Reference TV Bug' },
+                                { id: 'single-line', label: '⚡ Single-Line Scorebug', desc: 'All details in 1 continuous TV line' },
                                 { id: 'ribbon-full', label: '👑 Full Edge Ribbon', desc: 'Modern IPL Lower Third' },
                                 { id: 'slanted-pro-design', label: '📐 Slanted Modern', desc: 'Angled Polygon Panels' },
                                 { id: 'docked-corner', label: '📦 Docked Corner Bug', desc: 'ESPN/Sky Sports Corner Box' },
@@ -14932,10 +14935,12 @@ export const CricketScoreboard: React.FC = () => {
                             <div className="pt-2 border-t border-white/5">
                               <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 flex items-center justify-between">
                                 <span>1B. Scoreboard Layout</span>
-                                <span className="text-rose-400 font-mono text-[8px]">6 DESIGNS</span>
+                                <span className="text-rose-400 font-mono text-[8px]">8 DESIGNS</span>
                               </span>
                               <div className="grid grid-cols-2 gap-1.5">
                                 {[
+                                  { id: 'star-tv-broadcast', label: '⭐ Star TV Pro', desc: 'Official TV Reference' },
+                                  { id: 'single-line', label: '⚡ Single-Line', desc: 'All details in 1 line' },
                                   { id: 'ribbon-full', label: 'Full Ribbon', desc: 'IPL Lower Third' },
                                   { id: 'slanted-pro-design', label: 'Slanted Ribbon', desc: 'Angled Polygon' },
                                   { id: 'docked-corner', label: 'Docked Bug', desc: 'Corner TV Box' },
@@ -18745,6 +18750,48 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* 1-Click All-Squad PDF for Tournament Conclusion */}
+                  <div className="p-3 bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-slate-900 border border-emerald-500/40 rounded-2xl shadow-lg">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center font-black shadow-md">
+                          <Users size={16} />
+                        </div>
+                        <div className="text-left">
+                          <h4 className="text-xs font-black uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                            <span>1-Click All-Squad PDF</span>
+                            <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 text-[9px] font-black uppercase">
+                              11–15 Players
+                            </span>
+                          </h4>
+                          <p className="text-[10px] text-slate-400 font-medium">
+                            Generate multi-page certified PDF for full squad at tournament conclusion
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAwardCertificate('champion_squad', 'squad_pdf')}
+                        className="py-2 px-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer border-none shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <FileText size={12} />
+                        <span>Download Squad PDF</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAwardCertificate('champion_squad')}
+                        className="py-2 px-2.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+                      >
+                        <Award size={12} />
+                        <span>Customize Roster</span>
+                      </button>
+                    </div>
+                  </div>
 
                   <button
                     onClick={handleExportMatchPDF}

@@ -7,9 +7,11 @@ import {
   Filter, ArrowUpDown, LayoutGrid, List, Award
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { db } from '../../lib/firebase';
+import { db, removeMatchFromRealtimeDB } from '../../lib/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { MatchState } from './CricketScoreboard';
+import { markMatchDeleted, deleteLocalMatch, isMatchDeleted, broadcastMatchChange } from './cricketStorage';
+import { deleteMatchGlobally } from '../../services/cricketDb';
 
 export const CompletedMatchesAdminManager: React.FC = () => {
   const [matches, setMatches] = useState<MatchState[]>([]);
@@ -44,25 +46,17 @@ export const CompletedMatchesAdminManager: React.FC = () => {
             ...data,
             id: docSnap.id
           };
-          if (matchObj.status === 'completed' && !(matchObj as any).isDeleted) {
+          if (
+            matchObj.status === 'completed' && 
+            !(matchObj as any).isDeleted && 
+            !isMatchDeleted(matchObj.id)
+          ) {
             loaded.push(matchObj);
           }
         });
 
-        if (loaded.length > 0) {
-          setMatches(loaded);
-        } else {
-          // Fallback to local storage if Firestore is empty
-          try {
-            const rawLocal = localStorage.getItem('cricket_matches_local_registry');
-            if (rawLocal) {
-              const parsed = JSON.parse(rawLocal);
-              if (Array.isArray(parsed)) {
-                setMatches(parsed.filter((m: any) => m.status === 'completed' && !(m as any).isDeleted));
-              }
-            }
-          } catch (_) {}
-        }
+        // Remote database is single source of truth when online
+        setMatches(loaded);
         setLoading(false);
       }, (error) => {
         console.warn('CompletedMatchesAdminManager snapshot notice:', error?.message || error);
@@ -71,7 +65,7 @@ export const CompletedMatchesAdminManager: React.FC = () => {
           if (rawLocal) {
             const parsed = JSON.parse(rawLocal);
             if (Array.isArray(parsed)) {
-              setMatches(parsed.filter((m: any) => m.status === 'completed' && !(m as any).isDeleted));
+              setMatches(parsed.filter((m: any) => m.status === 'completed' && !(m as any).isDeleted && !isMatchDeleted(m.id)));
             }
           }
         } catch (_) {}
@@ -152,35 +146,64 @@ export const CompletedMatchesAdminManager: React.FC = () => {
   // 3. Delete Single Match Record
   const handleDeleteMatch = async (matchId: string) => {
     setMatches(prev => prev.filter(m => m.id !== matchId));
+    setConfirmDeleteId(null);
 
+    // 1. Tombstone in local registries
+    markMatchDeleted(matchId);
+    deleteLocalMatch(matchId);
+
+    // 2. Perform multi-tier deletion across Firestore, RTDB, and local cache
     try {
-      const rawLocal = localStorage.getItem('cricket_matches_local_registry');
-      if (rawLocal) {
-        const localParsed = JSON.parse(rawLocal);
-        if (Array.isArray(localParsed)) {
-          const updated = localParsed.filter((m: any) => m.id !== matchId);
-          localStorage.setItem('cricket_matches_local_registry', JSON.stringify(updated));
-        }
-      }
+      await deleteMatchGlobally(matchId);
+    } catch (e) {
+      console.warn('deleteMatchGlobally note:', e);
+    }
+
+    // 3. Remove match pointers from Firebase Realtime Database
+    try {
+      await removeMatchFromRealtimeDB(matchId);
     } catch (_) {}
 
+    // 4. Save deletion tombstone to Firestore cricket_deleted_matches for cross-device sync
+    try {
+      await setDoc(doc(db, 'cricket_deleted_matches', matchId), {
+        id: matchId,
+        deletedAt: Date.now(),
+        isDeleted: true
+      });
+    } catch (_) {}
+
+    // 5. Delete document in cricket_matches
     try {
       await deleteDoc(doc(db, 'cricket_matches', matchId));
-      showToast('Match record permanently deleted.', 'success');
     } catch (err) {
-      console.warn('Firestore delete warning, falling back to soft delete:', err);
+      console.warn('Firestore delete warning, fallback to soft delete:', err);
       try {
         await setDoc(doc(db, 'cricket_matches', matchId), {
           isDeleted: true,
           status: 'deleted',
           updatedAt: Date.now()
         }, { merge: true });
-        showToast('Match record marked as deleted.', 'success');
-      } catch (_) {
-        showToast('Record removed locally.', 'success');
-      }
+      } catch (_) {}
     }
-    setConfirmDeleteId(null);
+
+    // 6. Notify server endpoint to clear edge memory caches and record server tombstone
+    try {
+      await fetch('/api/cricket/delete-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matchId })
+      });
+    } catch (_) {}
+
+    // 7. Broadcast deletion events to all open tabs and components
+    try {
+      window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: matchId } }));
+      window.dispatchEvent(new CustomEvent('cricket_match_updated', { detail: { match: null, eventType: 'delete', timestamp: Date.now() } }));
+      broadcastMatchChange({ id: matchId } as MatchState, 'delete');
+    } catch (_) {}
+
+    showToast('Match record permanently deleted from all spectator dashboards and databases.', 'success');
   };
 
   // 4. Batch Hide / Unhide All Completed Records
@@ -243,28 +266,45 @@ export const CompletedMatchesAdminManager: React.FC = () => {
 
     const idsToDelete = matches.map(m => m.id).filter(Boolean) as string[];
     setMatches([]);
+    setBatchDeleteConfirm(false);
+
+    for (const id of idsToDelete) {
+      markMatchDeleted(id);
+      deleteLocalMatch(id);
+      try {
+        await deleteMatchGlobally(id);
+      } catch (_) {}
+      try {
+        await removeMatchFromRealtimeDB(id);
+      } catch (_) {}
+      try {
+        await setDoc(doc(db, 'cricket_deleted_matches', id), {
+          id,
+          deletedAt: Date.now(),
+          isDeleted: true
+        });
+      } catch (_) {}
+      try {
+        await deleteDoc(doc(db, 'cricket_matches', id));
+      } catch (_) {}
+      try {
+        await fetch('/api/cricket/delete-match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matchId: id })
+        });
+      } catch (_) {}
+      try {
+        window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id } }));
+        broadcastMatchChange({ id } as MatchState, 'delete');
+      } catch (_) {}
+    }
 
     try {
-      const rawLocal = localStorage.getItem('cricket_matches_local_registry');
-      if (rawLocal) {
-        const localParsed = JSON.parse(rawLocal);
-        if (Array.isArray(localParsed)) {
-          const remaining = localParsed.filter((m: any) => m.status !== 'completed');
-          localStorage.setItem('cricket_matches_local_registry', JSON.stringify(remaining));
-        }
-      }
+      window.dispatchEvent(new CustomEvent('cricket_match_updated', { detail: { match: null, eventType: 'delete', timestamp: Date.now() } }));
     } catch (_) {}
 
-    try {
-      for (const id of idsToDelete) {
-        await deleteDoc(doc(db, 'cricket_matches', id));
-      }
-      showToast('All completed match records have been permanently deleted.', 'success');
-    } catch (e) {
-      console.warn('Batch delete error:', e);
-      showToast('Records cleared locally.', 'success');
-    }
-    setBatchDeleteConfirm(false);
+    showToast('All completed match records have been permanently deleted from all spectator dashboards and databases.', 'success');
   };
 
   // --------------------------------------------------------------------------

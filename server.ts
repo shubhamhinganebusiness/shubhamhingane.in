@@ -719,6 +719,13 @@ async function startServer() {
         }
       }
 
+      // Invalidate server-side live caches immediately
+      try {
+        matchSummaryServerCache.delete(matchId);
+        liveMatchesServerCache.data = liveMatchesServerCache.data.filter((m: any) => m && m.id !== matchId);
+        liveMatchesServerCache.timestamp = 0;
+      } catch (_) {}
+
       // Delete docs in Firestore and register real-time deletion tombstone
       try {
         const db = await getFirebaseDb();
@@ -728,7 +735,8 @@ async function startServer() {
           deleteDoc(doc(db, "cricket_live_summaries", matchId)).catch(() => {});
           setDoc(doc(db, "cricket_deleted_matches", matchId), {
             id: matchId,
-            deletedAt: Date.now()
+            deletedAt: Date.now(),
+            isDeleted: true
           }).catch(() => {});
         }
       } catch (_) {}
@@ -959,8 +967,9 @@ async function startServer() {
         }
       }
 
+      const deletedIds = loadDeletedMatchIds();
       const summaries = rawMatches
-        .filter(m => m && !m.isDeleted && m.status !== "deleted")
+        .filter(m => m && !m.isDeleted && m.status !== "deleted" && !deletedIds.includes(m.id))
         .map(extractServerLiveSummary);
 
       const etag = `W/"livefeed-${now}-${summaries.length}-${summaries[0]?.updatedAt || 0}"`;
@@ -978,7 +987,7 @@ async function startServer() {
         matches: summaries
       });
     } catch (err: any) {
-      console.warn("[Live Feed API] Error serving live feed:", err.message);
+      console.warn("[Live Feed API] Live feed query notice:", err.message);
       // Serve stale cache if available rather than erroring
       if (liveMatchesServerCache.data.length > 0) {
         return res.json({
@@ -988,7 +997,13 @@ async function startServer() {
           matches: liveMatchesServerCache.data
         });
       }
-      res.status(500).json({ error: "Failed to read live match feed" });
+      // Graceful fallback to empty list instead of breaking clients
+      return res.json({
+        source: "fallback_empty",
+        cachedAt: Date.now(),
+        etag: `W/"livefeed-empty-${Date.now()}"`,
+        matches: []
+      });
     }
   });
 

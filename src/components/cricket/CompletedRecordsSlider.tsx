@@ -22,6 +22,7 @@ import {
   Award
 } from 'lucide-react';
 import { MatchState, Innings } from './CricketScoreboard';
+import { isMatchDeleted } from './cricketStorage';
 import { db } from '../../lib/firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { DEFAULT_PRESET_SPONSORS } from '../../utils/cricketSponsorsStorage';
@@ -757,6 +758,10 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
   onExportPDF,
   onDownloadAward
 }) => {
+  const validMatches = (matches || []).filter(
+    m => m && m.id && !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted'
+  );
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isAutoPlay, setIsAutoPlay] = useState<boolean>(true);
   const [isHovered, setIsHovered] = useState<boolean>(false);
@@ -834,7 +839,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
       let minDistance = Infinity;
 
       cardElements.forEach((child, i) => {
-        if (i >= matches.length) return; // skip trailing spacer
+        if (i >= validMatches.length) return; // skip trailing spacer
         const childCenter = child.offsetLeft + child.offsetWidth / 2;
         const dist = Math.abs(containerCenter - childCenter);
         if (dist < minDistance) {
@@ -849,7 +854,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
 
   // Auto-slide effect when there is more than 1 completed record
   useEffect(() => {
-    if (!isAutoPlay || isHovered || matches.length <= 1) return;
+    if (!isAutoPlay || isHovered || validMatches.length <= 1) return;
 
     const timer = setInterval(() => {
       if (scrollRef.current) {
@@ -863,7 +868,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
     }, 6000);
 
     return () => clearInterval(timer);
-  }, [isAutoPlay, isHovered, matches.length]);
+  }, [isAutoPlay, isHovered, validMatches.length]);
 
   const handleShareWhatsApp = (m: MatchState, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -879,7 +884,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
     window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
   };
 
-  if (matches.length === 0) {
+  if (validMatches.length === 0) {
     return null;
   }
 
@@ -890,12 +895,12 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Top Header Controls Bar for the Slider */}
-      {matches.length > 1 && (
+      {validMatches.length > 1 && (
         <div className="flex items-center justify-between gap-2 mb-2.5 px-1">
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 bg-emerald-500/15 text-emerald-400 rounded-full text-[9px] font-mono font-bold uppercase tracking-wider border border-emerald-500/30 flex items-center gap-1.5">
               <Trophy size={11} className="text-amber-400" />
-              {matches.length} Concluded Matches
+              {validMatches.length} Concluded Matches
             </span>
             {adminAds.length > 0 && (
               <span className="px-2 py-0.5 bg-amber-500/15 text-amber-300 rounded-full text-[8.5px] font-mono font-bold uppercase tracking-wider border border-amber-500/30 hidden sm:inline-flex items-center gap-1">
@@ -942,7 +947,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
                 ◀
               </button>
               <span className="text-[9px] font-mono font-bold text-emerald-400 px-1">
-                {activeIndex + 1}/{matches.length}
+                {activeIndex + 1}/{validMatches.length}
               </span>
               <button
                 type="button"
@@ -958,7 +963,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
       )}
 
       {/* Floating Side Navigation Chevron Buttons */}
-      {matches.length > 1 && (
+      {validMatches.length > 1 && (
         <>
           <div className="absolute -left-2 sm:-left-5 md:-left-7 top-[48%] -translate-y-1/2 z-30 opacity-0 group-hover/slider:opacity-100 transition-all duration-300 hidden sm:block pointer-events-auto">
             <button 
@@ -990,7 +995,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
         className="flex overflow-x-auto gap-4 sm:gap-6 custom-scrollbar snap-x snap-mandatory scroll-smooth p-1 sm:p-2 no-scrollbar pb-3"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
-        {matches.map((match, idx) => (
+        {validMatches.map((match, idx) => (
           <CompletedMatchCard
             key={match.id}
             match={match}
@@ -1008,17 +1013,17 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
       </div>
 
       {/* Result Slider Pagination Dots & Direct Selector */}
-      {matches.length > 1 && (
+      {validMatches.length > 1 && (
         <div className="flex items-center justify-between px-2 pt-1.5">
           <div className="text-[10px] font-mono font-bold text-slate-400">
             <span>Match </span>
             <span className="text-emerald-400 font-black">{activeIndex + 1}</span>
             <span> of </span>
-            <span>{matches.length}</span>
+            <span>{validMatches.length}</span>
           </div>
 
           <div className="flex items-center gap-1.5 bg-slate-900/90 px-2.5 py-1 rounded-full border border-slate-800 shadow-sm backdrop-blur-sm">
-            {matches.map((match, idx) => (
+            {validMatches.map((match, idx) => (
               <button
                 key={match.id}
                 type="button"
@@ -1034,7 +1039,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
           </div>
 
           <div className="text-[10px] font-mono text-slate-500 hidden sm:block">
-            {matches[activeIndex] ? `ID: ${matches[activeIndex].id.substring(0, 8)}` : ''}
+            {validMatches[activeIndex] ? `ID: ${validMatches[activeIndex].id.substring(0, 8)}` : ''}
           </div>
         </div>
       )}

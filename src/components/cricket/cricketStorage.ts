@@ -405,26 +405,29 @@ export function unmarkMatchDeleted(id: string): void {
 /**
  * Dispatches sync events across components in the same window and across browser tabs
  */
-function broadcastMatchChange(match: MatchState | null, eventType: 'update' | 'delete' = 'update') {
+export function broadcastMatchChange(match: MatchState | null, eventType: 'update' | 'delete' = 'update') {
   if (typeof window === 'undefined') return;
 
-  try {
-    window.dispatchEvent(
-      new CustomEvent('cricket_match_updated', {
-        detail: { match, eventType, timestamp: Date.now() }
-      })
-    );
-  } catch (e) {
-    console.warn('CustomEvent dispatch error:', e);
-  }
-
-  try {
-    if (broadcastChannel) {
-      broadcastChannel.postMessage({ match, eventType, timestamp: Date.now() });
+  // Defer event dispatch to next tick to ensure no active React render phase is interrupted
+  setTimeout(() => {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('cricket_match_updated', {
+          detail: { match, eventType, timestamp: Date.now() }
+        })
+      );
+    } catch (e) {
+      console.warn('CustomEvent dispatch error:', e);
     }
-  } catch (e) {
-    console.warn('BroadcastChannel postMessage error:', e);
-  }
+
+    try {
+      if (broadcastChannel) {
+        broadcastChannel.postMessage({ match, eventType, timestamp: Date.now() });
+      }
+    } catch (e) {
+      console.warn('BroadcastChannel postMessage error:', e);
+    }
+  }, 0);
 }
 
 /**
@@ -437,7 +440,7 @@ export function getActiveMatch(): MatchState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as MatchState;
     if (parsed && parsed.id) {
-      if (isMatchDeleted(parsed.id) || isDemoOrAIMatch(parsed)) {
+      if (isMatchDeleted(parsed.id) || (parsed as any).isDeleted === true || parsed.status === 'deleted' || isDemoOrAIMatch(parsed)) {
         localStorage.removeItem(ACTIVE_MATCH_KEY);
         return null;
       }
@@ -455,7 +458,7 @@ export function getActiveMatch(): MatchState | null {
 export function setActiveMatch(match: MatchState | null): void {
   if (typeof window === 'undefined') return;
   try {
-    if (!match || match.status === 'completed' || isDemoOrAIMatch(match) || isMatchDeleted(match.id)) {
+    if (!match || match.status === 'completed' || isDemoOrAIMatch(match) || isMatchDeleted(match.id) || (match as any).isDeleted === true) {
       localStorage.removeItem(ACTIVE_MATCH_KEY);
       broadcastMatchChange(match, 'update');
     } else {
@@ -482,7 +485,14 @@ export function getLocalMatches(): MatchState[] {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          if (item && item.id && !isMatchDeleted(item.id) && !isDemoOrAIMatch(item)) {
+          if (
+            item && 
+            item.id && 
+            !isMatchDeleted(item.id) && 
+            !(item as any).isDeleted && 
+            item.status !== 'deleted' && 
+            !isDemoOrAIMatch(item)
+          ) {
             list.push(item);
           }
         }
@@ -494,7 +504,14 @@ export function getLocalMatches(): MatchState[] {
 
   // Ensure active match is present in the list
   const active = getActiveMatch();
-  if (active && active.id && !isMatchDeleted(active.id) && !isDemoOrAIMatch(active)) {
+  if (
+    active && 
+    active.id && 
+    !isMatchDeleted(active.id) && 
+    !(active as any).isDeleted && 
+    active.status !== 'deleted' && 
+    !isDemoOrAIMatch(active)
+  ) {
     const existingIdx = list.findIndex(m => m.id === active.id);
     if (existingIdx >= 0) {
       // If active match is newer, replace it
@@ -593,6 +610,18 @@ export function deleteLocalMatch(id: string): void {
       }
     }
 
+    // Clean custom past matches if present
+    try {
+      const customRaw = localStorage.getItem('cricket_custom_past_matches');
+      if (customRaw) {
+        const parsed = JSON.parse(customRaw);
+        if (Array.isArray(parsed)) {
+          const remaining = parsed.filter((item: any) => item && item.id !== id);
+          localStorage.setItem('cricket_custom_past_matches', JSON.stringify(remaining));
+        }
+      }
+    } catch (_) {}
+
     // Clean offline pending queue if it contains this match
     try {
       const pendingRaw = localStorage.getItem(OFFLINE_PENDING_KEY);
@@ -606,7 +635,11 @@ export function deleteLocalMatch(id: string): void {
 
     // Broadcast delete event to all tabs and listeners
     broadcastMatchChange({ id } as MatchState, 'delete');
-    window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id } }));
+    setTimeout(() => {
+      try {
+        window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id } }));
+      } catch (_) {}
+    }, 0);
   } catch (e) {
     console.warn('Failed to delete match from local storage:', e);
   }
@@ -645,9 +678,11 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
               if (!isFreshOfflineDraft) {
                 // Was deleted remotely on another device (e.g. laptop)
                 markMatchDeleted(item.id);
-                try {
-                  window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: item.id } }));
-                } catch (_) {}
+                setTimeout(() => {
+                  try {
+                    window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: item.id } }));
+                  } catch (_) {}
+                }, 0);
                 return false;
               }
             }
@@ -678,9 +713,11 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
           if (!isFreshOfflineDraft) {
             shouldPurgeActive = true;
             markMatchDeleted(active.id);
-            try {
-              window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: active.id } }));
-            } catch (_) {}
+            setTimeout(() => {
+              try {
+                window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: active.id } }));
+              } catch (_) {}
+            }, 0);
           }
         }
 
@@ -708,7 +745,14 @@ export function purgeCachedAIMatches(): void {
       .then(res => res.json())
       .then(data => {
         if (data && Array.isArray(data.deletedIds)) {
-          data.deletedIds.forEach((id: string) => markMatchDeleted(id));
+          data.deletedIds.forEach((id: string) => {
+            markMatchDeleted(id);
+            setTimeout(() => {
+              try {
+                window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id } }));
+              } catch (_) {}
+            }, 0);
+          });
         }
       })
       .catch(() => {});
@@ -766,7 +810,11 @@ export function purgeCachedAIMatches(): void {
     }
 
     // Dispatch update notification so UI reactively rerenders cleanly
-    window.dispatchEvent(new CustomEvent('cricket_match_updated', { detail: { eventType: 'update' } }));
+    setTimeout(() => {
+      try {
+        window.dispatchEvent(new CustomEvent('cricket_match_updated', { detail: { eventType: 'update' } }));
+      } catch (_) {}
+    }, 0);
   } catch (err) {
     console.warn('[cricketStorage] purgeCachedAIMatches note:', err);
   }

@@ -1,9 +1,46 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Trophy, Award, Download, Share2, Check, X, Sparkles, Star, ShieldCheck, Flame, Medal, Zap } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { 
+  Trophy, 
+  Award, 
+  Download, 
+  Share2, 
+  Check, 
+  X, 
+  Sparkles, 
+  Star, 
+  ShieldCheck, 
+  Flame, 
+  Medal, 
+  Zap,
+  Users,
+  CheckSquare,
+  Square,
+  Search,
+  FileCheck,
+  Printer,
+  Layers,
+  Eye,
+  Loader2,
+  Package,
+  ArrowRight,
+  UserPlus,
+  Trash2,
+  FileText,
+  CheckCircle2,
+  ChevronRight,
+  Plus
+} from 'lucide-react';
 import { jsPDF } from 'jspdf';
+import JSZip from 'jszip';
 import { QRCodeSVG } from 'qrcode.react';
 import { subscribeCertificateConfig, DEFAULT_CERTIFICATE_CONFIG, CertificateConfigSettings } from '../../utils/certificateConfigStorage';
-import { generateCertificateSerial, buildCertificateVerificationUrl, AwardType } from '../../utils/certificateVerification';
+import { 
+  generateCertificateSerial, 
+  buildCertificateVerificationUrl, 
+  AwardType,
+  SquadPlayerCertificateItem,
+  extractSquadPlayersForCertificates 
+} from '../../utils/certificateVerification';
 
 export type { AwardType };
 
@@ -37,6 +74,7 @@ export interface MatchCertificateData {
   sponsorName?: string;
   federationName?: string;
   serialNumber?: string;
+  squadPlayers?: SquadPlayerCertificateItem[];
 }
 
 export interface CertificateTheme {
@@ -693,7 +731,7 @@ function fallbackDrawQrGrid(ctx: CanvasRenderingContext2D, x: number, y: number,
   }
 }
 
-interface CanvasRenderOptions {
+export interface CanvasRenderOptions {
   data: MatchCertificateData;
   selectedAward: AwardType;
   recipient: AwardPlayer;
@@ -711,7 +749,7 @@ interface CanvasRenderOptions {
   };
 }
 
-async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTMLCanvasElement> {
+export async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTMLCanvasElement> {
   const {
     data,
     recipient,
@@ -908,9 +946,16 @@ async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTM
   // Award Reason with Formal Athletic Phrasing
   ctx.font = '700 16px system-ui, sans-serif';
   ctx.fillStyle = theme.bodyText;
-  const prefixText = selectedAward === 'fighter'
-    ? 'adjudged for valorous fighting determination as '
-    : 'adjudged for exceptional match-winning performance as ';
+  let prefixText = 'adjudged for exceptional match-winning performance as ';
+  if (selectedAward === 'fighter') {
+    prefixText = 'adjudged for valorous fighting determination as ';
+  } else if (selectedAward === 'champion_squad') {
+    prefixText = 'conferred in high sporting honor as an official member of ';
+  } else if (selectedAward === 'runner_up_squad') {
+    prefixText = 'conferred for valiant sportsmanship as an official member of ';
+  } else if (selectedAward === 'participation') {
+    prefixText = 'presented in official match appreciation for representing ';
+  }
   const awardNameText = awardConfig.en;
   const prefixW = ctx.measureText(prefixText).width;
   ctx.font = '900 17px system-ui, sans-serif';
@@ -967,7 +1012,7 @@ async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTM
   ctx.font = '600 12px monospace, system-ui';
   const c1Sub = recipient.balls
     ? `${recipient.balls}b (${recipient.fours || 0}x4, ${recipient.sixes || 0}x6)`
-    : 'Key Match Contribution';
+    : (recipient.runs > 0 ? `${recipient.runs} runs scored` : 'Key Squad Member');
   ctx.fillText(c1Sub, c1X + cardW / 2, cardsY + 128);
 
   // Card 2: Wickets Taken
@@ -987,9 +1032,9 @@ async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTM
   ctx.fillStyle = theme.mutedText;
   ctx.font = '600 12px monospace, system-ui';
   const c2Sub =
-    recipient.runsConceded !== undefined
+    recipient.runsConceded !== undefined && recipient.runsConceded > 0
       ? `${recipient.runsConceded} runs conceded`
-      : 'Impact Bowling Phase';
+      : (recipient.wickets > 0 ? `${recipient.wickets} wickets taken` : 'Fielding & Tactical Unit');
   ctx.fillText(c2Sub, c2X + cardW / 2, cardsY + 128);
 
   // Card 3: MVP Rating
@@ -1008,7 +1053,10 @@ async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTM
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '800 12px system-ui, sans-serif';
-  ctx.fillText('GAME DECIDER', c3X + cardW / 2, cardsY + 128);
+  const c3Sub = (selectedAward === 'champion_squad' || selectedAward === 'runner_up_squad' || selectedAward === 'participation')
+    ? 'CHAMPIONSHIP SQUAD'
+    : 'GAME DECIDER';
+  ctx.fillText(c3Sub, c3X + cardW / 2, cardsY + 128);
 
   // 7. Footer Divider & 4-Quadrant Verification Bar
   ctx.strokeStyle = theme.secondaryBorder;
@@ -1145,12 +1193,156 @@ function triggerDownload(url: string, filename: string) {
   document.body.removeChild(link);
 }
 
-interface MatchAwardsCertificateModalProps {
+export interface GenerateAllSquadPdfOptions {
+  data: MatchCertificateData;
+  players: SquadPlayerCertificateItem[];
+  awardType?: AwardType;
+  teamName: string;
+  tournamentName?: string;
+  organizerName?: string;
+  sponsorName?: string;
+  federationName?: string;
+  themeId?: CertificateThemeId;
+  onProgress?: (current: number, total: number, currentPlayer: string) => void;
+}
+
+/**
+ * 1-Click Batch Generation Engine for Squads:
+ * Compiles certified individual certificates for all 11-15 players of the winning or participating
+ * team into a single unified multi-page landscape A4 PDF.
+ */
+export async function generateAllSquadMultiPagePDF(
+  opts: GenerateAllSquadPdfOptions
+): Promise<{ pdf: jsPDF; filename: string; count: number }> {
+  const {
+    data,
+    players,
+    awardType = 'champion_squad',
+    teamName,
+    tournamentName = data.tournamentName || 'Gully Premier League 2026',
+    organizerName = data.organizerName || 'Shubham Hingane',
+    sponsorName = data.sponsorName || 'Gully Scoreboard',
+    federationName = data.federationName || 'Gully Cricket Organizing Council',
+    themeId = 'classic_ivory',
+    onProgress
+  } = opts;
+
+  if (!players || players.length === 0) {
+    throw new Error('No players found in the selected squad roster.');
+  }
+
+  const pdf = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const awardConfigMap: Record<string, { en: string; mr: string; badge: string }> = {
+    champion_squad: {
+      en: 'CHAMPIONSHIP SQUAD WINNER',
+      mr: 'विजेता संघ मानकरी (Champions Squad)',
+      badge: 'CHAMPIONS TROPHY WINNER'
+    },
+    runner_up_squad: {
+      en: 'RUNNER-UP SQUAD CITATION',
+      mr: 'उपविजेता संघ गौरव (Runner-up Squad)',
+      badge: 'RUNNER-UP FINALIST'
+    },
+    participation: {
+      en: 'TOURNAMENT PARTICIPATION HONORS',
+      mr: 'सहभाग गौरव प्रमाणपत्र (Official Participation)',
+      badge: 'OFFICIAL SQUAD ACCLAIM'
+    },
+    potm: { en: 'PLAYER OF THE MATCH', mr: 'सामनावीर मानकरी', badge: '' },
+    best_batter: { en: 'BEST BATSMAN OF THE MATCH', mr: 'उत्कृष्ट फलंदाज', badge: 'POWER STRIKER' },
+    best_bowler: { en: 'BEST BOWLER OF THE MATCH', mr: 'उत्कृष्ट गोलंदाज', badge: 'GOLDEN ARM BOWLER' },
+    fighter: { en: 'FIGHTER OF THE MATCH', mr: 'झुंजार खेळाडू', badge: 'RUNNER-UP STANDOUT' }
+  };
+
+  const currentAwardConfig = awardConfigMap[awardType] || awardConfigMap.champion_squad;
+
+  for (let i = 0; i < players.length; i++) {
+    const p = players[i];
+    onProgress?.(i + 1, players.length, p.name);
+
+    const displayName = p.name + (p.isCaptain ? ' (C)' : '');
+    const playerSerial = generateCertificateSerial(
+      data.matchId || 'TOURN',
+      data.matchDate || new Date().toISOString().slice(0, 10),
+      awardType,
+      displayName
+    );
+
+    const playerVerificationUrl = buildCertificateVerificationUrl(playerSerial, {
+      matchId: data.matchId || 'TOURN',
+      awardType,
+      playerName: displayName,
+      runs: p.runs || 0,
+      balls: p.balls || 0,
+      fours: p.fours || 0,
+      sixes: p.sixes || 0,
+      wickets: p.wickets || 0,
+      runsConceded: p.runsConceded || 0,
+      points: p.points || 25,
+      teamA: data.teamA,
+      teamB: data.teamB,
+      winner: data.winner || teamName,
+      matchDate: data.matchDate,
+      tournamentName,
+      venue: data.venue
+    });
+
+    const canvas = await generateCertificateCanvas({
+      data: {
+        ...data,
+        winner: data.winner || teamName
+      },
+      selectedAward: awardType,
+      recipient: {
+        name: displayName,
+        runs: p.runs || 0,
+        balls: p.balls || 0,
+        fours: p.fours || 0,
+        sixes: p.sixes || 0,
+        wickets: p.wickets || 0,
+        runsConceded: p.runsConceded || 0,
+        points: p.points || 25
+      },
+      tournamentName,
+      organizerName,
+      sponsorName,
+      federationName,
+      themeId,
+      verificationUrl: playerVerificationUrl,
+      serialNumber: playerSerial,
+      awardConfig: currentAwardConfig
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+
+    if (i > 0) {
+      pdf.addPage('a4', 'landscape');
+    }
+    pdf.addImage(imgData, 'PNG', 0, 0, 297, 210, undefined, 'FAST');
+
+    // Yield control briefly to ensure UI progress bar is rendered smoothly
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  const safeTeam = (teamName || 'Squad').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `GullyScore_${awardType === 'champion_squad' ? 'Champions' : 'Squad'}_${safeTeam}_All_${players.length}_Players.pdf`;
+
+  pdf.save(filename);
+  return { pdf, filename, count: players.length };
+}
+
+export interface MatchAwardsCertificateModalProps {
   isOpen: boolean;
   onClose: () => void;
   data: MatchCertificateData;
   initialAward?: AwardType;
-  autoDownloadFormat?: 'png' | 'pdf' | null;
+  autoDownloadFormat?: 'png' | 'pdf' | 'squad_pdf' | null;
+  initialView?: 'individual' | 'squad_batch';
 }
 
 export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalProps> = ({
@@ -1158,9 +1350,17 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   onClose,
   data,
   initialAward = 'potm',
-  autoDownloadFormat = null
+  autoDownloadFormat = null,
+  initialView = 'individual'
 }) => {
-  const [selectedAward, setSelectedAward] = useState<AwardType>(initialAward);
+  const isInitialSquad = ['champion_squad', 'runner_up_squad', 'participation'].includes(initialAward) || initialView === 'squad_batch';
+  const [activeTab, setActiveTab] = useState<'individual' | 'squad_batch'>(
+    isInitialSquad ? 'squad_batch' : (initialView || 'individual')
+  );
+
+  const [selectedAward, setSelectedAward] = useState<AwardType>(
+    ['champion_squad', 'runner_up_squad', 'participation'].includes(initialAward) ? 'potm' : initialAward
+  );
   const [selectedTheme, setSelectedTheme] = useState<CertificateThemeId>('classic_ivory');
 
   // Non-editable certification authority & founder credentials:
@@ -1181,6 +1381,142 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   const [isExporting, setIsExporting] = useState(false);
   const [downloadSuccessMessage, setDownloadSuccessMessage] = useState<string | null>(null);
 
+  // Identify Winner and Runner-up teams
+  const winnerTeamName = useMemo(() => {
+    if (data.winner && data.winner !== 'Tie' && data.winner !== 'Completed') {
+      return data.winner.trim();
+    }
+    return data.teamA || 'Team A';
+  }, [data.winner, data.teamA]);
+
+  const runnerUpTeamName = useMemo(() => {
+    if (winnerTeamName.toLowerCase() === (data.teamA || '').trim().toLowerCase()) {
+      return data.teamB || 'Team B';
+    }
+    return data.teamA || 'Team A';
+  }, [winnerTeamName, data.teamA, data.teamB]);
+
+  // Squad Batch Mode State
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<'winner' | 'runner_up' | 'all'>('winner');
+  const [selectedSquadAwardType, setSelectedSquadAwardType] = useState<AwardType>(
+    initialAward === 'runner_up_squad' ? 'runner_up_squad' : (initialAward === 'participation' ? 'participation' : 'champion_squad')
+  );
+  const [selectedSquadPlayerIndex, setSelectedSquadPlayerIndex] = useState<number>(0);
+  const [newPlayerName, setNewPlayerName] = useState<string>('');
+  const [batchProgress, setBatchProgress] = useState<{
+    isGenerating: boolean;
+    current: number;
+    total: number;
+    currentPlayer: string;
+    statusText: string;
+  } | null>(null);
+
+  // Extract raw squad players from match/tournament data
+  const rawSquadPlayers = useMemo<SquadPlayerCertificateItem[]>(() => {
+    if (data.squadPlayers && data.squadPlayers.length > 0) {
+      return data.squadPlayers;
+    }
+    return extractSquadPlayersForCertificates(data);
+  }, [data]);
+
+  const [editableSquadList, setEditableSquadList] = useState<SquadPlayerCertificateItem[]>([]);
+
+  // Synchronize and filter squad roster whenever selectedTeamFilter changes
+  useEffect(() => {
+    let filtered: SquadPlayerCertificateItem[] = [];
+    if (selectedTeamFilter === 'winner') {
+      filtered = rawSquadPlayers.filter(p => 
+        p.isWinner || p.team.trim().toLowerCase() === winnerTeamName.toLowerCase()
+      );
+      setSelectedSquadAwardType('champion_squad');
+    } else if (selectedTeamFilter === 'runner_up') {
+      filtered = rawSquadPlayers.filter(p => 
+        !p.isWinner || p.team.trim().toLowerCase() === runnerUpTeamName.toLowerCase()
+      );
+      setSelectedSquadAwardType('runner_up_squad');
+    } else {
+      filtered = [...rawSquadPlayers];
+      setSelectedSquadAwardType('participation');
+    }
+
+    // If squad roster is empty, bootstrap a standard 11-player squad roster
+    if (filtered.length === 0) {
+      const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : (data.teamA || 'Team'));
+      for (let i = 1; i <= 11; i++) {
+        filtered.push({
+          id: `${targetTeam.toLowerCase()}_player_${i}`,
+          name: `${targetTeam} Player ${i}`,
+          team: targetTeam,
+          isWinner: selectedTeamFilter === 'winner',
+          isCaptain: i === 1,
+          role: i === 1 ? 'Captain' : 'Playing XI',
+          runs: 0,
+          wickets: 0,
+          points: 25
+        });
+      }
+    }
+
+    setEditableSquadList(filtered);
+    setSelectedSquadPlayerIndex(0);
+  }, [selectedTeamFilter, rawSquadPlayers, winnerTeamName, runnerUpTeamName]);
+
+  // Squad auto-fill helpers (supports expanding squad to full 11 or 15 players)
+  const handleAutoFillSquad = (targetCount: number = 11) => {
+    const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : (data.teamA || 'Team'));
+    const current = [...editableSquadList];
+    const needed = targetCount - current.length;
+    if (needed <= 0) return;
+
+    for (let i = 1; i <= needed; i++) {
+      const nextNum = current.length + 1;
+      current.push({
+        id: `${targetTeam.toLowerCase()}_squad_${Date.now()}_${i}`,
+        name: `${targetTeam} Player ${nextNum}`,
+        team: targetTeam,
+        isWinner: selectedTeamFilter === 'winner',
+        isCaptain: false,
+        role: nextNum <= 11 ? 'Playing XI' : 'Squad Reserve',
+        runs: 0,
+        wickets: 0,
+        points: 20
+      });
+    }
+    setEditableSquadList(current);
+  };
+
+  const handleAddPlayer = () => {
+    if (!newPlayerName.trim()) return;
+    const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : (data.teamA || 'Team'));
+    const isFirst = editableSquadList.length === 0;
+    const item: SquadPlayerCertificateItem = {
+      id: `${newPlayerName.trim().toLowerCase()}_${Date.now()}`,
+      name: newPlayerName.trim(),
+      team: targetTeam,
+      isWinner: selectedTeamFilter === 'winner',
+      isCaptain: isFirst,
+      role: isFirst ? 'Captain' : 'Squad Player',
+      runs: 0,
+      wickets: 0,
+      points: 25
+    };
+    setEditableSquadList(prev => [...prev, item]);
+    setNewPlayerName('');
+    setSelectedSquadPlayerIndex(editableSquadList.length);
+  };
+
+  const handleRemovePlayer = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (editableSquadList.length <= 1) {
+      alert('Squad roster must have at least 1 player.');
+      return;
+    }
+    setEditableSquadList(prev => prev.filter((_, i) => i !== idx));
+    if (selectedSquadPlayerIndex >= idx && selectedSquadPlayerIndex > 0) {
+      setSelectedSquadPlayerIndex(selectedSquadPlayerIndex - 1);
+    }
+  };
+
   // Subscribe to Super Admin global certificate design configuration
   useEffect(() => {
     const unsub = subscribeCertificateConfig((globalConfig) => {
@@ -1194,14 +1530,26 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   // Sync selected award when initialAward changes or modal opens
   React.useEffect(() => {
     if (initialAward) {
-      setSelectedAward(initialAward);
+      if (['champion_squad', 'runner_up_squad', 'participation'].includes(initialAward)) {
+        setActiveTab('squad_batch');
+        setSelectedSquadAwardType(initialAward);
+        if (initialAward === 'runner_up_squad') {
+          setSelectedTeamFilter('runner_up');
+        } else if (initialAward === 'participation') {
+          setSelectedTeamFilter('all');
+        } else {
+          setSelectedTeamFilter('winner');
+        }
+      } else {
+        setSelectedAward(initialAward);
+      }
     }
   }, [initialAward, isOpen]);
 
   const certificateRef = useRef<HTMLDivElement>(null);
 
-  // Active recipient based on selected award
-  const currentRecipient: AwardPlayer = 
+  // Active recipient based on selected award and active tab
+  const standoutRecipient: AwardPlayer = 
     selectedAward === 'fighter' && data.fighterOfTheMatch
       ? data.fighterOfTheMatch
       : selectedAward === 'best_batter' && data.bestBatsman
@@ -1210,33 +1558,25 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       ? data.bestBowler
       : data.playerOfTheMatch;
 
-  // Authentic Official Verification Serial Number
-  const serialNumber = data.serialNumber || generateCertificateSerial(
-    data.matchId,
-    data.matchDate,
-    selectedAward,
-    currentRecipient.name
-  );
+  const activeSquadPlayer = editableSquadList[selectedSquadPlayerIndex] || editableSquadList[0];
 
-  // Instant Verification URL for phone scanners
-  const verificationUrl = buildCertificateVerificationUrl(serialNumber, {
-    matchId: data.matchId,
-    awardType: selectedAward,
-    playerName: currentRecipient.name,
-    runs: currentRecipient.runs,
-    balls: currentRecipient.balls,
-    fours: currentRecipient.fours,
-    sixes: currentRecipient.sixes,
-    wickets: currentRecipient.wickets,
-    runsConceded: currentRecipient.runsConceded,
-    points: currentRecipient.points,
-    teamA: data.teamA,
-    teamB: data.teamB,
-    winner: data.winner,
-    matchDate: data.matchDate,
-    tournamentName: autoTournamentName,
-    venue: data.venue
-  });
+  const effectiveRecipient: AwardPlayer = useMemo(() => {
+    if (activeTab === 'squad_batch' && activeSquadPlayer) {
+      return {
+        name: activeSquadPlayer.name + (activeSquadPlayer.isCaptain ? ' (C)' : ''),
+        runs: activeSquadPlayer.runs || 0,
+        balls: activeSquadPlayer.balls,
+        fours: activeSquadPlayer.fours,
+        sixes: activeSquadPlayer.sixes,
+        wickets: activeSquadPlayer.wickets || 0,
+        runsConceded: activeSquadPlayer.runsConceded,
+        points: activeSquadPlayer.points || 25
+      };
+    }
+    return standoutRecipient;
+  }, [activeTab, activeSquadPlayer, standoutRecipient]);
+
+  const effectiveAward: AwardType = activeTab === 'squad_batch' ? selectedSquadAwardType : selectedAward;
 
   const awardTitleMap: Record<AwardType, { en: string; mr: string; badge: string; icon: any; color: string }> = {
     potm: {
@@ -1266,33 +1606,86 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       badge: 'RUNNER-UP STANDOUT FIGHTER',
       icon: Zap,
       color: 'from-rose-400 via-pink-400 to-amber-400'
+    },
+    champion_squad: {
+      en: 'CHAMPIONSHIP SQUAD WINNER',
+      mr: 'विजेता संघ मानकरी (Champions Squad)',
+      badge: 'CHAMPIONS TROPHY WINNER',
+      icon: Trophy,
+      color: 'from-amber-400 via-yellow-400 to-amber-500'
+    },
+    runner_up_squad: {
+      en: 'RUNNER-UP SQUAD CITATION',
+      mr: 'उपविजेता संघ गौरव (Runner-up Squad)',
+      badge: 'RUNNER-UP FINALIST',
+      icon: ShieldCheck,
+      color: 'from-blue-400 via-indigo-400 to-purple-400'
+    },
+    participation: {
+      en: 'TOURNAMENT PARTICIPATION HONORS',
+      mr: 'सहभाग गौरव प्रमाणपत्र (Official Participation)',
+      badge: 'OFFICIAL SQUAD ACCLAIM',
+      icon: Medal,
+      color: 'from-emerald-400 via-teal-400 to-cyan-400'
     }
   };
 
-  const activeAwardConfig = awardTitleMap[selectedAward];
+  const effectiveAwardConfig = awardTitleMap[effectiveAward] || awardTitleMap.champion_squad;
   const activeTheme = CERTIFICATE_THEMES[selectedTheme] || CERTIFICATE_THEMES.classic_ivory;
 
-  // Export high-res PNG image of the certificate instantly via native Canvas 2D
+  // Authentic Official Verification Serial Number
+  const serialNumber = useMemo(() => {
+    return generateCertificateSerial(
+      data.matchId || 'TOURN',
+      data.matchDate || new Date().toISOString().slice(0, 10),
+      effectiveAward,
+      effectiveRecipient.name
+    );
+  }, [data.matchId, data.matchDate, effectiveAward, effectiveRecipient.name]);
+
+  // Instant Verification URL for phone scanners
+  const verificationUrl = useMemo(() => {
+    const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : data.teamA);
+    return buildCertificateVerificationUrl(serialNumber, {
+      matchId: data.matchId || 'TOURN',
+      awardType: effectiveAward,
+      playerName: effectiveRecipient.name,
+      runs: effectiveRecipient.runs,
+      balls: effectiveRecipient.balls,
+      fours: effectiveRecipient.fours,
+      sixes: effectiveRecipient.sixes,
+      wickets: effectiveRecipient.wickets,
+      runsConceded: effectiveRecipient.runsConceded,
+      points: effectiveRecipient.points,
+      teamA: data.teamA,
+      teamB: data.teamB,
+      winner: data.winner || targetTeam,
+      matchDate: data.matchDate,
+      tournamentName: autoTournamentName,
+      venue: data.venue
+    });
+  }, [serialNumber, data, effectiveAward, effectiveRecipient, selectedTeamFilter, winnerTeamName, runnerUpTeamName, autoTournamentName]);
+
+  // Export high-res PNG image of the currently displayed certificate
   const handleDownloadImage = async () => {
     if (isExporting) return;
     try {
       setIsExporting(true);
       const canvas = await generateCertificateCanvas({
         data,
-        selectedAward,
-        recipient: currentRecipient,
+        selectedAward: effectiveAward,
+        recipient: effectiveRecipient,
         tournamentName: autoTournamentName,
         organizerName: certProviderFounder,
         sponsorName: certProviderTitle,
         federationName: certProviderTeam,
         themeId: selectedTheme,
         verificationUrl,
-        awardConfig: activeAwardConfig
+        awardConfig: effectiveAwardConfig
       });
 
-      const fileName = `GullyScore_${selectedAward.toUpperCase()}_${currentRecipient.name.replace(/\s+/g, '_')}.png`;
+      const fileName = `GullyScore_${effectiveAward.toUpperCase()}_${effectiveRecipient.name.replace(/\s+/g, '_')}.png`;
 
-      // Fast async blob export for instant browser download
       if (canvas.toBlob) {
         canvas.toBlob((blob) => {
           if (!blob) {
@@ -1317,27 +1710,25 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     }
   };
 
-  // Export PDF Certificate instantly using high-res Canvas 2D frame
+  // Export single PDF Certificate for current recipient
   const handleDownloadPDF = async () => {
     if (isExporting) return;
     try {
       setIsExporting(true);
       const canvas = await generateCertificateCanvas({
         data,
-        selectedAward,
-        recipient: currentRecipient,
+        selectedAward: effectiveAward,
+        recipient: effectiveRecipient,
         tournamentName: autoTournamentName,
         organizerName: certProviderFounder,
         sponsorName: certProviderTitle,
         federationName: certProviderTeam,
         themeId: selectedTheme,
         verificationUrl,
-        awardConfig: activeAwardConfig
+        awardConfig: effectiveAwardConfig
       });
 
       const imgData = canvas.toDataURL('image/png');
-
-      // Landscape Certificate A4 (297mm x 210mm)
       const pdf = new jsPDF({
         orientation: 'landscape',
         unit: 'mm',
@@ -1345,7 +1736,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       });
 
       pdf.addImage(imgData, 'PNG', 0, 0, 297, 210, undefined, 'FAST');
-      pdf.save(`GullyScore_Certificate_${currentRecipient.name.replace(/\s+/g, '_')}.pdf`);
+      pdf.save(`GullyScore_Certificate_${effectiveRecipient.name.replace(/\s+/g, '_')}.pdf`);
       setDownloadSuccessMessage('PDF Downloaded!');
       setTimeout(() => setDownloadSuccessMessage(null), 2500);
     } catch (err) {
@@ -1355,7 +1746,146 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     }
   };
 
-  // Auto-download on open if requested (starts in ~60ms)
+  // 1-Click All-Squad Multi-Page PDF Generation
+  const handleDownloadAllSquadPDF = async () => {
+    if (isExporting || editableSquadList.length === 0) return;
+    const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : `${data.teamA} & ${data.teamB}`);
+    try {
+      setIsExporting(true);
+      setBatchProgress({
+        isGenerating: true,
+        current: 0,
+        total: editableSquadList.length,
+        currentPlayer: editableSquadList[0]?.name || 'Squad Member',
+        statusText: `Initializing 1-Click All-Squad PDF compilation for ${editableSquadList.length} players...`
+      });
+
+      const res = await generateAllSquadMultiPagePDF({
+        data,
+        players: editableSquadList,
+        awardType: selectedSquadAwardType,
+        teamName: targetTeam,
+        tournamentName: autoTournamentName,
+        organizerName: certProviderFounder,
+        sponsorName: certProviderTitle,
+        federationName: certProviderTeam,
+        themeId: selectedTheme,
+        onProgress: (current, total, currentPlayer) => {
+          setBatchProgress({
+            isGenerating: true,
+            current,
+            total,
+            currentPlayer,
+            statusText: `Rendering high-res certificate & appending Page ${current} of ${total}: ${currentPlayer}`
+          });
+        }
+      });
+
+      setDownloadSuccessMessage(`Generated ${res.count}-Page All-Squad PDF!`);
+      setTimeout(() => setDownloadSuccessMessage(null), 3500);
+    } catch (err: any) {
+      console.error('Squad batch PDF generation failed:', err);
+      alert(err?.message || 'Failed to generate squad multi-page PDF');
+    } finally {
+      setIsExporting(false);
+      setBatchProgress(null);
+    }
+  };
+
+  // Download all squad certificates as ZIP of individual PNGs
+  const handleDownloadAllSquadZIP = async () => {
+    if (isExporting || editableSquadList.length === 0) return;
+    const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : `${data.teamA} & ${data.teamB}`);
+    try {
+      setIsExporting(true);
+      setBatchProgress({
+        isGenerating: true,
+        current: 0,
+        total: editableSquadList.length,
+        currentPlayer: editableSquadList[0]?.name || 'Squad Member',
+        statusText: `Rendering PNG archive for ${editableSquadList.length} squad players...`
+      });
+
+      const zip = new JSZip();
+      for (let i = 0; i < editableSquadList.length; i++) {
+        const p = editableSquadList[i];
+        setBatchProgress({
+          isGenerating: true,
+          current: i + 1,
+          total: editableSquadList.length,
+          currentPlayer: p.name,
+          statusText: `Generating PNG ${i + 1} of ${editableSquadList.length}: ${p.name}`
+        });
+
+        const displayName = p.name + (p.isCaptain ? ' (C)' : '');
+        const serial = generateCertificateSerial(data.matchId || 'TOURN', data.matchDate || new Date().toISOString().slice(0, 10), selectedSquadAwardType, displayName);
+        const vUrl = buildCertificateVerificationUrl(serial, {
+          matchId: data.matchId || 'TOURN',
+          awardType: selectedSquadAwardType,
+          playerName: displayName,
+          runs: p.runs || 0,
+          wickets: p.wickets || 0,
+          points: p.points || 25,
+          teamA: data.teamA,
+          teamB: data.teamB,
+          winner: data.winner || targetTeam,
+          matchDate: data.matchDate,
+          tournamentName: autoTournamentName
+        });
+
+        const canvas = await generateCertificateCanvas({
+          data: { ...data, winner: data.winner || targetTeam },
+          selectedAward: selectedSquadAwardType,
+          recipient: {
+            name: displayName,
+            runs: p.runs || 0,
+            balls: p.balls,
+            wickets: p.wickets || 0,
+            points: p.points || 25
+          },
+          tournamentName: autoTournamentName,
+          organizerName: certProviderFounder,
+          sponsorName: certProviderTitle,
+          federationName: certProviderTeam,
+          themeId: selectedTheme,
+          verificationUrl: vUrl,
+          serialNumber: serial,
+          awardConfig: awardTitleMap[selectedSquadAwardType]
+        });
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const base64 = dataUrl.split(',')[1];
+        const safeName = p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+        zip.file(`${String(i + 1).padStart(2, '0')}_${safeName}_Certificate.png`, base64, { base64: true });
+        await new Promise(r => setTimeout(r, 15));
+      }
+
+      setBatchProgress({
+        isGenerating: true,
+        current: editableSquadList.length,
+        total: editableSquadList.length,
+        currentPlayer: 'Archiving...',
+        statusText: 'Compressing into ZIP archive...'
+      });
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const blobUrl = URL.createObjectURL(zipBlob);
+      const safeTeam = targetTeam.replace(/[^a-zA-Z0-9_-]/g, '_');
+      triggerDownload(blobUrl, `GullyScore_${safeTeam}_Squad_Certificates.zip`);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+      setDownloadSuccessMessage('ZIP Archive Downloaded!');
+      setTimeout(() => setDownloadSuccessMessage(null), 3000);
+    } catch (err: any) {
+      console.error('ZIP export failed:', err);
+      alert(err?.message || 'Failed to export ZIP');
+    } finally {
+      setIsExporting(false);
+      setBatchProgress(null);
+    }
+  };
+
+  // Auto-download on open if requested
   React.useEffect(() => {
     if (!isOpen || !autoDownloadFormat) return;
     const timer = setTimeout(() => {
@@ -1363,10 +1893,13 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         handleDownloadPDF();
       } else if (autoDownloadFormat === 'png') {
         handleDownloadImage();
+      } else if (autoDownloadFormat === 'squad_pdf') {
+        setActiveTab('squad_batch');
+        handleDownloadAllSquadPDF();
       }
-    }, 60);
+    }, 100);
     return () => clearTimeout(timer);
-  }, [isOpen, autoDownloadFormat, selectedAward]);
+  }, [isOpen, autoDownloadFormat]);
 
   if (!isOpen) return null;
 
@@ -1397,92 +1930,310 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-md flex items-center justify-center p-1.5 sm:p-3 overflow-hidden">
       <div className="bg-slate-900 border border-amber-500/40 rounded-2xl sm:rounded-3xl max-w-4xl w-full p-2.5 sm:p-3.5 shadow-2xl relative text-white h-[98dvh] sm:h-[94vh] max-h-[860px] flex flex-col justify-between overflow-hidden">
         {/* Header Bar */}
-        <div className="flex items-center justify-between pb-2 sm:pb-2.5 border-b border-slate-800 shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between pb-2 sm:pb-2.5 border-b border-slate-800 shrink-0 gap-2">
+          <div className="flex items-center gap-2 truncate">
             <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 flex items-center justify-center shadow-md font-black shrink-0">
               <Trophy size={16} />
             </div>
-            <div>
-              <h2 className="text-sm sm:text-base font-black tracking-tight text-white uppercase flex items-center gap-1.5">
-                Official Match Award Certificates
+            <div className="truncate">
+              <h2 className="text-sm sm:text-base font-black tracking-tight text-white uppercase flex items-center gap-1.5 truncate">
+                {activeTab === 'squad_batch' ? '1-Click All-Squad Batch Certificates' : 'Official Match Award Certificates'}
               </h2>
-              <p className="text-[10px] sm:text-xs text-slate-400 font-medium hidden sm:block">
-                Official recognition certificate for standout performers
+              <p className="text-[10px] sm:text-xs text-slate-400 font-medium hidden sm:block truncate">
+                {activeTab === 'squad_batch' 
+                  ? 'Multi-page certified PDF for all 11–15 players at tournament conclusion' 
+                  : 'Official recognition certificate for standout performers'}
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-700"
-          >
-            <X size={16} />
-          </button>
-        </div>
+          {/* Primary View Switcher: Standout Awards vs 1-Click All-Squad Batch */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setActiveTab('individual')}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  activeTab === 'individual'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Trophy size={12} />
+                <span className="hidden xs:inline">Standout</span>
+                <span>Awards</span>
+              </button>
 
-        {/* Award Category Buttons (Theme selection & redundant tournament bar removed) */}
-        <div className="py-1 shrink-0 flex items-center justify-center border-b border-slate-800/80">
-          <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 max-w-full overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => setActiveTab('squad_batch')}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                  activeTab === 'squad_batch'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Users size={12} />
+                <span>All-Squad PDF</span>
+                <span className="px-1.5 py-0.2 rounded-md bg-amber-400 text-slate-950 text-[9px] font-black uppercase tracking-tight hidden sm:inline">
+                  11–15
+                </span>
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => setSelectedAward('potm')}
-              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                selectedAward === 'potm'
-                  ? 'bg-amber-500 text-slate-950 shadow-md font-black'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              onClick={onClose}
+              className="p-1.5 sm:p-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-white transition-colors cursor-pointer border border-slate-700 shrink-0"
             >
-              <Trophy size={12} />
-              <span>Player of Match</span>
+              <X size={16} />
             </button>
-
-            {data.bestBatsman && (
-              <button
-                type="button"
-                onClick={() => setSelectedAward('best_batter')}
-                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                  selectedAward === 'best_batter'
-                    ? 'bg-amber-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Flame size={12} />
-                <span>Best Batsman</span>
-              </button>
-            )}
-
-            {data.bestBowler && (
-              <button
-                type="button"
-                onClick={() => setSelectedAward('best_bowler')}
-                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                  selectedAward === 'best_bowler'
-                    ? 'bg-amber-500 text-slate-950 shadow-md font-black'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Medal size={12} />
-                <span>Best Bowler</span>
-              </button>
-            )}
-
-            {data.fighterOfTheMatch && (
-              <button
-                type="button"
-                onClick={() => setSelectedAward('fighter')}
-                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                  selectedAward === 'fighter'
-                    ? 'bg-gradient-to-r from-rose-500 to-amber-500 text-white shadow-md font-black'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Zap size={12} className="text-amber-300" />
-                <span>Fighter of Match</span>
-              </button>
-            )}
           </div>
         </div>
+
+        {/* Sub-Header Controls */}
+        {activeTab === 'individual' ? (
+          /* Standout Award Category Buttons */
+          <div className="py-1 shrink-0 flex items-center justify-center border-b border-slate-800/80">
+            <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 max-w-full overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => setSelectedAward('potm')}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  selectedAward === 'potm'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Trophy size={12} />
+                <span>Player of Match</span>
+              </button>
+
+              {data.bestBatsman && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedAward('best_batter')}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedAward === 'best_batter'
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Flame size={12} />
+                  <span>Best Batsman</span>
+                </button>
+              )}
+
+              {data.bestBowler && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedAward('best_bowler')}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedAward === 'best_bowler'
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Medal size={12} />
+                  <span>Best Bowler</span>
+                </button>
+              )}
+
+              {data.fighterOfTheMatch && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedAward('fighter')}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedAward === 'fighter'
+                      ? 'bg-gradient-to-r from-rose-500 to-amber-500 text-white shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Zap size={12} className="text-amber-300" />
+                  <span>Fighter of Match</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Squad Batch Generation Sub-Header Bar */
+          <div className="py-1.5 shrink-0 border-b border-slate-800/80 space-y-1.5">
+            {/* Team Filter + Award Type Selector */}
+            <div className="flex flex-wrap items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto">
+                <span className="text-[10px] font-bold text-slate-500 uppercase px-1 hidden sm:inline">Team:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamFilter('winner')}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedTeamFilter === 'winner'
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>👑</span>
+                  <span className="truncate max-w-[110px]">{winnerTeamName} (Champions)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamFilter('runner_up')}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedTeamFilter === 'runner_up'
+                      ? 'bg-blue-600 text-white shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>🥈</span>
+                  <span className="truncate max-w-[110px]">{runnerUpTeamName} (Finalists)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamFilter('all')}
+                  className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedTeamFilter === 'all'
+                      ? 'bg-teal-600 text-white shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>🌐</span>
+                  <span>All Players</span>
+                </button>
+              </div>
+
+              {/* Award Citation Type */}
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <span className="text-[10px] font-bold text-slate-500 uppercase px-1 hidden sm:inline">Citation:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSquadAwardType('champion_squad')}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    selectedSquadAwardType === 'champion_squad'
+                      ? 'bg-amber-500 text-slate-950 font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Champions
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSquadAwardType('runner_up_squad')}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    selectedSquadAwardType === 'runner_up_squad'
+                      ? 'bg-blue-600 text-white font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Runner-Up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSquadAwardType('participation')}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    selectedSquadAwardType === 'participation'
+                      ? 'bg-teal-600 text-white font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Participation
+                </button>
+              </div>
+            </div>
+
+            {/* Squad Roster Controls & Quick Auto-Fill */}
+            <div className="flex flex-wrap items-center justify-between gap-1.5 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-black text-amber-400 uppercase tracking-wider flex items-center gap-1">
+                  <Users size={12} />
+                  <span>Roster: {editableSquadList.length} Players</span>
+                </span>
+                
+                {editableSquadList.length < 11 && (
+                  <button
+                    type="button"
+                    onClick={() => handleAutoFillSquad(11)}
+                    className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center gap-1"
+                    title="Fill squad up to 11 players"
+                  >
+                    <Sparkles size={10} />
+                    <span>Auto-Fill Full 11</span>
+                  </button>
+                )}
+
+                {editableSquadList.length >= 11 && editableSquadList.length < 15 && (
+                  <button
+                    type="button"
+                    onClick={() => handleAutoFillSquad(15)}
+                    className="px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center gap-1"
+                    title="Fill squad up to 15 players"
+                  >
+                    <Plus size={10} />
+                    <span>Auto-Fill 15 Squad</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Add Custom Player to Squad */}
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPlayer();
+                    }
+                  }}
+                  placeholder="Add player name..."
+                  className="px-2 py-0.5 bg-slate-900 border border-slate-700 rounded-lg text-[10px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 w-28 sm:w-36"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddPlayer}
+                  disabled={!newPlayerName.trim()}
+                  className="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider cursor-pointer transition-all flex items-center gap-0.5"
+                >
+                  <Plus size={11} />
+                  <span>Add</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Horizontal Scrollable Player List Chips */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5 pt-0.5">
+              {editableSquadList.map((player, idx) => {
+                const isSelected = selectedSquadPlayerIndex === idx;
+                return (
+                  <div
+                    key={player.id || idx}
+                    onClick={() => setSelectedSquadPlayerIndex(idx)}
+                    className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1.5 shrink-0 cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-amber-500/20 border-amber-400 text-white shadow-sm'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-400 text-[9px] font-mono flex items-center justify-center">
+                      {idx + 1}
+                    </span>
+                    <span className="truncate max-w-[90px]">{player.name}</span>
+                    {player.isCaptain && <span title="Captain">👑</span>}
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemovePlayer(idx, e)}
+                      className="text-slate-500 hover:text-rose-400 p-0.5 rounded transition-colors"
+                      title="Remove player from batch"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Hidden high-res QR element for direct SVG-to-Canvas rendering */}
         <div style={{ display: 'none' }}>
@@ -1578,7 +2329,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                 CERTIFICATE OF EXCELLENCE
               </h1>
 
-              {activeAwardConfig.badge && activeAwardConfig.badge !== 'GOLD MEDAL PERFORMER' && (
+              {effectiveAwardConfig.badge && (
                 <div 
                   className="inline-block px-2 py-0.5 rounded-full text-[7px] sm:text-[8.5px] font-black uppercase tracking-widest border"
                   style={{
@@ -1587,7 +2338,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                     color: activeTheme.subAccentColor
                   }}
                 >
-                  {activeAwardConfig.badge}
+                  {effectiveAwardConfig.badge}
                 </div>
               )}
             </div>
@@ -1606,7 +2357,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                     color: activeTheme.headingText
                   }}
                 >
-                  {currentRecipient.name}
+                  {effectiveRecipient.name}
                 </h2>
                 <div
                   className="h-0.5 w-1/2 sm:w-2/3 mx-auto mt-0.5"
@@ -1615,14 +2366,20 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
               </div>
 
               <p className="text-[8.5px] sm:text-xs md:text-sm font-bold uppercase tracking-wider leading-tight" style={{ color: activeTheme.accentColor }}>
-                {selectedAward === 'fighter'
+                {effectiveAward === 'fighter'
                   ? 'adjudged for valorous fighting determination as '
+                  : effectiveAward === 'champion_squad'
+                  ? 'honored as esteemed squad member & champions victor '
+                  : effectiveAward === 'runner_up_squad'
+                  ? 'honored as esteemed finalist playing squad member '
+                  : effectiveAward === 'participation'
+                  ? 'honored for commendable spirit and sportsmanship in tournament '
                   : 'adjudged for exceptional match-winning performance as '}
                 <span
                   className="underline underline-offset-2"
                   style={{ color: activeTheme.headingText, textDecorationColor: activeTheme.secondaryBorder }}
                 >
-                  {activeAwardConfig.en}
+                  {effectiveAwardConfig.en}
                 </span>
               </p>
 
@@ -1643,11 +2400,11 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                     Runs Scored
                   </span>
                   <strong className={`text-xs sm:text-base font-mono font-black block ${activeTheme.isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
-                    {currentRecipient.runs}
+                    {effectiveRecipient.runs ?? 0}
                   </strong>
-                  {currentRecipient.balls ? (
+                  {effectiveRecipient.balls ? (
                     <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
-                      {currentRecipient.balls}b ({currentRecipient.fours || 0}x4, {currentRecipient.sixes || 0}x6)
+                      {effectiveRecipient.balls}b ({effectiveRecipient.fours || 0}x4, {effectiveRecipient.sixes || 0}x6)
                     </span>
                   ) : null}
                 </div>
@@ -1660,11 +2417,11 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                     Wickets Taken
                   </span>
                   <strong className={`text-xs sm:text-base font-mono font-black block ${activeTheme.isLight ? 'text-sky-700' : 'text-cyan-400'}`}>
-                    {currentRecipient.wickets}
+                    {effectiveRecipient.wickets ?? 0}
                   </strong>
-                  {currentRecipient.runsConceded !== undefined ? (
+                  {effectiveRecipient.runsConceded !== undefined ? (
                     <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
-                      {currentRecipient.runsConceded} runs conc.
+                      {effectiveRecipient.runsConceded} runs conc.
                     </span>
                   ) : null}
                 </div>
@@ -1677,13 +2434,13 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                     MVP Rating
                   </span>
                   <strong className="text-xs sm:text-base font-mono font-black block" style={{ color: activeTheme.accentColor }}>
-                    {currentRecipient.points}{' '}
+                    {effectiveRecipient.points || 25}{' '}
                     <span className="text-[7.5px] sm:text-[8.5px] font-sans font-normal" style={{ color: activeTheme.subAccentColor }}>
                       pts
                     </span>
                   </strong>
                   <span className="text-[6px] sm:text-[7.5px] font-bold uppercase block" style={{ color: activeTheme.mutedText }}>
-                    Game Decider
+                    Squad Contributor
                   </span>
                 </div>
               </div>
@@ -1819,32 +2576,82 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
           </div>
         </div>
 
-        {/* Action Buttons Toolbar (Copy option removed) */}
+        {/* Action Buttons Toolbar */}
         <div className="pt-2 sm:pt-2.5 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <span className="text-xs text-slate-400 font-bold hidden sm:inline">Export As:</span>
-            
-            {/* Download Image (PNG) */}
-            <button
-              type="button"
-              disabled={isExporting}
-              onClick={handleDownloadImage}
-              className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isExporting ? <Sparkles size={13} className="animate-spin" /> : <Download size={13} />}
-              <span>{isExporting ? 'Generating...' : 'Download PNG'}</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {activeTab === 'squad_batch' ? (
+              <>
+                {/* 1-Click All-Squad PDF Primary Button */}
+                <button
+                  type="button"
+                  disabled={isExporting || editableSquadList.length === 0}
+                  onClick={handleDownloadAllSquadPDF}
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ring-2 ring-emerald-400/40 animate-pulse"
+                >
+                  {isExporting ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                  <span>⚡ 1-Click All-Squad PDF ({editableSquadList.length} Players)</span>
+                </button>
 
-            {/* Download PDF */}
-            <button
-              type="button"
-              disabled={isExporting}
-              onClick={handleDownloadPDF}
-              className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isExporting ? <Sparkles size={13} className="animate-spin" /> : <Award size={13} />}
-              <span>{isExporting ? 'Generating...' : 'Download PDF'}</span>
-            </button>
+                {/* Download All as ZIP */}
+                <button
+                  type="button"
+                  disabled={isExporting || editableSquadList.length === 0}
+                  onClick={handleDownloadAllSquadZIP}
+                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Download individual PNG files in a ZIP archive"
+                >
+                  <Package size={13} />
+                  <span className="hidden xs:inline">ZIP</span>
+                  <span>Archive</span>
+                </button>
+
+                {/* Download Current Selected Player's Single PDF */}
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={handleDownloadPDF}
+                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold rounded-xl text-[10px] sm:text-xs uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  title="Download single PDF for currently selected player"
+                >
+                  <Award size={13} />
+                  <span>Single PDF</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Download Image (PNG) */}
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={handleDownloadImage}
+                  className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isExporting ? <Sparkles size={13} className="animate-spin" /> : <Download size={13} />}
+                  <span>{isExporting ? 'Generating...' : 'Download PNG'}</span>
+                </button>
+
+                {/* Download PDF */}
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={handleDownloadPDF}
+                  className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isExporting ? <Sparkles size={13} className="animate-spin" /> : <Award size={13} />}
+                  <span>{isExporting ? 'Generating...' : 'Download PDF'}</span>
+                </button>
+
+                {/* Quick 1-Click All-Squad Button from Individual View */}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('squad_batch')}
+                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Users size={13} />
+                  <span>⚡ 1-Click All-Squad PDF</span>
+                </button>
+              </>
+            )}
 
             {downloadSuccessMessage && (
               <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 animate-pulse">
@@ -1866,6 +2673,38 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
             </button>
           </div>
         </div>
+
+        {/* Full Modal Batch Progress Overlay */}
+        {batchProgress?.isGenerating && (
+          <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md rounded-2xl sm:rounded-3xl flex flex-col items-center justify-center p-6 text-center animate-fadeIn">
+            <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 flex items-center justify-center shadow-2xl mb-4 animate-bounce">
+              <Trophy size={32} />
+            </div>
+            <h3 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight mb-1">
+              Compiling 1-Click All-Squad Multi-Page PDF
+            </h3>
+            <p className="text-xs sm:text-sm font-bold text-amber-400 mb-4">
+              Certificate {batchProgress.current} of {batchProgress.total}: {batchProgress.currentPlayer}
+            </p>
+
+            {/* Animated Progress Bar */}
+            <div className="w-full max-w-md bg-slate-800 rounded-full h-3.5 p-0.5 overflow-hidden border border-slate-700 mb-2 shadow-inner">
+              <div 
+                className="bg-gradient-to-r from-amber-500 via-emerald-400 to-teal-400 h-full rounded-full transition-all duration-300"
+                style={{ width: `${Math.max(5, Math.round((batchProgress.current / Math.max(batchProgress.total, 1)) * 100))}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between w-full max-w-md text-[11px] font-mono text-slate-400">
+              <span className="truncate max-w-[280px]">{batchProgress.statusText}</span>
+              <span className="font-bold text-amber-300 shrink-0">
+                {Math.round((batchProgress.current / Math.max(batchProgress.total, 1)) * 100)}%
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 mt-4">
+              Rendering 300-DPI authentic certificates, applying official signatures, and compiling A4 landscape pages...
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

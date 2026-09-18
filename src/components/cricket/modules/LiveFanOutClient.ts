@@ -45,6 +45,28 @@ class LiveFanOutClient {
       document.addEventListener('visibilitychange', () => {
         this.adjustPollingIntervals();
       });
+
+      window.addEventListener('cricket_match_deleted', (e: any) => {
+        const id = e?.detail?.id;
+        if (id) {
+          this.purgeMatch(id);
+        }
+      });
+    }
+  }
+
+  public purgeMatch(matchId: string): void {
+    if (!matchId) return;
+    this.cachedMatchSummaries.delete(matchId);
+    this.stopMatchPolling(matchId);
+    if (this.cachedFeed && Array.isArray(this.cachedFeed.matches)) {
+      this.cachedFeed = {
+        ...this.cachedFeed,
+        matches: this.cachedFeed.matches.filter(m => m && m.id !== matchId)
+      };
+      this.feedSubscribers.forEach(cb => {
+        try { cb(this.cachedFeed!); } catch (_) {}
+      });
     }
   }
 
