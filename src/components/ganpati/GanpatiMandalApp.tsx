@@ -70,8 +70,10 @@ import {
   saveMandalDataset, 
   getAllMandalAccounts, 
   getMandalAccount, 
-  clearActiveSession 
+  clearActiveSession,
+  DEFAULT_MANDAL_SESSION 
 } from './services/mandalStorageService';
+import { initialMandalProfile } from './data/initialData';
 
 import { mandalTranslations } from './translations/mandalTranslations';
 import { PavatiBookSection } from './components/PavatiBookSection';
@@ -91,16 +93,18 @@ import { MultiMandalLoginModal } from './components/MultiMandalLoginModal';
 import { MandalSwitchModal } from './components/MandalSwitchModal';
 
 export const GanpatiMandalApp: React.FC = () => {
-  // App Session State
-  const [activeSession, setActiveSessionState] = useState<MandalUserSession>(() => getActiveSession());
+  // App Session State with guaranteed fallback
+  const [activeSession, setActiveSessionState] = useState<MandalUserSession>(() => {
+    return getActiveSession() || DEFAULT_MANDAL_SESSION;
+  });
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isSwitchModalOpen, setIsSwitchModalOpen] = useState(false);
 
   // App UI State
   const [lang, setLang] = useState<MandalLanguage>('mr');
   const [userRole, setUserRole] = useState<'admin' | 'karyakarta' | 'devotee'>(() => {
-    const s = getActiveSession();
-    return s.role === 'treasurer' ? 'admin' : (s.role as any);
+    const s = getActiveSession() || DEFAULT_MANDAL_SESSION;
+    return s?.role === 'treasurer' ? 'admin' : (s?.role as any) || 'admin';
   });
   const [activeTab, setActiveTab] = useState<
     'pavati' | 'expenses' | 'volunteers' | 'profile' | 'members' | 'events' | 'devotee' | 'inventory' | 'reports' | 'pandal'
@@ -108,15 +112,15 @@ export const GanpatiMandalApp: React.FC = () => {
 
   // Multi-Tenant Isolated Dataset State
   const [dataset, setDataset] = useState<MandalDataset>(() => {
-    const s = getActiveSession();
-    return getMandalDataset(s.mandalId);
+    const s = getActiveSession() || DEFAULT_MANDAL_SESSION;
+    return getMandalDataset(s?.mandalId || 'mandal-shivtej-pune');
   });
 
   // Current Volunteer for Collector Workspace
   const [currentVolunteer, setCurrentVolunteer] = useState<VolunteerCollector>(() => {
-    const s = getActiveSession();
-    const d = getMandalDataset(s.mandalId);
-    return d.volunteers[0] || {
+    const s = getActiveSession() || DEFAULT_MANDAL_SESSION;
+    const d = getMandalDataset(s?.mandalId || 'mandal-shivtej-pune');
+    return (d?.volunteers && d.volunteers[0]) || {
       id: 'vol-default',
       name: 'स्वयंसेवक',
       phone: '9800000000',
@@ -146,16 +150,19 @@ export const GanpatiMandalApp: React.FC = () => {
   const updateDataset = (updater: (prev: MandalDataset) => MandalDataset) => {
     setDataset(prev => {
       const next = updater(prev);
-      saveMandalDataset(activeSession.mandalId, next);
+      if ((next as any).profile && !(next as any).mandal) (next as any).mandal = (next as any).profile;
+      if ((next as any).mandal && !(next as any).profile) (next as any).profile = (next as any).mandal;
+      saveMandalDataset(activeSession?.mandalId || 'mandal-shivtej-pune', next);
       return next;
     });
   };
 
   // Helper to switch active mandal
   const handleSessionChange = (newSession: MandalUserSession) => {
-    setActiveSessionState(newSession);
-    setUserRole(newSession.role === 'treasurer' ? 'admin' : (newSession.role as any));
-    const loaded = getMandalDataset(newSession.mandalId);
+    const session = newSession || DEFAULT_MANDAL_SESSION;
+    setActiveSessionState(session);
+    setUserRole(session.role === 'treasurer' ? 'admin' : ((session.role as any) || 'admin'));
+    const loaded = getMandalDataset(session.mandalId || 'mandal-shivtej-pune');
     setDataset(loaded);
     if (loaded.volunteers && loaded.volunteers.length > 0) {
       setCurrentVolunteer(loaded.volunteers[0]);
@@ -164,24 +171,24 @@ export const GanpatiMandalApp: React.FC = () => {
     setIsDailySummaryModalOpen(false);
   };
 
-  const mandal = dataset.profile;
-  const pavatis = dataset.pavatis;
-  const expenses = dataset.expenses;
-  const members = dataset.members;
-  const duties = dataset.duties;
-  const aartis = dataset.aartis;
-  const events = dataset.events;
-  const mannats = dataset.mannats;
-  const gallery = dataset.gallery;
-  const inventory = dataset.inventory;
-  const zones = dataset.zones;
-  const announcements = dataset.announcements;
-  const donors = dataset.donors;
-  const pendingVargani = dataset.pendingVargani;
-  const dayWiseCollections = dataset.dayWiseCollections;
-  const volunteers = dataset.volunteers;
-  const handovers = dataset.handovers;
-  const verifications = dataset.verifications;
+  const mandal = (dataset as any)?.mandal || (dataset as any)?.profile || initialMandalProfile;
+  const pavatis = dataset?.pavatis || [];
+  const expenses = dataset?.expenses || [];
+  const members = dataset?.members || [];
+  const duties = dataset?.duties || [];
+  const aartis = dataset?.aartis || [];
+  const events = dataset?.events || [];
+  const mannats = dataset?.mannats || [];
+  const gallery = dataset?.gallery || [];
+  const inventory = dataset?.inventory || [];
+  const zones = dataset?.zones || [];
+  const announcements = dataset?.announcements || [];
+  const donors = dataset?.donors || [];
+  const pendingVargani = dataset?.pendingVargani || [];
+  const dayWiseCollections = dataset?.dayWiseCollections || [];
+  const volunteers = dataset?.volunteers || [];
+  const handovers = dataset?.handovers || [];
+  const verifications = dataset?.verifications || [];
 
   const t = mandalTranslations[lang];
 

@@ -37,13 +37,6 @@ export const DairyLogin: React.FC = () => {
   const from = (location.state as any)?.from?.pathname || "/live/dairy-management";
   const isEmail = identifier.includes('@');
 
-  // If already logged in and is dairy admin, redirect
-  React.useEffect(() => {
-    if (user && isDairyAdmin) {
-      navigate(from, { replace: true });
-    }
-  }, [user, isDairyAdmin, navigate, from]);
-
   const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -168,6 +161,22 @@ export const DairyLogin: React.FC = () => {
         </div>
 
         <div className="space-y-6">
+          {user && isDairyAdmin && (
+            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-3xl flex items-center justify-between gap-3 text-left">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Active Session Detected</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-white truncate mt-0.5">{user.displayName || user.email || 'Dairy Admin'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(from)}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-colors shrink-0 cursor-pointer border-none"
+              >
+                Continue &rarr;
+              </button>
+            </div>
+          )}
+
           {user && !isDairyAdmin ? (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900 p-6 rounded-3xl space-y-4">
               <div className="flex items-center gap-3 text-amber-600">

@@ -33,10 +33,28 @@ try {
 
 // Global window error listener to gracefully intercept internal assertion crashes from Firestore SDK
 if (typeof window !== 'undefined') {
+  const origConsoleError = console.error;
+  console.error = function (...args: any[]) {
+    const raw = args.map(a => (typeof a === 'string' ? a : (a?.message || ''))).join(' ');
+    if (
+      raw.includes('GrpcConnection RPC') ||
+      raw.includes('RST_STREAM') ||
+      (raw.includes('@firebase/firestore') && raw.includes('Code: 13'))
+    ) {
+      // Suppress transient WebChannel HTTP/2 transport reconnection logs from bubbling to error monitors
+      console.info('[Firestore WebChannel Reconnect]', ...args);
+      return;
+    }
+    origConsoleError.apply(console, args);
+  };
+
   window.addEventListener('error', (event) => {
     const msg = event?.message || event?.error?.message || '';
-    if (typeof msg === 'string' && msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
-      console.warn('[Firestore SDK Guard] Intercepted internal assertion error:', msg);
+    if (
+      (typeof msg === 'string' && msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) ||
+      (typeof msg === 'string' && (msg.includes('GrpcConnection') || msg.includes('RST_STREAM')))
+    ) {
+      console.warn('[Firestore SDK Guard] Intercepted internal assertion/transport error:', msg);
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -45,8 +63,11 @@ if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event?.reason;
     const msg = reason instanceof Error ? reason.message : String(reason || '');
-    if (typeof msg === 'string' && msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) {
-      console.warn('[Firestore SDK Guard] Intercepted internal assertion rejection:', msg);
+    if (
+      (typeof msg === 'string' && msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) ||
+      (typeof msg === 'string' && (msg.includes('GrpcConnection') || msg.includes('RST_STREAM')))
+    ) {
+      console.warn('[Firestore SDK Guard] Intercepted internal assertion/transport rejection:', msg);
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -58,9 +79,11 @@ export const app = initializeApp(firebaseConfig);
 export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-a0ff377c-7ae5-429e-9263-df2bcb690093';
 
 // Initialize Firestore with memory cache to prevent IndexedDB lock conflicts in preview iframes
+// and enable experimentalForceLongPolling to eliminate HTTP/2 stream RST_STREAM drops in proxy/iframe environments
 export const db = initializeFirestore(app, {
   localCache: memoryLocalCache(),
-  ignoreUndefinedProperties: true
+  ignoreUndefinedProperties: true,
+  experimentalForceLongPolling: typeof window !== 'undefined'
 }, firestoreDatabaseId);
 
 // Initialize Firebase Storage

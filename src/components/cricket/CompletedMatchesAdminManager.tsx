@@ -4,7 +4,7 @@ import {
   Sliders, Trophy, Eye, EyeOff, Ban, Unlock, Trash2, 
   Search, RefreshCw, AlertTriangle, CheckCircle2, X, 
   Calendar, ExternalLink, Send, ShieldAlert, ShieldCheck, 
-  Filter, ArrowUpDown, LayoutGrid, List
+  Filter, ArrowUpDown, LayoutGrid, List, Award
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { db } from '../../lib/firebase';

@@ -13,6 +13,8 @@ import { TournamentVenueScheduler, TeamWithRoster } from './TournamentVenueSched
 import { TournamentStatsAndLeaderboards } from './TournamentStatsAndLeaderboards';
 import { PointsTableModule } from './PointsTableModule';
 import { LiveStandingsSummaryWidget } from './LiveStandingsSummaryWidget';
+import { TournamentHierarchyPointsTable } from './TournamentHierarchyPointsTable';
+import { calculateTournamentStandings, convertOversToDecimal } from './modules/TournamentPointsCalculator';
 
 interface TournamentTeam {
   id: string;
@@ -1002,97 +1004,46 @@ export const CricketTournamentTab: React.FC<{
     triggerNotification(`Scores updated. match result registered successfully!`);
   };
 
-  // Helper calculation to compute Points Table
+  // Helper calculation to compute Points Table using standard ICC Engine
   const computePointsTable = (teams: TournamentTeam[], matches: TournamentMatch[]) => {
-    const table: Record<string, { id: string, name: string, captain: string, played: number, won: number, lost: number, tied: number, points: number, runsScored: number, runsConceded: number, oversFaced: number, oversBowled: number, NRR: number }> = {};
-    
-    teams.forEach(t => {
-      table[t.id] = {
-        id: t.id,
-        name: t.name,
-        captain: t.captain,
-        played: 0,
-        won: 0,
-        lost: 0,
-        tied: 0,
-        points: 0,
-        runsScored: 0,
-        runsConceded: 0,
-        oversFaced: 0,
-        oversBowled: 0,
-        NRR: 0,
-      };
-    });
-
-    const convertOversToDecimal = (oversStr: string): number => {
-      if (!oversStr) return 0;
-      const parts = oversStr.toString().split('.');
-      if (parts.length === 2) {
-        const overs = parseInt(parts[0]) || 0;
-        const balls = parseInt(parts[1]) || 0;
-        return overs + (balls / 6);
-      }
-      return parseFloat(oversStr) || 0;
-    };
-
     const defaultOvers = activeTournament ? (activeTournament.customOvers || (activeTournament.format === 'T20' ? 20 : (activeTournament.format === 'ODI' ? 50 : 10))) : 10;
+    
+    const calculated = calculateTournamentStandings(
+      teams,
+      matches.map(m => ({
+        id: m.id,
+        teamAId: m.teamAId,
+        teamBId: m.teamBId,
+        teamAName: m.teamAName,
+        teamBName: m.teamBName,
+        status: m.status,
+        scoreA: m.scoreA,
+        scoreB: m.scoreB,
+        oversA: m.oversA || defaultOvers,
+        oversB: m.oversB || defaultOvers,
+        winnerId: m.winnerId,
+        winReason: m.winReason,
+        stage: m.stage
+      })),
+      { standardOversQuota: defaultOvers }
+    );
 
-    matches.forEach(m => {
-      if (m.status !== 'completed' || m.stage !== 'League') return;
-      
-      const tA = table[m.teamAId];
-      const tB = table[m.teamBId];
-
-      if (!tA || !tB) return;
-
-      tA.played += 1;
-      tB.played += 1;
-
-      // Parse runs scored to compute actual net run rates
-      // Format support: "120/4" or "120" => runs = 120
-      const runsA = parseInt(m.scoreA.split('/')[0]) || 0;
-      const runsB = parseInt(m.scoreB.split('/')[0]) || 0;
-      
-      const oversA_dec = convertOversToDecimal(m.oversA) || defaultOvers;
-      const oversB_dec = convertOversToDecimal(m.oversB) || defaultOvers;
-
-      tA.runsScored += runsA;
-      tA.runsConceded += runsB;
-      tA.oversFaced += oversA_dec;
-      tA.oversBowled += oversB_dec;
-
-      tB.runsScored += runsB;
-      tB.runsConceded += runsA;
-      tB.oversFaced += oversB_dec;
-      tB.oversBowled += oversA_dec;
-
-      if (m.winnerId === m.teamAId) {
-        tA.won += 1;
-        tA.points += 2;
-        tB.lost += 1;
-      } else if (m.winnerId === m.teamBId) {
-        tB.won += 1;
-        tB.points += 2;
-        tA.lost += 1;
-      } else {
-        tA.tied += 1;
-        tB.tied += 1;
-        tA.points += 1;
-        tB.points += 1;
-      }
-    });
-
-    // Calculate NRR: (Runs scored per over) - (Runs conceded per over)
-    return Object.values(table).map(t => {
-      const scoredAvg = t.oversFaced > 0 ? (t.runsScored / t.oversFaced) : 0;
-      const concededAvg = t.oversBowled > 0 ? (t.runsConceded / t.oversBowled) : 0;
-      t.NRR = Number((scoredAvg - concededAvg).toFixed(3));
-      return t;
-    }).sort((a,b) => {
-      if (b.points !== a.points) return b.points - a.points;
-      if (b.won !== a.won) return b.won - a.won;
-      return b.NRR - a.NRR;
-    });
+    return calculated.map(c => ({
+      id: c.id,
+      name: c.name,
+      captain: c.captain || '',
+      played: c.played,
+      won: c.won,
+      lost: c.lost,
+      tied: c.tied,
+      points: c.points,
+      runsScored: c.runsScored,
+      runsConceded: c.runsConceded,
+      oversFaced: c.oversFacedDecimal,
+      oversBowled: c.oversBowledDecimal,
+      NRR: c.NRR,
+      qualificationStatus: c.qualificationStatus
+    }));
   };
 
   // Fetch AI Predictions and Dream11 Suggestions
@@ -1733,6 +1684,14 @@ export const CricketTournamentTab: React.FC<{
           {/* SCHEDULE & MATCHES SUBTAB */}
           {tourTab === 'matches' && (
             <div className="space-y-6">
+              {/* Quick Live Standings Summary Header for League Tournaments */}
+              {activeTournament.type === 'league' && (activeTournament.matches?.some(m => m.status === 'completed')) && (
+                <LiveStandingsSummaryWidget
+                  standings={computePointsTable(activeTournament.teams, activeTournament.matches)}
+                  tournamentName={activeTournament.name}
+                  isLeague={true}
+                />
+              )}
 
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
@@ -2042,116 +2001,10 @@ export const CricketTournamentTab: React.FC<{
               {standingsTabMode === 'sandbox' ? (
                 <PointsTableModule />
               ) : activeTournament.type === 'league' ? (
-                <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 shadow-xl overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs uppercase font-extrabold tracking-wide border-collapse min-w-[700px] points-table-component">
-                      <thead>
-                        <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400">
-                          <th className="py-4 px-4 text-center">Rank</th>
-                          <th className="py-4 px-4">Squad Name</th>
-                          <th className="py-4 px-4 text-center">Played</th>
-                          <th className="py-4 px-4 text-center">Won</th>
-                          <th className="py-4 px-4 text-center">Lost</th>
-                          <th className="py-4 px-4 text-center">Tied</th>
-                          <th className="py-4 px-4 text-center text-emerald-500 dark:text-emerald-400">Pts</th>
-                          <th className="py-4 px-4 text-center cursor-help relative group">
-                            <div className="flex items-center justify-center gap-1">
-                              <span>Net Runrate</span>
-                              <HelpCircle size={11} className="text-slate-450 dark:text-slate-500 group-hover:text-emerald-555 transition-colors" />
-                            </div>
-                            {/* General NRR formula explanation tooltip */}
-                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-950 border border-slate-800 text-white rounded-xl py-2 px-3.5 shadow-2x w-64 text-left z-50 normal-case select-none">
-                              <p className="font-extrabold text-[10px] text-emerald-400 mb-1">NRR FORMULA</p>
-                              <p className="text-[10px] text-slate-300 leading-normal font-semibold">
-                                (Runs Scored / Overs Faced) - (Runs Conceded / Overs Bowled)
-                              </p>
-                              <div className="text-[8.5px] text-slate-400 mt-1 font-medium leading-relaxed">
-                                Calculated across all completed league matches in this tournament. Overs are calculated under a flat standard 10 overs per match scale.
-                              </div>
-                            </div>
-                          </th>
-                        </tr>
-                      </thead>
-                      <AnimatePresence mode="popLayout">
-                        <tbody>
-                          {computePointsTable(activeTournament.teams, activeTournament.matches).map((row, idx) => {
-                            const oversFaced = row.oversFaced;
-                            const oversBowled = row.oversBowled;
-                            const scoredAvg = oversFaced > 0 ? (row.runsScored / oversFaced) : 0;
-                            const concededAvg = oversBowled > 0 ? (row.runsConceded / oversBowled) : 0;
-                            return (
-                              <motion.tr 
-                                layout
-                                key={row.id} 
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -10 }}
-                                transition={{ type: 'spring', stiffness: 350, damping: 25, opacity: { duration: 0.2 } }}
-                                className={`border-b border-slate-50 dark:border-slate-805 hover:bg-slate-50 dark:hover:bg-slate-950/80 transition-all ${
-                                  idx < 2 ? 'bg-emerald-500/5' : ''
-                                }`}
-                              >
-                                <td className="py-4 px-4 text-center font-bold text-slate-500">{idx + 1}</td>
-                                <td className="py-4 px-4">
-                                  <div className="flex flex-col">
-                                    <span className="font-extrabold text-slate-800 dark:text-white">{row.name}</span>
-                                    <span className="text-[9px] text-slate-400 lowercase font-medium">Captain: {row.captain || 'None'}</span>
-                                  </div>
-                                </td>
-                                <td className="py-4 px-4 text-center text-slate-500">{row.played}</td>
-                                <td className="py-4 px-4 text-center text-emerald-600 dark:text-emerald-400">{row.won}</td>
-                                <td className="py-4 px-4 text-center text-rose-500">{row.lost}</td>
-                                <td className="py-4 px-4 text-center text-slate-500">{row.tied}</td>
-                                <td className="py-4 px-4 text-center font-black text-emerald-500 text-sm">{row.points}</td>
-                                <td className="py-4 px-4 text-center font-mono font-medium text-slate-500 relative group cursor-help">
-                                  <span className="border-b border-dotted border-slate-300 dark:border-slate-700">
-                                    {row.NRR > 0 ? `+${row.NRR}` : row.NRR}
-                                  </span>
-                                  {/* Row Tooltip with live calculated values */}
-                                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-slate-950 border border-slate-800 text-white rounded-xl py-2 px-3.5 shadow-2xl w-60 text-left z-50 normal-case select-none">
-                                    <p className="font-extrabold text-[10px] text-emerald-400 mb-1">NRR BREAKDOWN</p>
-                                    <div className="text-[9.5px] font-mono text-slate-350 space-y-1">
-                                      <p className="flex justify-between">
-                                        <span>Runs Scored:</span>
-                                        <span className="font-semibold text-white">{row.runsScored}</span>
-                                      </p>
-                                      <p className="flex justify-between">
-                                        <span>Overs Faced:</span>
-                                        <span className="font-semibold text-white">{oversFaced.toFixed(1)}</span>
-                                      </p>
-                                      <p className="flex justify-between pl-2 pb-1 border-b border-slate-800 text-slate-400">
-                                        <span>Average:</span>
-                                        <span>{scoredAvg.toFixed(3)}</span>
-                                      </p>
-                                      
-                                      <p className="flex justify-between pt-1">
-                                        <span>Runs Conceded:</span>
-                                        <span className="font-semibold text-white">{row.runsConceded}</span>
-                                      </p>
-                                      <p className="flex justify-between">
-                                        <span>Overs Bowled:</span>
-                                        <span className="font-semibold text-white">{oversBowled.toFixed(1)}</span>
-                                      </p>
-                                      <p className="flex justify-between pl-2 pb-1 border-b border-slate-800 text-slate-400">
-                                        <span>Average:</span>
-                                        <span>{concededAvg.toFixed(3)}</span>
-                                      </p>
-                                      
-                                      <p className="flex justify-between font-bold text-[10px] pt-1 text-emerald-400 font-sans uppercase">
-                                        <span>Net Run Rate:</span>
-                                        <span>{row.NRR > 0 ? `+${row.NRR}` : row.NRR}</span>
-                                      </p>
-                                    </div>
-                                  </div>
-                                </td>
-                              </motion.tr>
-                            );
-                          })}
-                        </tbody>
-                      </AnimatePresence>
-                    </table>
-                  </div>
-                </div>
+                <TournamentHierarchyPointsTable
+                  tournament={activeTournament}
+                  qualifyingThreshold={4}
+                />
               ) : (
                 /* KNOCKOUT BRACKET RENDER */
                 <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-6 sm:p-10 shadow-xl overflow-x-auto">

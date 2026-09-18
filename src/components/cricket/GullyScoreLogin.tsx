@@ -30,17 +30,10 @@ export const GullyScoreLogin: React.FC = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isScoreManager } = useAuth();
+  const { user, isScoreManager, logout } = useAuth();
 
   const from = (location.state as any)?.from?.pathname || '/live/cricket-scoreboard';
   const isEmail = identifier.includes('@');
-
-  // If already logged in as score manager, navigate to target scoreboard
-  useEffect(() => {
-    if (user && isScoreManager) {
-      navigate(from, { replace: true });
-    }
-  }, [user, isScoreManager, navigate, from]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,6 +268,40 @@ export const GullyScoreLogin: React.FC = () => {
                 Enter your authorized username or mobile number and security key.
               </p>
             </div>
+
+            {user && isScoreManager && (
+              <div className="mb-5 p-3.5 rounded-2xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-black uppercase tracking-wider text-emerald-300 text-[10px]">Active Session Detected</p>
+                  <p className="text-white font-bold truncate mt-0.5">{user.displayName || user.email || 'Scorekeeper Account'}</p>
+                </div>
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await logout();
+                        setIdentifier('');
+                        setPassword('');
+                      } catch (err) {
+                        console.error('Logout error:', err);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 hover:text-rose-200 text-slate-300 font-bold text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer border border-slate-700"
+                    title="Sign out of current scorekeeper session"
+                  >
+                    Logout / Switch
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate(from)}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer border-none"
+                  >
+                    Continue &rarr;
+                  </button>
+                </div>
+              </div>
+            )}
 
             {error && (
               <motion.div

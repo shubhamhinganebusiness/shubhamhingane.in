@@ -18,7 +18,8 @@ import {
   Ban,
   Unlock,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Award
 } from 'lucide-react';
 import { MatchState, Innings } from './CricketScoreboard';
 import { db } from '../../lib/firebase';
@@ -29,6 +30,7 @@ interface CompletedRecordsSliderProps {
   matches: MatchState[];
   onSelectMatch: (matchId: string) => void;
   onExportPDF?: (match: MatchState) => void;
+  onDownloadAward?: (match: MatchState, award?: 'potm' | 'best_batter' | 'best_bowler') => void;
   isScoreManager?: boolean;
   homepageMode?: boolean;
 }
@@ -356,6 +358,7 @@ export const CompletedMatchCard: React.FC<{
   adminAds: SponsorAdSlide[];
   onSelectMatch: (matchId: string) => void;
   onExportPDF?: (match: MatchState) => void;
+  onDownloadAward?: (match: MatchState, award?: 'potm' | 'best_batter' | 'best_bowler') => void;
   onShareWhatsApp: (match: MatchState, e: React.MouseEvent) => void;
   isAdmin?: boolean;
   onToggleHide?: (matchId: string, currentHidden: boolean) => void;
@@ -367,6 +370,7 @@ export const CompletedMatchCard: React.FC<{
   adminAds, 
   onSelectMatch, 
   onExportPDF, 
+  onDownloadAward,
   onShareWhatsApp,
   isAdmin = false,
   onToggleHide,
@@ -628,6 +632,22 @@ export const CompletedMatchCard: React.FC<{
               </button>
             )}
 
+            {/* Awards Button */}
+            {onDownloadAward && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownloadAward(m, 'potm');
+                }}
+                className="px-2.5 py-1.5 bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/30 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1 cursor-pointer"
+                title="Download Match Awards (POTM, Best Batsman, Best Bowler)"
+              >
+                <Award size={10} />
+                <span>Awards</span>
+              </button>
+            )}
+
             {/* Admin Management Controls: Hide, Block, Delete */}
             {isAdmin && (
               <div className="flex items-center gap-1">
@@ -734,7 +754,8 @@ export const CompletedMatchCard: React.FC<{
 export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
   matches,
   onSelectMatch,
-  onExportPDF
+  onExportPDF,
+  onDownloadAward
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isAutoPlay, setIsAutoPlay] = useState<boolean>(true);
@@ -977,6 +998,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
             adminAds={adminAds}
             onSelectMatch={onSelectMatch}
             onExportPDF={onExportPDF}
+            onDownloadAward={onDownloadAward}
             onShareWhatsApp={handleShareWhatsApp}
           />
         ))}

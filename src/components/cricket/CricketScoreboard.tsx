@@ -8,7 +8,7 @@ import {
   Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2, Copy, ExternalLink, Send, Smartphone, Shield, Tv,
   Camera, Image as ImageIcon, Ban, CheckCircle2, Unlock
 } from 'lucide-react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { LogIn as LoginIcon, ShieldCheck as ShieldIcon } from 'lucide-react';
 
@@ -39,6 +39,9 @@ import { ConfettiCanvas } from './ConfettiCanvas';
 import { CricketTournamentTab } from './CricketTournamentTab';
 import { DLSCalculatorModal } from './DLSCalculatorModal';
 import { SpinCoinModal, SpinCoinResult } from './SpinCoinModal';
+import { VoiceAssistedScorer } from './VoiceAssistedScorer';
+import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
+import { computeFighterOfTheMatch } from '../../utils/certificateVerification';
 import { 
   deleteLocalMatch, 
   isMatchDeleted, 
@@ -779,6 +782,7 @@ export const CricketScoreboard: React.FC = () => {
 
   // Routing and Spectator mode query configuration
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const matchIdParam = searchParams.get('matchId');
   const isSpectator = searchParams.get('spectator') === 'true';
 
@@ -905,6 +909,16 @@ export const CricketScoreboard: React.FC = () => {
 
   // Player of the Match modal & settings state
   const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [showCertificateModal, setShowCertificateModal] = useState(false);
+  const [certificateAwardType, setCertificateAwardType] = useState<AwardType>('potm');
+  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | null>(null);
+
+  const handleDownloadAwardCertificate = (award: AwardType = 'potm', format?: 'png' | 'pdf') => {
+    setCertificateAwardType(award);
+    setCertificateDownloadFormat(format || null);
+    setShowCertificateModal(true);
+  };
+
   const [lastMatchStatus, setLastMatchStatus] = useState<string>('setup');
 
   // Innings break timer states
@@ -2498,6 +2512,17 @@ export const CricketScoreboard: React.FC = () => {
     setTimeout(() => {
       setFeedback(null);
     }, 4000);
+  };
+
+  const handleScoreManagerLogout = async () => {
+    try {
+      await logout();
+      showNotification('Successfully logged out from Gully Score session.', 'info');
+      navigate('/cricket-login');
+    } catch (err) {
+      console.error('Logout error:', err);
+      navigate('/cricket-login');
+    }
   };
 
   // GullyScore Digital Toss Simulator: Auto-fill setup or Auto-launch live match
@@ -5945,19 +5970,19 @@ export const CricketScoreboard: React.FC = () => {
   const matchPerformanceHighlights = useMemo(() => {
     if (!match || (!match.innings1 && !match.innings2)) return null;
     
-    let bestBatter = { name: 'N/A', runs: 0, balls: 0 };
-    let bestBowler = { name: 'N/A', wickets: 0, runs: 0 };
+    let bestBatter = { name: 'N/A', runs: 0, balls: 0, fours: 0, sixes: 0 };
+    let bestBowler = { name: 'N/A', wickets: 0, runs: 0, maidens: 0, ballsBowled: 0 };
 
     const processInningsPerformers = (inn: Innings | null) => {
       if (!inn) return;
       inn.batsmen.forEach(b => {
         if (b.runs > bestBatter.runs) {
-          bestBatter = { name: b.name, runs: b.runs, balls: b.balls };
+          bestBatter = { name: b.name, runs: b.runs, balls: b.balls, fours: b.fours || 0, sixes: b.sixes || 0 };
         }
       });
       inn.bowlers.forEach(bw => {
         if (bw.wickets > bestBowler.wickets || (bw.wickets === bestBowler.wickets && bw.runsConceded < bestBowler.runs)) {
-          bestBowler = { name: bw.name, wickets: bw.wickets, runs: bw.runsConceded };
+          bestBowler = { name: bw.name, wickets: bw.wickets, runs: bw.runsConceded, maidens: bw.maidens || 0, ballsBowled: bw.ballsBowled || 0 };
         }
       });
     };
@@ -6036,6 +6061,67 @@ export const CricketScoreboard: React.FC = () => {
     }
     return null;
   }, [match]);
+
+  // Certificate auto-generated data bundle
+  const certificateData: MatchCertificateData | null = useMemo(() => {
+    if (!match) return null;
+    const potm = playerOfTheMatch || {
+      name: match.winner || 'Star Performer',
+      runs: 0,
+      balls: 0,
+      fours: 0,
+      sixes: 0,
+      wickets: 0,
+      runsConceded: 0,
+      maidens: 0,
+      ballsBowled: 0,
+      points: 50,
+    };
+
+    const fighter = computeFighterOfTheMatch(match);
+
+    return {
+      matchId: match.id || `MATCH-${Date.now().toString().slice(-4)}`,
+      tournamentName: (match as any).tournamentName || (match as any).seriesName || 'Gully Premier League 2026',
+      matchDate: match.date || new Date().toLocaleDateString('en-GB'),
+      venue: (match as any).venue || (match as any).groundName || 'Local Gully Ground',
+      teamA: match.teamA || 'Team A',
+      teamB: match.teamB || 'Team B',
+      winner: match.winner || 'Completed',
+      winReason: match.winReason || '',
+      playerOfTheMatch: {
+        name: potm.name,
+        runs: potm.runs || 0,
+        balls: potm.balls || 0,
+        fours: potm.fours || 0,
+        sixes: potm.sixes || 0,
+        wickets: potm.wickets || 0,
+        runsConceded: potm.runsConceded || 0,
+        maidens: potm.maidens || 0,
+        ballsBowled: potm.ballsBowled || 0,
+        points: potm.points || ((potm.runs || 0) + (potm.wickets || 0) * 25),
+      },
+      bestBatsman: (matchPerformanceHighlights?.bestBatter && matchPerformanceHighlights.bestBatter.name && matchPerformanceHighlights.bestBatter.name !== 'N/A') ? {
+        name: matchPerformanceHighlights.bestBatter.name,
+        runs: matchPerformanceHighlights.bestBatter.runs,
+        balls: matchPerformanceHighlights.bestBatter.balls,
+        fours: matchPerformanceHighlights.bestBatter.fours || 0,
+        sixes: matchPerformanceHighlights.bestBatter.sixes || 0,
+        wickets: 0,
+        points: matchPerformanceHighlights.bestBatter.runs,
+      } : undefined,
+      bestBowler: (matchPerformanceHighlights?.bestBowler && matchPerformanceHighlights.bestBowler.name && matchPerformanceHighlights.bestBowler.name !== 'N/A') ? {
+        name: matchPerformanceHighlights.bestBowler.name,
+        runs: 0,
+        wickets: matchPerformanceHighlights.bestBowler.wickets,
+        runsConceded: matchPerformanceHighlights.bestBowler.runs,
+        maidens: matchPerformanceHighlights.bestBowler.maidens || 0,
+        ballsBowled: matchPerformanceHighlights.bestBowler.ballsBowled || 0,
+        points: matchPerformanceHighlights.bestBowler.wickets * 25,
+      } : undefined,
+      fighterOfTheMatch: fighter || undefined,
+    };
+  }, [match, playerOfTheMatch, matchPerformanceHighlights]);
 
   const filteredMatchHistory = useMemo(() => {
     return matchHistory.filter((past) => {
@@ -6950,10 +7036,19 @@ export const CricketScoreboard: React.FC = () => {
           <div className="flex items-center gap-1 sm:gap-1.5 font-sans overflow-x-auto max-w-[calc(100vw-100px)] sm:max-w-none pr-1">
             {/* Scorer Identity Badge */}
             {isScoreManager && currentManagerId && (
-              <div className="hidden lg:flex items-center gap-1 px-2 py-1 bg-slate-800/90 border border-emerald-500/30 rounded-lg text-[9px] font-bold text-emerald-400 shrink-0">
+              <div className="hidden lg:flex items-center gap-1.5 px-2 py-1 bg-slate-800/90 border border-emerald-500/30 rounded-lg text-[9px] font-bold text-emerald-400 shrink-0">
                 <ShieldIcon size={10} className="text-amber-300" />
                 <span className="text-slate-400">Scorer:</span>
                 <span className="font-mono text-emerald-300">@{currentManagerId}</span>
+                <button
+                  type="button"
+                  id="btn-badge-scorer-logout"
+                  onClick={handleScoreManagerLogout}
+                  className="ml-1 px-1.5 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 hover:text-rose-100 border border-rose-800/40 text-[9px] font-bold uppercase transition-colors cursor-pointer"
+                  title="Logout Score Manager"
+                >
+                  Logout
+                </button>
               </div>
             )}
 
@@ -9103,6 +9198,40 @@ export const CricketScoreboard: React.FC = () => {
               })()}
             </div>
 
+            {/* AI VOICE-ASSISTED HANDS-FREE SCORER (Marathi / Hindi / English) */}
+            <VoiceAssistedScorer
+              disabled={isScoringDisabled}
+              strikerName={currentInnings?.batsmen[currentInnings.strikerIndex]?.name}
+              bowlerName={currentInnings?.bowlers[currentInnings.currentBowlerIndex]?.name}
+              onScoreRuns={(runs) => {
+                if (runs === 6) setActiveAnimation('six');
+                else if (runs === 4) setActiveAnimation('four');
+                handleScoreEvent({ type: 'runs', val: runs });
+              }}
+              onScoreDot={() => {
+                handleScoreEvent({ type: 'dot' });
+              }}
+              onScoreExtra={(type, extraRuns) => {
+                if (type === 'wide') {
+                  handleScoreEvent({ type: 'wide', val: extraRuns });
+                } else if (type === 'noball') {
+                  handleScoreEvent({ type: 'noball', val: extraRuns });
+                }
+              }}
+              onScoreByes={(type, runs) => {
+                handleScoreEvent({ type, val: runs });
+              }}
+              onScoreWicket={(wicketType) => {
+                openWicketModal('striker');
+              }}
+              onUndo={() => {
+                handleUndoLastBall();
+              }}
+              onSwapBatsmen={() => {
+                handleSwapStriker();
+              }}
+            />
+
             {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions >= 44x44px */}
             <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2.5 flex flex-col justify-between relative overflow-visible min-h-0 shadow-lg select-none">
               
@@ -10805,15 +10934,10 @@ export const CricketScoreboard: React.FC = () => {
 
               {isScoreManager ? (
                 <button
-                  onClick={async () => {
-                    try {
-                      await logout();
-                      window.location.href = '/';
-                    } catch (err) {
-                      console.error('Logout error:', err);
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                  type="button"
+                  id="btn-header-scorer-logout"
+                  onClick={handleScoreManagerLogout}
+                  className="px-3 py-1.5 bg-rose-600/90 hover:bg-rose-600 border border-rose-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
                   title="Sign out of scorekeeper session"
                 >
                   <ShieldIcon size={14} className="text-amber-300" />
@@ -11038,15 +11162,10 @@ export const CricketScoreboard: React.FC = () => {
 
                 {isScoreManager ? (
                   <button
-                    onClick={async () => {
-                      try {
-                        await logout();
-                        window.location.href = '/';
-                      } catch (err) {
-                        console.error('Logout error:', err);
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                    type="button"
+                    id="btn-mobile-scorer-logout"
+                    onClick={handleScoreManagerLogout}
+                    className="px-3 py-1.5 bg-rose-600/90 hover:bg-rose-600 border border-rose-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
                     title="Sign out of scorekeeper session"
                   >
                     <ShieldIcon size={14} className="text-amber-300" />
@@ -13846,21 +13965,12 @@ export const CricketScoreboard: React.FC = () => {
                       <button
                         type="button"
                         id="btn-setup-core-logout"
-                        onClick={async () => {
-                          if (window.confirm('Are you sure you want to log out from Core Scorer mode?')) {
-                            try {
-                              await logout();
-                              showNotification('Logged out from Core Scorer session.', 'info');
-                            } catch (err) {
-                              console.error('Logout error:', err);
-                            }
-                          }
-                        }}
-                        className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md border border-emerald-500"
+                        onClick={handleScoreManagerLogout}
+                        className="px-3.5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md border border-rose-500"
                         title="Core Scorer authenticated - Click to log out"
                       >
                         <ShieldIcon size={15} className="text-amber-300" />
-                        <span>Core: Logged In</span>
+                        <span>Logout Scorer</span>
                       </button>
                     ) : (
                       <Link
@@ -13929,11 +14039,16 @@ export const CricketScoreboard: React.FC = () => {
                     <motion.div
                       initial={{ scale: 0.9, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
-                      className="max-w-md mx-auto bg-gradient-to-r from-amber-600 via-yellow-600 to-amber-650 p-4.5 rounded-2xl border-2 border-yellow-300 mt-6 shadow-lg text-center text-white"
+                      onClick={() => handleDownloadAwardCertificate('potm')}
+                      className="max-w-md mx-auto bg-gradient-to-r from-amber-600 via-yellow-600 to-amber-650 p-4.5 rounded-2xl border-2 border-yellow-300 mt-6 shadow-lg text-center text-white cursor-pointer hover:brightness-105 transition-all group"
+                      title="Download Official Player of the Match Certificate"
                     >
-                      <span className="text-[10px] uppercase font-black tracking-widest text-yellow-250 block mb-1">
-                        🌟 Player of the Match 🌟
-                      </span>
+                      <div className="flex items-center justify-center gap-1.5 text-[10px] uppercase font-black tracking-widest text-yellow-250 mb-1">
+                        <span>🌟 Player of the Match 🌟</span>
+                        <span className="bg-black/30 group-hover:bg-black/50 px-2 py-0.5 rounded-full text-[8.5px] text-yellow-200 border border-yellow-300/30 font-bold ml-1">
+                          Auto-Generated Certificate 🏆
+                        </span>
+                      </div>
                       <strong className="text-lg font-black block tracking-tight">
                         {playerOfTheMatch.name}
                       </strong>
@@ -13945,20 +14060,80 @@ export const CricketScoreboard: React.FC = () => {
                       <p className="text-[8.5px] tracking-widest text-yellow-200 font-extrabold uppercase mt-1 bg-black/20 inline-block px-3 py-1 rounded-full border border-yellow-300/20">
                         Rating Points: {playerOfTheMatch.points} pts
                       </p>
+
+                      {/* Direct Quick Download Buttons on POTM card */}
+                      <div className="mt-3 pt-2.5 border-t border-white/20 flex items-center justify-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadAwardCertificate('potm', 'png')}
+                          className="px-3 py-1.5 bg-black/40 hover:bg-black/60 text-white rounded-xl text-[9px] font-bold border border-white/25 flex items-center gap-1 transition-all cursor-pointer"
+                          title="Download POTM as PNG"
+                        >
+                          <Download size={11} /> Download PNG
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadAwardCertificate('potm', 'pdf')}
+                          className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-[9px] font-bold border border-white/25 flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                          title="Download Official POTM PDF Certificate"
+                        >
+                          <FileText size={11} /> Download PDF
+                        </button>
+                      </div>
                     </motion.div>
                   )}
 
                   {matchPerformanceHighlights && (
                     <div className="max-w-md mx-auto grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 pt-4 border-t border-white/20 text-xs text-white/90">
-                      <div className="bg-white/10 p-3 rounded-xl border border-white/15">
-                        <span className="text-[9px] uppercase tracking-widest text-yellow-300 block mb-1 font-black">Top Scorer</span>
-                        <strong className="text-sm">{matchPerformanceHighlights.bestBatter.name}</strong>
-                        <p className="font-mono text-[10px] mt-0.5">{matchPerformanceHighlights.bestBatter.runs} Runs ({matchPerformanceHighlights.bestBatter.balls} Balls)</p>
+                      <div className="bg-white/10 p-3 rounded-xl border border-white/15 flex flex-col justify-between">
+                        <div>
+                          <span className="text-[9px] uppercase tracking-widest text-yellow-300 block mb-1 font-black">Top Scorer (Best Batsman)</span>
+                          <strong className="text-sm">{matchPerformanceHighlights.bestBatter.name}</strong>
+                          <p className="font-mono text-[10px] mt-0.5">{matchPerformanceHighlights.bestBatter.runs} Runs ({matchPerformanceHighlights.bestBatter.balls} Balls)</p>
+                        </div>
+                        <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAwardCertificate('best_batter', 'pdf')}
+                            className="flex-1 py-1 px-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[8.5px] uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer"
+                            title="Download Best Batsman PDF Certificate"
+                          >
+                            <Download size={9} /> Best Batter PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAwardCertificate('best_batter', 'png')}
+                            className="py-1 px-1.5 bg-black/30 hover:bg-black/50 text-white font-bold rounded-lg text-[8.5px] uppercase flex items-center justify-center gap-1 transition-all cursor-pointer border border-white/20"
+                            title="Download Best Batsman PNG"
+                          >
+                            PNG
+                          </button>
+                        </div>
                       </div>
-                      <div className="bg-white/10 p-3 rounded-xl border border-white/15">
-                        <span className="text-[9px] uppercase tracking-widest text-yellow-300 block mb-1 font-black">Most Wickets</span>
-                        <strong className="text-sm">{matchPerformanceHighlights.bestBowler.name}</strong>
-                        <p className="font-mono text-[10px] mt-0.5">{matchPerformanceHighlights.bestBowler.wickets} Wkts (conceded {matchPerformanceHighlights.bestBowler.runs} runs)</p>
+                      <div className="bg-white/10 p-3 rounded-xl border border-white/15 flex flex-col justify-between">
+                        <div>
+                          <span className="text-[9px] uppercase tracking-widest text-yellow-300 block mb-1 font-black">Most Wickets (Best Bowler)</span>
+                          <strong className="text-sm">{matchPerformanceHighlights.bestBowler.name}</strong>
+                          <p className="font-mono text-[10px] mt-0.5">{matchPerformanceHighlights.bestBowler.wickets} Wkts (conceded {matchPerformanceHighlights.bestBowler.runs} runs)</p>
+                        </div>
+                        <div className="mt-2.5 pt-2 border-t border-white/10 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAwardCertificate('best_bowler', 'pdf')}
+                            className="flex-1 py-1 px-1.5 bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black rounded-lg text-[8.5px] uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer"
+                            title="Download Best Bowler PDF Certificate"
+                          >
+                            <Download size={9} /> Best Bowler PDF
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAwardCertificate('best_bowler', 'png')}
+                            className="py-1 px-1.5 bg-black/30 hover:bg-black/50 text-white font-bold rounded-lg text-[8.5px] uppercase flex items-center justify-center gap-1 transition-all cursor-pointer border border-white/20"
+                            title="Download Best Bowler PNG"
+                          >
+                            PNG
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -14031,7 +14206,40 @@ export const CricketScoreboard: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="pt-4 flex flex-wrap gap-3 justify-center items-center">
+                  <div className="pt-4 flex flex-wrap gap-2.5 justify-center items-center">
+                    {/* Auto-Generated Award Certificates Download Triggers */}
+                    {certificateData && (
+                      <div className="flex items-center gap-2 flex-wrap justify-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadAwardCertificate('potm')}
+                          className="px-3.5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-xl font-black uppercase tracking-wider text-[10px] transition-all cursor-pointer border-none shadow-md flex items-center gap-1.5 active:scale-95"
+                          title="Download Player of the Match Certificate"
+                        >
+                          <Trophy size={14} className="text-slate-950" />
+                          <span>Download POTM Certificate</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadAwardCertificate('best_batter')}
+                          className="px-3 py-2.5 bg-orange-500/20 hover:bg-orange-500 hover:text-slate-950 text-orange-200 border border-orange-400/30 rounded-xl font-black uppercase tracking-wider text-[10px] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                          title="Download Best Batsman Certificate"
+                        >
+                          <Flame size={13} />
+                          <span>Best Batsman</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadAwardCertificate('best_bowler')}
+                          className="px-3 py-2.5 bg-cyan-500/20 hover:bg-cyan-500 hover:text-slate-950 text-cyan-200 border border-cyan-400/30 rounded-xl font-black uppercase tracking-wider text-[10px] transition-all cursor-pointer shadow-sm flex items-center gap-1.5"
+                          title="Download Best Bowler Certificate"
+                        >
+                          <Medal size={13} />
+                          <span>Best Bowler</span>
+                        </button>
+                      </div>
+                    )}
+
                     <button
                       onClick={handleResetMatch}
                       className="px-6 py-2.5 bg-white hover:bg-slate-100 text-emerald-800 rounded-xl font-bold uppercase tracking-wider text-[10px] transition-all cursor-pointer border-none shadow-sm"
@@ -16036,6 +16244,40 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       ) : (
                         <>
+                          {/* AI VOICE-ASSISTED HANDS-FREE SCORER */}
+                          <VoiceAssistedScorer
+                            disabled={isScoringDisabled}
+                            strikerName={currentInnings?.batsmen[currentInnings.strikerIndex]?.name}
+                            bowlerName={currentInnings?.bowlers[currentInnings.currentBowlerIndex]?.name}
+                            onScoreRuns={(runs) => {
+                              if (runs === 6) setActiveAnimation('six');
+                              else if (runs === 4) setActiveAnimation('four');
+                              handleScoreEvent({ type: 'runs', val: runs });
+                            }}
+                            onScoreDot={() => {
+                              handleScoreEvent({ type: 'dot' });
+                            }}
+                            onScoreExtra={(type, extraRuns) => {
+                              if (type === 'wide') {
+                                handleScoreEvent({ type: 'wide', val: extraRuns });
+                              } else if (type === 'noball') {
+                                handleScoreEvent({ type: 'noball', val: extraRuns });
+                              }
+                            }}
+                            onScoreByes={(type, runs) => {
+                              handleScoreEvent({ type, val: runs });
+                            }}
+                            onScoreWicket={(wicketType) => {
+                              openWicketModal('striker');
+                            }}
+                            onUndo={() => {
+                              handleUndoLastBall();
+                            }}
+                            onSwapBatsmen={() => {
+                              handleSwapStriker();
+                            }}
+                          />
+
                           {/* Control buttons block */}
                           <div>
                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 leading-none font-bold">TAP BALL RUNS</span>
@@ -18278,6 +18520,232 @@ export const CricketScoreboard: React.FC = () => {
                       Stay on Scoreboard
                     </button>
                   </div>
+                  {/* Auto-Generated Official Match Certificates Section */}
+                  {certificateData && (
+                    <div className="bg-slate-950/90 border border-amber-500/40 rounded-3xl p-4 sm:p-5 text-left space-y-3.5 shadow-xl">
+                      <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[8.5px] font-black uppercase tracking-wider">
+                              ● Auto-Generated
+                            </span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 flex items-center gap-1">
+                              <Award size={13} className="text-amber-400" />
+                              Official Award Certificates
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1 font-sans">
+                            Player of the Match, Best Batsman, Best Bowler, and Fighter of the Match certificates are generated automatically and ready for instant download.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        {/* 1. Player of the Match */}
+                        <div className="bg-slate-900 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                                <Trophy size={10} /> Player of Match
+                              </span>
+                              <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[7.5px] font-mono font-bold">
+                                {certificateData.playerOfTheMatch.points} pts
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-black text-white mt-1 truncate">
+                              {certificateData.playerOfTheMatch.name}
+                            </h5>
+                            <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                              {certificateData.playerOfTheMatch.runs} runs{certificateData.playerOfTheMatch.wickets > 0 ? ` • ${certificateData.playerOfTheMatch.wickets}w` : ''}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadAwardCertificate('potm')}
+                              className="w-full py-1 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                            >
+                              <Award size={10} />
+                              <span>View Certificate</span>
+                            </button>
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('potm', 'png')}
+                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Download POTM PNG"
+                              >
+                                <Download size={8} />
+                                <span>PNG</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('potm', 'pdf')}
+                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Download POTM PDF"
+                              >
+                                <FileText size={8} />
+                                <span>PDF</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Best Batsman */}
+                        <div className="bg-slate-900 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                                <Flame size={10} /> Best Batsman
+                              </span>
+                              <span className="px-1.5 py-0.5 bg-orange-500/20 text-orange-300 rounded text-[7.5px] font-mono font-bold">
+                                Top Runs
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-black text-white mt-1 truncate">
+                              {certificateData.bestBatsman?.name || 'Top Batsman'}
+                            </h5>
+                            <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                              {certificateData.bestBatsman?.runs || 0} runs ({certificateData.bestBatsman?.balls || 0}b)
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadAwardCertificate('best_batter')}
+                              className="w-full py-1 px-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                            >
+                              <Award size={10} />
+                              <span>View Certificate</span>
+                            </button>
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('best_batter', 'png')}
+                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Download Best Batsman PNG"
+                              >
+                                <Download size={8} />
+                                <span>PNG</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('best_batter', 'pdf')}
+                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Download Best Batsman PDF"
+                              >
+                                <FileText size={8} />
+                                <span>PDF</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 3. Best Bowler */}
+                        <div className="bg-slate-900 border border-cyan-500/30 hover:border-cyan-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[8px] font-black uppercase tracking-wider text-cyan-400 flex items-center gap-1">
+                                <Medal size={10} /> Best Bowler
+                              </span>
+                              <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 rounded text-[7.5px] font-mono font-bold">
+                                Top Wkts
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-black text-white mt-1 truncate">
+                              {certificateData.bestBowler?.name || 'Top Bowler'}
+                            </h5>
+                            <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                              {certificateData.bestBowler?.wickets || 0} wkts ({certificateData.bestBowler?.runsConceded || 0}r)
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadAwardCertificate('best_bowler')}
+                              className="w-full py-1 px-2 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                            >
+                              <Award size={10} />
+                              <span>View Certificate</span>
+                            </button>
+                            <div className="grid grid-cols-2 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('best_bowler', 'png')}
+                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Download Best Bowler PNG"
+                              >
+                                <Download size={8} />
+                                <span>PNG</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('best_bowler', 'pdf')}
+                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                title="Download Best Bowler PDF"
+                              >
+                                <FileText size={8} />
+                                <span>PDF</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 4. Fighter of the Match (Runner-up Standout) */}
+                        {certificateData.fighterOfTheMatch && (
+                          <div className="bg-slate-900 border border-rose-500/40 hover:border-rose-400/70 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-rose-400 flex items-center gap-1">
+                                  <Zap size={10} className="text-amber-300" /> Fighter of Match
+                                </span>
+                                <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded text-[7.5px] font-mono font-bold">
+                                  {certificateData.fighterOfTheMatch.points} pts
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-black text-white mt-1 truncate">
+                                {certificateData.fighterOfTheMatch.name}
+                              </h5>
+                              <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                                {certificateData.fighterOfTheMatch.runs} runs{certificateData.fighterOfTheMatch.wickets > 0 ? ` • ${certificateData.fighterOfTheMatch.wickets}w` : ''}
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('fighter')}
+                                className="w-full py-1 px-2 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                              >
+                                <Award size={10} />
+                                <span>View Certificate</span>
+                              </button>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('fighter', 'png')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Fighter of Match PNG"
+                                >
+                                  <Download size={8} />
+                                  <span>PNG</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('fighter', 'pdf')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Fighter of Match PDF"
+                                >
+                                  <FileText size={8} />
+                                  <span>PDF</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleExportMatchPDF}
                     className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-wider text-[11px] rounded-2xl transition-all cursor-pointer border-none shadow-md active:scale-95 flex items-center justify-center gap-1.5 font-sans"
@@ -18467,6 +18935,20 @@ export const CricketScoreboard: React.FC = () => {
         onApplyToss={handleApplySpinCoinToss}
         soundEnabled={soundEnabled}
       />
+
+      {/* Digital Awards & Certificate Generator Modal */}
+      {certificateData && (
+        <MatchAwardsCertificateModal
+          isOpen={showCertificateModal}
+          onClose={() => {
+            setShowCertificateModal(false);
+            setCertificateDownloadFormat(null);
+          }}
+          data={certificateData}
+          initialAward={certificateAwardType}
+          autoDownloadFormat={certificateDownloadFormat}
+        />
+      )}
 
       {/* Shared Modals: Tournament Caps, Sponsor Management & Player Cards */}
       {renderSharedOverlays()}

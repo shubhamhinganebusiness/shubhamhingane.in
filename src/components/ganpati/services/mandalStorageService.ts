@@ -343,19 +343,53 @@ export function updateMandalProfile(mandalId: string, updatedProfile: MandalProf
   saveMandalDataset(mandalId, dataset);
 }
 
+export const DEFAULT_MANDAL_SESSION: MandalUserSession = {
+  mandalId: 'mandal-shivtej-pune',
+  mandalCode: 'SHIVTEJ_PUNE',
+  mandalNameMr: 'श्री शिवतेज सार्वजनिक गणेशोत्सव मंडळ',
+  mandalNameEn: 'Shree Shivtej Sarvajanik Ganeshotsav Mandal',
+  role: 'admin',
+  userName: 'मंडळ अध्यक्ष / मुख्य प्रशासक',
+  token: 'tok_admin_default',
+  loginTime: new Date().toISOString()
+};
+
 /**
- * Get the currently logged in user session
+ * Get the currently logged in user session (never returns null, falls back to default tenant)
  */
-export function getActiveSession(): MandalUserSession | null {
+export function getActiveSession(): MandalUserSession {
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.mandalId && parsed.role) {
+        return parsed;
+      }
     }
   } catch (err) {
     console.error('Failed to get active session', err);
   }
-  return null;
+
+  // Fallback to default session
+  const defaultAccount = getMandalAccount('mandal-shivtej-pune') || getAllMandalAccounts()[0];
+  const defaultSession: MandalUserSession = {
+    mandalId: defaultAccount ? defaultAccount.id : 'mandal-shivtej-pune',
+    mandalCode: defaultAccount ? defaultAccount.mandalCode : 'SHIVTEJ_PUNE',
+    mandalNameMr: defaultAccount ? defaultAccount.profile.nameMr : 'श्री शिवतेज सार्वजनिक गणेशोत्सव मंडळ',
+    mandalNameEn: defaultAccount ? defaultAccount.profile.nameEn : 'Shree Shivtej Sarvajanik Ganeshotsav Mandal',
+    role: 'admin',
+    userName: defaultAccount?.profile?.presidentName || 'मंडळ अध्यक्ष / मुख्य प्रशासक',
+    token: 'tok_admin_default',
+    loginTime: new Date().toISOString()
+  };
+
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(defaultSession));
+  } catch (e) {
+    console.error('Failed to initialize active session', e);
+  }
+
+  return defaultSession;
 }
 
 /**

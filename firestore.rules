@@ -279,6 +279,13 @@ service cloud.firestore {
       }
     }
 
+    match /site_settings/{settingId} {
+      allow read, write: if true;
+      match /{allSub=**} {
+        allow read, write: if true;
+      }
+    }
+
     // -------------------------------------------------------------------------
     // Ganpati Mandal: Digital Pavati & ERP Multi-Tenant Data
     // -------------------------------------------------------------------------

@@ -73,8 +73,12 @@ const GanpatiMandalApp = lazy(() => import('./components/ganpati/GanpatiMandalAp
 const CricketDigitalToss = lazy(() => import('./components/cricket/CricketDigitalToss').then(m => ({ default: m.CricketDigitalToss })));
 const CaptainSquadSubmission = lazy(() => import('./components/cricket/CaptainSquadSubmission').then(m => ({ default: m.CaptainSquadSubmission })));
 const GoogleWorkspaceHub = lazy(() => import('./components/workspace/GoogleWorkspaceHub').then(m => ({ default: m.GoogleWorkspaceHub })));
+const CertificateVerificationPage = lazy(() => import('./pages/CertificateVerificationPage').then(m => ({ default: m.CertificateVerificationPage })));
 
 const hideOnRoutes = [
+  '/verify-certificate',
+  '/verify-award',
+  '/live/verify-certificate',
   '/live/cricket-captain-squad',
   '/cricket-captain-squad',
   '/live/cricket-toss',
@@ -142,7 +146,15 @@ const LoadingSpinner = () => (
   </div>
 );
 
-const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
+const ProtectedRoute = ({ 
+  children, 
+  allowedRoles,
+  redirectTo = "/login"
+}: { 
+  children: React.ReactNode; 
+  allowedRoles?: string[];
+  redirectTo?: string;
+}) => {
   const { user, role, loading } = useAuth();
   const location = useLocation();
   
@@ -155,7 +167,7 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 
   if (!user) {
     // Save the intended destination and redirect to login
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to={redirectTo} state={{ from: location }} replace />;
   }
 
   if (allowedRoles && role && !allowedRoles.includes(role)) {
@@ -163,13 +175,21 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
       <div className="min-h-screen flex items-center justify-center p-20 bg-gray-50">
         <div className="bg-white p-12 rounded-[2.5rem] shadow-xl text-center max-w-md border border-gray-100">
           <h2 className="text-2xl font-black text-gray-900 mb-4">Access Restricted</h2>
-          <p className="text-gray-500 font-medium mb-8">Your account does not have administrative privileges required for this section.</p>
-          <button 
-            onClick={() => window.location.hash = '#/'}
-            className="w-full py-4 bg-primary text-white rounded-2xl font-bold uppercase tracking-widest text-xs"
-          >
-            Back to Home
-          </button>
+          <p className="text-gray-500 font-medium mb-6">Your account does not have administrative privileges required for this section.</p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button 
+              onClick={() => window.location.hash = '#/'}
+              className="flex-1 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl font-bold uppercase tracking-widest text-xs cursor-pointer border-none"
+            >
+              Back to Home
+            </button>
+            <button 
+              onClick={() => window.location.hash = `#${redirectTo}`}
+              className="flex-1 py-3.5 bg-primary text-white rounded-2xl font-bold uppercase tracking-widest text-xs cursor-pointer border-none"
+            >
+              Sign In
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -389,7 +409,22 @@ function AppContent() {
             }
           />
           <Route path="/live/school-erp" element={<SchoolERPApp />} />
-          <Route path="/live/cricket-scoreboard" element={<CricketScoreboard />} />
+          <Route 
+            path="/live/cricket-scoreboard" 
+            element={
+              <ProtectedRoute redirectTo="/cricket-login" allowedRoles={['super_admin', 'score_manager']}>
+                <CricketScoreboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/cricket-scoreboard" 
+            element={
+              <ProtectedRoute redirectTo="/cricket-login" allowedRoles={['super_admin', 'score_manager']}>
+                <CricketScoreboard />
+              </ProtectedRoute>
+            } 
+          />
           <Route path="/live/cricket-captain-squad" element={<CaptainSquadSubmission />} />
           <Route path="/live/cricket-captain-squad/:teamId" element={<CaptainSquadSubmission />} />
           <Route path="/cricket-captain-squad" element={<CaptainSquadSubmission />} />
@@ -412,9 +447,38 @@ function AppContent() {
           <Route path="/cricket-login" element={<GullyScoreLogin />} />
           <Route path="/live/cricket-login" element={<GullyScoreLogin />} />
           <Route path="/live/video-streamer-recorder" element={<VideoRecorderApp />} />
-          <Route path="/live/id-card-generator" element={<IDCardGenerator />} />
-          <Route path="/live/instant-id-builder" element={<InstantIDCardBuilderPage />} />
-          <Route path="/live/select-template" element={<SelectTemplatePage />} />
+          <Route 
+            path="/live/id-card-generator" 
+            element={
+              <ProtectedRoute redirectTo="/login">
+                <IDCardGenerator />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/live/instant-id-builder" 
+            element={
+              <ProtectedRoute redirectTo="/login">
+                <InstantIDCardBuilderPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/instant-id-builder" 
+            element={
+              <ProtectedRoute redirectTo="/login">
+                <InstantIDCardBuilderPage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/live/select-template" 
+            element={
+              <ProtectedRoute redirectTo="/login">
+                <SelectTemplatePage />
+              </ProtectedRoute>
+            } 
+          />
           <Route path="/live/photography-portfolio" element={<PhotographyPortfolio />} />
           <Route path="/live/election-command-center" element={<ElectionCommandCenter />} />
           <Route path="/live/ganpati-mandal" element={<GanpatiMandalApp />} />
@@ -422,6 +486,9 @@ function AppContent() {
           <Route path="/workspace" element={<GoogleWorkspaceHub />} />
           <Route path="/google-sheets" element={<GoogleWorkspaceHub />} />
           <Route path="/google-forms" element={<GoogleWorkspaceHub />} />
+          <Route path="/verify-certificate" element={<CertificateVerificationPage />} />
+          <Route path="/verify-award" element={<CertificateVerificationPage />} />
+          <Route path="/live/verify-certificate" element={<CertificateVerificationPage />} />
           <Route path="/agro-dashboard" element={<AgroDashboard />} />
           <Route path="/portfolio-admin" element={<PortfolioAdmin />} />
           <Route path="/service/:id" element={<ServiceDetail />} />
@@ -432,7 +499,7 @@ function AppContent() {
           <Route 
             path="/live/dairy-management" 
             element={
-              <ProtectedRoute allowedRoles={['super_admin', 'dairy_admin']}>
+              <ProtectedRoute redirectTo="/dairy-login" allowedRoles={['super_admin', 'dairy_admin']}>
                 <DairyDashboard />
               </ProtectedRoute>
             } 

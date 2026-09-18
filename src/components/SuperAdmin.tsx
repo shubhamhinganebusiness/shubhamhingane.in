@@ -3,7 +3,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { updatePassword } from 'firebase/auth';
 import { collection, doc, setDoc, getDoc, getDocs, query, orderBy, deleteDoc, where } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutDashboard, Plus, Users, Trash2, ShieldCheck, Mail, Database, Settings as SettingsIcon, AlertCircle, MessageSquare, Phone, Clock, Store, Edit2, Eye, EyeOff, X, Sparkles, RefreshCw, Lock, Check, ShieldAlert, ChevronDown, Globe, Palette, BarChart3, Briefcase, Activity, UtensilsCrossed, Trophy, CheckCircle2, SlidersHorizontal, LogOut, Grid } from 'lucide-react';
+import { LayoutDashboard, Plus, Users, Trash2, ShieldCheck, Mail, Database, Settings as SettingsIcon, AlertCircle, MessageSquare, Phone, Clock, Store, Edit2, Eye, EyeOff, X, Sparkles, RefreshCw, Lock, Check, ShieldAlert, ChevronDown, Globe, Palette, BarChart3, Briefcase, Activity, UtensilsCrossed, Trophy, CheckCircle2, SlidersHorizontal, LogOut, Grid, Award } from 'lucide-react';
 import { useAuth } from './AuthContext';
 import { SiteManagement } from './SiteManagement';
 import { AdminAnalytics } from './AdminAnalytics';
@@ -13,6 +13,7 @@ import { PlayerDirectoryDashboard } from './cricket/PlayerDirectoryDashboard';
 import { SpectatorSliderAdmin } from './cricket/SpectatorSliderAdmin';
 import { BroadcastThemeStudio } from './cricket/BroadcastThemeStudio';
 import { CompletedMatchesAdminManager } from './cricket/CompletedMatchesAdminManager';
+import { CertificateDesignStudioAdmin } from './cricket/CertificateDesignStudioAdmin';
 
 interface PasswordStrength {
   score: number; // 0 to 4
@@ -97,7 +98,7 @@ export const generateSecurePassword = (): string => {
 
 export const SuperAdmin: React.FC = () => {
   const { role, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings' | 'themestudio' | 'completed_matches'>('site');
+  const [activeTab, setActiveTab] = useState<'site' | 'users' | 'messages' | 'analytics' | 'enterprise' | 'med' | 'mess' | 'cricket' | 'slider' | 'settings' | 'themestudio' | 'completed_matches' | 'certificate_design'>('site');
   const [users, setUsers] = useState<any[]>([]);
   const [shopOwners, setShopOwners] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
@@ -115,7 +116,7 @@ export const SuperAdmin: React.FC = () => {
   const [newSMPassword, setNewSMPassword] = useState('');
   const [creatingSM, setCreatingSM] = useState(false);
   const [showSMPass, setShowSMPass] = useState<Record<string, boolean>>({});
-  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'completed_matches' | 'managers' | 'slider' | 'themestudio'>('players');
+  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'completed_matches' | 'managers' | 'slider' | 'themestudio' | 'certificate_design'>('players');
 
   // Account Security Tab States
   const [newAdminPassword, setNewAdminPassword] = useState('');
@@ -573,6 +574,7 @@ export const SuperAdmin: React.FC = () => {
 
   const TABS = [
     { id: 'site', label: 'Site CMS', icon: Globe, description: 'Content & Pages' },
+    { id: 'certificate_design', label: 'Certificate Studio', icon: Award, description: 'Match Award Designs' },
     { id: 'themestudio', label: 'Theme Studio', icon: Palette, description: 'Broadcast Graphics' },
     { id: 'users', label: 'Users & Roles', icon: Users, description: 'Accounts & Access', count: users.length },
     { id: 'analytics', label: 'Analytics', icon: BarChart3, description: 'Traffic & Activity' },
@@ -671,11 +673,11 @@ export const SuperAdmin: React.FC = () => {
                       {tab.description}
                     </div>
                   </div>
-                  {tab.count !== undefined && tab.count > 0 && (
+                  {(tab as any).count !== undefined && (tab as any).count > 0 && (
                     <span className={`text-[9.5px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${
                       isActive ? 'bg-primary text-white' : 'bg-gray-200 text-gray-700 group-hover:bg-primary/20 group-hover:text-primary'
                     }`}>
-                      {tab.count}
+                      {(tab as any).count}
                     </span>
                   )}
                 </button>
@@ -1317,6 +1319,13 @@ export const SuperAdmin: React.FC = () => {
                     >
                       🎨 Theme Studio
                     </button>
+                    <button
+                      onClick={() => setCricketSubTab('certificate_design')}
+                      type="button"
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'certificate_design' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                    >
+                      🏆 Certificate Design
+                    </button>
                   </div>
                 </div>
 
@@ -1328,6 +1337,8 @@ export const SuperAdmin: React.FC = () => {
                   <SpectatorSliderAdmin />
                 ) : cricketSubTab === 'themestudio' ? (
                   <BroadcastThemeStudio />
+                ) : cricketSubTab === 'certificate_design' ? (
+                  <CertificateDesignStudioAdmin />
                 ) : (
                   <div className="space-y-8">
                     {/* Score Manager creation form */}
@@ -1503,6 +1514,15 @@ export const SuperAdmin: React.FC = () => {
                   </div>
                 )}
               </div>
+            </motion.div>
+          ) : activeTab === 'certificate_design' ? (
+            <motion.div
+              key="certificate_design"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <CertificateDesignStudioAdmin />
             </motion.div>
           ) : activeTab === 'completed_matches' ? (
             <motion.div

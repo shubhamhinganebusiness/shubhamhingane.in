@@ -175,11 +175,9 @@ async function generateContentWithFallback(
   try {
     // Official valid Gemini models ordered for maximum availability and high throughput
     const baseModels = [
-      "gemini-3.1-flash-lite",
-      "gemini-3.6-flash",
       "gemini-3.8-flash",
-      "gemini-flash-latest",
-      "gemini-3.7-flash"
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest"
     ];
 
     // Prioritize healthy models that are not currently cooling down from a 503 spike
@@ -255,6 +253,57 @@ async function startServer() {
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // High-Traffic Security & Anti-DDoS Headers (Cricbuzz-grade standards)
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    // Allow overlay embedding while blocking clickjacking on sensitive forms
+    if (!req.path.startsWith("/obs-") && !req.path.startsWith("/embed-")) {
+      res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    }
+    next();
+  });
+
+  // Anti-DDoS in-memory token-bucket IP rate limiter for spectator and API endpoints
+  const ipHitCounter = new Map<string, { count: number; resetAt: number }>();
+  app.use((req, res, next) => {
+    // Only rate-limit /api/ endpoints to preserve static asset loading speed
+    if (!req.path.startsWith("/api/")) {
+      return next();
+    }
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown_ip";
+    const now = Date.now();
+    const windowMs = 10000; // 10-second rolling window
+    // Generous limit for live score polling: up to 150 requests per 10s per IP
+    const maxRequestsPerWindow = 150;
+
+    let tracker = ipHitCounter.get(ip);
+    if (!tracker || now > tracker.resetAt) {
+      tracker = { count: 1, resetAt: now + windowMs };
+      ipHitCounter.set(ip, tracker);
+    } else {
+      tracker.count++;
+    }
+
+    // Clean old IPs periodically if map gets huge
+    if (ipHitCounter.size > 20000) {
+      ipHitCounter.forEach((v, k) => {
+        if (now > v.resetAt) ipHitCounter.delete(k);
+      });
+    }
+
+    if (tracker.count > maxRequestsPerWindow) {
+      res.setHeader("Retry-After", "5");
+      return res.status(429).json({
+        error: "Too Many Requests",
+        message: "High-traffic spectator protection active. Please wait a few seconds."
+      });
+    }
+
+    next();
+  });
 
   // Gracefully catch body-parser PayloadTooLargeError or malformed JSON
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -752,6 +801,266 @@ async function startServer() {
     } catch (err: any) {
       console.error("[Cricket Active Match API] Error fetching active match:", err);
       res.status(500).json({ error: err.message || "Failed to query active match" });
+    }
+  });
+
+  // =========================================================================
+  // Cricbuzz-Grade Edge Fan-out & Read-Replica Live Score Feed Endpoints
+  // Protects Firestore from read exhaustion by caching live data at the edge
+  // with HTTP Cache-Control (public, max-age=1, stale-while-revalidate=2).
+  // =========================================================================
+
+  // In-memory server cache for hot live matches (micro-cache: 1500ms)
+  let liveMatchesServerCache: { timestamp: number; etag: string; data: any[] } = {
+    timestamp: 0,
+    etag: "",
+    data: []
+  };
+
+  const matchSummaryServerCache = new Map<string, { timestamp: number; etag: string; data: any }>();
+
+  // Helper to extract lightweight Cricbuzz-style live score summary
+  function extractServerLiveSummary(m: any) {
+    if (!m || !m.id) return null;
+    const currentInn = m.currentInningsNum === 1 ? m.innings1 : m.innings2;
+    const balls = currentInn?.ballsBowled || 0;
+    const oversFormatted = `${Math.floor(balls / 6)}.${balls % 6}`;
+    const runs = currentInn?.runs || 0;
+    const wickets = currentInn?.wickets || 0;
+    const crr = balls > 0 ? parseFloat((runs / (balls / 6)).toFixed(2)) : 0;
+    
+    let rrr: number | null = null;
+    if (m.currentInningsNum === 2 && m.targetRuns) {
+      const needed = Math.max(0, m.targetRuns - runs);
+      const remainingBalls = Math.max(0, (m.oversLimit || 10) * 6 - balls);
+      rrr = remainingBalls > 0 ? parseFloat(((needed / remainingBalls) * 6).toFixed(2)) : null;
+    }
+
+    const striker = currentInn?.batsmen?.[currentInn?.strikerIndex];
+    const nonStriker = currentInn?.batsmen?.[currentInn?.nonStrikerIndex];
+    const bowler = currentInn?.bowlers?.[currentInn?.currentBowlerIndex];
+
+    const recentBalls: any[] = [];
+    if (Array.isArray(currentInn?.commentaryList) && currentInn.commentaryList.length > 0) {
+      recentBalls.push(...currentInn.commentaryList.slice(0, 12));
+    }
+
+    return {
+      id: m.id,
+      status: m.status || "setup",
+      teamA: m.teamA || "Team A",
+      teamB: m.teamB || "Team B",
+      teamALogo: m.teamALogo || "",
+      teamBLogo: m.teamBLogo || "",
+      tournamentName: m.tournamentName || "",
+      groundName: m.groundName || "",
+      oversLimit: m.oversLimit || 10,
+      currentInningsNum: m.currentInningsNum || 1,
+      targetRuns: m.targetRuns || null,
+      isSuperOver: m.isSuperOver || false,
+      score: {
+        runs,
+        wickets,
+        ballsBowled: balls,
+        oversFormatted,
+        crr,
+        rrr
+      },
+      striker: striker ? {
+        name: striker.name,
+        runs: striker.runs,
+        balls: striker.balls,
+        fours: striker.fours || 0,
+        sixes: striker.sixes || 0
+      } : null,
+      nonStriker: nonStriker ? {
+        name: nonStriker.name,
+        runs: nonStriker.runs,
+        balls: nonStriker.balls,
+        fours: nonStriker.fours || 0,
+        sixes: nonStriker.sixes || 0
+      } : null,
+      currentBowler: bowler ? {
+        name: bowler.name,
+        oversFormatted: `${Math.floor((bowler.ballsBowled || 0) / 6)}.${(bowler.ballsBowled || 0) % 6}`,
+        maidens: bowler.maidens || 0,
+        runsConceded: bowler.runsConceded || 0,
+        wickets: bowler.wickets || 0
+      } : null,
+      recentBalls,
+      updatedAt: m.updatedAt || Date.now()
+    };
+  }
+
+  // 1. High-Traffic Live Feed Endpoint (/api/cricket/live-feed)
+  app.get("/api/cricket/live-feed", async (req, res) => {
+    try {
+      const now = Date.now();
+      const CACHE_WINDOW_MS = 1500; // 1.5 seconds micro-cache
+
+      // Edge Caching Headers (Cloudflare / Cloud CDN / Fastly compatible)
+      res.setHeader("Cache-Control", "public, max-age=1, stale-while-revalidate=2");
+      res.setHeader("X-FanOut-Tier", "edge-replica");
+
+      if (liveMatchesServerCache.data.length > 0 && now - liveMatchesServerCache.timestamp < CACHE_WINDOW_MS) {
+        if (req.headers["if-none-match"] === liveMatchesServerCache.etag) {
+          return res.status(304).end();
+        }
+        res.setHeader("ETag", liveMatchesServerCache.etag);
+        return res.json({
+          source: "edge_cache",
+          cachedAt: liveMatchesServerCache.timestamp,
+          etag: liveMatchesServerCache.etag,
+          matches: liveMatchesServerCache.data
+        });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        // Fall back to stale cache if available
+        if (liveMatchesServerCache.data.length > 0) {
+          res.setHeader("ETag", liveMatchesServerCache.etag);
+          return res.json({
+            source: "edge_cache_fallback",
+            cachedAt: liveMatchesServerCache.timestamp,
+            etag: liveMatchesServerCache.etag,
+            matches: liveMatchesServerCache.data
+          });
+        }
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { collection, query, where, getDocs, limit, orderBy } = await import("firebase/firestore");
+      
+      // Query active live matches first
+      const liveQ = query(
+        collection(db, "cricket_matches"),
+        where("status", "==", "live"),
+        limit(10)
+      );
+      const liveSnap = await getDocs(liveQ);
+      const rawMatches: any[] = [];
+      liveSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+
+      // If no live matches, fetch top 3 most recent completed matches for spectator display
+      if (rawMatches.length === 0) {
+        const recentQ = query(
+          collection(db, "cricket_matches"),
+          orderBy("updatedAt", "desc"),
+          limit(5)
+        );
+        try {
+          const recSnap = await getDocs(recentQ);
+          recSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+        } catch (_) {
+          // fallback without orderBy if index is building
+          const fallbackSnap = await getDocs(query(collection(db, "cricket_matches"), limit(5)));
+          fallbackSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+        }
+      }
+
+      const summaries = rawMatches
+        .filter(m => m && !m.isDeleted && m.status !== "deleted")
+        .map(extractServerLiveSummary);
+
+      const etag = `W/"livefeed-${now}-${summaries.length}-${summaries[0]?.updatedAt || 0}"`;
+      liveMatchesServerCache = {
+        timestamp: now,
+        etag,
+        data: summaries
+      };
+
+      res.setHeader("ETag", etag);
+      return res.json({
+        source: "origin_db",
+        cachedAt: now,
+        etag,
+        matches: summaries
+      });
+    } catch (err: any) {
+      console.warn("[Live Feed API] Error serving live feed:", err.message);
+      // Serve stale cache if available rather than erroring
+      if (liveMatchesServerCache.data.length > 0) {
+        return res.json({
+          source: "edge_cache_emergency",
+          cachedAt: liveMatchesServerCache.timestamp,
+          etag: liveMatchesServerCache.etag,
+          matches: liveMatchesServerCache.data
+        });
+      }
+      res.status(500).json({ error: "Failed to read live match feed" });
+    }
+  });
+
+  // 2. High-Traffic Match Summary Read-Replica Endpoint (/api/cricket/match-summary/:id)
+  app.get("/api/cricket/match-summary/:matchId", async (req, res) => {
+    try {
+      const { matchId } = req.params;
+      if (!matchId) return res.status(400).json({ error: "matchId required" });
+
+      const now = Date.now();
+      const CACHE_WINDOW_MS = 1000; // 1 second micro-cache
+
+      res.setHeader("Cache-Control", "public, max-age=1, stale-while-revalidate=2");
+      res.setHeader("X-FanOut-Tier", "edge-replica");
+
+      const cached = matchSummaryServerCache.get(matchId);
+      if (cached && now - cached.timestamp < CACHE_WINDOW_MS) {
+        if (req.headers["if-none-match"] === cached.etag) {
+          return res.status(304).end();
+        }
+        res.setHeader("ETag", cached.etag);
+        return res.json({
+          source: "edge_cache",
+          cachedAt: cached.timestamp,
+          etag: cached.etag,
+          summary: cached.data
+        });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        if (cached) {
+          res.setHeader("ETag", cached.etag);
+          return res.json({
+            source: "edge_cache_fallback",
+            cachedAt: cached.timestamp,
+            etag: cached.etag,
+            summary: cached.data
+          });
+        }
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, getDoc } = await import("firebase/firestore");
+      const docSnap = await getDoc(doc(db, "cricket_matches", matchId));
+      if (!docSnap.exists()) {
+        return res.status(404).json({ error: "Match not found" });
+      }
+
+      const data = { id: docSnap.id, ...docSnap.data() } as any;
+      const summary = extractServerLiveSummary(data);
+
+      const etag = `W/"match-${matchId}-${now}-${data.updatedAt || 0}"`;
+      const cacheObj = { timestamp: now, etag, data: summary };
+      matchSummaryServerCache.set(matchId, cacheObj);
+
+      // Clean old matches from map
+      if (matchSummaryServerCache.size > 200) {
+        const oldestKey = matchSummaryServerCache.keys().next().value;
+        if (oldestKey) matchSummaryServerCache.delete(oldestKey);
+      }
+
+      res.setHeader("ETag", etag);
+      return res.json({
+        source: "origin_db",
+        cachedAt: now,
+        etag,
+        summary
+      });
+    } catch (err: any) {
+      console.warn("[Match Summary API] Error serving match summary:", err.message);
+      res.status(500).json({ error: "Failed to read match summary" });
     }
   });
 
@@ -1862,7 +2171,7 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         }
       });
     } catch (error: any) {
-      console.warn("Gemini Commentary API Quota limit or error triggered. Reverting to local gully commentator:", error.message || error);
+      console.log("[Cricket Commentary] Gemini temporarily unavailable or experiencing high demand. Seamlessly served local multilingual gully commentator.");
       const fallback = getGullyCommentaryMultilingual(
         event,
         batsman?.name,

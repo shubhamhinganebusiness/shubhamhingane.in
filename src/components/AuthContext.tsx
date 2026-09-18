@@ -339,15 +339,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       localStorage.removeItem('erp_virtual_user');
+      sessionStorage.removeItem('erp_virtual_user');
+      // Clean up cached role entries
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('auth_role_') || key.startsWith('auth_pharmacyId_') || key.startsWith('auth_storeId_'))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
     } catch (e) {
       console.warn('Logging out did not clear localStorage erp_virtual_user:', e);
     }
-    const { auth } = await import('../lib/firebase');
-    await auth.signOut();
-    setUser(null);
-    setRole(null);
-    setPharmacyId(null);
-    setStoreId(null);
+
+    try {
+      const { auth } = await import('../lib/firebase');
+      await auth.signOut();
+    } catch (signOutErr) {
+      console.warn('Firebase auth signOut error during logout:', signOutErr);
+    } finally {
+      setUser(null);
+      setRole(null);
+      setPharmacyId(null);
+      setStoreId(null);
+      setLoading(false);
+    }
   };
   const isSuperAdmin = role === 'super_admin';
   const isDairyAdmin = role === 'dairy_admin' || role === 'super_admin';

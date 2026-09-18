@@ -12,6 +12,8 @@ import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { MatchState } from '../components/cricket/CricketScoreboard';
 import { CompletedMatchCard, SponsorAdSlide } from '../components/cricket/CompletedRecordsSlider';
 import { DEFAULT_PRESET_SPONSORS } from '../utils/cricketSponsorsStorage';
+import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from '../components/cricket/MatchAwardsCertificateModal';
+import { computeFighterOfTheMatch } from '../utils/certificateVerification';
 
 export const CompletedMatchesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -22,6 +24,133 @@ export const CompletedMatchesPage: React.FC = () => {
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'high_score' | 'low_score'>('newest');
   const [viewMode, setViewMode] = useState<'cards' | 'compact' | 'table'>('cards');
   const [adminAds, setAdminAds] = useState<SponsorAdSlide[]>([]);
+
+  // Match Awards Certificate Modal State
+  const [selectedAwardMatch, setSelectedAwardMatch] = useState<MatchState | null>(null);
+  const [awardModalOpen, setAwardModalOpen] = useState<boolean>(false);
+  const [awardType, setAwardType] = useState<AwardType>('potm');
+
+  // Compute certificate data for selected match
+  const awardCertificateData: MatchCertificateData | null = useMemo(() => {
+    if (!selectedAwardMatch) return null;
+    const m = selectedAwardMatch;
+    let bestBatter = { name: 'N/A', runs: 0, balls: 0, fours: 0, sixes: 0 };
+    let bestBowler = { name: 'N/A', wickets: 0, runs: 0, maidens: 0, ballsBowled: 0 };
+    const statsMap: { [key: string]: { name: string; runs: number; balls: number; wickets: number; runsConceded: number; fours: number; sixes: number; maidens: number; ballsBowled: number } } = {};
+
+    const getOrCreate = (name: string) => {
+      const k = name.trim().toLowerCase();
+      if (!statsMap[k]) statsMap[k] = { name: name.trim(), runs: 0, balls: 0, wickets: 0, runsConceded: 0, fours: 0, sixes: 0, maidens: 0, ballsBowled: 0 };
+      return statsMap[k];
+    };
+
+    const processInn = (inn: any) => {
+      if (!inn) return;
+      (inn.batsmen || []).forEach((b: any) => {
+        if (!b.name) return;
+        const p = getOrCreate(b.name);
+        p.runs += b.runs || 0;
+        p.balls += b.balls || 0;
+        p.fours += b.fours || 0;
+        p.sixes += b.sixes || 0;
+        if ((b.runs || 0) > bestBatter.runs) {
+          bestBatter = { name: b.name, runs: b.runs || 0, balls: b.balls || 0, fours: b.fours || 0, sixes: b.sixes || 0 };
+        }
+      });
+      (inn.bowlers || []).forEach((bw: any) => {
+        if (!bw.name) return;
+        const p = getOrCreate(bw.name);
+        p.wickets += bw.wickets || 0;
+        p.runsConceded += bw.runsConceded || 0;
+        p.maidens += bw.maidens || 0;
+        p.ballsBowled += bw.ballsBowled || 0;
+        if ((bw.wickets || 0) > bestBowler.wickets || ((bw.wickets || 0) === bestBowler.wickets && (bw.runsConceded || 0) < bestBowler.runs)) {
+          bestBowler = { name: bw.name, wickets: bw.wickets || 0, runs: bw.runsConceded || 0, maidens: bw.maidens || 0, ballsBowled: bw.ballsBowled || 0 };
+        }
+      });
+    };
+
+    processInn(m.mainMatchState?.innings1 || m.innings1);
+    processInn(m.mainMatchState?.innings2 || m.innings2);
+
+    let potmRecipient = m.playerOfTheMatch;
+    if (!potmRecipient || !potmRecipient.name) {
+      let maxPts = -1;
+      let topP: any = null;
+      for (const k in statsMap) {
+        const p = statsMap[k];
+        const pts = p.runs + (p.wickets * 25);
+        if (pts > maxPts) {
+          maxPts = pts;
+          topP = p;
+        }
+      }
+      if (topP) {
+        potmRecipient = { ...topP, points: maxPts };
+      }
+    }
+
+    const potmObj = potmRecipient || {
+      name: m.winner || 'Star Performer',
+      runs: 0,
+      balls: 0,
+      fours: 0,
+      sixes: 0,
+      wickets: 0,
+      runsConceded: 0,
+      maidens: 0,
+      ballsBowled: 0,
+      points: 50,
+    };
+
+    return {
+      matchId: m.id || `MATCH-${Date.now().toString().slice(-4)}`,
+      tournamentName: m.tournamentName || (m as any).seriesName || (m as any).tournament || (m as any).series || (m as any).cupName || 'Gully Premier League 2026',
+      matchDate: m.date || new Date().toLocaleDateString('en-GB'),
+      venue: (m as any).venue || (m as any).groundName || 'Local Ground',
+      teamA: m.teamA || 'Team A',
+      teamB: m.teamB || 'Team B',
+      winner: m.winner || 'Completed',
+      winReason: m.winReason || '',
+      playerOfTheMatch: {
+        name: potmObj.name,
+        runs: potmObj.runs || 0,
+        balls: potmObj.balls || 0,
+        fours: (potmObj as any).fours || 0,
+        sixes: (potmObj as any).sixes || 0,
+        wickets: potmObj.wickets || 0,
+        runsConceded: potmObj.runsConceded || 0,
+        maidens: (potmObj as any).maidens || 0,
+        ballsBowled: (potmObj as any).ballsBowled || 0,
+        points: potmObj.points || ((potmObj.runs || 0) + (potmObj.wickets || 0) * 25),
+      },
+      bestBatsman: bestBatter.name !== 'N/A' ? {
+        name: bestBatter.name,
+        runs: bestBatter.runs,
+        balls: bestBatter.balls,
+        fours: bestBatter.fours,
+        sixes: bestBatter.sixes,
+        wickets: 0,
+        points: bestBatter.runs,
+      } : undefined,
+      bestBowler: bestBowler.name !== 'N/A' ? {
+        name: bestBowler.name,
+        runs: 0,
+        wickets: bestBowler.wickets,
+        runsConceded: bestBowler.runs,
+        maidens: bestBowler.maidens,
+        ballsBowled: bestBowler.ballsBowled,
+        points: bestBowler.wickets * 25,
+      } : undefined,
+      fighterOfTheMatch: computeFighterOfTheMatch(m) || undefined,
+    };
+  }, [selectedAwardMatch]);
+
+  const handleOpenAwardsModal = (match: MatchState, award: AwardType = 'potm') => {
+    setSelectedAwardMatch(match);
+    setAwardType(award);
+    setAwardModalOpen(true);
+  };
 
   // Scroll to top on mount
   useEffect(() => {
@@ -568,6 +697,7 @@ export const CompletedMatchesPage: React.FC = () => {
                     adminAds={adminAds}
                     onSelectMatch={handleSelectMatch}
                     onShareWhatsApp={handleShareWhatsApp}
+                    onDownloadAward={(m, award) => handleOpenAwardsModal(m, award)}
                     isAdmin={false}
                   />
                 </div>
@@ -643,6 +773,16 @@ export const CompletedMatchesPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAwardsModal(m, 'potm')}
+                        className="px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border border-amber-500/40"
+                        title="Download Match Awards (POTM, Best Batsman, Best Bowler)"
+                      >
+                        <Award size={10} />
+                        <span>Awards</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={(e) => handleShareWhatsApp(m, e)}
@@ -724,6 +864,15 @@ export const CompletedMatchesPage: React.FC = () => {
                           <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
+                              onClick={() => handleOpenAwardsModal(m, 'potm')}
+                              className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 text-amber-300 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border border-amber-500/40"
+                              title="Download Match Awards"
+                            >
+                              <Award size={10} />
+                              <span>Awards</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={(e) => handleShareWhatsApp(m, e)}
                               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg transition-all border border-slate-700 cursor-pointer"
                               title="Share on WhatsApp"
@@ -749,6 +898,16 @@ export const CompletedMatchesPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Match Awards Certificate Modal */}
+      {awardCertificateData && (
+        <MatchAwardsCertificateModal
+          isOpen={awardModalOpen}
+          onClose={() => setAwardModalOpen(false)}
+          data={awardCertificateData}
+          initialAward={awardType}
+        />
+      )}
     </div>
   );
 };

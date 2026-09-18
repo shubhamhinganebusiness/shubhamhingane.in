@@ -1,11 +1,16 @@
 import React from 'react';
-import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Sparkles, LogIn, Trophy, Globe, Radio, History } from 'lucide-react';
+import { Facebook, Linkedin, MessageCircle, Phone, MapPin, Clock, ArrowRight, Activity, X, Sparkles, LogIn, Trophy, Globe, Radio, History, Calculator, Terminal, Code2, Milk, CreditCard, Cpu } from 'lucide-react';
 import { TypingText } from './TypingText';
 import { useLanguage } from './LanguageContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { useSiteSettings } from '../hooks/useCMS';
 import { useNavigate } from 'react-router-dom';
 import { LanguageModal } from './LanguageModal';
+import { ProjectCostEstimatorModal } from './hero/ProjectCostEstimatorModal';
+import { DeveloperTerminalModal } from './hero/DeveloperTerminalModal';
+import { HeroMiniAppDock, MiniDockTab } from './hero/HeroMiniAppDock';
+import { HeroTrustMarquee } from './hero/HeroTrustMarquee';
+import { KineticAuroraCanvas } from './hero/KineticAuroraCanvas';
 
 export const Hero = () => {
   const { t, language, setLanguage } = useLanguage();
@@ -13,6 +18,9 @@ export const Hero = () => {
   const navigate = useNavigate();
   const [showIDCardModal, setShowIDCardModal] = React.useState(false);
   const [isLangModalOpen, setIsLangModalOpen] = React.useState(false);
+  const [isEstimatorOpen, setIsEstimatorOpen] = React.useState(false);
+  const [isTerminalOpen, setIsTerminalOpen] = React.useState(false);
+  const [miniDockTab, setMiniDockTab] = React.useState<MiniDockTab>('profile');
 
   const displayTitle = settings?.heroTitle || t.hero.title;
   const displayName = settings?.heroName || t.hero.name;
@@ -70,7 +78,10 @@ export const Hero = () => {
   };
 
   return (
-    <section id="home" className="relative min-h-[calc(100vh-5rem)] flex items-center py-4 lg:py-6 px-4 md:px-8 max-w-7xl mx-auto select-none">
+    <section id="home" className="relative min-h-[calc(100vh-5rem)] flex flex-col justify-center py-4 lg:py-6 px-4 md:px-8 max-w-7xl mx-auto select-none">
+      {/* Kinetic Ambient Aurora Canvas (Smooth pointer reaction & particles) */}
+      <KineticAuroraCanvas />
+
       {/* Absolute Ambient Grid background decorations */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] -z-20 opacity-70" />
       
@@ -239,26 +250,27 @@ export const Hero = () => {
             </div>
           )}
 
-          {/* Action Buttons Hub with primary visual guides */}
-          <div className="flex flex-wrap gap-3 mb-3 w-full sm:w-auto">
+          {/* Action Buttons Hub with primary visual guides & interactive tools */}
+          <div className="flex flex-wrap items-center gap-2.5 mb-3 w-full sm:w-auto">
             <motion.button 
               id="hero-hire-me"
               onClick={() => window.dispatchEvent(new CustomEvent('open-hire-modal'))}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-6 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-primary/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2.5 group cursor-pointer w-full sm:w-auto justify-center"
+              className="relative overflow-hidden px-5 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-primary/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
               <span className="relative z-10 font-black tracking-wider">{t.nav.hireMe}</span>
               <ArrowRight className="w-3.5 h-3.5 text-white group-hover:translate-x-1 transition-transform relative z-10" />
             </motion.button>
 
+            {/* Gully Score Tournament Manager Login */}
             <motion.button 
               id="hero-gully-score-login"
               onClick={() => navigate('/cricket-login')}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-6 py-2.5 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-emerald-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2.5 group cursor-pointer w-full sm:w-auto justify-center border border-emerald-400/40"
+              className="relative overflow-hidden px-4 py-2.5 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-md shadow-emerald-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-emerald-400/40"
               title="Gully Scoreboard & Tournament Manager Login"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
@@ -266,7 +278,41 @@ export const Hero = () => {
               <span className="relative z-10 font-black">
                 {language === 'mr' ? 'गुल्ली स्कोअर लॉगिन' : language === 'hi' ? 'गल्ली स्कोर लॉगिन' : 'Gully Score Login'}
               </span>
-              <LogIn size={13} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
+              <LogIn size={12} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
+            </motion.button>
+
+            {/* Dairy ERP Portal Login */}
+            <motion.button 
+              id="hero-dairy-erp-login"
+              onClick={() => navigate('/dairy-login')}
+              whileHover={{ y: -2, scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="relative overflow-hidden px-4 py-2.5 sm:py-3 bg-gradient-to-r from-sky-600 via-blue-600 to-sky-700 hover:from-sky-500 hover:to-blue-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-md shadow-sky-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-sky-400/40"
+              title="Dairy & Agro ERP Platform Login"
+            >
+              <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
+              <Milk size={14} className="text-sky-200 group-hover:scale-110 transition-transform relative z-10" />
+              <span className="relative z-10 font-black">
+                {language === 'mr' ? 'डेअरी ईआरपी लॉगिन' : language === 'hi' ? 'डेयरी ईआरपी लॉगिन' : 'Dairy ERP Login'}
+              </span>
+              <LogIn size={12} className="text-sky-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
+            </motion.button>
+
+            {/* Instant ID Card Builder Login */}
+            <motion.button 
+              id="hero-id-card-login"
+              onClick={() => navigate('/login', { state: { from: { pathname: '/live/instant-id-builder' } } })}
+              whileHover={{ y: -2, scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="relative overflow-hidden px-4 py-2.5 sm:py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-md shadow-indigo-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-indigo-400/40"
+              title="Instant ID Card Builder Login"
+            >
+              <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
+              <CreditCard size={14} className="text-purple-200 group-hover:scale-110 transition-transform relative z-10" />
+              <span className="relative z-10 font-black">
+                {language === 'mr' ? 'आयडी कार्ड लॉगिन' : language === 'hi' ? 'आईडी कार्ड लॉगिन' : 'ID Card Login'}
+              </span>
+              <LogIn size={12} className="text-indigo-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
             </motion.button>
           </div>
 
@@ -338,15 +384,14 @@ export const Hero = () => {
           </motion.div>
         </motion.div>
 
-        {/* Artistic Media Presentation Column */}
+        {/* Interactive Media Presentation Column with Mini-App Dock */}
         <motion.div 
-          className="order-1 lg:order-2 relative flex justify-center py-4 lg:py-0"
-          initial={{ opacity: 0, scale: 0.92, rotate: 2 }}
+          className="order-1 lg:order-2 relative flex flex-col items-center justify-center py-4 lg:py-0 w-full"
+          initial={{ opacity: 0, scale: 0.92, rotate: 1 }}
           animate={{ opacity: 1, scale: 1, rotate: 0 }}
-          transition={{ duration: 1, delay: 0.2, ease: "easeOut" }}
-          style={{ perspective: "1000px" }}
+          transition={{ duration: 0.8, delay: 0.15, ease: "easeOut" }}
         >
-          {/* Ambient luminous energy cloud behind picture frame */}
+          {/* Ambient luminous energy cloud behind dock */}
           <div className="absolute -inset-4 bg-gradient-to-tr from-primary/10 via-rose-500/5 to-primary/0 rounded-full blur-[60px] opacity-70 -z-10 animate-float animate-pulse duration-[6000ms]" />
           
           {/* Dynamic Floating Badge 1: Innovation and Experience */}
@@ -354,9 +399,9 @@ export const Hero = () => {
             role="button"
             onClick={() => handleScrollTo('resume', '/resume')}
             whileHover={{ scale: 1.08, zIndex: 30, y: -4 }}
-            animate={{ y: [0, -8, 0] }}
+            animate={{ y: [0, -6, 0] }}
             transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute -top-1.5 left-2 md:left-6 lg:left-0 xl:left-4 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md px-3.5 py-2 lg:px-3 lg:py-1.5 xl:px-4 xl:py-2 rounded-xl shadow-lg border border-gray-200/50 dark:border-zinc-800/85 z-20 flex items-center gap-2 cursor-pointer hover:border-primary/50 transition-colors group"
+            className="absolute -top-3 left-2 md:left-6 lg:-left-2 xl:left-2 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md px-3.5 py-2 lg:px-3 lg:py-1.5 xl:px-4 xl:py-2 rounded-xl shadow-lg border border-gray-200/50 dark:border-zinc-800/85 z-20 flex items-center gap-2 cursor-pointer hover:border-primary/50 transition-colors group"
             title="Click to view detailed Resume and Skill details"
           >
             <span className="text-lg md:text-xl xl:text-2xl font-black text-primary group-hover:scale-110 transition-transform">5+</span>
@@ -373,9 +418,9 @@ export const Hero = () => {
             role="button"
             onClick={() => handleScrollTo('portfolio', '/projects')}
             whileHover={{ scale: 1.08, zIndex: 30, y: 4 }}
-            animate={{ y: [0, 8, 0] }}
+            animate={{ y: [0, 6, 0] }}
             transition={{ duration: 4.8, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute -bottom-2 right-2 md:right-6 lg:right-0 xl:right-4 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md px-3.5 py-2 lg:px-3 lg:py-1.5 xl:px-4 xl:py-2 rounded-xl shadow-lg border border-gray-200/50 dark:border-zinc-800/85 z-20 flex items-center gap-2 cursor-pointer hover:border-emerald-500/50 transition-colors group"
+            className="absolute -bottom-2 right-2 md:right-6 lg:-right-2 xl:right-2 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md px-3.5 py-2 lg:px-3 lg:py-1.5 xl:px-4 xl:py-2 rounded-xl shadow-lg border border-gray-200/50 dark:border-zinc-800/85 z-20 flex items-center gap-2 cursor-pointer hover:border-emerald-500/50 transition-colors group"
             title="Click to view successful projects and client works"
           >
             <span className="text-base md:text-lg xl:text-xl font-black text-emerald-500 group-hover:scale-110 transition-transform">50+</span>
@@ -387,60 +432,22 @@ export const Hero = () => {
             </div>
           </motion.div>
 
-          {/* Premium Glassmorphic 3D perspective tilt canvas */}
-          <motion.div 
-            className="relative w-full max-w-[270px] md:max-w-[320px] lg:max-w-[280px] xl:max-w-[330px] aspect-square rounded-3xl p-2.5 bg-white dark:bg-zinc-900 border border-gray-200/55 dark:border-zinc-800/85 card-shadow group overflow-visible"
-            whileHover={{ 
-              rotateY: 8, 
-              rotateX: -4, 
-              scale: 1.03,
-              boxShadow: "0 25px 45px -12px rgba(59, 130, 246, 0.28)"
-            }}
-            transition={{ type: "spring", stiffness: 220, damping: 18 }}
-            style={{ transformStyle: "preserve-3d" }}
-          >
-            {/* Subtle Glow aura on hover mode */}
-            <div className="absolute inset-0 rounded-3xl bg-gradient-to-tr from-primary to-rose-450 opacity-0 group-hover:opacity-10 blur-[10px] transition-opacity duration-500" />
-            
-            <div className="w-full h-full rounded-2xl overflow-hidden relative z-10 bg-slate-50 dark:bg-zinc-950">
-              {!displayImage ? (
-                <div className="w-full h-full bg-gray-200 dark:bg-gray-800 animate-pulse flex items-center justify-center">
-                   <div className="w-8 h-8 border-3 border-primary/20 border-t-primary rounded-full animate-spin" />
-                </div>
-              ) : (
-                <img 
-                  src={imgError ? fallbackImage : displayImage} 
-                  alt="Shubham Hingane Profile" 
-                  className="w-full h-full object-cover grayscale-[10%] group-hover:grayscale-0 group-hover:scale-103 transition-all duration-750 ease-out"
-                  onError={() => setImgError(true)}
-                  referrerPolicy="no-referrer"
-                  loading="eager"
-                  fetchPriority="high"
-                />
-              )}
-              
-              {/* Sleek bottom shadow gradient to secure contrast */}
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent h-1.5/4 pointer-events-none z-10" />
-
-              {/* Minimal Glossy Interactive Indicator Badge */}
-              <div className="absolute bottom-2 left-2 right-2 bg-black/50 dark:bg-zinc-950/60 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-white/10 dark:border-zinc-800/20 flex items-center justify-between pointer-events-none z-20 shadow-md">
-                <div className="flex items-center gap-1.5">
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-[8px] font-black tracking-widest text-white uppercase">
-                    Core Systems Active
-                  </span>
-                </div>
-                <span className="text-[7.5px] font-mono text-zinc-300">
-                  SH // 2026
-                </span>
-              </div>
-            </div>
-          </motion.div>
+          {/* Interactive Mini-App Dock (Profile, GullyScore Live Simulation, Dairy ERP, Instant ID) */}
+          <HeroMiniAppDock
+            activeTab={miniDockTab}
+            onTabChange={setMiniDockTab}
+            displayImage={displayImage}
+            imgError={imgError}
+            fallbackImage={fallbackImage}
+            onImgError={() => setImgError(true)}
+            onOpenEstimator={() => setIsEstimatorOpen(true)}
+            onOpenTerminal={() => setIsTerminalOpen(true)}
+          />
         </motion.div>
       </div>
+
+      {/* Step 4: Client Trust & Live Metrics Infinite Marquee */}
+      <HeroTrustMarquee />
 
       {/* Kinetic Mouse Downward Scroll Pointer */}
       <motion.div 
@@ -466,6 +473,19 @@ export const Hero = () => {
           />
         </div>
       </motion.div>
+
+      {/* Step 1 Modal: Project Cost & Timeline Estimator */}
+      <ProjectCostEstimatorModal
+        isOpen={isEstimatorOpen}
+        onClose={() => setIsEstimatorOpen(false)}
+        defaultCurrency="INR"
+      />
+
+      {/* Step 2 Modal: Developer Terminal & Tech Matrix Sandbox */}
+      <DeveloperTerminalModal
+        isOpen={isTerminalOpen}
+        onClose={() => setIsTerminalOpen(false)}
+      />
 
       <LanguageModal 
         isOpen={isLangModalOpen} 
