@@ -3324,32 +3324,50 @@ export const CricketScoreboard: React.FC = () => {
         console.warn('Could not calculate win probability for AI commentary:', err);
       }
 
-      const res = await fetch('/api/cricket/commentary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          matchState: activeInnings,
-          event: eventInfo,
-          batsman: { name: batsmanName },
-          striker: { name: batsmanName },
-          nonStriker: { name: additionalContext?.nonStrikerName || '' },
-          bowler: { name: bowlerName },
-          originalDescription: baseDesc,
-          isBowlerChanged: additionalContext?.isBowlerChanged || false,
-          isNewBatsmanOnCrease: additionalContext?.isNewBatsmanOnCrease || false,
-          newBatsmanName: additionalContext?.newBatsmanName || '',
-          isOverStart: additionalContext?.isOverStart || false,
-          isMatchStart: additionalContext?.isMatchStart || (eventInfo?.type === 'match_start'),
-          tournamentName: additionalContext?.tournamentName || matchState?.tournamentName || (match as any)?.tournamentName || undefined,
-          groundName: additionalContext?.groundName || matchState?.groundName || (match as any)?.groundName || undefined,
-          isCrucialTime: additionalContext?.isCrucialTime,
-          language: userCommentaryLang,
-          contextualTone: toneInfo.tone,
-          specialTrigger: additionalContext?.specialTrigger,
-          winProbability: additionalContext?.isCrucialTime ? winProbData : undefined
-        })
-      });
-      const data = await res.json();
+      let data: any = null;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+        const res = await fetch('/api/cricket/commentary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            matchState: activeInnings,
+            event: eventInfo,
+            batsman: { name: batsmanName },
+            striker: { name: batsmanName },
+            nonStriker: { name: additionalContext?.nonStrikerName || '' },
+            bowler: { name: bowlerName },
+            originalDescription: baseDesc,
+            isBowlerChanged: additionalContext?.isBowlerChanged || false,
+            isNewBatsmanOnCrease: additionalContext?.isNewBatsmanOnCrease || false,
+            newBatsmanName: additionalContext?.newBatsmanName || '',
+            isOverStart: additionalContext?.isOverStart || false,
+            isMatchStart: additionalContext?.isMatchStart || (eventInfo?.type === 'match_start'),
+            tournamentName: additionalContext?.tournamentName || matchState?.tournamentName || (match as any)?.tournamentName || undefined,
+            groundName: additionalContext?.groundName || matchState?.groundName || (match as any)?.groundName || undefined,
+            isCrucialTime: additionalContext?.isCrucialTime,
+            language: userCommentaryLang,
+            contextualTone: toneInfo.tone,
+            specialTrigger: additionalContext?.specialTrigger,
+            winProbability: additionalContext?.isCrucialTime ? winProbData : undefined
+          })
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            data = await res.json();
+          }
+        }
+      } catch (fetchErr) {
+        // Network timeout or offline - seamlessly handle without unhandled rejection
+        data = null;
+      }
+
       if (data && (data.text || data.translations)) {
         syncMatch(prev => {
           const targetInnings = inningsNum === 1 ? prev.innings1 : prev.innings2;
@@ -3387,7 +3405,7 @@ export const CricketScoreboard: React.FC = () => {
         });
       }
     } catch (err) {
-      console.error('Failed to generate AI commentary:', err);
+      console.warn('AI commentary completed with standard local description:', err);
     } finally {
       setIsAiCommentaryLoading(false);
     }

@@ -13,16 +13,9 @@ export const LedgerTab: React.FC<{ state: AgroState; shopId: string | null }> = 
   const [reportType, setReportType] = useState<'Daybook' | 'Ledger'>('Daybook');
   const [selectedParty, setSelectedParty] = useState({ id: 'All', type: 'Customer' });
 
-  if (state.loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <LoadingSpinner label="Compiling Financial Statements..." />
-      </div>
-    );
-  }
-
   // Combined daily transactions for Daybook
   const dayTransactions = useMemo(() => {
+    if (!state.bills || !state.purchases || !state.transactions) return [];
     return [
       ...state.bills.filter(b => b.date.includes(filterDate)).map(b => ({
         id: b.id,
@@ -56,6 +49,7 @@ export const LedgerTab: React.FC<{ state: AgroState; shopId: string | null }> = 
 
   // Party Ledger View Logic
   const partyHistory = useMemo(() => {
+    if (!state.bills || !state.purchases || !state.transactions) return [];
     if (selectedParty.id === 'All') return [];
     
     if (selectedParty.type === 'Customer') {
@@ -108,6 +102,14 @@ export const LedgerTab: React.FC<{ state: AgroState; shopId: string | null }> = 
       return { ...item, balance: runningBalance };
     });
   }, [partyHistory]);
+
+  if (state.loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <LoadingSpinner label="Compiling Financial Statements..." />
+      </div>
+    );
+  }
 
   const totalIn = dayTransactions.filter(t => t.flow === 'In').reduce((s, t) => s + t.amount, 0);
   const totalOut = dayTransactions.filter(t => t.flow === 'Out').reduce((s, t) => s + t.amount, 0);

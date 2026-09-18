@@ -496,13 +496,13 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [searchParams]);
 
-  // Fallback to any recent/default match if standalone overlay is opened without a matchId
+  // Fallback to any recent/default match if standalone overlay is opened or match is not loaded
   useEffect(() => {
-    if (!match && !matchId) {
+    if (!match) {
       const recent = getAnyActiveOrRecentMatch();
-      if (recent) {
+      if (recent && (recent.id === matchId || !matchId)) {
         setMatch(recent);
-      } else {
+      } else if (!matchId) {
         const def = getOrCreateDefaultMatch();
         if (def) setMatch(def);
       }
@@ -615,8 +615,18 @@ export const CricketOverlay: React.FC = () => {
         console.log('[Overlay Sync] Received match update via Firestore:', data.id);
         setMatch(data);
       } else {
-        markMatchDeleted(matchId);
-        setMatch(null);
+        // If not found in Firestore yet, try reading from local storage fallback before giving up
+        try {
+          const localActive = localStorage.getItem('cricket_active_match');
+          if (localActive) {
+            const parsed = JSON.parse(localActive) as MatchState;
+            if (parsed && (parsed.id === matchId || !matchId)) {
+              setMatch(parsed);
+              return;
+            }
+          }
+        } catch {}
+        console.warn('[Overlay Sync] Match doc not found in Firestore for matchId:', matchId);
       }
     }, (err) => {
       console.warn('[Overlay Sync] Firestore subscription error, using local storage fallback:', err);
@@ -1060,11 +1070,11 @@ export const CricketOverlay: React.FC = () => {
       const bLabels: string[] = [];
 
       comms.reverse().forEach(c => {
-        const desc = c.description.toLowerCase();
-        if (c.type === 'wicket') {
+        const desc = (c?.description || '').toLowerCase();
+        if (c?.type === 'wicket') {
           wktsSum++;
           bLabels.push('W');
-        } else if (c.type === 'boundary') {
+        } else if (c?.type === 'boundary') {
           const is6 = desc.includes('six') || desc.includes('6 runs');
           runsSum += is6 ? 6 : 4;
           bLabels.push(is6 ? '6' : '4');
@@ -1129,7 +1139,7 @@ export const CricketOverlay: React.FC = () => {
   const bowlingStats = useMemo(() => {
     if (!currentInnings) return null;
     const bowlers = currentInnings.bowlers || [];
-    const currentBowler = bowlers[currentInnings.currentBowlerIndex] || bowlers.find(b => b.isCurrent);
+    const currentBowler = bowlers[currentInnings.currentBowlerIndex] || bowlers.find(b => b?.isCurrent) || bowlers[0];
     if (!currentBowler) return null;
 
     const balls = currentBowler.ballsBowled || 0;
@@ -1139,21 +1149,21 @@ export const CricketOverlay: React.FC = () => {
     const econ = balls > 0 ? ((runs / balls) * 6).toFixed(2) : '0.00';
 
     // Calculate dot ball percentage from bowler-specific commentary
-    const bowlerNameLower = currentBowler.name.toLowerCase();
+    const bowlerNameLower = (currentBowler.name || '').toLowerCase();
     const bowlsForThisBowler = (currentInnings.commentaryList || []).filter(c => 
-      c.description.toLowerCase().includes(bowlerNameLower)
+      (c?.description || '').toLowerCase().includes(bowlerNameLower)
     );
     const dotsCount = bowlsForThisBowler.filter(c => 
-      c.description.toLowerCase().includes('dot ball') || 
-      c.description.toLowerCase().includes('no run') || 
-      c.description.toLowerCase().includes('0 run')
+      (c?.description || '').toLowerCase().includes('dot ball') || 
+      (c?.description || '').toLowerCase().includes('no run') || 
+      (c?.description || '').toLowerCase().includes('0 run')
     ).length;
     const dotBallPct = bowlsForThisBowler.length > 0 
       ? Math.round((dotsCount / bowlsForThisBowler.length) * 100) 
       : 35; // reasonable average fallback
 
     return {
-      name: currentBowler.name,
+      name: currentBowler.name || 'Bowler',
       balls,
       maidens,
       wickets,
@@ -1165,22 +1175,39 @@ export const CricketOverlay: React.FC = () => {
 
   const battingStats = useMemo(() => {
     if (!currentInnings) return null;
-    const striker = currentInnings.batsmen?.[currentInnings.strikerIndex];
-    const nonStriker = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
-    if (!striker) return null;
+    const batsmen = currentInnings.batsmen || [];
+    const striker = batsmen[currentInnings.strikerIndex] || batsmen.find(b => b?.isStriker) || batsmen[0] || null;
+    const nonStriker = batsmen[currentInnings.nonStrikerIndex] || batsmen.find(b => !b?.isStriker && b?.status === 'batting') || batsmen[1] || null;
 
-    const strikerSR = striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0';
+    const strikerSR = striker && striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0';
     const nonStrikerSR = nonStriker && nonStriker.balls > 0 
       ? ((nonStriker.runs / nonStriker.balls) * 100).toFixed(1) 
       : '0.0';
 
     return {
-      striker: {
+      striker: striker ? {
         ...striker,
+        name: striker.name || 'Batter',
+        runs: striker.runs ?? 0,
+        balls: striker.balls ?? 0,
+        fours: striker.fours ?? 0,
+        sixes: striker.sixes ?? 0,
         sr: strikerSR
+      } : {
+        name: 'Batter',
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        sr: '0.0'
       },
       nonStriker: nonStriker ? {
         ...nonStriker,
+        name: nonStriker.name || 'Partner',
+        runs: nonStriker.runs ?? 0,
+        balls: nonStriker.balls ?? 0,
+        fours: nonStriker.fours ?? 0,
+        sixes: nonStriker.sixes ?? 0,
         sr: nonStrikerSR
       } : null
     };
@@ -1349,87 +1376,6 @@ export const CricketOverlay: React.FC = () => {
     return { label, style };
   };
 
-  const isFullScreenTransition = [
-    'team_lineups', 'lineups', 'playing_xi', 
-    'innings_scorecard', 'full_scorecard', 
-    'match_presentation', 'potm_card', 'presentation', 
-    'tournament_standings', 'points_table', 'standings',
-    'prematch_matchup', 'matchup_card', 'matchup', 'match_card',
-    'toss_result', 'toss_card', 'toss', 'toss_report',
-    'pitch_weather_report', 'pitch_report', 'pitch_weather', 'weather_report', 'pitch_and_weather',
-    'batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro',
-    'player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'
-  ].includes(activeGraphic);
-
-  // Standby Slate for Permanent OBS Links when waiting or between matches
-  if (isPermanentLink && (!match || match.status !== 'live' || !currentInnings) && !isFullScreenTransition) {
-    return (
-      <div className="absolute inset-0 bg-transparent flex flex-col justify-end p-8 font-sans pointer-events-none select-none">
-        <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="max-w-md bg-slate-950/90 backdrop-blur-md border border-slate-800/90 rounded-2xl p-4 shadow-2xl text-white pointer-events-auto"
-        >
-          <div className="flex items-center gap-2.5 mb-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
-              Permanent OBS Link Active
-            </span>
-            <span className="ml-auto text-[9px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded">
-              1920×1080
-            </span>
-          </div>
-
-          <div className="text-xs font-black text-slate-200 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-            <span>Standby Mode</span>
-            <span className="text-slate-500">•</span>
-            <span className="text-slate-400 font-mono text-[10px]">ID: {managerId || streamKey || 'Official Scorer'}</span>
-          </div>
-
-          <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
-            {match && match.status === 'completed'
-              ? `Previous match "${match.teamA} vs ${match.teamB}" concluded. Score bug will appear automatically when next match is set to Live.`
-              : 'Waiting for score manager to broadcast a live match. Live graphics will appear automatically without updating this link.'}
-          </p>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (!match && !isFullScreenTransition) {
-    return (
-      <div className="absolute inset-0 bg-transparent flex flex-col items-center justify-center font-sans">
-        <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 p-8 rounded-[2rem] text-center shadow-2xl backdrop-blur-md">
-          <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Radio className="animate-pulse" size={28} />
-          </div>
-          <h2 className="text-xl font-black text-white uppercase tracking-widest mb-3">Broadcast Score Bug</h2>
-          <p className="text-slate-400 text-sm font-medium mb-6 leading-relaxed">
-            Please copy the Browser Source URL from the live scorer cockpit and use it directly inside OBS Studio, or open a live match.
-          </p>
-          <div className="text-[10px] font-mono font-black border border-white/5 bg-black/40 text-rose-400 rounded-xl p-3 uppercase tracking-wider">
-            Waiting for real-time match data...
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentInnings && !isFullScreenTransition) {
-    return (
-      <div className="absolute inset-0 bg-transparent flex items-center justify-center font-sans">
-        <div className="bg-slate-900/90 border border-slate-800 p-8 rounded-2xl text-center backdrop-blur-md">
-          <p className="text-white font-extrabold uppercase tracking-widest text-sm mb-2">No Active Innings Initialized</p>
-          <span className="text-[10px] text-slate-500 font-mono">Activate innings inside Scorer Cockpit</span>
-        </div>
-      </div>
-    );
-  }
-
   // Active Broadcast Theme & Layout Resolution
   const activeTheme = (
     searchParams.get('theme') ||
@@ -1440,6 +1386,8 @@ export const CricketOverlay: React.FC = () => {
         : 'broadcast-pro'
     )
   ) as BroadcastTheme;
+
+  const isStudioCustom = activeTheme === 'studio-custom';
 
   const activeLayout = (
     searchParams.get('layout') ||
@@ -1460,7 +1408,6 @@ export const CricketOverlay: React.FC = () => {
   const isCricHeroes = activeTheme === 'cricheroes-dark';
   const isRetro = activeTheme === 'retro-gold';
   const isCarbon = activeTheme === 'carbon-modern';
-  const isStudioCustom = activeTheme === 'studio-custom';
 
   let themeColors = {
     cardBg: 'bg-slate-950/92 border-slate-800/80 text-white backdrop-blur-xl shadow-2xl',
@@ -1622,6 +1569,126 @@ export const CricketOverlay: React.FC = () => {
       </div>
     );
   };
+
+  const isFullScreenTransition = [
+    'team_lineups', 'lineups', 'playing_xi', 
+    'innings_scorecard', 'full_scorecard', 
+    'match_presentation', 'potm_card', 'presentation', 
+    'tournament_standings', 'points_table', 'standings',
+    'prematch_matchup', 'matchup_card', 'matchup', 'match_card',
+    'toss_result', 'toss_card', 'toss', 'toss_report',
+    'pitch_weather_report', 'pitch_report', 'pitch_weather', 'weather_report', 'pitch_and_weather',
+    'batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro',
+    'player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'
+  ].includes(activeGraphic);
+
+  // Standby Slate for Permanent OBS Links when waiting or between matches
+  if (isPermanentLink && (!match || match.status !== 'live' || !currentInnings) && !isFullScreenTransition) {
+    return (
+      <div 
+        className="bg-transparent overflow-hidden select-none font-sans"
+        style={{
+          transform: `translate(${dimensions.translateX}px, ${dimensions.translateY}px) scale(${dimensions.scale})`,
+          transformOrigin: 'top left',
+          width: '1920px',
+          height: '1080px',
+          position: 'absolute',
+          top: 0,
+          left: 0
+        }}
+      >
+        <div className="absolute inset-0 bg-transparent flex flex-col justify-end p-8 font-sans pointer-events-none select-none">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="max-w-md bg-slate-950/90 backdrop-blur-md border border-slate-800/90 rounded-2xl p-4 shadow-2xl text-white pointer-events-auto"
+          >
+            <div className="flex items-center gap-2.5 mb-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">
+                Permanent OBS Link Active
+              </span>
+              <span className="ml-auto text-[9px] font-mono font-bold text-slate-400 bg-white/5 px-2 py-0.5 rounded">
+                1920×1080
+              </span>
+            </div>
+
+            <div className="text-xs font-black text-slate-200 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <span>Standby Mode</span>
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-400 font-mono text-[10px]">ID: {managerId || streamKey || 'Official Scorer'}</span>
+            </div>
+
+            <p className="text-[10px] text-slate-400 font-medium leading-relaxed">
+              {match && match.status === 'completed'
+                ? `Previous match "${match.teamA} vs ${match.teamB}" concluded. Score bug will appear automatically when next match is set to Live.`
+                : 'Waiting for score manager to broadcast a live match. Live graphics will appear automatically without updating this link.'}
+            </p>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!match && !isFullScreenTransition) {
+    return (
+      <div 
+        className="bg-transparent overflow-hidden select-none font-sans"
+        style={{
+          transform: `translate(${dimensions.translateX}px, ${dimensions.translateY}px) scale(${dimensions.scale})`,
+          transformOrigin: 'top left',
+          width: '1920px',
+          height: '1080px',
+          position: 'absolute',
+          top: 0,
+          left: 0
+        }}
+      >
+        <div className="absolute inset-0 bg-transparent flex flex-col items-center justify-center font-sans">
+          <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 p-8 rounded-[2rem] text-center shadow-2xl backdrop-blur-md">
+            <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Radio className="animate-pulse" size={28} />
+            </div>
+            <h2 className="text-xl font-black text-white uppercase tracking-widest mb-3">Broadcast Score Bug</h2>
+            <p className="text-slate-400 text-sm font-medium mb-6 leading-relaxed">
+              Please copy the Browser Source URL from the live scorer cockpit and use it directly inside OBS Studio, or open a live match.
+            </p>
+            <div className="text-[10px] font-mono font-black border border-white/5 bg-black/40 text-rose-400 rounded-xl p-3 uppercase tracking-wider">
+              Waiting for real-time match data...
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentInnings && !isFullScreenTransition) {
+    return (
+      <div 
+        className="bg-transparent overflow-hidden select-none font-sans"
+        style={{
+          transform: `translate(${dimensions.translateX}px, ${dimensions.translateY}px) scale(${dimensions.scale})`,
+          transformOrigin: 'top left',
+          width: '1920px',
+          height: '1080px',
+          position: 'absolute',
+          top: 0,
+          left: 0
+        }}
+      >
+        <div className="absolute inset-0 bg-transparent flex items-center justify-center font-sans">
+          <div className="bg-slate-900/90 border border-slate-800 p-8 rounded-2xl text-center backdrop-blur-md">
+            <p className="text-white font-extrabold uppercase tracking-widest text-sm mb-2">No Active Innings Initialized</p>
+            <span className="text-[10px] text-slate-500 font-mono">Activate innings inside Scorer Cockpit</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -1844,7 +1911,7 @@ export const CricketOverlay: React.FC = () => {
                       Method: <strong className="text-red-400 font-black">{wicketPopup?.dismissalType || 'Bowled'}</strong>
                     </span>
                     <span className="text-xs text-amber-300 font-mono font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
-                      FOW: {wicketPopup?.scoreAtFall || `${currentInnings?.runs}/${currentInnings?.wickets}`}
+                      FOW: {wicketPopup?.scoreAtFall || `${currentInnings?.runs ?? 0}/${currentInnings?.wickets ?? 0}`}
                     </span>
                   </div>
                 </div>
@@ -2050,13 +2117,13 @@ export const CricketOverlay: React.FC = () => {
                 <div className="text-left">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">BATSMAN</span>
                   <span className="text-lg font-bold text-white block uppercase">
-                    {battingStats?.striker.name || 'Batter'}
+                    {battingStats?.striker?.name || 'Batter'}
                   </span>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">SCORE AT FALL</span>
                   <span className="text-lg font-bold text-emerald-400 block font-mono">
-                    {currentInnings.runs}/{currentInnings.wickets}
+                    {currentInnings?.runs ?? 0}/{currentInnings?.wickets ?? 0}
                   </span>
                 </div>
               </div>
@@ -2082,29 +2149,29 @@ export const CricketOverlay: React.FC = () => {
           )}
 
           <StarTVScorebug 
-            battingTeamName={currentInnings.battingTeam}
+            battingTeamName={currentInnings?.battingTeam || match?.teamA || 'TEAM A'}
             battingTeamSubtext={inningsNum === 1 ? 'BAT FIRST' : '2ND INNINGS'}
             battingTeamColor={
-              currentInnings.battingTeam === match.teamA 
+              (currentInnings?.battingTeam || '') === (match?.teamA || '')
                 ? (globalStudioTheme?.teamAColor || activeConfig.teamAColor || '#0143a3') 
                 : (globalStudioTheme?.teamBColor || activeConfig.teamBColor || '#c8102e')
             }
-            battingTeamLogo={currentInnings.battingTeam === match.teamA ? match.teamALogo : match.teamBLogo}
-            strikerName={battingStats?.striker.name || 'STRIKER'}
-            strikerRuns={battingStats?.striker.runs ?? 0}
-            strikerBalls={battingStats?.striker.balls ?? 0}
+            battingTeamLogo={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? match?.teamALogo : match?.teamBLogo}
+            strikerName={battingStats?.striker?.name || 'STRIKER'}
+            strikerRuns={battingStats?.striker?.runs ?? 0}
+            strikerBalls={battingStats?.striker?.balls ?? 0}
             nonStrikerName={battingStats?.nonStriker?.name || 'NON-STRIKER'}
             nonStrikerRuns={battingStats?.nonStriker?.runs ?? 0}
             nonStrikerBalls={battingStats?.nonStriker?.balls ?? 0}
-            score={currentInnings.runs}
-            wickets={currentInnings.wickets}
-            overs={formatOvers(currentInnings.ballsBowled)}
-            oversLimit={match.oversLimit}
+            score={currentInnings?.runs ?? 0}
+            wickets={currentInnings?.wickets ?? 0}
+            overs={formatOvers(currentInnings?.ballsBowled ?? 0)}
+            oversLimit={match?.oversLimit ?? 20}
             bowlerName={bowlingStats?.name || 'BOWLER'}
             bowlerFigures={bowlingStats ? `${bowlingStats.wickets}/${bowlingStats.runs}` : '0/0'}
             bowlerOvers={bowlingStats ? formatOvers(bowlingStats.balls) : '0.0'}
             bowlerEcon={bowlingStats && bowlingStats.balls > 0 ? Number(((bowlingStats.runs / bowlingStats.balls) * 6).toFixed(1)) : 0}
-            thisOverBalls={currentOverBalls.slice(0, 6).map(b => {
+            thisOverBalls={(currentOverBalls || []).slice(0, 6).map(b => {
               const d = getPillDetails(b);
               let type: 'dot' | 'run' | 'four' | 'six' | 'wicket' | 'extra' = 'dot';
               if (d.label === '4') type = 'four';
@@ -2114,18 +2181,18 @@ export const CricketOverlay: React.FC = () => {
               else if (parseInt(d.label, 10) > 0) type = 'run';
               return { label: d.label, type };
             })}
-            bowlingTeamName={currentInnings.battingTeam === match.teamA ? match.teamB : match.teamA}
+            bowlingTeamName={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? (match?.teamB || 'TEAM B') : (match?.teamA || 'TEAM A')}
             bowlingTeamSubtext="BOWLING"
             bowlingTeamColor={
-              currentInnings.battingTeam === match.teamA 
+              (currentInnings?.battingTeam || '') === (match?.teamA || '')
                 ? (globalStudioTheme?.teamBColor || activeConfig.teamBColor || '#c8102e') 
                 : (globalStudioTheme?.teamAColor || activeConfig.teamAColor || '#0143a3')
             }
-            bowlingTeamLogo={currentInnings.battingTeam === match.teamA ? match.teamBLogo : match.teamALogo}
-            isLive={match.status === 'live'}
-            targetRuns={match.targetRuns}
-            remainingRuns={match.targetRuns ? Math.max(0, match.targetRuns - currentInnings.runs) : undefined}
-            remainingBalls={match.oversLimit ? Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled) : undefined}
+            bowlingTeamLogo={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? match?.teamBLogo : match?.teamALogo}
+            isLive={match?.status === 'live'}
+            targetRuns={match?.targetRuns}
+            remainingRuns={match?.targetRuns ? Math.max(0, match.targetRuns - (currentInnings?.runs ?? 0)) : undefined}
+            remainingBalls={match?.oversLimit ? Math.max(0, (match.oversLimit * 6) - (currentInnings?.ballsBowled ?? 0)) : undefined}
           />
         </div>
       )}
@@ -3152,13 +3219,13 @@ export const CricketOverlay: React.FC = () => {
                   <div className="flex items-center min-w-0">
                     <span className="text-[#25d366] font-black text-[11px] mr-1.5 animate-pulse shrink-0">▶</span>
                     <span className="text-white text-[13px] font-black uppercase tracking-wide truncate max-w-[130px] font-sans drop-shadow">
-                      {battingStats?.striker.name || 'BATSMEN A'}
+                      {battingStats?.striker?.name || 'BATSMEN A'}
                     </span>
                   </div>
                   <span className="text-white font-mono font-black text-[13px]">
-                    {battingStats?.striker.runs || 0}{' '}
+                    {battingStats?.striker?.runs || 0}{' '}
                     <span className="text-slate-300 font-normal text-[10px]">
-                      ({battingStats?.striker.balls || 0})
+                      ({battingStats?.striker?.balls || 0})
                     </span>
                   </span>
                 </div>
@@ -3189,11 +3256,11 @@ export const CricketOverlay: React.FC = () => {
             >
               <div className="skew-x-[15deg] flex flex-col justify-between items-center h-full text-center">
                 <span className="text-[#5b0e0e] font-sans font-black text-[11px] tracking-wide uppercase leading-none">
-                  {currentInnings.battingTeam.substring(0, 3).toUpperCase()}
+                  {(currentInnings?.battingTeam || match?.teamA || 'TM1').substring(0, 3).toUpperCase()}
                 </span>
                 <span className="text-sky-500 font-sans font-extrabold text-[10px] italic leading-none my-0.5 animate-pulse">V</span>
                 <span className="text-slate-600 font-sans font-black text-[11px] tracking-wide uppercase leading-none">
-                  {(match.teamA === currentInnings.battingTeam ? match.teamB : match.teamA).substring(0, 3).toUpperCase()}
+                  {((match?.teamA || '') === (currentInnings?.battingTeam || '') ? (match?.teamB || 'TM2') : (match?.teamA || 'TM1')).substring(0, 3).toUpperCase()}
                 </span>
               </div>
             </div>
@@ -3341,7 +3408,7 @@ export const CricketOverlay: React.FC = () => {
                 <div className="bg-white/5 border border-white/5 rounded-xl p-4 flex gap-4 items-center">
                   {/* Photo Avatar */}
                   <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-900 border border-white/10 shrink-0 flex items-center justify-center">
-                    {match?.playerPhotos?.[battingStats.striker.name.toLowerCase().trim()] ? (
+                    {battingStats?.striker?.name && match?.playerPhotos?.[battingStats.striker.name.toLowerCase().trim()] ? (
                       <img 
                         src={match.playerPhotos[battingStats.striker.name.toLowerCase().trim()]} 
                         alt={battingStats.striker.name} 
@@ -3354,18 +3421,18 @@ export const CricketOverlay: React.FC = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-[10px] text-emerald-400 font-black tracking-wider block">STRIKER</span>
-                    <h4 className="text-xl font-black text-white uppercase truncate">{battingStats.striker.name}</h4>
+                    <h4 className="text-xl font-black text-white uppercase truncate">{battingStats?.striker?.name || 'STRIKER'}</h4>
                     <div className="flex justify-between font-mono text-xs text-slate-300 mt-2">
-                      <span>Runs: <strong className="text-white">{battingStats.striker.runs}</strong> ({battingStats.striker.balls}b)</span>
-                      <span className="text-amber-500 font-bold">SR: {battingStats.striker.sr}%</span>
+                      <span>Runs: <strong className="text-white">{battingStats?.striker?.runs ?? 0}</strong> ({battingStats?.striker?.balls ?? 0}b)</span>
+                      <span className="text-amber-500 font-bold">SR: {battingStats?.striker?.sr || '0.0'}%</span>
                     </div>
                   </div>
                 </div>
-                {battingStats.nonStriker ? (
+                {battingStats?.nonStriker ? (
                   <div className="bg-white/5 border border-white/5 rounded-xl p-4 flex gap-4 items-center">
                     {/* Photo Avatar */}
                     <div className="w-16 h-16 rounded-xl overflow-hidden bg-slate-900 border border-white/10 shrink-0 flex items-center justify-center">
-                      {match?.playerPhotos?.[battingStats.nonStriker.name.toLowerCase().trim()] ? (
+                      {battingStats?.nonStriker?.name && match?.playerPhotos?.[battingStats.nonStriker.name.toLowerCase().trim()] ? (
                         <img 
                           src={match.playerPhotos[battingStats.nonStriker.name.toLowerCase().trim()]} 
                           alt={battingStats.nonStriker.name} 
@@ -3461,7 +3528,7 @@ export const CricketOverlay: React.FC = () => {
                 <div className="w-full flex items-center justify-between">
                   <div>
                     <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider block">BATTER BIO</span>
-                    <h2 className="text-2xl font-black text-white mt-1 uppercase leading-none">{battingStats?.striker.name || 'ACTIVE BATTER'}</h2>
+                    <h2 className="text-2xl font-black text-white mt-1 uppercase leading-none">{battingStats?.striker?.name || 'ACTIVE BATTER'}</h2>
                     <span className="text-[10px] text-indigo-300 font-mono mt-1.5 block leading-none">Matches: 42 • Run-rate Peak: 142.1</span>
                   </div>
                   <div className="flex items-center gap-4">
@@ -3485,7 +3552,7 @@ export const CricketOverlay: React.FC = () => {
                   <div>
                     <span className="text-[9px] text-rose-500 font-bold uppercase tracking-wider block">MATCH DRIFT EQUATION</span>
                     <h3 className="text-xl font-black text-white mt-1 uppercase leading-snug">
-                      {inningsNum === 1 ? 'Batting team setting baseline target' : `NEED ${match.targetRuns ? match.targetRuns - currentInnings.runs : 0} RUNS FROM ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)} DELIVERIES`}
+                      {inningsNum === 1 ? 'Batting team setting baseline target' : `NEED ${match?.targetRuns ? match.targetRuns - (currentInnings?.runs ?? 0) : 0} RUNS FROM ${Math.max(0, ((match?.oversLimit ?? 20) * 6) - (currentInnings?.ballsBowled ?? 0))} DELIVERIES`}
                     </h3>
                   </div>
                   <div className="flex items-center gap-3">
@@ -3566,7 +3633,7 @@ export const CricketOverlay: React.FC = () => {
               <div className="flex justify-between items-center border-b border-white/10 pb-2 mb-4 text-left">
                 <span className="text-xs font-black tracking-widest text-teal-400">PARTNERSHIP PROFILE</span>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-mono text-white">BATTING FOR {currentInnings.battingTeam}</span>
+                  <span className="text-xs font-mono text-white">BATTING FOR {currentInnings?.battingTeam || ''}</span>
                   <button
                     type="button"
                     onClick={() => setActiveGraphic('none')}
@@ -3579,8 +3646,8 @@ export const CricketOverlay: React.FC = () => {
               </div>
               <div className="grid grid-cols-12 gap-6 items-center">
                 <div className="col-span-3 text-left">
-                  <h4 className="text-lg font-black text-white truncate uppercase">{battingStats?.striker.name}</h4>
-                  <div className="text-3xl font-mono font-black text-teal-400 mt-1">{battingStats?.striker.runs} <span className="text-xs font-normal text-slate-400">({battingStats?.striker.balls}b)</span></div>
+                  <h4 className="text-lg font-black text-white truncate uppercase">{battingStats?.striker?.name || 'Striker'}</h4>
+                  <div className="text-3xl font-mono font-black text-teal-400 mt-1">{battingStats?.striker?.runs ?? 0} <span className="text-xs font-normal text-slate-400">({battingStats?.striker?.balls ?? 0}b)</span></div>
                 </div>
                 <div className="col-span-6 flex flex-col items-center">
                   <div className="w-20 h-20 rounded-full border border-teal-500 bg-teal-500/10 flex flex-col justify-center items-center font-mono">
@@ -3689,7 +3756,7 @@ export const CricketOverlay: React.FC = () => {
               <div className="w-12 h-12 bg-red-650 text-white rounded-full flex items-center justify-center animate-pulse"><Skull size={24} /></div>
               <div className="text-left border-l border-white/10 pl-5 pr-4">
                 <span className="text-[9px] text-red-500 font-bold uppercase tracking-widest block">OUT! (BATTER DISMISSED)</span>
-                <h3 className="text-2xl font-black text-white uppercase mt-0.5">{battingStats?.striker.name || 'ACTIVE BATTER'}</h3>
+                <h3 className="text-2xl font-black text-white uppercase mt-0.5">{battingStats?.striker?.name || 'ACTIVE BATTER'}</h3>
                 <span className="text-xs text-slate-400 block font-mono mt-0.5">Dismissed method: <strong className="text-red-400 font-black">CLEAN BOWLED!</strong></span>
               </div>
             </motion.div>
@@ -3703,7 +3770,7 @@ export const CricketOverlay: React.FC = () => {
               <div className="w-16 h-16 bg-amber-500 text-slate-950 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce"><Trophy size={32} /></div>
               <span className="text-[8px] uppercase tracking-widest font-mono text-amber-500 block mb-1">BROADCAST CELEBRATION</span>
               <h1 className="text-4xl font-black text-white uppercase">{customMilestone?.type === '100' ? '👑 MAJESTIC CENTURY' : customMilestone?.type === '5wkt' ? '⚡ FIVE WICKET SPELL' : '⭐ CRUCIAL HALF-CENTURY'}</h1>
-              <p className="mt-2 text-xs font-mono font-bold text-slate-400 uppercase">{customMilestone ? `${customMilestone.name || 'Batter'} reached milestone ${customMilestone.value}` : `${battingStats?.striker.name || 'Batter'} plays an amazing inning of 50 runs!`}</p>
+              <p className="mt-2 text-xs font-mono font-bold text-slate-400 uppercase">{customMilestone ? `${customMilestone.name || 'Batter'} reached milestone ${customMilestone.value}` : `${battingStats?.striker?.name || 'Batter'} plays an amazing inning of 50 runs!`}</p>
             </motion.div>
           </div>
         )}
@@ -3717,7 +3784,7 @@ export const CricketOverlay: React.FC = () => {
                   <span className="text-[9px] text-teal-400 font-bold block">SHOT SECTORS RANGE</span>
                   <h2 className="text-2xl font-black text-white uppercase">Batter Wagon Wheel</h2>
                 </div>
-                <div className="font-mono text-xs bg-slate-900 border border-white/5 py-1 px-3 rounded-lg text-teal-400">Runs: <strong className="text-white font-black">{battingStats?.striker.runs || 0}</strong></div>
+                <div className="font-mono text-xs bg-slate-900 border border-white/5 py-1 px-3 rounded-lg text-teal-400">Runs: <strong className="text-white font-black">{battingStats?.striker?.runs ?? 0}</strong></div>
               </div>
               <div className="h-[380px] w-full flex items-center justify-center bg-teal-950/5 border border-teal-500/10 rounded-xl relative p-2 overflow-hidden">
                 <svg className="w-full h-full" viewBox="0 0 500 350">

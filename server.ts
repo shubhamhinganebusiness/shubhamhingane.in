@@ -175,8 +175,9 @@ async function generateContentWithFallback(
   try {
     // Official valid Gemini models ordered for maximum availability and high throughput
     const baseModels = [
+      "gemini-3.5-flash-lite",
+      "gemini-3.6-flash",
       "gemini-3.8-flash",
-      "gemini-3.1-flash-lite",
       "gemini-flash-latest"
     ];
 
@@ -196,20 +197,43 @@ async function generateContentWithFallback(
         continue;
       }
 
-      // Allow up to 2 attempts for standard transient blips, but immediately switch on 503 high demand
+      // Attempt model call with timeout protection (7s) to prevent proxy 504 gateway timeouts
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           console.log(`[Gemini] Calling model: ${model}${attempt > 0 ? ` (retry ${attempt + 1})` : ''}`);
-          const response = await ai.models.generateContent({
-            ...params,
-            model,
-          });
+          
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Model ${model} request timed out after 7000ms`)), 7000)
+          );
+          
+          const response = await Promise.race([
+            ai.models.generateContent({
+              ...params,
+              model,
+            }),
+            timeoutPromise
+          ]) as any;
+
           if (response && response.text) {
             console.log(`[Gemini] Success using model: ${model}`);
             return response;
           }
         } catch (err: any) {
           lastError = err;
+
+          // If network connection to Google API cannot be established (fetch failed / DNS / offline),
+          // do not stall the user request with further retries; fail fast to instant local fallback.
+          const errMsg = (err.message || String(err)).toLowerCase();
+          if (errMsg.includes('fetch failed') || errMsg.includes('econnrefused') || errMsg.includes('enotfound')) {
+            console.log(`[Gemini] Network connectivity unavailable (${err.message || err}). Failing fast to local generator.`);
+            throw err;
+          }
+
+          // If the model timed out, do not retry this model; switch immediately to next fallback
+          if (errMsg.includes('timed out')) {
+            console.log(`[Gemini] Model ${model} timed out. Moving immediately to next fallback model.`);
+            break;
+          }
 
           // If the model is experiencing high demand (503), put it on cooldown and switch immediately
           if (isServiceUnavailableOrDemandSpike(err)) {
