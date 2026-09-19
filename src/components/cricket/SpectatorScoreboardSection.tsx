@@ -1113,15 +1113,21 @@ export const SpectatorScoreboardSection = ({
     }
 
     // Check for Wide (including extra runs taken)
-    const isWideDelivery = (comm.type === 'extra' && desc.includes('wide')) || (comm.ballScore && /wd/i.test(comm.ballScore));
+    const bScore = String(comm.ballScore || '').trim().toUpperCase();
+    const isWideDelivery = (comm.type === 'extra' && desc.includes('wide')) || /wd/i.test(bScore) || (comm as any).extraType === 'wide';
     if (isWideDelivery) {
-      let extraRuns = comm.runsOffBat !== undefined ? Number(comm.runsOffBat) : 0;
-      if (!extraRuns && comm.ballScore) {
-        const m = comm.ballScore.match(/(\d+)/);
+      let extraRuns = 0;
+      if (bScore === 'WD') {
+        extraRuns = 0;
+      } else if (bScore.includes('+')) {
+        const m = bScore.match(/\+(\d+)/);
         if (m) extraRuns = parseInt(m[1], 10);
-      }
-      if (!extraRuns) {
-        const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*extra\s*runs?/i);
+      } else if (typeof comm.runsOffBat === 'number' && comm.runsOffBat > 0) {
+        extraRuns = comm.runsOffBat;
+      } else if (typeof comm.runsOffBat === 'number' && comm.runsOffBat === 0) {
+        extraRuns = 0;
+      } else {
+        const m = desc.match(/plus\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*extra\s*runs?/i);
         if (m) extraRuns = parseInt(m[1], 10);
       }
       if (extraRuns > 0) {
@@ -1136,9 +1142,21 @@ export const SpectatorScoreboardSection = ({
         ? { label: '6', color: 'bg-amber-500 text-slate-950 border-amber-500 font-black shadow shadow-amber-500/50' } 
         : { label: '4', color: 'bg-emerald-600 text-white border-emerald-600 font-extrabold shadow-sm' };
     }
-    if (comm.type === 'extra') {
-      if (desc.includes('leg bye')) return { label: 'LB', color: 'bg-sky-100 text-sky-850 border-sky-205 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
-      if (desc.includes('bye')) return { label: 'B', color: 'bg-sky-100 text-sky-850 border-sky-105 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
+    if (comm.type === 'extra' || /lb|b/i.test(bScore)) {
+      if (desc.includes('leg bye') || desc.includes('legbye') || /lb/i.test(bScore) || (comm as any).extraType === 'legbye') {
+        let lbRuns = 1;
+        const mScore = bScore.match(/(\d+)\s*LB/i) || bScore.match(/^LB\s*(\d+)$/i) || bScore.match(/^(\d+)$/);
+        if (mScore) lbRuns = parseInt(mScore[1], 10);
+        else if (typeof comm.runsOffBat === 'number' && comm.runsOffBat > 0) lbRuns = comm.runsOffBat;
+        return { label: `${lbRuns}lb`, color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 font-bold' };
+      }
+      if (desc.includes('bye') || /(?:^|\d+)B$/i.test(bScore) || (comm as any).extraType === 'bye') {
+        let bRuns = 1;
+        const mScore = bScore.match(/(\d+)\s*B/i) || bScore.match(/^B\s*(\d+)$/i) || bScore.match(/^(\d+)$/);
+        if (mScore) bRuns = parseInt(mScore[1], 10);
+        else if (typeof comm.runsOffBat === 'number' && comm.runsOffBat > 0) bRuns = comm.runsOffBat;
+        return { label: `${bRuns}b`, color: 'bg-sky-100 text-sky-850 border-sky-205 dark:bg-sky-950/40 dark:text-sky-300 font-semibold' };
+      }
       return { label: 'Ex', color: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-450' };
     }
     // Default runs parsing

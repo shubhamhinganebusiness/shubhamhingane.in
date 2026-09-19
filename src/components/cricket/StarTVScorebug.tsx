@@ -67,25 +67,26 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   activeStinger = null
 }) => {
   // Normalize balls to standard object representation
-  // Normalize balls to standard object representation
   const normalizedBalls = useMemo<StarTVBall[]>(() => {
     return thisOverBalls.map(item => {
       if (typeof item === 'string') {
         let type: StarTVBall['type'] = 'dot';
+        const lower = item.toLowerCase();
         if (item === '4') type = 'four';
         else if (item === '6') type = 'six';
-        else if (item === 'W' || item.toLowerCase().includes('w')) type = 'wicket';
-        else if (item.toLowerCase().includes('wd') || item.toLowerCase().includes('nb') || item.toLowerCase().includes('b') || item.toLowerCase().includes('lb')) type = 'extra';
+        else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(item) || lower === 'ex') type = 'extra';
+        else if (item === 'W' || /^w$/i.test(item) || /^w\+/i.test(item) || item.toUpperCase() === 'OUT') type = 'wicket';
         else if (['1', '2', '3', '5'].includes(item) || parseInt(item, 10) > 0) type = 'run';
         return { label: item, type };
       }
       const label = item.label || '';
       let type = item.type;
+      const lower = label.toLowerCase();
       if (!type) {
         if (label === '4') type = 'four';
         else if (label === '6') type = 'six';
-        else if (label === 'W' || label.toLowerCase().includes('w')) type = 'wicket';
-        else if (label.toLowerCase().includes('wd') || label.toLowerCase().includes('nb') || label.toLowerCase().includes('b') || label.toLowerCase().includes('lb')) type = 'extra';
+        else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(label) || lower === 'ex') type = 'extra';
+        else if (label === 'W' || /^w$/i.test(label) || /^w\+/i.test(label) || label.toUpperCase() === 'OUT') type = 'wicket';
         else if (['1', '2', '3', '5'].includes(label) || parseInt(label, 10) > 0) type = 'run';
         else type = 'dot';
       }
@@ -280,18 +281,30 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
               <span className="text-[8.5px] sm:text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono mb-1">
                 THIS OVER
               </span>
-              <div className="flex items-center gap-1 sm:gap-1.5">
+              <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
                 {normalizedBalls.length > 0 ? (
-                  normalizedBalls.slice(0, 6).map((ball, idx) => (
+                  normalizedBalls.map((ball, idx) => (
                     <span 
                       key={idx}
-                      className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-[10px] sm:text-[11px] font-mono font-black border shadow-sm ${
+                      className={`rounded-full flex items-center justify-center font-mono font-black border shadow-sm transition-all ${
+                        ball.label.length > 3
+                          ? 'w-auto min-w-[26px] sm:min-w-[30px] px-1 h-6 sm:h-7 text-[8px] sm:text-[9px] tracking-tighter'
+                          : ball.label.length > 2
+                          ? 'w-auto min-w-[25px] sm:min-w-[28px] px-0.5 h-6 sm:h-7 text-[8.5px] sm:text-[9.5px] tracking-tight'
+                          : 'w-6 h-6 sm:w-7 sm:h-7 text-[10px] sm:text-[11px]'
+                      } ${
                         ball.type === 'four'
                           ? 'bg-sky-500 text-white border-sky-300 shadow-[0_0_8px_#0284c7]'
                           : ball.type === 'six'
                           ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_10px_#f59e0b]'
                           : ball.type === 'wicket'
                           ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_8px_#e11d48]'
+                          : ball.label.toLowerCase().includes('wd')
+                          ? 'bg-orange-500 text-white border-orange-400 shadow-sm'
+                          : ball.label.toLowerCase().includes('nb')
+                          ? 'bg-pink-600 text-white border-pink-400 shadow-sm'
+                          : ball.label.toLowerCase().includes('lb')
+                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-sm'
                           : ball.type === 'extra'
                           ? 'bg-purple-600 text-white border-purple-400'
                           : ball.type === 'run'

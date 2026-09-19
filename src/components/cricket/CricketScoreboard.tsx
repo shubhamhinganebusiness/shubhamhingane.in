@@ -3954,8 +3954,8 @@ export const CricketScoreboard: React.FC = () => {
     else if (event.type === 'runs') ballLabel = String(event.val);
     else if (event.type === 'wide') ballLabel = (event.val && event.val > 0) ? `WD+${event.val}` : 'WD';
     else if (event.type === 'noball') ballLabel = (event.val && event.val > 0) ? `NB+${event.val}` : 'NB';
-    else if (event.type === 'bye') ballLabel = event.val ? `${event.val}B` : 'B';
-    else if (event.type === 'legbye') ballLabel = event.val ? `${event.val}LB` : 'LB';
+    else if (event.type === 'bye') ballLabel = event.val ? `${event.val}b` : '1b';
+    else if (event.type === 'legbye') ballLabel = event.val ? `${event.val}lb` : '1lb';
 
     const ballDesc = `${bowler.name} to ${striker.name}: ${outcomeDescription}`;
     const effectiveExtraType = 
@@ -4031,6 +4031,7 @@ export const CricketScoreboard: React.FC = () => {
       overBall: formatOvers(inn.ballsBowled),
       description: localizedEnWithProb,
       type: eventType,
+      extraType: effectiveExtraType,
       isNoBall: event.type === 'noball',
       runsOffBat: runsOffBatFromDelivery,
       ballScore: ballLabel,

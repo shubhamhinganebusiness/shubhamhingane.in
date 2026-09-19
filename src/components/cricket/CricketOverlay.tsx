@@ -1309,18 +1309,28 @@ export const CricketOverlay: React.FC = () => {
         label = '4';
         style = 'bg-sky-500 border-sky-500 font-bold text-white shadow-[0_0_10px_rgba(14,165,233,0.5)]';
       }
-    } else if (b.type === 'extra' || (b as any).isNoBall || ((b as any).ballScore && /nb|wd/i.test((b as any).ballScore))) {
-      const isNoBallDelivery = (b as any).isNoBall || desc.includes('no ball') || desc.includes('no-ball') || desc.includes('nb') || ((b as any).ballScore && /nb/i.test((b as any).ballScore));
-      const isWideDelivery = desc.includes('wide') || ((b as any).ballScore && /wd/i.test((b as any).ballScore));
+    } else if (b.type === 'extra' || (b as any).isNoBall || ((b as any).ballScore && /nb|wd|lb|b|ex/i.test((b as any).ballScore))) {
+      const bScore = String((b as any).ballScore || '').trim().toUpperCase();
+      const extraType = String((b as any).extraType || '').toLowerCase();
+      const isNoBallDelivery = (b as any).isNoBall || extraType === 'noball' || desc.includes('no ball') || desc.includes('no-ball') || desc.includes('nb') || /nb/i.test(bScore);
+      const isWideDelivery = extraType === 'wide' || desc.includes('wide') || /wd/i.test(bScore);
+      const isLegByeDelivery = extraType === 'legbye' || /lb/i.test(bScore) || desc.includes('leg bye') || desc.includes('leg-bye') || desc.includes('legbye');
+      const isByeDelivery = extraType === 'bye' || /(?:^|\d+)B$/i.test(bScore) || desc.includes('bye');
 
       if (isNoBallDelivery) {
-        let batRuns = (b as any).runsOffBat !== undefined ? Number((b as any).runsOffBat) : 0;
-        if (!batRuns && (b as any).ballScore) {
-          const m = (b as any).ballScore.match(/(\d+)/);
+        let batRuns = 0;
+        if (bScore.includes('+')) {
+          const m = bScore.match(/\+(\d+)/);
           if (m) batRuns = parseInt(m[1], 10);
-        }
-        if (!batRuns) {
-          const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken)/i);
+        } else if (/^(\d+)NB$/i.test(bScore)) {
+          const m = bScore.match(/^(\d+)NB$/i);
+          if (m && parseInt(m[1], 10) > 1) batRuns = parseInt(m[1], 10) - 1;
+        } else if (bScore === 'NB') {
+          batRuns = 0;
+        } else if (typeof (b as any).runsOffBat === 'number') {
+          batRuns = (b as any).runsOffBat;
+        } else {
+          const m = desc.match(/plus\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken)/i);
           if (m) batRuns = parseInt(m[1], 10);
         }
         if (batRuns > 0) {
@@ -1335,13 +1345,20 @@ export const CricketOverlay: React.FC = () => {
           style = 'bg-red-500 border-red-500 text-white font-bold animate-pulse-fast';
         }
       } else if (isWideDelivery) {
-        let extraRuns = (b as any).runsOffBat !== undefined ? Number((b as any).runsOffBat) : 0;
-        if (!extraRuns && (b as any).ballScore) {
-          const m = (b as any).ballScore.match(/(\d+)/);
+        let extraRuns = 0;
+        if (bScore === 'WD') {
+          extraRuns = 0;
+        } else if (bScore.includes('+')) {
+          const m = bScore.match(/\+(\d+)/);
           if (m) extraRuns = parseInt(m[1], 10);
-        }
-        if (!extraRuns) {
-          const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*extra\s*runs?/i);
+        } else if (/^(\d+)WD$/i.test(bScore)) {
+          const m = bScore.match(/^(\d+)WD$/i);
+          if (m && parseInt(m[1], 10) > 1) extraRuns = parseInt(m[1], 10) - 1;
+        } else if (typeof (b as any).runsOffBat === 'number') {
+          extraRuns = (b as any).runsOffBat;
+        } else {
+          // Check description for extra runs completed by batsmen running; NEVER match "+1 runs" from "Total +1 runs"
+          const m = desc.match(/plus\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*extra\s*runs?/i);
           if (m) extraRuns = parseInt(m[1], 10);
         }
         if (extraRuns > 0) {
@@ -1351,15 +1368,47 @@ export const CricketOverlay: React.FC = () => {
           label = 'WD';
           style = 'bg-orange-500 border-orange-500 text-white font-bold';
         }
-      } else if (desc.includes('leg bye')) { 
-        label = 'LB'; 
-        style = 'bg-emerald-600/30 border-emerald-600/50 text-emerald-300'; 
-      } else if (desc.includes('bye')) { 
-        label = 'B'; 
-        style = 'bg-slate-700 border-slate-650 text-slate-300'; 
-      } else { 
-        label = 'EX'; 
-        style = 'bg-slate-800 border-slate-700 text-slate-400'; 
+      } else if (isLegByeDelivery) {
+        // Cricbuzz style: show runs like "1lb", "2lb", "4lb"
+        let lbRuns = 1;
+        const mScore = bScore.match(/(\d+)\s*LB/i) || bScore.match(/^LB\s*(\d+)$/i) || bScore.match(/^(\d+)$/);
+        if (mScore) {
+          lbRuns = parseInt(mScore[1], 10);
+        } else if (typeof (b as any).runsOffBat === 'number' && (b as any).runsOffBat > 0) {
+          lbRuns = (b as any).runsOffBat;
+        } else if (typeof (b as any).runs === 'number' && (b as any).runs > 0) {
+          lbRuns = (b as any).runs;
+        } else {
+          const mDesc = desc.match(/(\d+)\s*leg[- ]?bye/i) || desc.match(/(\d+)\s*lb/i);
+          if (mDesc) lbRuns = parseInt(mDesc[1], 10);
+        }
+        if (isNaN(lbRuns) || lbRuns <= 0) lbRuns = 1;
+
+        label = `${lbRuns}lb`;
+        style = lbRuns >= 4
+          ? 'bg-emerald-600 border-emerald-400 text-white font-black shadow-sm'
+          : 'bg-emerald-800/80 border-emerald-600/70 text-emerald-100 font-bold';
+      } else if (isByeDelivery) {
+        // Cricbuzz style: show runs like "1b", "2b", "4b"
+        let bRuns = 1;
+        const mScore = bScore.match(/(\d+)\s*B/i) || bScore.match(/^B\s*(\d+)$/i) || bScore.match(/^(\d+)$/);
+        if (mScore) {
+          bRuns = parseInt(mScore[1], 10);
+        } else if (typeof (b as any).runsOffBat === 'number' && (b as any).runsOffBat > 0) {
+          bRuns = (b as any).runsOffBat;
+        } else if (typeof (b as any).runs === 'number' && (b as any).runs > 0) {
+          bRuns = (b as any).runs;
+        } else {
+          const mDesc = desc.match(/(\d+)\s*bye/i);
+          if (mDesc) bRuns = parseInt(mDesc[1], 10);
+        }
+        if (isNaN(bRuns) || bRuns <= 0) bRuns = 1;
+
+        label = `${bRuns}b`;
+        style = 'bg-slate-700 border-slate-500 text-slate-200 font-bold';
+      } else {
+        label = 'EX';
+        style = 'bg-slate-800 border-slate-700 text-slate-400';
       }
     } else {
       let resolvedRuns: number | null = null;
@@ -2206,14 +2255,24 @@ export const CricketOverlay: React.FC = () => {
             bowlerFigures={bowlingStats ? `${bowlingStats.wickets}/${bowlingStats.runs}` : '0/0'}
             bowlerOvers={bowlingStats ? formatOvers(bowlingStats.balls) : '0.0'}
             bowlerEcon={bowlingStats && bowlingStats.balls > 0 ? Number(((bowlingStats.runs / bowlingStats.balls) * 6).toFixed(1)) : 0}
-            thisOverBalls={(currentOverBalls || []).slice(0, 6).map(b => {
+            thisOverBalls={(currentOverBalls || []).map(b => {
               const d = getPillDetails(b);
               let type: 'dot' | 'run' | 'four' | 'six' | 'wicket' | 'extra' = 'dot';
-              if (d.label === '4') type = 'four';
-              else if (d.label === '6') type = 'six';
-              else if (d.label === 'W' || d.label.includes('W')) type = 'wicket';
-              else if (d.label.includes('WD') || d.label.includes('NB') || d.label.includes('B') || d.label.includes('LB')) type = 'extra';
-              else if (['1', '2', '3', '5'].includes(d.label) || parseInt(d.label, 10) > 0) type = 'run';
+              if (b.type === 'wicket' || d.label === 'W' || /^W$/i.test(d.label)) {
+                type = 'wicket';
+              } else if (d.label === '4') {
+                type = 'four';
+              } else if (d.label === '6') {
+                type = 'six';
+              } else if (
+                b.type === 'extra' ||
+                /wd|nb|lb|b|ex/i.test(d.label) ||
+                (b as any).isNoBall
+              ) {
+                type = 'extra';
+              } else if (['1', '2', '3', '5'].includes(d.label) || parseInt(d.label, 10) > 0) {
+                type = 'run';
+              }
               return { label: d.label, type };
             })}
             bowlingTeamName={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? (match?.teamB || 'TEAM B') : (match?.teamA || 'TEAM A')}
@@ -2418,7 +2477,7 @@ export const CricketOverlay: React.FC = () => {
                     return (
                       <div
                         key={b.id || idx}
-                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-mono font-black border shrink-0 ${details.style}`}
+                        className={`${details.label.length > 2 ? 'w-auto min-w-[26px] px-1' : 'w-6'} h-6 rounded-full flex items-center justify-center text-[8.5px] font-mono font-black border shrink-0 ${details.style}`}
                         title={details.label}
                       >
                         {details.label}
@@ -2849,7 +2908,7 @@ export const CricketOverlay: React.FC = () => {
                       initial={{ scale: 0.2, x: -10, opacity: 0 }}
                       animate={{ scale: 1, x: 0, opacity: 1 }}
                       transition={{ type: 'spring', stiffness: 260, damping: 18, delay: index * 0.05 }}
-                      className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] uppercase font-mono font-black border text-center shrink-0 ${details.style}`}
+                      className={`${details.label.length > 2 ? 'w-auto min-w-[28px] px-1' : 'w-7'} h-7 rounded-full flex items-center justify-center text-[9.5px] uppercase font-mono font-black border text-center shrink-0 ${details.style}`}
                       title={`${b.overBall}: ${b.description}`}
                     >
                       {details.label}
