@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Volume2, Sparkles, AlertCircle, HelpCircle, Check, X, Globe, Radio } from 'lucide-react';
+import { Mic, MicOff, Volume2, Sparkles, AlertCircle, HelpCircle, Check, X, Globe, Radio, ChevronDown, ChevronUp } from 'lucide-react';
 
 export type VoiceLanguage = 'mr-IN' | 'hi-IN' | 'en-IN';
 
@@ -16,6 +16,7 @@ export interface VoiceScoreCommandResult {
 
 interface VoiceAssistedScorerProps {
   disabled?: boolean;
+  defaultCollapsed?: boolean;
   onScoreRuns: (runs: number) => void;
   onScoreDot: () => void;
   onScoreExtra: (type: 'wide' | 'noball', extraRuns: number) => void;
@@ -29,6 +30,7 @@ interface VoiceAssistedScorerProps {
 
 export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   disabled = false,
+  defaultCollapsed = true,
   onScoreRuns,
   onScoreDot,
   onScoreExtra,
@@ -39,6 +41,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   strikerName,
   bowlerName
 }) => {
+  const [isExpanded, setIsExpanded] = useState(!defaultCollapsed);
   const [isListening, setIsListening] = useState(false);
   const [selectedLang, setSelectedLang] = useState<VoiceLanguage>('mr-IN');
   const [liveTranscript, setLiveTranscript] = useState('');
@@ -524,6 +527,59 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     };
   }, []);
 
+  if (!isExpanded) {
+    return (
+      <div className="w-full bg-slate-900/90 border border-amber-500/20 rounded-xl px-2 py-1 shadow-md flex items-center justify-between gap-1.5 shrink-0 select-none">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <button
+            type="button"
+            id="btn-voice-mic-trigger"
+            disabled={disabled || !supported}
+            onClick={isListening ? stopListening : startListening}
+            className={`h-6.5 px-2 rounded-lg font-black text-[9px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow border shrink-0 active:scale-95 ${
+              isListening
+                ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                : 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
+            }`}
+            title={isListening ? 'Click to Stop Voice' : 'Click to Speak (e.g. "4", "Wide", "Out")'}
+          >
+            {isListening ? <MicOff size={11} className="animate-spin" /> : <Mic size={11} />}
+            <span>{isListening ? 'Mic ON' : '🎙️ Voice'}</span>
+          </button>
+          
+          <div className="text-[9px] text-slate-300 truncate font-medium flex-1 min-w-0">
+            {liveTranscript ? (
+              <strong className="text-amber-300 font-mono">"{liveTranscript}"</strong>
+            ) : statusMessage ? (
+              <span className="text-emerald-400 font-bold truncate block">{statusMessage}</span>
+            ) : (
+              <span className="text-slate-400 truncate block">Speak ball outcome ({selectedLang === 'mr-IN' ? 'मराठी' : selectedLang === 'hi-IN' ? 'हिंदी' : 'EN'})</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleLangChange(selectedLang === 'mr-IN' ? 'hi-IN' : selectedLang === 'hi-IN' ? 'en-IN' : 'mr-IN')}
+            className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[8px] font-bold border border-slate-700 cursor-pointer"
+            title="Switch Language"
+          >
+            {selectedLang === 'mr-IN' ? '🇮🇳 MR' : selectedLang === 'hi-IN' ? '🇮🇳 HI' : '🌐 EN'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 cursor-pointer flex items-center"
+            title="Expand Voice Assistant"
+          >
+            <ChevronDown size={11} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full bg-slate-900/90 border border-amber-500/20 rounded-2xl p-2.5 sm:p-3 shadow-xl backdrop-blur-sm">
       {/* Header Bar */}
@@ -572,6 +628,17 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
           >
             <HelpCircle size={13} />
             <span className="text-[9px] font-bold hidden sm:inline">Commands</span>
+          </button>
+
+          {/* Collapse button */}
+          <button
+            type="button"
+            onClick={() => setIsExpanded(false)}
+            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs transition-colors cursor-pointer flex items-center gap-1"
+            title="Collapse Voice Scorer Panel"
+          >
+            <ChevronUp size={13} />
+            <span className="text-[9px] font-bold hidden sm:inline">Collapse</span>
           </button>
         </div>
       </div>

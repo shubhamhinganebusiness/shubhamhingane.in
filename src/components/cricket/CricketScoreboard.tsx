@@ -8940,14 +8940,27 @@ export const CricketScoreboard: React.FC = () => {
             </div>
           </div>
 
-          {/* COLUMN 2: Crease Batsmen, Bowlers and Tactile Scoring Panels */}
-          <div className={`flex flex-col gap-2 min-h-0 overflow-y-auto custom-scrollbar ${
+          {/* COLUMN 2: Crease Batsmen, Bowlers and Tactile Scoring Panels - Optimized for 100% Single-Screen Laptop View */}
+          <div className={`flex flex-col gap-1.5 min-h-0 overflow-y-auto lg:overflow-visible custom-scrollbar ${
             activeMobileTab === 'scorer' ? 'flex' : 'hidden lg:flex'
-          } lg:col-span-5 pb-3 max-h-[calc(100vh-140px)]`}>
+          } lg:col-span-5 pb-1 lg:pb-0`}>
             
             {/* Direct crease details card */}
-            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-2xl shrink-0 space-y-2 shadow-md">
-              <span className="text-[8px] font-black text-slate-450 uppercase tracking-widest block leading-none font-sans">ACTIVE CREASE MATCHUP</span>
+            <div className="p-2 bg-slate-900 border border-slate-800 rounded-xl shrink-0 space-y-1.5 shadow-md">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none font-sans">ACTIVE CREASE MATCHUP</span>
+                {!isSpectator && (
+                  <button
+                    type="button"
+                    onClick={handleSwapStrikers}
+                    className="h-6 px-2 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-750 rounded-lg font-black uppercase text-[8.5px] tracking-wider gap-1 active:scale-95 transition-all cursor-pointer select-none"
+                    title="Swap Strike / Rotate Batters"
+                  >
+                    <ArrowLeftRight size={10} className="text-amber-400" />
+                    <span>SWAP STRIKE</span>
+                  </button>
+                )}
+              </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {/* Striker batsman card */}
@@ -9147,22 +9160,12 @@ export const CricketScoreboard: React.FC = () => {
                 })()}
               </div>
 
-              {/* Swap Ends - Touch target > 44px */}
-              <button
-                type="button"
-                onClick={handleSwapStrikers}
-                className="w-full h-11 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-100 border-none rounded-xl font-black uppercase text-[10px] tracking-widest gap-2 active:scale-95 transition-all cursor-pointer select-none"
-              >
-                <ArrowLeftRight size={13} className="text-amber-400 mr-1" />
-                SWAP STRIKE / ROTATE BATTERS
-              </button>
-
               {/* Bowler Details card */}
               {(() => {
                 const bw = currentInnings.bowlers[currentInnings.currentBowlerIndex];
-                if (!bw) return <div className="text-center py-2 bg-slate-955 rounded-lg text-xs leading-none">Bowler not assigned</div>;
+                if (!bw) return <div className="text-center py-1.5 bg-slate-955 rounded-lg text-xs leading-none">Bowler not assigned</div>;
                 return (
-                  <div className="bg-slate-950 p-2 border border-slate-850 rounded-xl flex justify-between items-center gap-2">
+                  <div className="bg-slate-950 p-1.5 border border-slate-850 rounded-xl flex justify-between items-center gap-2">
                     <div className="truncate flex-1">
                       <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest block leading-none mb-1">CURRENT ACTIVE BOWLER</span>
                       {editBowlerIndex === null ? (
@@ -9253,8 +9256,8 @@ export const CricketScoreboard: React.FC = () => {
               }}
             />
 
-            {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions >= 44x44px */}
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2.5 flex flex-col justify-between relative overflow-visible min-h-0 shadow-lg select-none">
+            {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions */}
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-2 flex flex-col justify-between relative overflow-visible min-h-0 shadow-lg select-none">
               
               {/* Overlay padlock cover */}
               {isScoringDisabled && (
@@ -9376,12 +9379,12 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-2 flex-1 flex flex-col justify-between">
+              <div className="space-y-1.5 flex-1 flex flex-col justify-between">
                 
-                {/* RUN CHOOTER CHANNELS (0,1,2,3,4,6) - minimum target 44px satisfied with h-12 */}
-                <div className="space-y-1">
-                  <span className="text-[7.5px] font-black text-amber-405 uppercase tracking-widest block mb-0.5 leading-none font-sans">BALL OUTCOME RUN CHANNELS (TAP MARKS LOGS)</span>
-                  <div className="grid grid-cols-6 gap-1">
+                {/* RUN CHOOTER CHANNELS (0,1,2,3,4,6) */}
+                <div className="space-y-0.5">
+                  <span className="text-[7.5px] font-black text-amber-400 uppercase tracking-widest block mb-0.5 leading-none font-sans">BALL OUTCOME RUN CHANNELS (TAP MARKS LOGS)</span>
+                  <div className="grid grid-cols-6 gap-1 font-black">
                     {[0, 1, 2, 3, 4, 6].map((rCount) => {
                       let buttonStyle = 'bg-slate-800 text-white hover:bg-slate-750 active:scale-95';
                       if (rCount === 4) buttonStyle = 'bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 font-black';
@@ -9406,10 +9409,10 @@ export const CricketScoreboard: React.FC = () => {
                               handleScoreEvent({ type: 'runs', val: rCount });
                             }
                           }}
-                          className={`h-12 w-full flex flex-col items-center justify-center rounded-xl font-mono transition-transform border-none font-black text-sm cursor-pointer ${buttonStyle}`}
+                          className={`h-9 sm:h-9.5 w-full flex flex-col items-center justify-center rounded-xl font-mono transition-transform border-none font-black text-xs cursor-pointer ${buttonStyle}`}
                         >
-                          <span className="leading-none text-base">{rCount}</span>
-                          <span className="text-[7px] font-sans font-black uppercase opacity-60 mt-0.5">
+                          <span className="leading-none text-sm sm:text-base font-black">{rCount}</span>
+                          <span className="text-[6.5px] font-sans font-black uppercase opacity-70 mt-0.5">
                             {rCount === 4 ? 'FOUR' : rCount === 6 ? 'SIX' : rCount === 0 ? 'DOT' : 'RUN'}
                           </span>
                         </button>
@@ -9418,18 +9421,18 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* EXTRAS CHOOSE: Wide, No Ball & Quick Wicket - h-11 provides 44px compliant touch area */}
-                <div className="grid grid-cols-3 gap-1.5">
+                {/* EXTRAS CHOOSE: Wide, No Ball & Quick Wicket */}
+                <div className="grid grid-cols-3 gap-1 font-bold">
                   <button
                     disabled={isScoringDisabled}
                     onClick={() => {
                       setExtraRunsBallType('wide');
                       setShowExtraRunsModal(true);
                     }}
-                    className="h-11 flex flex-col items-center justify-center bg-purple-950 border border-purple-800/45 hover:bg-purple-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
+                    className="h-8 sm:h-8.5 flex flex-col items-center justify-center bg-purple-950/90 border border-purple-800/45 hover:bg-purple-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
                   >
                     <span className="leading-none font-extrabold">+1 WIDE</span>
-                    <span className="text-[6.5px] text-purple-400 font-semibold mt-0.5 truncate max-w-full px-0.5">Re-bowls</span>
+                    <span className="text-[6px] text-purple-300 font-semibold mt-0.5 truncate max-w-full px-0.5">Re-bowls</span>
                   </button>
                   <button
                     disabled={isScoringDisabled}
@@ -9437,37 +9440,37 @@ export const CricketScoreboard: React.FC = () => {
                       setExtraRunsBallType('noball');
                       setShowExtraRunsModal(true);
                     }}
-                    className="h-11 flex flex-col items-center justify-center bg-amber-955 border border-amber-800/45 hover:bg-amber-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
+                    className="h-8 sm:h-8.5 flex flex-col items-center justify-center bg-amber-950/90 border border-amber-800/45 hover:bg-amber-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
                   >
                     <span className="leading-none font-extrabold">+1 NO BALL</span>
-                    <span className="text-[6.5px] text-amber-400 font-semibold mt-0.5 truncate max-w-full px-0.5">Free hit</span>
+                    <span className="text-[6px] text-amber-300 font-semibold mt-0.5 truncate max-w-full px-0.5">Free hit</span>
                   </button>
                   <button
                     disabled={isScoringDisabled}
                     id="btn-quick-wicket"
                     onClick={() => openWicketModal('striker')}
-                    className="h-11 flex flex-col items-center justify-center bg-rose-600 hover:bg-rose-500 border border-rose-400/50 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow"
+                    className="h-8 sm:h-8.5 flex flex-col items-center justify-center bg-rose-600 hover:bg-rose-500 border border-rose-400/50 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow"
                   >
                     <span className="leading-none font-extrabold flex items-center gap-1">
-                      <AlertCircle size={11} /> 🔴 WICKET
+                      <AlertCircle size={10} /> 🔴 WICKET
                     </span>
-                    <span className="text-[6.5px] text-rose-100 font-semibold mt-0.5">Dismiss Out</span>
+                    <span className="text-[6px] text-rose-100 font-semibold mt-0.5">Dismiss Out</span>
                   </button>
                 </div>
 
-                {/* BYES AND LEGBYES - h-9 combined with text block provides ample compliant touch target area */}
-                <div className="bg-slate-950 p-1.5 rounded-xl border border-slate-850 space-y-1">
-                  <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest block leading-none">EXTRAS BYES & LEGBYES (TEAM ADDS RUNS, BYPASSES BATSMAN STATS)</span>
-                  <div className="grid grid-cols-2 gap-2">
+                {/* BYES AND LEGBYES */}
+                <div className="bg-slate-950 p-1 rounded-xl border border-slate-850 space-y-0.5">
+                  <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block leading-none">EXTRAS BYES & LEGBYES (TEAM ADDS RUNS, BYPASSES BATSMAN STATS)</span>
+                  <div className="grid grid-cols-2 gap-1.5 font-bold">
                     <div>
-                      <span className="text-[7px] font-black text-purple-400 uppercase block mb-0.5">BYE RUNS</span>
+                      <span className="text-[6.5px] font-black text-purple-400 uppercase block mb-0.5">BYE RUNS</span>
                       <div className="flex gap-1 justify-between">
                         {[1, 2, 4].map((r) => (
                           <button
                             key={r}
                             disabled={isScoringDisabled}
                             onClick={() => handleScoreEvent({ type: 'bye', val: r })}
-                            className="flex-1 h-9 bg-purple-900/10 hover:bg-purple-900/30 text-purple-305 border border-purple-850 text-[9.5px] font-black uppercase rounded-lg cursor-pointer"
+                            className="flex-1 h-7 bg-purple-900/10 hover:bg-purple-900/30 text-purple-300 border border-purple-800 text-[8.5px] font-black uppercase rounded-lg cursor-pointer"
                           >
                             +{r}B
                           </button>
@@ -9475,14 +9478,14 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     </div>
                     <div>
-                      <span className="text-[7px] font-black text-indigo-400 uppercase block mb-0.5">LEG-BYE RUNS</span>
+                      <span className="text-[6.5px] font-black text-indigo-400 uppercase block mb-0.5">LEG-BYE RUNS</span>
                       <div className="flex gap-1 justify-between">
                         {[1, 2, 4].map((r) => (
                           <button
                             key={r}
                             disabled={isScoringDisabled}
                             onClick={() => handleScoreEvent({ type: 'legbye', val: r })}
-                            className="flex-1 h-9 bg-indigo-900/10 hover:bg-indigo-900/30 text-indigo-305 border border-indigo-850 text-[9.5px] font-black uppercase rounded-lg cursor-pointer"
+                            className="flex-1 h-7 bg-indigo-900/10 hover:bg-indigo-900/30 text-indigo-300 border border-indigo-800 text-[8.5px] font-black uppercase rounded-lg cursor-pointer"
                           >
                             +{r}L
                           </button>
@@ -9492,15 +9495,15 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* RED TACTILE BUTTON: Dismissal wicket tracker (target 48px height) */}
-                <div className="pt-0.5">
+                {/* RED TACTILE BUTTON: Dismissal wicket tracker */}
+                <div className="pt-0">
                   <button
                     disabled={isScoringDisabled}
                     id="btn-wicket"
                     onClick={() => openWicketModal('striker')}
-                    className="h-12 w-full flex items-center justify-center bg-rose-600 hover:bg-rose-500 rounded-xl font-black text-xs uppercase uppercase tracking-wider text-white gap-2 transition-all cursor-pointer border-none animate-pulse active:scale-95 shadow-lg"
+                    className="h-8.5 sm:h-9 w-full flex items-center justify-center bg-rose-600 hover:bg-rose-500 rounded-xl font-black text-xs uppercase tracking-wider text-white gap-2 transition-all cursor-pointer border-none animate-pulse active:scale-95 shadow-lg"
                   >
-                    <AlertCircle size={14} />
+                    <AlertCircle size={13} />
                     🔴 DISMISS / WICKET (OUT RECONCILER)
                   </button>
                 </div>
@@ -16146,8 +16149,8 @@ export const CricketScoreboard: React.FC = () => {
                   })()}
                 </div>
 
-                {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-3 sm:p-5 lg:p-4 rounded-2xl border border-white/5 space-y-3 sm:space-y-4 max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">
+                {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) - Optimized for Laptop Single Screen */}
+                <div className="lg:col-span-4 bg-slate-950/40 p-2.5 sm:p-3 rounded-xl border border-white/5 space-y-2 lg:space-y-1.5 overflow-y-auto lg:overflow-visible custom-scrollbar">
                   {isSpectator ? (
                     <div className="h-full flex flex-col justify-between space-y-4">
                       <div className="space-y-2">
@@ -16303,8 +16306,8 @@ export const CricketScoreboard: React.FC = () => {
 
                           {/* Control buttons block */}
                           <div>
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2 leading-none font-bold">TAP BALL RUNS</span>
-                            <div className="grid grid-cols-6 gap-1.5 font-black">
+                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none font-bold">TAP BALL RUNS</span>
+                            <div className="grid grid-cols-6 gap-1 font-black">
                               {[0, 1, 2, 3, 4, 6].map((runs) => (
                                 <button
                                   key={runs}
@@ -16315,7 +16318,7 @@ export const CricketScoreboard: React.FC = () => {
                                     if (runs === 0) handleScoreEvent({ type: 'dot' });
                                     else handleScoreEvent({ type: 'runs', val: runs });
                                   }}
-                                  className={`py-3 text-sm font-black rounded-xl transition-all cursor-pointer border-none transform active:scale-95 shadow ${
+                                  className={`py-2 text-xs sm:text-sm font-black rounded-xl transition-all cursor-pointer border-none transform active:scale-95 shadow ${
                                     runs === 4 ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 font-black animate-pulse' :
                                     runs === 6 ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black' :
                                     'bg-slate-800 hover:bg-slate-700 text-white hover:text-emerald-400'
@@ -16330,10 +16333,10 @@ export const CricketScoreboard: React.FC = () => {
                       )}
 
                       {/* Extras quick selections (Wide and No Ball) */}
-                      <div className="grid grid-cols-2 gap-1.5 font-bold">
+                      <div className="grid grid-cols-2 gap-1 font-bold">
                         <button
                           onClick={() => handleScoreEvent({ type: 'wide', val: 0 })}
-                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] sm:text-xs font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2.5 items-center"
+                          className="py-1.5 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
                         >
                           <span>Wide</span>
                           <span className="text-emerald-400 font-mono font-black">+1</span>
@@ -16341,7 +16344,7 @@ export const CricketScoreboard: React.FC = () => {
 
                         <button
                           onClick={() => handleScoreEvent({ type: 'noball', val: 0 })}
-                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-amber-400 text-[10px] sm:text-xs font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2.5 items-center"
+                          className="py-1.5 bg-slate-800 hover:bg-slate-750 text-white hover:text-amber-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
                         >
                           <span>No ball</span>
                           <span className="text-amber-400 font-mono font-black">+1</span>
@@ -16366,21 +16369,21 @@ export const CricketScoreboard: React.FC = () => {
                           }
                           setShowWicketModal(true);
                         }}
-                        className="w-full py-2.5 sm:py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer border-none transition-transform hover:scale-[1.01] active:scale-95 shadow-md flex items-center justify-center gap-1.5 animate-pulse"
+                        className="w-full py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer border-none transition-transform hover:scale-[1.01] active:scale-95 shadow-md flex items-center justify-center gap-1.5 animate-pulse"
                       >
                         🔴 <span>DISMISS BATSMAN (WICKET)</span>
                       </button>
 
                       {/* Byes / Leg-byes quick controls */}
-                      <div className="grid grid-cols-2 gap-2 bg-slate-900 border border-white/5 p-2 rounded-xl font-bold">
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-900 border border-white/5 p-1.5 rounded-xl font-bold">
                         <div>
-                          <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block mb-1">Byes</span>
+                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Byes</span>
                           <div className="flex gap-1 animate-none">
                             {[1, 2, 4].map(r => (
                               <button
                                 key={r}
                                 onClick={() => handleScoreEvent({ type: 'bye', val: r })}
-                                className="flex-1 py-1 bg-slate-800 hover:bg-slate-705 text-white text-[9px] font-extrabold border-none rounded cursor-pointer"
+                                className="flex-1 py-0.5 bg-slate-800 hover:bg-slate-705 text-white text-[8.5px] font-extrabold border-none rounded cursor-pointer"
                               >
                                 B{r}
                               </button>
@@ -16389,13 +16392,13 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
 
                         <div>
-                          <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block mb-1">Leg-byes</span>
+                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Leg-byes</span>
                           <div className="flex gap-1 animate-none">
                             {[1, 2, 4].map(r => (
                               <button
                                 key={r}
                                 onClick={() => handleScoreEvent({ type: 'legbye', val: r })}
-                                className="flex-1 py-1 bg-slate-800 hover:bg-slate-705 text-white text-[9px] font-extrabold border-none rounded cursor-pointer"
+                                className="flex-1 py-0.5 bg-slate-800 hover:bg-slate-705 text-white text-[8.5px] font-extrabold border-none rounded cursor-pointer"
                               >
                                 L{r}
                               </button>
@@ -16405,8 +16408,8 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
 
                       {/* ADD PLAYER CREATION QUICK ROSTER OPERATIONS */}
-                      <div className="p-3 bg-slate-900 border border-white/5 rounded-xl space-y-2.5 font-bold">
-                        <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest block leading-none font-sans">Scorer Quick Roster Tool</span>
+                      <div className="p-2 bg-slate-900 border border-white/5 rounded-xl space-y-1.5 font-bold">
+                        <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest block leading-none font-sans">Scorer Quick Roster Tool</span>
                         
                         {/* Dynamic Batsman Roster Adder */}
                         <div className="flex gap-1.5 font-bold">
