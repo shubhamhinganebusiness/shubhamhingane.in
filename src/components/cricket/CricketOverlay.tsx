@@ -1362,13 +1362,48 @@ export const CricketOverlay: React.FC = () => {
         style = 'bg-slate-800 border-slate-700 text-slate-400'; 
       }
     } else {
-      const numMatch = desc.match(/\d+/);
-      const runs = numMatch ? parseInt(numMatch[0]) : 0;
-      if (runs === 0) {
+      let resolvedRuns: number | null = null;
+      const directBallScore = (b as any).ballScore;
+      if (typeof directBallScore === 'string' && /^[0-6]$/.test(directBallScore.trim())) {
+        resolvedRuns = parseInt(directBallScore.trim(), 10);
+      } else if (typeof (b as any).runsOffBat === 'number' && !isNaN((b as any).runsOffBat)) {
+        resolvedRuns = (b as any).runsOffBat;
+      } else if (typeof (b as any).runs === 'number' && !isNaN((b as any).runs)) {
+        resolvedRuns = (b as any).runs;
+      }
+
+      if (resolvedRuns === null) {
+        if (desc.includes('six') || desc.includes(' 6 ') || desc.includes('6 runs')) {
+          resolvedRuns = 6;
+        } else if (desc.includes('four') || desc.includes(' 4 ') || desc.includes('4 runs') || desc.includes('boundary')) {
+          resolvedRuns = 4;
+        } else if (desc.includes('three') || desc.includes('triple') || desc.includes('3 runs') || desc.includes('3 run') || desc.includes('for three') || desc.includes('runs 3')) {
+          resolvedRuns = 3;
+        } else if (desc.includes('two') || desc.includes('couple') || desc.includes('double') || desc.includes('2 runs') || desc.includes('2 run') || desc.includes('for two') || desc.includes('runs 2')) {
+          resolvedRuns = 2;
+        } else if (desc.includes('single') || desc.includes('one run') || desc.includes('1 run') || desc.includes('for a single') || desc.includes('runs 1') || desc.includes('rotates strike')) {
+          resolvedRuns = 1;
+        } else {
+          const numMatch = desc.match(/\b([0-6])\b/) || desc.match(/\d+/);
+          if (numMatch) {
+            resolvedRuns = parseInt(numMatch[1] || numMatch[0], 10);
+          } else {
+            resolvedRuns = 0;
+          }
+        }
+      }
+
+      if (resolvedRuns === 0) {
         label = '•';
         style = 'bg-slate-850 border-slate-800 text-slate-500';
+      } else if (resolvedRuns === 4) {
+        label = '4';
+        style = 'bg-sky-500 border-sky-500 font-bold text-white shadow-[0_0_10px_rgba(14,165,233,0.5)]';
+      } else if (resolvedRuns === 6) {
+        label = '6';
+        style = 'bg-gradient-to-r from-amber-500 to-yellow-400 border-amber-500 font-extrabold text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-bounce-custom';
       } else {
-        label = runs.toString();
+        label = resolvedRuns.toString();
         style = 'bg-emerald-500 border-emerald-500 font-bold text-white';
       }
     }
@@ -1826,7 +1861,7 @@ export const CricketOverlay: React.FC = () => {
       {/* =========================================================================
           TOP BROADCAST 'LIVE' MATCH STATUS BADGE (PULSING WHILE IN PROGRESS)
           ========================================================================= */}
-      {match?.status === 'live' && !isFullScreenTransition && (
+      {match?.status === 'live' && !isFullScreenTransition && activeLayout !== 'star-tv-broadcast' && (
         <motion.div
           id="overlay-top-live-badge"
           initial={{ opacity: 0, y: -12 }}
@@ -2138,14 +2173,14 @@ export const CricketOverlay: React.FC = () => {
       {activeConfig.showScoreBug && activeLayout === 'star-tv-broadcast' && (
         <div 
           id="star-tv-pro-scorebug"
-          className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-6' : 'bottom-6'} left-1/2 -translate-x-1/2 w-[98%] max-w-[1400px] z-30 transition-all`}
+          className={`absolute ${activeConfig.bugPosition === 'top-full' ? 'top-0' : 'bottom-0'} left-0 right-0 w-full z-30 transition-all`}
         >
           {/* Boundary Flash Strip */}
           {lastBdryFlash === '4' && (
-            <div className="absolute inset-x-0 -top-2.5 h-2 bg-sky-400 animate-pulse z-50 rounded-full shadow-[0_0_16px_rgba(56,189,248,0.9)]" />
+            <div className="absolute inset-x-0 -top-2.5 h-2 bg-sky-400 animate-pulse z-50 shadow-[0_0_16px_rgba(56,189,248,0.9)]" />
           )}
           {lastBdryFlash === '6' && (
-            <div className="absolute inset-x-0 -top-2.5 h-2 bg-amber-400 animate-pulse z-50 rounded-full shadow-[0_0_20px_rgba(251,191,36,1)]" />
+            <div className="absolute inset-x-0 -top-2.5 h-2 bg-amber-400 animate-pulse z-50 shadow-[0_0_20px_rgba(251,191,36,1)]" />
           )}
 
           <StarTVScorebug 
@@ -2178,7 +2213,7 @@ export const CricketOverlay: React.FC = () => {
               else if (d.label === '6') type = 'six';
               else if (d.label === 'W' || d.label.includes('W')) type = 'wicket';
               else if (d.label.includes('WD') || d.label.includes('NB') || d.label.includes('B') || d.label.includes('LB')) type = 'extra';
-              else if (parseInt(d.label, 10) > 0) type = 'run';
+              else if (['1', '2', '3', '5'].includes(d.label) || parseInt(d.label, 10) > 0) type = 'run';
               return { label: d.label, type };
             })}
             bowlingTeamName={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? (match?.teamB || 'TEAM B') : (match?.teamA || 'TEAM A')}

@@ -67,6 +67,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   activeStinger = null
 }) => {
   // Normalize balls to standard object representation
+  // Normalize balls to standard object representation
   const normalizedBalls = useMemo<StarTVBall[]>(() => {
     return thisOverBalls.map(item => {
       if (typeof item === 'string') {
@@ -74,11 +75,21 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         if (item === '4') type = 'four';
         else if (item === '6') type = 'six';
         else if (item === 'W' || item.toLowerCase().includes('w')) type = 'wicket';
-        else if (item.toLowerCase().includes('wd') || item.toLowerCase().includes('nb')) type = 'extra';
-        else if (parseInt(item, 10) > 0) type = 'run';
+        else if (item.toLowerCase().includes('wd') || item.toLowerCase().includes('nb') || item.toLowerCase().includes('b') || item.toLowerCase().includes('lb')) type = 'extra';
+        else if (['1', '2', '3', '5'].includes(item) || parseInt(item, 10) > 0) type = 'run';
         return { label: item, type };
       }
-      return item;
+      const label = item.label || '';
+      let type = item.type;
+      if (!type) {
+        if (label === '4') type = 'four';
+        else if (label === '6') type = 'six';
+        else if (label === 'W' || label.toLowerCase().includes('w')) type = 'wicket';
+        else if (label.toLowerCase().includes('wd') || label.toLowerCase().includes('nb') || label.toLowerCase().includes('b') || label.toLowerCase().includes('lb')) type = 'extra';
+        else if (['1', '2', '3', '5'].includes(label) || parseInt(label, 10) > 0) type = 'run';
+        else type = 'dot';
+      }
+      return { ...item, type, label };
     });
   }, [thisOverBalls]);
 
@@ -89,12 +100,12 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   return (
     <div 
       id="star-tv-scorebug-container"
-      className="relative w-full max-w-[1360px] mx-auto select-none font-sans filter drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)]"
+      className="relative w-full select-none font-sans filter drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)]"
     >
       {/* Dynamic Stinger Glow Header */}
       {activeStinger && (
         <div 
-          className={`absolute -top-3 inset-x-8 h-2 rounded-full z-40 animate-pulse ${
+          className={`absolute -top-3 inset-x-0 h-2 z-40 animate-pulse ${
             activeStinger === 'four' 
               ? 'bg-sky-400 shadow-[0_0_20px_#38bdf8]' 
               : activeStinger === 'six' 
@@ -106,7 +117,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
       {/* Chasing Target / Equation Header Banner (if in 2nd innings) */}
       {targetRuns && targetRuns > 0 && (
-        <div className="mx-auto w-fit mb-1 px-4 py-0.5 rounded-t-lg bg-slate-950/95 border-t border-x border-amber-400/40 text-[10px] font-mono font-black text-amber-300 uppercase tracking-wider flex items-center gap-2 shadow-lg backdrop-blur-md">
+        <div className="mx-auto w-fit mb-0 px-6 py-0.5 rounded-t-lg bg-slate-950/95 border-t border-x border-amber-400/40 text-[10px] font-mono font-black text-amber-300 uppercase tracking-wider flex items-center gap-2 shadow-lg backdrop-blur-md">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
           <span>TARGET {targetRuns}</span>
           <span className="text-white/40">•</span>
@@ -114,8 +125,8 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         </div>
       )}
 
-      {/* MASTER SCOREBUG TV BAR */}
-      <div className="flex items-stretch justify-between h-[64px] sm:h-[70px] rounded-xl overflow-hidden border border-white/20 bg-slate-950/95 shadow-2xl backdrop-blur-xl">
+      {/* MASTER SCOREBUG TV BAR - 100% Full-Bleed Screen Width */}
+      <div className="flex items-stretch justify-between h-[74px] sm:h-[82px] w-full border-t border-white/20 bg-slate-950/95 shadow-2xl backdrop-blur-xl">
         
         {/* =====================================================================
             1. LEFT WING: BATTING TEAM BADGE & ACTIVE BATSMEN
@@ -124,11 +135,11 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
           
           {/* Batting Team Polygonal Brand Block */}
           <div 
-            className="relative px-3.5 sm:px-4 flex items-center gap-2 text-white shrink-0 overflow-hidden"
+            className="relative px-3.5 sm:px-6 flex items-center gap-2.5 text-white shrink-0 overflow-hidden"
             style={{ 
               backgroundColor: battingTeamColor,
               clipPath: 'polygon(0 0, 100% 0, 88% 100%, 0% 100%)',
-              paddingRight: '1.75rem'
+              paddingRight: '2rem'
             }}
           >
             {/* Ambient metallic sheen */}
@@ -144,37 +155,37 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
               <img 
                 src={battingTeamLogo} 
                 alt={battingTeamName} 
-                className="w-8 h-8 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
+                className="w-9 h-9 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
                 referrerPolicy="no-referrer"
               />
             ) : null}
 
             <div className="flex flex-col">
-              <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[90px] sm:max-w-[120px]">
+              <span className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[120px] xl:max-w-[200px]">
                 {battingTeamName}
               </span>
-              <span className="text-[8px] sm:text-[9px] font-bold text-white/80 uppercase tracking-widest leading-none">
+              <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
                 {battingTeamSubtext}
               </span>
             </div>
           </div>
 
           {/* Batters Details */}
-          <div className="flex-1 px-3 sm:px-4 flex items-center justify-around gap-2 min-w-0 overflow-hidden">
+          <div className="flex-1 px-3 sm:px-6 flex items-center justify-around gap-2 min-w-0 overflow-hidden">
             {/* Striker */}
             <div className="flex flex-col justify-center min-w-0">
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0 shadow-[0_0_6px_#34d399]" />
-                <span className="text-xs sm:text-sm font-black text-white uppercase truncate max-w-[100px] sm:max-w-[140px]">
+                <span className="text-xs sm:text-base font-black text-white uppercase truncate max-w-[120px] xl:max-w-[180px]">
                   {strikerName}*
                 </span>
               </div>
               <div className="flex items-baseline gap-1.5 mt-0.5">
-                <span className="text-sm sm:text-base font-black font-mono text-amber-300">
+                <span className="text-sm sm:text-lg font-black font-mono text-amber-300">
                   {strikerRuns}
-                  <span className="text-[10px] font-normal text-slate-400 ml-0.5">({strikerBalls})</span>
+                  <span className="text-[11px] font-normal text-slate-400 ml-0.5">({strikerBalls})</span>
                 </span>
-                <span className="text-[8.5px] font-mono font-bold text-amber-400/80 px-1 py-0.2 bg-amber-400/10 rounded hidden md:inline-block">
+                <span className="text-[9px] sm:text-[10px] font-mono font-bold text-amber-400/80 px-1 py-0.2 bg-amber-400/10 rounded hidden md:inline-block">
                   SR {strikerSR}
                 </span>
               </div>
@@ -184,15 +195,15 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
             {/* Non-Striker */}
             <div className="flex flex-col justify-center min-w-0">
-              <span className="text-xs sm:text-sm font-bold text-slate-300 uppercase truncate max-w-[90px] sm:max-w-[130px]">
+              <span className="text-xs sm:text-base font-bold text-slate-300 uppercase truncate max-w-[110px] xl:max-w-[170px]">
                 {nonStrikerName}
               </span>
               <div className="flex items-baseline gap-1.5 mt-0.5">
-                <span className="text-sm sm:text-base font-black font-mono text-slate-200">
+                <span className="text-sm sm:text-lg font-black font-mono text-slate-200">
                   {nonStrikerRuns}
-                  <span className="text-[10px] font-normal text-slate-400 ml-0.5">({nonStrikerBalls})</span>
+                  <span className="text-[11px] font-normal text-slate-400 ml-0.5">({nonStrikerBalls})</span>
                 </span>
-                <span className="text-[8.5px] font-mono font-bold text-slate-400 px-1 py-0.2 bg-white/5 rounded hidden md:inline-block">
+                <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 px-1 py-0.2 bg-white/5 rounded hidden md:inline-block">
                   SR {nonStrikerSR}
                 </span>
               </div>
@@ -205,8 +216,8 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
             ===================================================================== */}
         <div 
           id="star-tv-center-shield"
-          className="relative z-20 px-5 sm:px-7 flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-[#070b14] to-slate-950 text-white shrink-0 border-x border-white/20 shadow-[0_0_25px_rgba(0,0,0,0.9)]"
-          style={{ minWidth: '150px' }}
+          className="relative z-20 px-6 sm:px-8 flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-[#070b14] to-slate-950 text-white shrink-0 border-x border-white/20 shadow-[0_0_25px_rgba(0,0,0,0.9)]"
+          style={{ minWidth: '170px' }}
         >
           {/* Top highlight glint */}
           <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-sky-400 to-transparent opacity-80" />
@@ -220,7 +231,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
           {/* Overs Indicator */}
           <div className="flex items-center gap-1.5 -mt-0.5">
-            <span className="text-[10px] sm:text-[11px] font-bold font-mono text-sky-300 tracking-wider">
+            <span className="text-[11px] sm:text-xs font-bold font-mono text-sky-300 tracking-wider">
               {overs}
               {oversLimit ? <span className="text-slate-400 font-normal"> / {oversLimit} OV</span> : ' OV'}
             </span>
@@ -233,29 +244,29 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         <div className="flex-1 flex items-stretch min-w-0 bg-gradient-to-l from-slate-900/90 to-slate-950/80">
           
           {/* Bowler Details & This Over Balls */}
-          <div className="flex-1 px-3 sm:px-4 flex items-center justify-around gap-2 min-w-0 overflow-hidden">
+          <div className="flex-1 px-3 sm:px-6 flex items-center justify-around gap-2 min-w-0 overflow-hidden">
             
             {/* Active Bowler */}
             <div className="flex flex-col justify-center min-w-0">
-              <div className="flex items-center gap-1">
-                <span className="text-[8px] font-black uppercase tracking-wider px-1 py-0.2 rounded bg-white/10 text-slate-300 font-mono">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider px-1 py-0.2 rounded bg-white/10 text-slate-300 font-mono">
                   BOWL
                 </span>
-                <span className="text-xs sm:text-sm font-black text-white uppercase truncate max-w-[100px] sm:max-w-[130px]">
+                <span className="text-xs sm:text-base font-black text-white uppercase truncate max-w-[120px] xl:max-w-[180px]">
                   {bowlerName}
                 </span>
               </div>
               <div className="flex items-baseline gap-1.5 mt-0.5">
-                <span className="text-sm sm:text-base font-black font-mono text-emerald-400">
+                <span className="text-sm sm:text-lg font-black font-mono text-emerald-400">
                   {bowlerFigures}
                 </span>
                 {bowlerOvers && (
-                  <span className="text-[10px] font-mono text-slate-400">
+                  <span className="text-[11px] font-mono text-slate-400">
                     ({bowlerOvers} ov)
                   </span>
                 )}
                 {bowlerEcon !== undefined && bowlerEcon > 0 && (
-                  <span className="text-[8.5px] font-mono text-slate-400 hidden lg:inline-block">
+                  <span className="text-[9px] sm:text-[10px] font-mono text-slate-400 hidden lg:inline-block">
                     Econ {bowlerEcon}
                   </span>
                 )}
@@ -266,15 +277,15 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
             {/* This Over Balls Pills */}
             <div className="flex flex-col justify-center shrink-0">
-              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 font-mono mb-1">
+              <span className="text-[8.5px] sm:text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono mb-1">
                 THIS OVER
               </span>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 sm:gap-1.5">
                 {normalizedBalls.length > 0 ? (
                   normalizedBalls.slice(0, 6).map((ball, idx) => (
                     <span 
                       key={idx}
-                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[9px] sm:text-[10px] font-mono font-black border shadow-sm ${
+                      className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-[10px] sm:text-[11px] font-mono font-black border shadow-sm ${
                         ball.type === 'four'
                           ? 'bg-sky-500 text-white border-sky-300 shadow-[0_0_8px_#0284c7]'
                           : ball.type === 'six'
@@ -284,11 +295,11 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                           : ball.type === 'extra'
                           ? 'bg-purple-600 text-white border-purple-400'
                           : ball.type === 'run'
-                          ? 'bg-slate-700 text-white border-slate-500'
+                          ? 'bg-slate-800 text-white border-slate-400 font-black shadow-sm'
                           : 'bg-black/60 text-slate-400 border-white/10'
                       }`}
                     >
-                      {ball.label === '0' ? '•' : ball.label}
+                      {ball.label === '0' || ball.label === '•' ? '•' : ball.label}
                     </span>
                   ))
                 ) : (
@@ -299,7 +310,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                   Array.from({ length: 6 - normalizedBalls.length }).map((_, padIdx) => (
                     <span 
                       key={`star-pad-${padIdx}`}
-                      className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border border-dashed border-white/15 flex items-center justify-center text-[8px] text-slate-600 font-mono"
+                      className="w-6 h-6 sm:w-7 sm:h-7 rounded-full border border-dashed border-white/15 flex items-center justify-center text-[9px] text-slate-600 font-mono"
                     >
                       •
                     </span>
@@ -311,21 +322,21 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
           {/* Bowling Team Polygonal Brand Block */}
           <div 
-            className="relative px-3.5 sm:px-4 flex items-center gap-2 text-white shrink-0 overflow-hidden text-right"
+            className="relative px-3.5 sm:px-6 flex items-center gap-2.5 text-white shrink-0 overflow-hidden text-right"
             style={{ 
               backgroundColor: bowlingTeamColor,
               clipPath: 'polygon(12% 0, 100% 0, 100% 100%, 0% 100%)',
-              paddingLeft: '1.75rem'
+              paddingLeft: '2rem'
             }}
           >
             {/* Ambient metallic sheen */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-white/20 pointer-events-none" />
 
             <div className="flex flex-col items-end">
-              <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[90px] sm:max-w-[120px]">
+              <span className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[120px] xl:max-w-[200px]">
                 {bowlingTeamName}
               </span>
-              <span className="text-[8px] sm:text-[9px] font-bold text-white/80 uppercase tracking-widest leading-none">
+              <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
                 {bowlingTeamSubtext}
               </span>
             </div>
@@ -335,7 +346,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
               <img 
                 src={bowlingTeamLogo} 
                 alt={bowlingTeamName} 
-                className="w-8 h-8 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
+                className="w-9 h-9 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
                 referrerPolicy="no-referrer"
               />
             ) : null}

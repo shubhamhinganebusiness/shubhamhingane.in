@@ -8941,9 +8941,9 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           {/* COLUMN 2: Crease Batsmen, Bowlers and Tactile Scoring Panels */}
-          <div className={`flex flex-col gap-2 min-h-0 overflow-y-auto lg:overflow-visible custom-scrollbar ${
+          <div className={`flex flex-col gap-2 min-h-0 overflow-y-auto custom-scrollbar ${
             activeMobileTab === 'scorer' ? 'flex' : 'hidden lg:flex'
-          } lg:col-span-5 pb-3`}>
+          } lg:col-span-5 pb-3 max-h-[calc(100vh-140px)]`}>
             
             {/* Direct crease details card */}
             <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-2xl shrink-0 space-y-2 shadow-md">
@@ -16147,7 +16147,7 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
 
                 {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-4 sm:p-6 rounded-2xl border border-white/5 space-y-4">
+                <div className="lg:col-span-4 bg-slate-950/40 p-3 sm:p-5 lg:p-4 rounded-2xl border border-white/5 space-y-3 sm:space-y-4 max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">
                   {isSpectator ? (
                     <div className="h-full flex flex-col justify-between space-y-4">
                       <div className="space-y-2">
@@ -16329,31 +16329,47 @@ export const CricketScoreboard: React.FC = () => {
                         </>
                       )}
 
-                      {/* Extras quick selections (W, NB, Wicket) */}
-                      <div className="grid grid-cols-3 gap-1.5 font-bold">
+                      {/* Extras quick selections (Wide and No Ball) */}
+                      <div className="grid grid-cols-2 gap-1.5 font-bold">
                         <button
                           onClick={() => handleScoreEvent({ type: 'wide', val: 0 })}
-                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
+                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] sm:text-xs font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2.5 items-center"
                         >
                           <span>Wide</span>
-                          <span className="text-emerald-400">+1</span>
+                          <span className="text-emerald-400 font-mono font-black">+1</span>
                         </button>
 
                         <button
                           onClick={() => handleScoreEvent({ type: 'noball', val: 0 })}
-                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
+                          className="py-2 bg-slate-800 hover:bg-slate-750 text-white hover:text-amber-400 text-[10px] sm:text-xs font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2.5 items-center"
                         >
                           <span>No ball</span>
-                          <span className="text-amber-400">+1</span>
-                        </button>
-
-                        <button
-                          onClick={() => openWicketModal('striker')}
-                          className="py-2 bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer border-none flex justify-center items-center gap-1 shadow"
-                        >
-                          🔴 <span>Wicket</span>
+                          <span className="text-amber-400 font-mono font-black">+1</span>
                         </button>
                       </div>
+
+                      {/* OUT / Wicket Button trigger - prominent and perfectly fitted for laptop screens */}
+                      <button
+                        id="btn-cockpit-wicket"
+                        onClick={() => {
+                          setActiveAnimation('wicket');
+                          setOutBatsmanWho('striker');
+                          if (currentInnings) {
+                            const activeBowlerName = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name || '';
+                            setWicketBowlerName(activeBowlerName);
+                            setWicketHowOutDetails('Bowled');
+                            setWicketType('Bowled');
+                            setWicketFielderName('');
+                            setWicketAdditionalDetails('');
+                            setNewBatsmanName('');
+                            setWicketValidationErr('');
+                          }
+                          setShowWicketModal(true);
+                        }}
+                        className="w-full py-2.5 sm:py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer border-none transition-transform hover:scale-[1.01] active:scale-95 shadow-md flex items-center justify-center gap-1.5 animate-pulse"
+                      >
+                        🔴 <span>DISMISS BATSMAN (WICKET)</span>
+                      </button>
 
                       {/* Byes / Leg-byes quick controls */}
                       <div className="grid grid-cols-2 gap-2 bg-slate-900 border border-white/5 p-2 rounded-xl font-bold">
@@ -16387,28 +16403,6 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
                         </div>
                       </div>
-
-                      {/* OUT / Wicket Button trigger */}
-                      <button
-                        onClick={() => {
-                          setActiveAnimation('wicket');
-                          setOutBatsmanWho('striker');
-                          if (currentInnings) {
-                            const activeBowlerName = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name || '';
-                            setWicketBowlerName(activeBowlerName);
-                            setWicketHowOutDetails('Bowled');
-                            setWicketType('Bowled');
-                            setWicketFielderName('');
-                            setWicketAdditionalDetails('');
-                            setNewBatsmanName('');
-                            setWicketValidationErr('');
-                          }
-                          setShowWicketModal(true);
-                        }}
-                        className="w-full py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-black text-[10px] uppercase tracking-wider cursor-pointer border-none transition-transform hover:scale-[1.01] active:scale-95 shadow-md flex items-center justify-center gap-1"
-                      >
-                        🔴 Dismiss batsman (wicket)
-                      </button>
 
                       {/* ADD PLAYER CREATION QUICK ROSTER OPERATIONS */}
                       <div className="p-3 bg-slate-900 border border-white/5 rounded-xl space-y-2.5 font-bold">

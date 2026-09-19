@@ -758,7 +758,9 @@ export const BroadcastThemeStudio: React.FC = () => {
 
           {/* LIVE SCORE BUG SIMULATOR (Dynamic based on theme config) */}
           <div className={`w-full z-20 transition-all ${
-            theme.bugPosition === 'top-full'
+            theme.layout === 'star-tv-broadcast'
+              ? 'p-0 w-full'
+              : theme.bugPosition === 'top-full'
               ? 'p-2 sm:p-4 absolute top-0 inset-x-0'
               : theme.bugPosition === 'bottom-left'
               ? 'p-2 sm:p-4 max-w-4xl'
