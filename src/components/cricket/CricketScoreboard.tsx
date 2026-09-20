@@ -223,6 +223,11 @@ interface OverlayConfig {
   customOverlayOpacity?: number;
   customOverlayEnabled?: boolean;
   customOverlayAsBackground?: boolean;
+  youtubeChannelLogo?: string;
+  showYoutubeChannelLogo?: boolean;
+  youtubeChannelName?: string;
+  youtubeChannelLogoScale?: number;
+  youtubeChannelLogoOpacity?: number;
 }
 
 export interface MatchState {
@@ -285,6 +290,9 @@ export interface MatchState {
   streamKey?: string;
   tournamentName?: string;
   tournamentLogo?: string;
+  youtubeChannelLogo?: string;
+  showYoutubeChannelLogo?: boolean;
+  youtubeChannelName?: string;
   seriesName?: string;
   groundName?: string;
   umpire1Name?: string;
@@ -1134,7 +1142,27 @@ export const CricketScoreboard: React.FC = () => {
   const [seriesName, setSeriesName] = useState('Bilateral Series');
   const [groundName, setGroundName] = useState('Gully Ground');
   const [tournamentName, setTournamentName] = useState('Bilateral Cup');
-  const [tournamentLogo, setTournamentLogo] = useState('');
+  const [tournamentLogo, setTournamentLogo] = useState(() => {
+    try {
+      return localStorage.getItem('cricket_tournament_logo') || '';
+    } catch (_) {
+      return '';
+    }
+  });
+  const [youtubeChannelLogo, setYoutubeChannelLogo] = useState(() => {
+    try {
+      return localStorage.getItem('cricket_youtube_channel_logo') || '';
+    } catch (_) {
+      return '';
+    }
+  });
+  const [youtubeChannelName, setYoutubeChannelName] = useState(() => {
+    try {
+      return localStorage.getItem('cricket_youtube_channel_name') || '';
+    } catch (_) {
+      return '';
+    }
+  });
   const [umpire1Name, setUmpire1Name] = useState('');
   const [umpire1Photo, setUmpire1Photo] = useState('');
   const [umpire2Name, setUmpire2Name] = useState('');
@@ -1362,6 +1390,7 @@ export const CricketScoreboard: React.FC = () => {
   const [lowerThirdMode, setLowerThirdMode] = useState<'intro' | 'equation' | 'umpires'>('intro');
   const [selectedUmpireSignal, setSelectedUmpireSignal] = useState<'out' | 'noball' | 'freehit' | 'deadball' | 'wide'>('out');
   const [customMilestone, setCustomMilestone] = useState<{ name: string; type: 'fifty' | 'hundred' | '5wkt'; value: number } | null>(null);
+  const [cockpitAnimationFilter, setCockpitAnimationFilter] = useState<'all' | 'events' | 'dismissals' | 'tension' | 'gully' | 'milestones'>('all');
 
   // Sequencer & Broadcast states
   const [graphicsQueue, setGraphicsQueue] = useState<string[]>(['score_bug', 'batsman_stats', 'partnership']);
@@ -1499,6 +1528,8 @@ export const CricketScoreboard: React.FC = () => {
   const [editModalBallsBowled, setEditModalBallsBowled] = useState(0);
   const [editModalTournamentLogo, setEditModalTournamentLogo] = useState('');
   const [editModalTournamentName, setEditModalTournamentName] = useState('');
+  const [editModalYoutubeChannelLogo, setEditModalYoutubeChannelLogo] = useState('');
+  const [editModalYoutubeChannelName, setEditModalYoutubeChannelName] = useState('');
   const [editModalGroundName, setEditModalGroundName] = useState('');
   const [editModalUmpire1Name, setEditModalUmpire1Name] = useState('');
   const [editModalUmpire1Photo, setEditModalUmpire1Photo] = useState('');
@@ -1726,6 +1757,44 @@ export const CricketScoreboard: React.FC = () => {
     if (editModalTournamentLogo !== undefined) {
       updated.tournamentLogo = editModalTournamentLogo;
       setTournamentLogo(editModalTournamentLogo);
+      try {
+        if (editModalTournamentLogo) {
+          localStorage.setItem('cricket_tournament_logo', editModalTournamentLogo);
+        } else {
+          localStorage.removeItem('cricket_tournament_logo');
+        }
+      } catch (_) {}
+    }
+    if (editModalYoutubeChannelLogo !== undefined) {
+      updated.youtubeChannelLogo = editModalYoutubeChannelLogo;
+      updated.overlayConfig = {
+        ...(updated.overlayConfig || {}),
+        youtubeChannelLogo: editModalYoutubeChannelLogo,
+        showYoutubeChannelLogo: !!editModalYoutubeChannelLogo
+      };
+      setYoutubeChannelLogo(editModalYoutubeChannelLogo);
+      try {
+        if (editModalYoutubeChannelLogo) {
+          localStorage.setItem('cricket_youtube_channel_logo', editModalYoutubeChannelLogo);
+        } else {
+          localStorage.removeItem('cricket_youtube_channel_logo');
+        }
+      } catch (_) {}
+    }
+    if (editModalYoutubeChannelName !== undefined) {
+      updated.youtubeChannelName = editModalYoutubeChannelName;
+      updated.overlayConfig = {
+        ...(updated.overlayConfig || {}),
+        youtubeChannelName: editModalYoutubeChannelName
+      };
+      setYoutubeChannelName(editModalYoutubeChannelName);
+      try {
+        if (editModalYoutubeChannelName) {
+          localStorage.setItem('cricket_youtube_channel_name', editModalYoutubeChannelName);
+        } else {
+          localStorage.removeItem('cricket_youtube_channel_name');
+        }
+      } catch (_) {}
     }
     if (editModalTournamentName !== undefined) {
       updated.tournamentName = editModalTournamentName;
@@ -2979,6 +3048,9 @@ export const CricketScoreboard: React.FC = () => {
       tournamentMatchId: match?.tournamentMatchId || null,
       tournamentName: tournamentName || null,
       tournamentLogo: tournamentLogo || match?.tournamentLogo || undefined,
+      youtubeChannelLogo: youtubeChannelLogo || match?.youtubeChannelLogo || undefined,
+      showYoutubeChannelLogo: !!(youtubeChannelLogo || match?.youtubeChannelLogo),
+      youtubeChannelName: youtubeChannelName || match?.youtubeChannelName || undefined,
       seriesName: seriesName || 'Bilateral Series',
       groundName: groundName || 'Gully Ground',
       umpire1Name: umpire1Name || match?.umpire1Name || undefined,
@@ -6046,6 +6118,9 @@ export const CricketScoreboard: React.FC = () => {
       tournamentMatchId: match?.tournamentMatchId || null,
       tournamentName: tournamentName || null,
       tournamentLogo: tournamentLogo || match?.tournamentLogo || undefined,
+      youtubeChannelLogo: youtubeChannelLogo || match?.youtubeChannelLogo || undefined,
+      showYoutubeChannelLogo: !!(youtubeChannelLogo || match?.youtubeChannelLogo),
+      youtubeChannelName: youtubeChannelName || match?.youtubeChannelName || undefined,
       seriesName: seriesName || 'Bilateral Series',
       groundName: groundName || 'Gully Ground',
       umpire1Name: umpire1Name || match?.umpire1Name || undefined,
@@ -7437,6 +7512,8 @@ export const CricketScoreboard: React.FC = () => {
                     setEditModalMatchBannerUrl(match.matchBannerUrl || '');
                     setEditModalTournamentLogo(match.tournamentLogo || '');
                     setEditModalTournamentName(match.tournamentName || '');
+                    setEditModalYoutubeChannelLogo(match.overlayConfig?.youtubeChannelLogo || match.youtubeChannelLogo || youtubeChannelLogo || '');
+                    setEditModalYoutubeChannelName(match.overlayConfig?.youtubeChannelName || match.youtubeChannelName || youtubeChannelName || '');
                     setEditModalGroundName(match.groundName || '');
                     setEditModalUmpire1Name(match.umpire1Name || '');
                     setEditModalUmpire1Photo(match.umpire1Photo || '');
@@ -8210,282 +8287,123 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Team Squad List with Images Overlay (Two Different Buttons: Team A Squad & Team B Squad) */}
-                          <div className="border border-blue-500/30 bg-gradient-to-r from-blue-950/70 via-slate-950/90 to-indigo-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 flex items-center justify-center text-xs shadow-md shrink-0 border border-blue-400/40">
-                                  👥
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
-                                    Team Squad List with Images Overlay (1:1 TV Graphic)
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-slate-300 block truncate">
-                                    Photos / Avatars • Metallic Bar • Gold Bottom Toss Banner • 11 Squad
-                                  </span>
-                                </div>
-                              </div>
-                              {(currentActiveGraphic === 'squad_a' || currentActiveGraphic === 'squad_b') && (
-                                <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
-                                  {currentActiveGraphic === 'squad_a' ? `${(match.teamA || 'TEAM A').toUpperCase()} SQUAD LIVE` : `${(match.teamB || 'TEAM B').toUpperCase()} SQUAD LIVE`}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* TWO DIFFERENT BUTTONS FOR TEAM A AND TEAM B SQUAD LIST */}
+                          {/* 1. Team Squad List (Team A & Team B) */}
+                          <div className="border border-blue-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
                             <div className="grid grid-cols-2 gap-2">
-                              {/* BUTTON 1: TEAM A SQUAD */}
-                              <div className="p-2 rounded-xl bg-slate-950/80 border border-blue-500/30 flex flex-col justify-between gap-1.5 shadow-md">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[8.5px] font-black uppercase text-blue-300 truncate">
-                                    🛡️ {match.teamA || 'Team A'} Squad
-                                  </span>
-                                  {currentActiveGraphic === 'squad_a' && (
-                                    <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping shrink-0" />
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => {
-                                      const nextState = currentActiveGraphic === 'squad_a' ? 'none' : 'squad_a';
-                                      updateOverlayProp({ activeGraphic: nextState });
-                                      showNotification(
-                                        nextState === 'squad_a' ? `${match.teamA || 'Team A'} squad list overlay live on air!` : 'Squad overlay dismissed.',
-                                        nextState === 'squad_a' ? 'success' : 'info'
-                                      );
-                                    }}
-                                    className={`flex-1 py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow ${
-                                      currentActiveGraphic === 'squad_a'
-                                        ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/40'
-                                    }`}
-                                  >
-                                    <span>{currentActiveGraphic === 'squad_a' ? '🔴 Dismiss' : '📺 Show Team A'}</span>
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      triggerManualAlert('squad_a', {
-                                        teamName: match.teamA || 'Team A',
-                                        tournamentName: match.tournamentName || 'STAR TV PREMIER LEAGUE',
-                                        matchStage: 'Match No. 2 , Group Match'
-                                      });
-                                    }}
-                                    className="py-1.5 px-1.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[7px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all shrink-0"
-                                    title="Trigger 7s Auto-Dismiss Alert"
-                                  >
-                                    ⚡ 7s
-                                  </button>
-                                </div>
+                              {/* Team A */}
+                              <div className="flex flex-col gap-1">
+                                <span className="text-[8px] font-black uppercase text-blue-300 truncate">
+                                  {match.teamA || 'Team A'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextState = currentActiveGraphic === 'squad_a' ? 'none' : 'squad_a';
+                                    updateOverlayProp({ activeGraphic: nextState });
+                                    showNotification(
+                                      nextState === 'squad_a' ? `${match.teamA || 'Team A'} squad live on air!` : 'Squad dismissed.',
+                                      nextState === 'squad_a' ? 'success' : 'info'
+                                    );
+                                  }}
+                                  className={`py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-sm ${
+                                    currentActiveGraphic === 'squad_a'
+                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.6)] animate-pulse'
+                                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/40'
+                                  }`}
+                                >
+                                  <span>{currentActiveGraphic === 'squad_a' ? '🔴 Dismiss Team A' : '📺 Show Team A'}</span>
+                                </button>
                               </div>
 
-                              {/* BUTTON 2: TEAM B SQUAD */}
-                              <div className="p-2 rounded-xl bg-slate-950/80 border border-indigo-500/30 flex flex-col justify-between gap-1.5 shadow-md">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[8.5px] font-black uppercase text-indigo-300 truncate">
-                                    🛡️ {match.teamB || 'Team B'} Squad
-                                  </span>
-                                  {currentActiveGraphic === 'squad_b' && (
-                                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping shrink-0" />
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => {
-                                      const nextState = currentActiveGraphic === 'squad_b' ? 'none' : 'squad_b';
-                                      updateOverlayProp({ activeGraphic: nextState });
-                                      showNotification(
-                                        nextState === 'squad_b' ? `${match.teamB || 'Team B'} squad list overlay live on air!` : 'Squad overlay dismissed.',
-                                        nextState === 'squad_b' ? 'success' : 'info'
-                                      );
-                                    }}
-                                    className={`flex-1 py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow ${
-                                      currentActiveGraphic === 'squad_b'
-                                        ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                        : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-indigo-400/40'
-                                    }`}
-                                  >
-                                    <span>{currentActiveGraphic === 'squad_b' ? '🔴 Dismiss' : '📺 Show Team B'}</span>
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      triggerManualAlert('squad_b', {
-                                        teamName: match.teamB || 'Team B',
-                                        tournamentName: match.tournamentName || 'STAR TV PREMIER LEAGUE',
-                                        matchStage: 'Match No. 2 , Group Match'
-                                      });
-                                    }}
-                                    className="py-1.5 px-1.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[7px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all shrink-0"
-                                    title="Trigger 7s Auto-Dismiss Alert"
-                                  >
-                                    ⚡ 7s
-                                  </button>
-                                </div>
+                              {/* Team B */}
+                              <div className="flex flex-col gap-1">
+                                <span className="text-[8px] font-black uppercase text-indigo-300 truncate">
+                                  {match.teamB || 'Team B'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextState = currentActiveGraphic === 'squad_b' ? 'none' : 'squad_b';
+                                    updateOverlayProp({ activeGraphic: nextState });
+                                    showNotification(
+                                      nextState === 'squad_b' ? `${match.teamB || 'Team B'} squad live on air!` : 'Squad dismissed.',
+                                      nextState === 'squad_b' ? 'success' : 'info'
+                                    );
+                                  }}
+                                  className={`py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-sm ${
+                                    currentActiveGraphic === 'squad_b'
+                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.6)] animate-pulse'
+                                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-indigo-400/40'
+                                  }`}
+                                >
+                                  <span>{currentActiveGraphic === 'squad_b' ? '🔴 Dismiss Team B' : '📺 Show Team B'}</span>
+                                </button>
                               </div>
                             </div>
                           </div>
 
-                          {/* Featured Team A VS Team B 3D Tournament Overlay Option */}
-                          <div className="border border-blue-500/30 bg-gradient-to-r from-blue-950/60 via-slate-950/90 to-red-950/60 p-2.5 rounded-2xl space-y-2 shadow-lg">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-blue-600 via-slate-800 to-rose-600 flex items-center justify-center text-xs shadow-md shrink-0 border border-white/20">
-                                  ⚔️
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
-                                    Team A VS Team B Overlay Animation
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-slate-300 block truncate">
-                                    {match.teamA || 'JAMKHED 11'} VS {match.teamB || 'KARJAT 11'} • 3D Shield Graphic
-                                  </span>
-                                </div>
-                              </div>
-                              {currentActiveGraphic === 'team_vs_team' && (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
-                                  LIVE ON AIR
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-1.5">
-                              {/* Live Toggle button */}
-                              <button
-                                onClick={() => {
-                                  const nextState = currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team';
-                                  updateOverlayProp({ activeGraphic: nextState });
-                                  showNotification(
-                                    nextState === 'team_vs_team' ? 'Team A VS Team B overlay live on air!' : 'Team A VS Team B overlay dismissed.',
-                                    nextState === 'team_vs_team' ? 'success' : 'info'
-                                  );
-                                }}
-                                className={`py-2 px-2.5 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
-                                  currentActiveGraphic === 'team_vs_team'
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
-                                    : 'bg-gradient-to-r from-blue-600 to-rose-600 hover:from-blue-500 hover:to-rose-500 text-white border-white/20'
-                                }`}
-                              >
-                                <span>{currentActiveGraphic === 'team_vs_team' ? '🔴 Dismiss VS' : '📺 Show VS Overlay'}</span>
-                              </button>
-
-                              {/* 6.5s Auto-Stinger Alert Trigger button */}
-                              <button
-                                onClick={() => {
-                                  triggerManualAlert('team_vs_team', {
-                                    tournamentName: match.tournamentName || 'KARJAT BIG BASH LEAGUE',
-                                    tournamentLogo: match.tournamentLogo,
-                                    matchStage: match.status === 'completed' ? 'FINAL RESULT' : 'Match No. 1, Group Match',
-                                    matchVenue: match.venue,
-                                    teamAName: match.teamA || 'JAMKHED 11',
-                                    teamBName: match.teamB || 'KARJAT 11',
-                                    teamALogo: match.teamALogo,
-                                    teamBLogo: match.teamBLogo
-                                  });
-                                }}
-                                className="py-2 px-2.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5"
-                              >
-                                <span>⚡ 6s Stinger Alert</span>
-                              </button>
-                              </div>
+                          {/* 2. Team A VS Team B Overlay */}
+                          <div className="border border-rose-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextState = currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team';
+                                updateOverlayProp({ activeGraphic: nextState });
+                                showNotification(
+                                  nextState === 'team_vs_team' ? 'Team A VS Team B overlay live on air!' : 'Team A VS Team B overlay dismissed.',
+                                  nextState === 'team_vs_team' ? 'success' : 'info'
+                                );
+                              }}
+                              className={`w-full py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                currentActiveGraphic === 'team_vs_team'
+                                  ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                  : 'bg-gradient-to-r from-blue-600 via-purple-600 to-rose-600 hover:from-blue-500 hover:to-rose-500 text-white border-white/20'
+                              }`}
+                            >
+                              <span>⚔️</span>
+                              <span>
+                                {currentActiveGraphic === 'team_vs_team' ? '🔴 DISMISS ' : '📺 '}
+                                {(match.teamA || 'TEAM A').toUpperCase()} VS {(match.teamB || 'TEAM B').toUpperCase()}
+                              </span>
+                            </button>
                           </div>
 
-                          {/* Field Position Overlay Option (Interactive 11 Players Ground Graphic) */}
-                          <div className="border border-emerald-500/40 bg-gradient-to-r from-emerald-950/70 via-slate-950/95 to-teal-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-emerald-600 via-teal-600 to-slate-900 flex items-center justify-center text-xs shadow-md shrink-0 border border-emerald-400/40">
-                                  🎯
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
-                                    Field Position Overlay (11 Players Ground)
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-emerald-300/80 block truncate">
-                                    Interactive Ground Popup • Draggable 11 Players • 1:1 TV Broadcast Graphic
-                                  </span>
-                                </div>
-                              </div>
-                              {(currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position' || currentActiveGraphic === 'field_positions_alert') && (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
-                                  LIVE ON AIR
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
-                              {/* BUTTON: Open Field Position Setup Popup Modal (11 Players available) */}
+                          {/* 3. Field Position */}
+                          <div className="border border-emerald-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
+                            <div className="grid grid-cols-2 gap-2">
                               <button
                                 type="button"
                                 onClick={() => setShowFieldPositionModal(true)}
-                                className="sm:col-span-6 py-2 px-2.5 rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95"
-                                title="Open interactive popup to set 11 player field positions on cricket ground"
+                                className="py-2 px-2.5 rounded-lg border border-emerald-500/40 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
                               >
                                 <span>🎯</span>
-                                <span>Set Field Positions (Popup)</span>
+                                <span>Set Field Position</span>
                               </button>
 
-                              {/* Live Broadcast Toggle Button */}
                               <button
                                 type="button"
                                 onClick={() => {
                                   const nextState = (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? 'none' : 'field_positions';
                                   updateOverlayProp({ activeGraphic: nextState });
                                   showNotification(
-                                    nextState === 'field_positions' ? 'Field Position overlay is LIVE ON AIR!' : 'Field Position overlay dismissed.',
+                                    nextState === 'field_positions' ? 'Field Position overlay LIVE ON AIR!' : 'Field Position overlay dismissed.',
                                     nextState === 'field_positions' ? 'success' : 'info'
                                   );
                                 }}
-                                className={`sm:col-span-4 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-md ${
+                                className={`py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
                                   (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
-                                    : 'bg-white/10 hover:bg-white/15 text-emerald-300 border-white/15'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border-emerald-500/40'
                                 }`}
                               >
                                 <span>{(currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? '🔴 Dismiss' : '📺 Show On TV'}</span>
                               </button>
-
-                              {/* 7s Auto-Dismiss Alert Button */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateOverlayProp({ activeGraphic: 'field_positions_alert' });
-                                  showNotification('Field Position Overlay: 7s Stinger Alert triggered on air!', 'info');
-                                }}
-                                className="sm:col-span-2 py-2 px-1.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-0.5"
-                                title="Trigger 7s Auto-Dismiss Field Position Alert"
-                              >
-                                <span>⚡ 7s</span>
-                              </button>
                             </div>
                           </div>
 
-                          {/* 🏏 BATTING SUMMARY OVERLAY: TWO OPTIONS (FULL SCREEN & MINI SUMMARY) */}
-                          <div className="border border-amber-500/40 bg-gradient-to-r from-amber-950/70 via-slate-950/95 to-orange-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-amber-500 via-amber-600 to-orange-700 flex items-center justify-center text-xs shadow-md shrink-0 border border-amber-400/40 text-slate-950 font-black">
-                                  🏏
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
-                                    Batting Summary Overlay (1:1 Broadcast TV Graphic)
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-amber-300/80 block truncate">
-                                    Two Display Modes: Full Screen Breakdown & Non-intrusive Mini Lower-Third
-                                  </span>
-                                </div>
-                              </div>
-                              {/* Active Status Badge */}
-                              {(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full' || currentActiveGraphic === 'batting_summary_mini' || currentActiveGraphic === 'batting_summary_alert' || currentActiveGraphic === 'batting_summary_mini_alert') && (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
-                                  {currentActiveGraphic.includes('mini') ? 'MINI SUMMARY LIVE' : 'FULL SCREEN LIVE'}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* TWO OPTIONS BUTTONS GRID: FULL SCREEN & MINI SUMMARY */}
-                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
-                              {/* OPTION 1: FULL SCREEN BATTING SUMMARY */}
+                          {/* 4. Batting Match Summary */}
+                          <div className="border border-amber-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
+                            <div className="grid grid-cols-2 gap-2">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -8497,17 +8415,15 @@ export const CricketScoreboard: React.FC = () => {
                                     next === 'batting_summary' ? 'success' : 'info'
                                   );
                                 }}
-                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
                                   (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full')
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
                                     : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white border-amber-400/40'
                                 }`}
-                                title="Show Full Screen Batting Breakdown Scorecard on TV stream"
                               >
-                                <span>{(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full') ? '🔴 Dismiss Full' : '📺 Full Screen Summary'}</span>
+                                <span>{(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full') ? '🔴 Dismiss Full' : '🏏 Batting Full Screen Summary'}</span>
                               </button>
 
-                              {/* OPTION 2: MINI SUMMARY LOWER-THIRD */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -8519,58 +8435,20 @@ export const CricketScoreboard: React.FC = () => {
                                     next === 'batting_summary_mini' ? 'success' : 'info'
                                   );
                                 }}
-                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
                                   currentActiveGraphic === 'batting_summary_mini'
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
                                     : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/30'
                                 }`}
-                                title="Show Non-intrusive Lower-Third Mini Batting Card on TV stream"
                               >
-                                <span>{currentActiveGraphic === 'batting_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Mini Summary (Lower-Third)'}</span>
-                              </button>
-
-                              {/* 8s Auto-Dismiss Alert */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateOverlayProp({ activeGraphic: 'batting_summary_alert' });
-                                  showNotification('Batting Summary: 8s Alert triggered on air!', 'info');
-                                }}
-                                className="sm:col-span-2 py-2 px-1 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-0.5"
-                                title="Trigger 8s Auto-Dismiss Batting Alert"
-                              >
-                                <span>⚡ 8s</span>
+                                <span>{currentActiveGraphic === 'batting_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Batting Mini Summary'}</span>
                               </button>
                             </div>
                           </div>
 
-                          {/* 🎯 BOWLING SUMMARY OVERLAY: TWO OPTIONS (FULL SCREEN & MINI SUMMARY) */}
-                          <div className="border border-cyan-500/40 bg-gradient-to-r from-cyan-950/70 via-slate-950/95 to-teal-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-cyan-500 via-teal-600 to-slate-900 flex items-center justify-center text-xs shadow-md shrink-0 border border-cyan-400/40 text-slate-950 font-black">
-                                  🎯
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
-                                    Bowling Summary Overlay (1:1 Broadcast TV Graphic)
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-cyan-300/80 block truncate">
-                                    Two Display Modes: Full Screen Spell Breakdown & Non-intrusive Mini Lower-Third
-                                  </span>
-                                </div>
-                              </div>
-                              {/* Active Status Badge */}
-                              {(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full' || currentActiveGraphic === 'bowling_summary_mini' || currentActiveGraphic === 'bowling_summary_alert' || currentActiveGraphic === 'bowling_summary_mini_alert') && (
-                                <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
-                                  {currentActiveGraphic.includes('mini') ? 'MINI SUMMARY LIVE' : 'FULL SCREEN LIVE'}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* TWO OPTIONS BUTTONS GRID: FULL SCREEN & MINI SUMMARY */}
-                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
-                              {/* OPTION 1: FULL SCREEN BOWLING SUMMARY */}
+                          {/* 5. Bowling Match Summary */}
+                          <div className="border border-cyan-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
+                            <div className="grid grid-cols-2 gap-2">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -8582,17 +8460,15 @@ export const CricketScoreboard: React.FC = () => {
                                     next === 'bowling_summary' ? 'success' : 'info'
                                   );
                                 }}
-                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
                                   (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full')
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
                                     : 'bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white border-cyan-400/40'
                                 }`}
-                                title="Show Full Screen Bowling Spell Breakdown Scorecard on TV stream"
                               >
-                                <span>{(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full') ? '🔴 Dismiss Full' : '📺 Full Screen Summary'}</span>
+                                <span>{(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full') ? '🔴 Dismiss Full' : '🎯 Bowling Full Screen Summary'}</span>
                               </button>
 
-                              {/* OPTION 2: MINI SUMMARY LOWER-THIRD */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -8604,204 +8480,897 @@ export const CricketScoreboard: React.FC = () => {
                                     next === 'bowling_summary_mini' ? 'success' : 'info'
                                   );
                                 }}
-                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
                                   currentActiveGraphic === 'bowling_summary_mini'
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
                                     : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border-cyan-500/30'
                                 }`}
-                                title="Show Non-intrusive Lower-Third Mini Bowling Card on TV stream"
                               >
-                                <span>{currentActiveGraphic === 'bowling_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Mini Summary (Lower-Third)'}</span>
-                              </button>
-
-                              {/* 8s Auto-Dismiss Alert */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  updateOverlayProp({ activeGraphic: 'bowling_summary_alert' });
-                                  showNotification('Bowling Summary: 8s Alert triggered on air!', 'info');
-                                }}
-                                className="sm:col-span-2 py-2 px-1 bg-white/5 hover:bg-white/10 border border-white/15 text-cyan-300 hover:text-cyan-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-0.5"
-                                title="Trigger 8s Auto-Dismiss Bowling Alert"
-                              >
-                                <span>⚡ 8s</span>
+                                <span>{currentActiveGraphic === 'bowling_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Bowling Mini Summary'}</span>
                               </button>
                             </div>
                           </div>
 
-                          {/* Manual Transient Overlay Animations */}
-                          <div className="border border-white/5 bg-slate-950/40 p-2 rounded-2xl space-y-1.5">
-                            <span className="text-[7.5px] font-black text-rose-400 uppercase tracking-widest block">Manual Transient Animations</span>
-                            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                              <button
-                                onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wicket_alert_temp' ? 'none' : 'wicket_alert_temp' })}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  currentActiveGraphic === 'wicket_alert_temp'
-                                    ? 'bg-red-500/20 border-red-500/40 text-red-400'
-                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                }`}
-                              >
-                                <span className="text-[9px]">🏏</span>
-                                <span>Wicket</span>
-                              </button>
-                              <button
-                                onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'milestone_alert_temp' ? 'none' : 'milestone_alert_temp' })}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  currentActiveGraphic === 'milestone_alert_temp'
-                                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-400 font-bold'
-                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                }`}
-                              >
-                                <span className="text-[9px]">🏆</span>
-                                <span>Milestone</span>
-                              </button>
-                              <button
-                                onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini') ? 'none' : 'batting_summary' })}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini')
-                                    ? 'bg-amber-500/25 border-amber-500/50 text-amber-300 font-black shadow-md'
-                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                }`}
-                                title="Toggle Batting Summary"
-                              >
-                                <span className="text-[9px]">🏏</span>
-                                <span>Bat Sum</span>
-                              </button>
-                              <button
-                                onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini') ? 'none' : 'bowling_summary' })}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini')
-                                    ? 'bg-cyan-500/25 border-cyan-500/50 text-cyan-300 font-black shadow-md'
-                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                }`}
-                                title="Toggle Bowling Summary"
-                              >
-                                <span className="text-[9px]">🎯</span>
-                                <span>Bowl Sum</span>
-                              </button>
-                              <button
-                                onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wagon_wheel' ? 'none' : 'wagon_wheel' })}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  currentActiveGraphic === 'wagon_wheel'
-                                    ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 font-bold'
-                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                }`}
-                              >
-                                <span className="text-[9px]">🎡</span>
-                                <span>Wagon</span>
-                              </button>
-                              <button
-                                onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  currentActiveGraphic === 'team_vs_team'
-                                    ? 'bg-gradient-to-r from-blue-600/40 to-rose-600/40 border-rose-400 text-white font-black shadow-md'
-                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                }`}
-                              >
-                                <span className="text-[9px]">⚔️</span>
-                                <span>VS Shield</span>
-                              </button>
-                              <button
-                                onClick={() => setShowFieldPositionModal(true)}
-                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
-                                  (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
-                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 font-bold shadow-md'
-                                    : 'bg-slate-950 border-emerald-500/20 text-emerald-400/90 hover:bg-emerald-950/40'
-                                }`}
-                                title="Open Field Position Popup (11 Players Setup)"
-                              >
-                                <span className="text-[9px]">🎯</span>
-                                <span>Field Pos</span>
-                              </button>
+                          {/* 6. Tournament Logo Overlay */}
+                          <div className="border border-blue-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const isActive = currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand';
+                                const next = isActive ? 'none' : 'tournament_logo';
+                                updateOverlayProp({ activeGraphic: next });
+                                showNotification(
+                                  next === 'tournament_logo' ? 'Tournament Logo Overlay LIVE ON AIR!' : 'Tournament Logo Overlay dismissed.',
+                                  next === 'tournament_logo' ? 'success' : 'info'
+                                );
+                              }}
+                              className={`w-full py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                (currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand')
+                                  ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/40'
+                              }`}
+                            >
+                              <span>🏆</span>
+                              <span>{(currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand') ? 'Dismiss Tournament Logo' : 'Tournament Logo'}</span>
+                            </button>
+                          </div>
+
+                          {/* 7. Black Board Scoreboard Overlay (Only available during 2nd innings run chase) */}
+                          <div className="border border-amber-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
+                            {(() => {
+                              const isChasing = match.currentInnings === 2 && ((match.target !== undefined && match.target > 0) || (match.innings?.[0]?.runs !== undefined && match.innings[0].runs > 0));
+                              const isActive = currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board';
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!isChasing && !isActive) {
+                                      showNotification('Black Board Scoreboard is only available during 2nd innings run chase.', 'warning');
+                                      return;
+                                    }
+                                    const next = isActive ? 'none' : 'black_board_scoreboard';
+                                    updateOverlayProp({ activeGraphic: next });
+                                    showNotification(
+                                      next === 'black_board_scoreboard' ? 'Black Board Scoreboard LIVE ON AIR!' : 'Black Board Scoreboard dismissed.',
+                                      next === 'black_board_scoreboard' ? 'success' : 'info'
+                                    );
+                                  }}
+                                  className={`w-full py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                    isActive
+                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                      : isChasing
+                                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black border-amber-400/50'
+                                      : 'bg-slate-900/80 text-slate-500 border-white/5 cursor-not-allowed'
+                                  }`}
+                                  title={!isChasing ? 'Only available during 2nd innings run chase' : 'Show Black Board Scoreboard'}
+                                >
+                                  <span>📋</span>
+                                  <span>{isActive ? 'Dismiss Black Board Scoreboard' : 'Show Black Board Scoreboard'}</span>
+                                </button>
+                              );
+                            })()}
+                          </div>
+
+                          {/* =========================================================================
+                              TV GRAPHICS COCKPIT: ANIMATED EVENTS, DISMISSALS, HIGH TENSION & GULLY RULES
+                              ========================================================================= */}
+                          <div className="border border-indigo-500/30 bg-gradient-to-b from-slate-950 via-[#060919] to-slate-950 p-2.5 rounded-2xl space-y-2 shadow-2xl">
+                            {/* Header with category selector */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-1 border-b border-white/5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                                <span className="text-[8.5px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                                  <span>📺 TV Graphics Cockpit & Animated Stingers</span>
+                                </span>
+                              </div>
+
+                              {/* Quick category filter pills */}
+                              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                                {(
+                                  [
+                                    { id: 'all', label: 'All' },
+                                    { id: 'events', label: 'Events & Popups' },
+                                    { id: 'dismissals', label: 'Dismissals' },
+                                    { id: 'tension', label: 'High Tension' },
+                                    { id: 'gully', label: 'Gully Rules' },
+                                    { id: 'milestones', label: 'Milestones' },
+                                  ] as const
+                                ).map(tab => (
+                                  <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => setCockpitAnimationFilter(tab.id)}
+                                    className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase font-mono transition-all whitespace-nowrap cursor-pointer border ${
+                                      cockpitAnimationFilter === tab.id
+                                        ? 'bg-rose-500 text-white border-rose-400 shadow-sm'
+                                        : 'bg-white/5 text-slate-400 border-white/5 hover:text-white hover:bg-white/10'
+                                    }`}
+                                  >
+                                    {tab.label}
+                                  </button>
+                                ))}
+                              </div>
                             </div>
 
-                            {/* Milestone Quick Config options */}
-                            {currentActiveGraphic === 'milestone_alert_temp' && (
-                              <div className="bg-slate-950 border border-white/5 rounded-xl p-2 space-y-2 text-center mt-1.5">
-                                <span className="text-[7px] font-bold text-slate-400 uppercase font-mono block text-left">Quick Configure Selector:</span>
-                                <div className="flex gap-1 justify-center">
+                            {/* --- 1. ANIMATED EVENT STRINGS & POPUPS --- */}
+                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'events') && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[7px] font-black text-cyan-400 uppercase tracking-widest flex items-center gap-1">
+                                    <span>🎬 Animated Event Strings & Popups</span>
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-cyan-500/70">Audio + Stinger Animation</span>
+                                </div>
+                                <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
                                   <button
-                                    onClick={() => updateOverlayProp({ customMilestone: { name: currentInnings.batsmen[currentInnings.strikerIndex]?.name || 'Batter', type: 'fifty', value: 50 } })}
-                                    className={`py-1 px-2.5 rounded bg-white/5 font-mono text-[7px] uppercase cursor-pointer transition-all border ${
-                                      activeOverlayConfig.customMilestone?.type === 'fifty' ? 'text-amber-500 border-amber-500/30 font-bold' : 'text-slate-400 border-transparent'
-                                    }`}
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'six',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                            sixes: (liveStriker?.sixes || 0) + 1,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('🚀 MAXIMUM SIX Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-amber-500/30 bg-gradient-to-b from-amber-500/20 to-slate-950 text-amber-300 hover:border-amber-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 shadow-sm active:scale-95"
+                                    title="Trigger 3D Animated SIX Stinger with Audio"
                                   >
-                                    50 runs
+                                    <span className="text-[10px]">🚀</span>
+                                    <span>SIX!</span>
                                   </button>
+
                                   <button
-                                    onClick={() => updateOverlayProp({ customMilestone: { name: currentInnings.batsmen[currentInnings.strikerIndex]?.name || 'Batter', type: 'hundred', value: 100 } })}
-                                    className={`py-1 px-2.5 rounded bg-white/5 font-mono text-[7px] uppercase cursor-pointer transition-all border ${
-                                      activeOverlayConfig.customMilestone?.type === 'hundred' ? 'text-amber-500 border-amber-505 font-bold' : 'text-slate-400 border-transparent'
-                                    }`}
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'four',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                            fours: (liveStriker?.fours || 0) + 1,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('⚡ FOUR Boundary Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-cyan-500/30 bg-gradient-to-b from-cyan-500/20 to-slate-950 text-cyan-300 hover:border-cyan-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 shadow-sm active:scale-95"
+                                    title="Trigger 3D Animated FOUR Stinger with Audio"
                                   >
-                                    100 runs
+                                    <span className="text-[10px]">⚡</span>
+                                    <span>FOUR!</span>
                                   </button>
+
                                   <button
-                                    onClick={() => updateOverlayProp({ customMilestone: { name: currentInnings.bowlers[currentInnings.bowlerIndex]?.name || 'Bowler', type: '5wkt', value: 5 } })}
-                                    className={`py-1 px-2.5 rounded bg-white/5 font-mono text-[7px] uppercase cursor-pointer transition-all border ${
-                                      activeOverlayConfig.customMilestone?.type === '5wkt' ? 'text-amber-500 border-amber-505 font-bold' : 'text-slate-400 border-transparent'
-                                    }`}
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'free_hit',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('🎯 FREE HIT Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-red-500/30 bg-gradient-to-b from-red-500/20 to-slate-950 text-red-300 hover:border-red-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 shadow-sm active:scale-95"
+                                    title="Trigger FREE HIT Warning Siren & Stinger"
                                   >
-                                    5 Wkts
+                                    <span className="text-[10px]">🎯</span>
+                                    <span>FREE HIT</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'boundary_counter_four',
+                                          timestamp: Date.now(),
+                                          meta: { batterName: liveStriker?.name || 'Striker' },
+                                        } as any,
+                                      });
+                                      showNotification('📊 4s Counter Popup Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-sky-500/30 bg-slate-950 text-sky-400 hover:bg-sky-950/40 hover:text-sky-200 transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger Tournament Fours Counter Overlay"
+                                  >
+                                    <span className="text-[10px]">📊</span>
+                                    <span>4s POPUP</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'boundary_counter_six',
+                                          timestamp: Date.now(),
+                                          meta: { batterName: liveStriker?.name || 'Striker' },
+                                        } as any,
+                                      });
+                                      showNotification('🌟 6s Counter Popup Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-amber-500/30 bg-slate-950 text-amber-400 hover:bg-amber-950/40 hover:text-amber-200 transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger Tournament Sixes Counter Overlay"
+                                  >
+                                    <span className="text-[10px]">🌟</span>
+                                    <span>6s POPUP</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'appeal',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('📢 HOWZAT Appeal Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-yellow-500/30 bg-slate-950 text-yellow-300 hover:bg-yellow-950/40 hover:text-yellow-100 transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger HOWZAT Appeal Stinger"
+                                  >
+                                    <span className="text-[10px]">📢</span>
+                                    <span>HOWZAT!</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'not_out',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('✅ NOT OUT Confirmed!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-green-500/30 bg-slate-950 text-green-300 hover:bg-green-950/40 hover:text-green-100 transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger NOT OUT Decision Stinger"
+                                  >
+                                    <span className="text-[10px]">✅</span>
+                                    <span>NOT OUT</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_six' ? 'none' : 'event_six' })}
+                                    className={`py-1.5 px-1 rounded-xl border text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 transition-all truncate active:scale-95 ${
+                                      currentActiveGraphic === 'event_six'
+                                        ? 'bg-amber-500/30 border-amber-400 text-amber-200 shadow-md font-black'
+                                        : 'bg-slate-950 border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
+                                    }`}
+                                    title="Toggle Full-Screen Animated 6s Slate"
+                                  >
+                                    <span className="text-[10px]">📺</span>
+                                    <span>6s SLATE</span>
                                   </button>
                                 </div>
                               </div>
                             )}
-                          </div>
 
-                          <div>
-                            <span className="text-[7.5px] font-black text-slate-405 uppercase tracking-widest block mb-1">Corner Banner Projections</span>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              {[
-                                { id: 'fifty', label: '⭐ 50 runs' },
-                                { id: 'hundred', label: '👑 100 runs' },
-                                { id: 'drinks', label: '🥤 DRINKS' },
-                                { id: 'rain', label: '🌧️ RAIN DELAY' },
-                                { id: 'free_hit', label: '⚡ Free Hit' },
-                                { id: 'out', label: '🚨 OUT banner' }
-                              ].map(btn => {
-                                const isBannerActive = activeOverlayConfig.customBanner === btn.id;
-                                return (
+                            {/* --- 2. DISMISSAL STRINGS --- */}
+                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'dismissals') && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[7px] font-black text-rose-400 uppercase tracking-widest flex items-center gap-1">
+                                    <span>🪵 Dismissal Strings & Out Alerts</span>
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-rose-500/70">Wicket Animations & Slates</span>
+                                </div>
+                                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
                                   <button
-                                    key={btn.id}
+                                    type="button"
                                     onClick={() => {
-                                      const nextBanner = isBannerActive ? 'none' : btn.id;
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
                                       updateOverlayProp({
-                                        customBanner: nextBanner as any,
-                                        customBannerText: nextBanner === 'none' ? '' : activeOverlayConfig.customBannerText || ''
+                                        manualAlertTrigger: {
+                                          type: 'bowled',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            bowlerName: liveBowler?.name || 'Bowler',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                          },
+                                        } as any,
                                       });
+                                      showNotification('🪵 CLEAN BOWLED Stinger Triggered!', 'success');
                                     }}
-                                    className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate ${
-                                      isBannerActive
-                                        ? 'bg-rose-500/20 border-rose-500/40 text-rose-455 animate-pulse font-extrabold shadow-[0_0_8px_rgba(239,68,68,0.2)]'
-                                        : 'bg-slate-950 border-white/5 text-slate-450 hover:bg-white/5'
-                                    }`}
+                                    className="py-1.5 px-1 rounded-xl border border-red-500/30 bg-gradient-to-b from-red-500/20 to-slate-950 text-red-300 hover:border-red-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger CLEAN BOWLED Stinger with Flying Stumps"
                                   >
-                                    {btn.label}
+                                    <span className="text-[10px]">🪵</span>
+                                    <span>BOWLED</span>
                                   </button>
-                                );
-                              })}
-                            </div>
-                          </div>
 
-                          <div>
-                            <span className="text-[7.5px] font-black text-slate-405 uppercase tracking-widest block mb-1">Banner custom subtitle text</span>
-                            <div className="flex gap-1">
-                              <input
-                                type="text"
-                                value={activeOverlayConfig.customBannerText || ''}
-                                onChange={(e) => updateOverlayProp({ customBannerText: e.target.value })}
-                                className="flex-1 min-w-0 bg-slate-950 text-slate-300 rounded-xl text-[9px] px-2 py-1.5 border border-white/5 hover:border-white/10 outline-none uppercase font-mono"
-                                placeholder="E.g., SPECTACULAR SHOT!"
-                              />
-                              {activeOverlayConfig.customBanner !== 'none' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'caught',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            bowlerName: liveBowler?.name || 'Bowler',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('🧤 CAUGHT OUT Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-rose-500/30 bg-slate-950 text-rose-300 hover:bg-rose-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger CAUGHT OUT Stinger"
+                                  >
+                                    <span className="text-[10px]">🧤</span>
+                                    <span>CAUGHT</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'run_out',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('🏃 RUN OUT Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-orange-500/30 bg-slate-950 text-orange-300 hover:bg-orange-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger RUN OUT Stinger"
+                                  >
+                                    <span className="text-[10px]">🏃</span>
+                                    <span>RUN OUT</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'lbw',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            bowlerName: liveBowler?.name || 'Bowler',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('🎯 LBW Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-pink-500/30 bg-slate-950 text-pink-300 hover:bg-pink-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger LBW Stinger"
+                                  >
+                                    <span className="text-[10px]">🎯</span>
+                                    <span>LBW</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'stumped',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            bowlerName: liveBowler?.name || 'Bowler',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('⚡ STUMPED Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-yellow-500/30 bg-slate-950 text-yellow-300 hover:bg-yellow-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger STUMPED Stinger"
+                                  >
+                                    <span className="text-[10px]">⚡</span>
+                                    <span>STUMPED</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'wicket',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            bowlerName: liveBowler?.name || 'Bowler',
+                                            runs: liveStriker?.runs || 0,
+                                            balls: liveStriker?.balls || 0,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('💥 WICKET Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-1 rounded-xl border border-rose-500/40 bg-gradient-to-b from-rose-600/20 to-slate-950 text-rose-200 hover:border-rose-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
+                                    title="Trigger General WICKET Stinger"
+                                  >
+                                    <span className="text-[10px]">🏏</span>
+                                    <span>WICKET</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_wicket' ? 'none' : 'event_wicket' })}
+                                    className={`py-1.5 px-1 rounded-xl border text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 transition-all truncate active:scale-95 ${
+                                      currentActiveGraphic === 'event_wicket'
+                                        ? 'bg-rose-500/30 border-rose-400 text-rose-200 shadow-md font-black'
+                                        : 'bg-slate-950 border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
+                                    }`}
+                                    title="Toggle Full-Screen Animated Wicket Slate"
+                                  >
+                                    <span className="text-[10px]">📺</span>
+                                    <span>OUT SLATE</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* --- 3. HIGH TENSION (DRAMA & CLIMAX) --- */}
+                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'tension') && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[7px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                                    <span>⚡ High Tension & Match Climax</span>
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-amber-500/70">Heartbeat Siren + Pressure VFX</span>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const target = match.target || (match.innings?.[0]?.runs ? match.innings[0].runs + 1 : 0);
+                                      const runsNeed = match.currentInnings === 2 ? Math.max(0, target - (curInn?.runs || 0)) : 24;
+                                      const totalB = (match.totalOvers || 20) * 6;
+                                      const bBowled = (curInn?.overs || 0) * 6 + (curInn?.balls || 0);
+                                      const ballsRem = match.currentInnings === 2 ? Math.max(0, totalB - bBowled) : 6;
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'high_tension',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            runsNeed,
+                                            ballsRem,
+                                            equation: `NEED ${runsNeed} RUNS FROM ${ballsRem} BALLS`,
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('🔥 HIGH TENSION Alert Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-rose-500/40 bg-gradient-to-r from-rose-950/60 via-red-950/40 to-slate-950 text-rose-200 hover:border-rose-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger HIGH TENSION Stinger with Heartbeat & Warning Siren"
+                                  >
+                                    <span className="text-[11px] animate-ping">🔥</span>
+                                    <span>HIGH TENSION</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'hat_trick_ball',
+                                          timestamp: Date.now(),
+                                          meta: { bowlerName: liveBowler?.name || 'Bowler' },
+                                        } as any,
+                                      });
+                                      showNotification('⚠️ HAT-TRICK BALL Pressure Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-950/60 via-yellow-950/40 to-slate-950 text-amber-200 hover:border-amber-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger Hat-Trick Ball Delivery Alert"
+                                  >
+                                    <span className="text-[11px] animate-bounce">⚠️</span>
+                                    <span>HAT-TRICK BALL</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'super_over',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('⚡ SUPER OVER Showdown Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950/60 via-blue-950/40 to-slate-950 text-cyan-200 hover:border-cyan-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger SUPER OVER Showdown Stinger"
+                                  >
+                                    <span className="text-[11px] animate-pulse">⚔️</span>
+                                    <span>SUPER OVER</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const target = match.target || (match.innings?.[0]?.runs ? match.innings[0].runs + 1 : 0);
+                                      const runsNeed = match.currentInnings === 2 ? Math.max(0, target - (curInn?.runs || 0)) : 24;
+                                      const totalB = (match.totalOvers || 20) * 6;
+                                      const bBowled = (curInn?.overs || 0) * 6 + (curInn?.balls || 0);
+                                      const ballsRem = match.currentInnings === 2 ? Math.max(0, totalB - bBowled) : 6;
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'high_tension',
+                                          timestamp: Date.now(),
+                                          meta: { equation: `NEED ${runsNeed} RUNS FROM ${ballsRem} BALLS` },
+                                        } as any,
+                                      });
+                                      showNotification(`⏱️ NEED ${runsNeed} R / ${ballsRem} B Alert Triggered!`, 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-orange-500/40 bg-slate-950 text-orange-300 hover:bg-orange-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger Climax Equation Stinger"
+                                  >
+                                    <span className="text-[11px]">⏱️</span>
+                                    <span>EQUATION ALERT</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* --- 4. GULLY RULES --- */}
+                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'gully') && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[7px] font-black text-sky-400 uppercase tracking-widest flex items-center gap-1">
+                                    <span>🏏 Gully Cricket Rules & Penalties</span>
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-sky-500/70">Street & Box Cricket Rules</span>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'one_tip_hand',
+                                          timestamp: Date.now(),
+                                          meta: { batterName: liveStriker?.name || 'Striker' },
+                                        } as any,
+                                      });
+                                      showNotification('🖐️ 1-TIP 1-HAND OUT Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-sky-500/30 bg-slate-950 text-sky-300 hover:bg-sky-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
+                                    title="Trigger 1-Tip 1-Hand Out Rule"
+                                  >
+                                    <span className="text-[11px]">✋</span>
+                                    <span>1-TIP 1-HAND</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'lost_ball',
+                                          timestamp: Date.now(),
+                                          meta: { batterName: liveStriker?.name || 'Striker' },
+                                        } as any,
+                                      });
+                                      showNotification('🏠 BALL IN HOUSE (6 & OUT) Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-orange-500/30 bg-slate-950 text-orange-300 hover:bg-orange-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
+                                    title="Trigger Lost Ball / Ball In House (6 & Out)"
+                                  >
+                                    <span className="text-[11px]">🏠</span>
+                                    <span>LOST BALL (6 & OUT)</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'car_hit',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('🚗 CAR HIT PENALTY (-5 RUNS) Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-rose-500/30 bg-slate-950 text-rose-300 hover:bg-rose-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
+                                    title="Trigger Direct Car Hit (-5 Runs Penalty)"
+                                  >
+                                    <span className="text-[11px]">🚗💥</span>
+                                    <span>CAR HIT (-5)</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'direct_hit',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('🎯 DIRECT HIT OUT Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-cyan-500/30 bg-slate-950 text-cyan-300 hover:bg-cyan-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
+                                    title="Trigger Direct Hit Stumps Out"
+                                  >
+                                    <span className="text-[11px]">🎯💥</span>
+                                    <span>DIRECT HIT</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'box_cricket_out',
+                                          timestamp: Date.now(),
+                                        } as any,
+                                      });
+                                      showNotification('📦 BOX CRICKET OUT Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-purple-500/30 bg-slate-950 text-purple-300 hover:bg-purple-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
+                                    title="Trigger Box Cricket Over Net Out"
+                                  >
+                                    <span className="text-[11px]">📦🚫</span>
+                                    <span>BOX OUT</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* --- 5. PLAYER MILESTONE CELEBRATIONS --- */}
+                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'milestones') && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[7px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                                    <span>🏆 Player Milestone Celebrations</span>
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-amber-500/70">Fanfare + Golden Confetti</span>
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'fifty',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            runs: liveStriker?.runs || 50,
+                                            balls: liveStriker?.balls || 28,
+                                            fours: liveStriker?.fours || 5,
+                                            sixes: liveStriker?.sixes || 3,
+                                            strikeRate: liveStriker?.balls ? ((liveStriker.runs / liveStriker.balls) * 100).toFixed(1) : '150.0',
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('🎖️ 50 RUNS HALF-CENTURY Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-950/60 to-slate-950 text-amber-300 hover:border-amber-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger 50 Runs Half-Century Celebration"
+                                  >
+                                    <span className="text-[11px]">🎖️</span>
+                                    <span>50 RUNS</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'hundred',
+                                          timestamp: Date.now(),
+                                          meta: {
+                                            batterName: liveStriker?.name || 'Striker',
+                                            runs: liveStriker?.runs || 100,
+                                            balls: liveStriker?.balls || 52,
+                                            fours: liveStriker?.fours || 9,
+                                            sixes: liveStriker?.sixes || 6,
+                                            strikeRate: liveStriker?.balls ? ((liveStriker.runs / liveStriker.balls) * 100).toFixed(1) : '180.0',
+                                          },
+                                        } as any,
+                                      });
+                                      showNotification('👑 100 RUNS CENTURY Stinger Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-yellow-500/40 bg-gradient-to-r from-yellow-950/60 to-slate-950 text-yellow-300 hover:border-yellow-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger 100 Runs Century Celebration"
+                                  >
+                                    <span className="text-[11px]">👑</span>
+                                    <span>100 RUNS</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'hat_trick',
+                                          timestamp: Date.now(),
+                                          meta: { bowlerName: liveBowler?.name || 'Bowler' },
+                                        } as any,
+                                      });
+                                      showNotification('🎩 HAT-TRICK Milestone Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-slate-950 text-cyan-300 hover:bg-cyan-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger HAT-TRICK (3 in 3) Celebration"
+                                  >
+                                    <span className="text-[11px]">🎩</span>
+                                    <span>HAT-TRICK</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
+                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
+                                      updateOverlayProp({
+                                        manualAlertTrigger: {
+                                          type: 'five_wickets',
+                                          timestamp: Date.now(),
+                                          meta: { bowlerName: liveBowler?.name || 'Bowler' },
+                                        } as any,
+                                      });
+                                      showNotification('⭐ 5-WICKET HAUL Milestone Triggered!', 'success');
+                                    }}
+                                    className="py-1.5 px-2 rounded-xl border border-blue-500/40 bg-slate-950 text-blue-300 hover:bg-blue-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                    title="Trigger 5-Wicket Haul (Fifer) Celebration"
+                                  >
+                                    <span className="text-[11px]">⭐</span>
+                                    <span>5-WKTS</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_milestone' ? 'none' : 'event_milestone' })}
+                                    className={`py-1.5 px-2 rounded-xl border text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 transition-all truncate active:scale-95 ${
+                                      currentActiveGraphic === 'event_milestone'
+                                        ? 'bg-amber-500/30 border-amber-400 text-amber-200 shadow-md font-black'
+                                        : 'bg-slate-950 border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
+                                    }`}
+                                    title="Toggle Full-Screen Milestone Slate"
+                                  >
+                                    <span className="text-[11px]">📺</span>
+                                    <span>FULL SLATE</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* --- 6. MATCH CARDS & UTILITIES --- */}
+                            <div className="pt-1 border-t border-white/5 space-y-1">
+                              <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block">
+                                📊 Match Cards & In-Game Overlays
+                              </span>
+                              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
                                 <button
-                                  onClick={() => updateOverlayProp({ customBanner: 'none', customBannerText: '' })}
-                                  className="px-2.5 bg-rose-600 hover:bg-rose-500 text-slate-950 rounded-xl font-black text-[9px] uppercase border-none cursor-pointer transition-all"
+                                  type="button"
+                                  onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini') ? 'none' : 'batting_summary' })}
+                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                                    (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini')
+                                      ? 'bg-amber-500/25 border-amber-500/50 text-amber-300 font-black shadow-md'
+                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                  }`}
+                                  title="Toggle Batting Summary Overlay"
                                 >
-                                  Clear
+                                  <span className="text-[9px]">🏏</span>
+                                  <span>Bat Sum</span>
                                 </button>
-                              )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini') ? 'none' : 'bowling_summary' })}
+                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                                    (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini')
+                                      ? 'bg-cyan-500/25 border-cyan-500/50 text-cyan-300 font-black shadow-md'
+                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                  }`}
+                                  title="Toggle Bowling Summary Overlay"
+                                >
+                                  <span className="text-[9px]">🎯</span>
+                                  <span>Bowl Sum</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wagon_wheel' ? 'none' : 'wagon_wheel' })}
+                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                                    currentActiveGraphic === 'wagon_wheel'
+                                      ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 font-bold shadow-md'
+                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                  }`}
+                                  title="Toggle Wagon Wheel Overlay"
+                                >
+                                  <span className="text-[9px]">🎡</span>
+                                  <span>Wagon</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })}
+                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                                    currentActiveGraphic === 'team_vs_team'
+                                      ? 'bg-gradient-to-r from-blue-600/40 to-rose-600/40 border-rose-400 text-white font-black shadow-md'
+                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                  }`}
+                                  title="Toggle 3D VS Shield Matchup"
+                                >
+                                  <span className="text-[9px]">⚔️</span>
+                                  <span>VS Shield</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setShowFieldPositionModal(true)}
+                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                                    (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
+                                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 font-bold shadow-md'
+                                      : 'bg-slate-950 border-emerald-500/20 text-emerald-400/90 hover:bg-emerald-950/40'
+                                  }`}
+                                  title="Open Field Position Popup (11 Players Setup)"
+                                >
+                                  <span className="text-[9px]">🎯</span>
+                                  <span>Field Pos</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -9165,6 +9734,13 @@ export const CricketScoreboard: React.FC = () => {
                                   desc: 'Elegant ticker statistics bar at bottom',
                                   isActive: currentActiveGraphic === 'lower_third',
                                   onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'lower_third' ? 'none' : 'lower_third' })
+                                },
+                                {
+                                  id: 'black_board_scoreboard',
+                                  label: 'Black Board Scoreboard (Need Runs / Balls)',
+                                  desc: 'Dark board with yellow chamfered badges: NEED [runs] RUNS FROM [balls] BALLS',
+                                  isActive: currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board') ? 'none' : 'black_board_scoreboard' })
                                 }
                               ].map(item => (
                                 <div key={item.id} className="flex items-center justify-between p-1.5 bg-slate-950/80 border border-white/5 hover:border-white/10 rounded-xl transition-all">
@@ -9217,6 +9793,14 @@ export const CricketScoreboard: React.FC = () => {
                             
                             <div className="space-y-1.5">
                               {[
+                                {
+                                  id: 'tournament_logo',
+                                  label: 'Tournament Logo Overlay (Reference Chevron Ribbon)',
+                                  desc: 'Official tournament logo, brand shields, chevron flanks & matchup details',
+                                  icon: '🏆',
+                                  isActive: currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand') ? 'none' : 'tournament_logo' })
+                                },
                                 {
                                   id: 'squad_a',
                                   label: `${match.teamA || 'Team A'} Squad (XI) with Images`,
@@ -11933,6 +12517,74 @@ export const CricketScoreboard: React.FC = () => {
                             className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[9px] text-slate-200 outline-none focus:border-indigo-500"
                           />
                         </div>
+                      </div>
+                    </div>
+
+                    {/* YouTube Channel Logo (Continuous TV Graphics Watermark) */}
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-300 flex items-center gap-1.5">
+                          <span className="text-red-500 font-black">▶</span>
+                          YouTube Channel Watermark Logo
+                        </span>
+                        {editModalYoutubeChannelLogo && (
+                          <button
+                            type="button"
+                            onClick={() => setEditModalYoutubeChannelLogo('')}
+                            className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                          >
+                            Remove Logo
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                          {editModalYoutubeChannelLogo ? (
+                            <img src={editModalYoutubeChannelLogo} alt="YouTube Logo" className="w-full h-full object-contain p-1" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-lg">📺</span>
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-1.5">
+                          <div className="relative overflow-hidden inline-block w-full">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-youtube-logo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalYoutubeChannelLogo(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-youtube-logo-file"
+                              className="w-full block py-1.5 px-2 bg-slate-850 hover:bg-slate-800 text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              📁 Upload Channel Logo
+                            </label>
+                          </div>
+                          <input
+                            type="url"
+                            value={editModalYoutubeChannelLogo}
+                            onChange={(e) => setEditModalYoutubeChannelLogo(e.target.value)}
+                            placeholder="Or paste channel logo URL (https://...)"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[9px] text-slate-200 outline-none focus:border-red-500"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <input
+                          type="text"
+                          value={editModalYoutubeChannelName}
+                          onChange={(e) => setEditModalYoutubeChannelName(e.target.value)}
+                          placeholder="Channel Name / Handle (e.g. Cricket Live TV)"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[9px] text-slate-200 outline-none focus:border-red-500 font-bold"
+                        />
                       </div>
                     </div>
                   </div>
@@ -15084,7 +15736,22 @@ export const CricketScoreboard: React.FC = () => {
                       <button
                         type="button"
                         id="btn-remove-tournament-logo"
-                        onClick={() => setTournamentLogo('')}
+                        onClick={() => {
+                          setTournamentLogo('');
+                          try {
+                            localStorage.removeItem('cricket_tournament_logo');
+                          } catch (_) {}
+                          if (match) {
+                            setMatch(prev => {
+                              if (!prev) return prev;
+                              const next = { ...prev, tournamentLogo: '', updatedAt: Date.now() };
+                              try {
+                                localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                              } catch (_) {}
+                              return next;
+                            });
+                          }
+                        }}
                         className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 rounded-xl text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1"
                       >
                         <Trash2 size={10} /> Clear Logo
@@ -15119,6 +15786,19 @@ export const CricketScoreboard: React.FC = () => {
                               if (file) {
                                 processOfficialPhotoFile(file, (dataUrl) => {
                                   setTournamentLogo(dataUrl);
+                                  try {
+                                    localStorage.setItem('cricket_tournament_logo', dataUrl);
+                                  } catch (_) {}
+                                  if (match) {
+                                    setMatch(prev => {
+                                      if (!prev) return prev;
+                                      const next = { ...prev, tournamentLogo: dataUrl, updatedAt: Date.now() };
+                                      try {
+                                        localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                                      } catch (_) {}
+                                      return next;
+                                    });
+                                  }
                                   showNotification('Tournament logo uploaded successfully!', 'success');
                                 });
                               }
@@ -15138,11 +15818,204 @@ export const CricketScoreboard: React.FC = () => {
                         id="setup-tournament-logo-url"
                         type="url"
                         value={tournamentLogo}
-                        onChange={(e) => setTournamentLogo(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTournamentLogo(val);
+                          try {
+                            localStorage.setItem('cricket_tournament_logo', val);
+                          } catch (_) {}
+                          if (match) {
+                            setMatch(prev => {
+                              if (!prev) return prev;
+                              const next = { ...prev, tournamentLogo: val, updatedAt: Date.now() };
+                              try {
+                                localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                              } catch (_) {}
+                              return next;
+                            });
+                          }
+                        }}
                         placeholder="Or paste tournament logo image URL (https://...)"
                         className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-[10px] font-medium text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-amber-500 transition-all"
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* YouTube Channel Logo (Continuous Live TV Graphics Watermark) */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 space-y-4 text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base text-red-500 font-black">▶</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider">
+                          YouTube Channel Watermark Logo
+                        </h4>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-500/10 text-red-650 dark:text-red-400 border border-red-500/20">
+                          Top-Right Corner
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-medium">
+                        Displays continuously in the right side top corner of TV graphics and OBS overlay stream
+                      </p>
+                    </div>
+                  </div>
+
+                  {youtubeChannelLogo && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setYoutubeChannelLogo('');
+                        try {
+                          localStorage.removeItem('cricket_youtube_channel_logo');
+                        } catch (_) {}
+                        if (match) {
+                          setMatch(prev => {
+                            if (!prev) return prev;
+                            const next = { 
+                              ...prev, 
+                              youtubeChannelLogo: '', 
+                              overlayConfig: { ...(prev.overlayConfig || {}), youtubeChannelLogo: '', showYoutubeChannelLogo: false },
+                              updatedAt: Date.now() 
+                            };
+                            try {
+                              localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                            } catch (_) {}
+                            return next;
+                          });
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 rounded-xl text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1"
+                    >
+                      <Trash2 size={10} /> Clear Logo
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  {/* Channel Logo Preview Avatar */}
+                  <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1">
+                    {youtubeChannelLogo ? (
+                      <img
+                        src={youtubeChannelLogo}
+                        alt="YouTube Channel Logo Preview"
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <span className="text-2xl" title="No channel logo added">📺</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 w-full space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="relative overflow-hidden inline-block flex-1">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          id="setup-youtube-channel-logo-file"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              processOfficialPhotoFile(file, (dataUrl) => {
+                                setYoutubeChannelLogo(dataUrl);
+                                try {
+                                  localStorage.setItem('cricket_youtube_channel_logo', dataUrl);
+                                } catch (_) {}
+                                if (match) {
+                                  setMatch(prev => {
+                                    if (!prev) return prev;
+                                    const next = { 
+                                      ...prev, 
+                                      youtubeChannelLogo: dataUrl,
+                                      showYoutubeChannelLogo: true,
+                                      overlayConfig: { ...(prev.overlayConfig || {}), youtubeChannelLogo: dataUrl, showYoutubeChannelLogo: true },
+                                      updatedAt: Date.now() 
+                                    };
+                                    try {
+                                      localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                                    } catch (_) {}
+                                    return next;
+                                  });
+                                }
+                                showNotification('YouTube Channel logo uploaded successfully!', 'success');
+                              });
+                            }
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                        <label
+                          htmlFor="setup-youtube-channel-logo-file"
+                          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-red-600/15 hover:bg-red-600/25 text-red-700 dark:text-red-400 text-center font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border border-red-500/30 transition-all"
+                        >
+                          <Camera size={12} />
+                          Upload Channel Logo from Device
+                        </label>
+                      </div>
+                    </div>
+
+                    <input
+                      id="setup-youtube-channel-logo-url"
+                      type="url"
+                      value={youtubeChannelLogo}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setYoutubeChannelLogo(val);
+                        try {
+                          localStorage.setItem('cricket_youtube_channel_logo', val);
+                        } catch (_) {}
+                        if (match) {
+                          setMatch(prev => {
+                            if (!prev) return prev;
+                            const next = { 
+                              ...prev, 
+                              youtubeChannelLogo: val,
+                              showYoutubeChannelLogo: !!val,
+                              overlayConfig: { ...(prev.overlayConfig || {}), youtubeChannelLogo: val, showYoutubeChannelLogo: !!val },
+                              updatedAt: Date.now() 
+                            };
+                            try {
+                              localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                            } catch (_) {}
+                            return next;
+                          });
+                        }
+                      }}
+                      placeholder="Or paste YouTube channel logo URL (https://...)"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-[10px] font-medium text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-red-500 transition-all"
+                    />
+
+                    <input
+                      id="setup-youtube-channel-name"
+                      type="text"
+                      value={youtubeChannelName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setYoutubeChannelName(val);
+                        try {
+                          localStorage.setItem('cricket_youtube_channel_name', val);
+                        } catch (_) {}
+                        if (match) {
+                          setMatch(prev => {
+                            if (!prev) return prev;
+                            const next = { 
+                              ...prev, 
+                              youtubeChannelName: val,
+                              overlayConfig: { ...(prev.overlayConfig || {}), youtubeChannelName: val },
+                              updatedAt: Date.now() 
+                            };
+                            try {
+                              localStorage.setItem('cricket_active_match', JSON.stringify(next));
+                            } catch (_) {}
+                            return next;
+                          });
+                        }
+                      }}
+                      placeholder="YouTube Channel Name / Handle (e.g. Cricket Live TV)"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-[10px] font-bold text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-red-500 transition-all"
+                    />
                   </div>
                 </div>
               </div>
@@ -16445,6 +17318,8 @@ export const CricketScoreboard: React.FC = () => {
                         setEditModalMatchBannerUrl(match.matchBannerUrl || '');
                         setEditModalTournamentLogo(match.tournamentLogo || '');
                         setEditModalTournamentName(match.tournamentName || '');
+                        setEditModalYoutubeChannelLogo(match.overlayConfig?.youtubeChannelLogo || match.youtubeChannelLogo || youtubeChannelLogo || '');
+                        setEditModalYoutubeChannelName(match.overlayConfig?.youtubeChannelName || match.youtubeChannelName || youtubeChannelName || '');
                         setEditModalGroundName(match.groundName || '');
                         setEditModalUmpire1Name(match.umpire1Name || '');
                         setEditModalUmpire1Photo(match.umpire1Photo || '');
@@ -17573,6 +18448,314 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       </>
                     );
+                    })()}
+
+                    {/* =========================================================================
+                        YOUTUBE CHANNEL LOGO & LIVE TV WATERMARK CONTROLS
+                        (Continuously visible in top-right corner of broadcast graphics)
+                        ========================================================================= */}
+                    {(() => {
+                      const ytLogo = activeOverlayConfig.youtubeChannelLogo || match?.youtubeChannelLogo || youtubeChannelLogo || '';
+                      const isEnabled = activeOverlayConfig.showYoutubeChannelLogo !== false && !!ytLogo;
+                      const ytName = activeOverlayConfig.youtubeChannelName || match?.youtubeChannelName || youtubeChannelName || '';
+                      const ytScale = activeOverlayConfig.youtubeChannelLogoScale !== undefined ? activeOverlayConfig.youtubeChannelLogoScale : 1.0;
+                      const ytOpacity = activeOverlayConfig.youtubeChannelLogoOpacity !== undefined ? activeOverlayConfig.youtubeChannelLogoOpacity : 0.95;
+
+                      return (
+                        <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900/90 via-slate-950/95 to-red-950/20 border border-red-500/20 shadow-lg space-y-3.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-white/5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-red-600/20 border border-red-500/30 flex items-center justify-center text-red-500 shrink-0 shadow-xs">
+                                <span className="text-sm font-black">▶</span>
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h5 className="text-xs uppercase font-black tracking-wider text-white flex items-center gap-1.5">
+                                    YouTube Channel Logo Watermark
+                                  </h5>
+                                  <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-red-600/20 text-red-400 border border-red-500/30">
+                                    Top-Right Corner
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-medium">
+                                  Shows your channel logo continuously on the top-right corner of the live broadcast graphics
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Enable/Disable Toggle */}
+                            <div className="flex items-center gap-2 self-end sm:self-center">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                {isEnabled ? 'Active' : 'Disabled'}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  const updated = {
+                                    ...activeOverlayConfig,
+                                    showYoutubeChannelLogo: !isEnabled
+                                  };
+                                  syncMatch(prev => ({
+                                    ...prev,
+                                    showYoutubeChannelLogo: !isEnabled,
+                                    overlayConfig: updated
+                                  }));
+                                }}
+                                className={`w-11 h-6 rounded-full p-1 cursor-pointer transition-colors border ${
+                                  isEnabled ? 'bg-red-600 border-red-500' : 'bg-slate-800 border-slate-700'
+                                }`}
+                              >
+                                <div className={`w-4 h-4 rounded-full bg-white transition-transform ${isEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Controls Grid */}
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center">
+                            {/* Logo Preview Avatar */}
+                            <div className="sm:col-span-3 flex flex-col items-center justify-center p-3 rounded-xl bg-black/60 border border-white/10 text-center relative overflow-hidden">
+                              <span className="text-[7.5px] uppercase font-mono font-bold text-slate-500 mb-1.5 tracking-wider">Live Preview</span>
+                              <div className="relative flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-black/80 border border-white/15 shadow-inner">
+                                <span className="w-2 h-2 rounded-full bg-red-600 animate-ping absolute -top-0.5 -right-0.5" />
+                                <span className="w-2 h-2 rounded-full bg-red-600 absolute -top-0.5 -right-0.5" />
+                                {ytLogo ? (
+                                  <img 
+                                    src={ytLogo} 
+                                    alt="YouTube Logo" 
+                                    className="h-8 w-auto max-w-[80px] object-contain" 
+                                    referrerPolicy="no-referrer" 
+                                  />
+                                ) : (
+                                  <span className="text-xl">📺</span>
+                                )}
+                                {ytName && (
+                                  <span className="text-[8px] font-black text-white uppercase tracking-tight max-w-[60px] truncate">
+                                    {ytName}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[8px] font-medium text-slate-400 mt-1.5">
+                                {ytLogo ? 'Logo Loaded' : 'No Logo Set'}
+                              </span>
+                            </div>
+
+                            {/* Upload and URL paste controls */}
+                            <div className="sm:col-span-9 space-y-2.5">
+                              <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                                {/* Upload Button */}
+                                <div className="relative overflow-hidden inline-block flex-1">
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    id="tv-graphics-youtube-logo-file"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        processOfficialPhotoFile(file, (dataUrl) => {
+                                          setYoutubeChannelLogo(dataUrl);
+                                          const updated = {
+                                            ...activeOverlayConfig,
+                                            youtubeChannelLogo: dataUrl,
+                                            showYoutubeChannelLogo: true
+                                          };
+                                          syncMatch(prev => ({
+                                            ...prev,
+                                            youtubeChannelLogo: dataUrl,
+                                            showYoutubeChannelLogo: true,
+                                            overlayConfig: updated
+                                          }));
+                                          try {
+                                            localStorage.setItem('cricket_youtube_channel_logo', dataUrl);
+                                          } catch (_) {}
+                                          showNotification('YouTube Channel Logo uploaded to TV Graphics!', 'success');
+                                        });
+                                      }
+                                    }}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                  />
+                                  <label
+                                    htmlFor="tv-graphics-youtube-logo-file"
+                                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-red-600 hover:bg-red-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border border-red-500/50 shadow-md transition-all active:scale-95"
+                                  >
+                                    <Camera size={13} />
+                                    Upload Logo from Device
+                                  </label>
+                                </div>
+
+                                {ytLogo && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setYoutubeChannelLogo('');
+                                      const updated = {
+                                        ...activeOverlayConfig,
+                                        youtubeChannelLogo: '',
+                                        showYoutubeChannelLogo: false
+                                      };
+                                      syncMatch(prev => ({
+                                        ...prev,
+                                        youtubeChannelLogo: '',
+                                        showYoutubeChannelLogo: false,
+                                        overlayConfig: updated
+                                      }));
+                                      try {
+                                        localStorage.removeItem('cricket_youtube_channel_logo');
+                                      } catch (_) {}
+                                      showNotification('YouTube Channel Logo removed', 'info');
+                                    }}
+                                    className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1 shrink-0"
+                                  >
+                                    <Trash2 size={12} />
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Paste URL */}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="url"
+                                  value={ytLogo}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setYoutubeChannelLogo(val);
+                                    const updated = {
+                                      ...activeOverlayConfig,
+                                      youtubeChannelLogo: val,
+                                      showYoutubeChannelLogo: !!val
+                                    };
+                                    syncMatch(prev => ({
+                                      ...prev,
+                                      youtubeChannelLogo: val,
+                                      showYoutubeChannelLogo: !!val,
+                                      overlayConfig: updated
+                                    }));
+                                    try {
+                                      if (val) {
+                                        localStorage.setItem('cricket_youtube_channel_logo', val);
+                                      } else {
+                                        localStorage.removeItem('cricket_youtube_channel_logo');
+                                      }
+                                    } catch (_) {}
+                                  }}
+                                  placeholder="Or paste YouTube channel logo URL (https://...)"
+                                  className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-slate-200 placeholder-slate-500 outline-none focus:border-red-500 font-mono transition-all"
+                                />
+                              </div>
+
+                              {/* Channel Name input */}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={ytName}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setYoutubeChannelName(val);
+                                    const updated = {
+                                      ...activeOverlayConfig,
+                                      youtubeChannelName: val
+                                    };
+                                    syncMatch(prev => ({
+                                      ...prev,
+                                      youtubeChannelName: val,
+                                      overlayConfig: updated
+                                    }));
+                                    try {
+                                      if (val) {
+                                        localStorage.setItem('cricket_youtube_channel_name', val);
+                                      } else {
+                                        localStorage.removeItem('cricket_youtube_channel_name');
+                                      }
+                                    } catch (_) {}
+                                  }}
+                                  placeholder="Channel Name / Tag (e.g. Cricket Live TV, Karjat Sports)"
+                                  className="flex-1 bg-slate-950 border border-white/10 rounded-xl px-3 py-2 text-[10px] text-slate-200 placeholder-slate-500 outline-none focus:border-red-500 font-bold transition-all"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Sliders for Scale & Opacity */}
+                          {ytLogo && (
+                            <div className="pt-2.5 border-t border-white/5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                              {/* Scale slider */}
+                              <div>
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[8.5px] font-black uppercase text-slate-400">Watermark Size / Scale</span>
+                                  <span className="text-[9px] font-mono font-black text-red-400">
+                                    {Math.round(ytScale * 100)}%
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button 
+                                    onClick={() => {
+                                      const updated = { ...activeOverlayConfig, youtubeChannelLogoScale: Math.max(0.4, Number((ytScale - 0.05).toFixed(2))) };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="w-6 h-6 rounded-lg bg-slate-900 border border-white/10 flex items-center justify-center text-[10px] hover:bg-slate-800 text-white cursor-pointer"
+                                  >-</button>
+                                  <input 
+                                    type="range"
+                                    min="0.4"
+                                    max="2.0"
+                                    step="0.05"
+                                    value={ytScale}
+                                    onChange={(e) => {
+                                      const updated = { ...activeOverlayConfig, youtubeChannelLogoScale: parseFloat(e.target.value) };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="flex-1 accent-red-600 h-1 cursor-pointer"
+                                  />
+                                  <button 
+                                    onClick={() => {
+                                      const updated = { ...activeOverlayConfig, youtubeChannelLogoScale: Math.min(2.0, Number((ytScale + 0.05).toFixed(2))) };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="w-6 h-6 rounded-lg bg-slate-900 border border-white/10 flex items-center justify-center text-[10px] hover:bg-slate-800 text-white cursor-pointer"
+                                  >+</button>
+                                </div>
+                              </div>
+
+                              {/* Opacity slider */}
+                              <div>
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[8.5px] font-black uppercase text-slate-400">Watermark Opacity</span>
+                                  <span className="text-[9px] font-mono font-black text-red-400">
+                                    {Math.round(ytOpacity * 100)}%
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button 
+                                    onClick={() => {
+                                      const updated = { ...activeOverlayConfig, youtubeChannelLogoOpacity: Math.max(0.2, Number((ytOpacity - 0.05).toFixed(2))) };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="w-6 h-6 rounded-lg bg-slate-900 border border-white/10 flex items-center justify-center text-[10px] hover:bg-slate-800 text-white cursor-pointer"
+                                  >-</button>
+                                  <input 
+                                    type="range"
+                                    min="0.2"
+                                    max="1.0"
+                                    step="0.05"
+                                    value={ytOpacity}
+                                    onChange={(e) => {
+                                      const updated = { ...activeOverlayConfig, youtubeChannelLogoOpacity: parseFloat(e.target.value) };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="flex-1 accent-red-600 h-1 cursor-pointer"
+                                  />
+                                  <button 
+                                    onClick={() => {
+                                      const updated = { ...activeOverlayConfig, youtubeChannelLogoOpacity: Math.min(1.0, Number((ytOpacity + 0.05).toFixed(2))) };
+                                      syncMatch(prev => ({ ...prev, overlayConfig: updated }));
+                                    }}
+                                    className="w-6 h-6 rounded-lg bg-slate-900 border border-white/10 flex items-center justify-center text-[10px] hover:bg-slate-800 text-white cursor-pointer"
+                                  >+</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
                     })()}
 
                     {/* Integrated 16:9 Live Broadcast Overlay System integrated preview */}

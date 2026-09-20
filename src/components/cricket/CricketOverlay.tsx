@@ -19,6 +19,8 @@ import { CricketAnalyticsOverlay } from './CricketAnalyticsOverlay';
 import { TournamentBoundaryCounterPopup } from './TournamentBoundaryCounterPopup';
 import { TeamVsTeamOverlay } from './TeamVsTeamOverlay';
 import { FieldPositionManagerModal } from './FieldPositionManagerModal';
+import { TournamentLogoOverlay } from './TournamentLogoOverlay';
+import { BlackBoardScoreboardOverlay } from './BlackBoardScoreboardOverlay';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -151,6 +153,11 @@ interface OverlayConfig {
   tournamentBaseFours?: number;
   tournamentBaseSixes?: number;
   boundaryCounterPosition?: 'bottom-right' | 'bottom-center' | 'top-right' | 'top-left';
+  youtubeChannelLogo?: string;
+  showYoutubeChannelLogo?: boolean;
+  youtubeChannelName?: string;
+  youtubeChannelLogoScale?: number;
+  youtubeChannelLogoOpacity?: number;
 }
 
 interface MatchState {
@@ -161,6 +168,10 @@ interface MatchState {
   tournamentBaseFours?: number;
   tournamentBaseSixes?: number;
   tournamentStats?: { totalFours?: number; totalSixes?: number };
+  tournamentLogo?: string;
+  youtubeChannelLogo?: string;
+  showYoutubeChannelLogo?: boolean;
+  youtubeChannelName?: string;
   teamA: string;
   teamB: string;
   oversLimit: number;
@@ -202,6 +213,20 @@ export const CricketOverlay: React.FC = () => {
   const [streamKey, setStreamKey] = useState<string>('');
   const [isPermanentLink, setIsPermanentLink] = useState<boolean>(false);
   const [isLiveActive, setIsLiveActive] = useState<boolean>(false);
+  const [localYoutubeChannelLogo, setLocalYoutubeChannelLogo] = useState<string>(() => {
+    try {
+      return localStorage.getItem('cricket_youtube_channel_logo') || '';
+    } catch (_) {
+      return '';
+    }
+  });
+  const [localYoutubeChannelName, setLocalYoutubeChannelName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('cricket_youtube_channel_name') || '';
+    } catch (_) {
+      return '';
+    }
+  });
 
   useEffect(() => {
     // 1. Direct route parameter: /live/cricket-overlay/:managerId
@@ -452,7 +477,12 @@ export const CricketOverlay: React.FC = () => {
       customOverlayOpacity: 1.0,
       customOverlayEnabled: false,
       customOverlayAsBackground: false,
-      scorebugOverlayMode: 'this_over'
+      scorebugOverlayMode: 'this_over',
+      youtubeChannelLogo: '',
+      showYoutubeChannelLogo: true,
+      youtubeChannelName: '',
+      youtubeChannelLogoScale: 1.0,
+      youtubeChannelLogoOpacity: 0.95
     };
 
     if (!match || !match.overlayConfig) return fallback;
@@ -499,7 +529,12 @@ export const CricketOverlay: React.FC = () => {
       customOverlayOpacity: match.overlayConfig.customOverlayOpacity !== undefined ? match.overlayConfig.customOverlayOpacity : fallback.customOverlayOpacity,
       customOverlayEnabled: match.overlayConfig.customOverlayEnabled !== undefined ? match.overlayConfig.customOverlayEnabled : fallback.customOverlayEnabled,
       customOverlayAsBackground: match.overlayConfig.customOverlayAsBackground !== undefined ? match.overlayConfig.customOverlayAsBackground : fallback.customOverlayAsBackground,
-      scorebugOverlayMode: match.overlayConfig.scorebugOverlayMode || fallback.scorebugOverlayMode || 'this_over'
+      scorebugOverlayMode: match.overlayConfig.scorebugOverlayMode || fallback.scorebugOverlayMode || 'this_over',
+      youtubeChannelLogo: match.overlayConfig.youtubeChannelLogo || (match as any).youtubeChannelLogo || fallback.youtubeChannelLogo,
+      showYoutubeChannelLogo: match.overlayConfig.showYoutubeChannelLogo !== false,
+      youtubeChannelName: match.overlayConfig.youtubeChannelName || (match as any).youtubeChannelName || fallback.youtubeChannelName,
+      youtubeChannelLogoScale: match.overlayConfig.youtubeChannelLogoScale !== undefined ? match.overlayConfig.youtubeChannelLogoScale : fallback.youtubeChannelLogoScale,
+      youtubeChannelLogoOpacity: match.overlayConfig.youtubeChannelLogoOpacity !== undefined ? match.overlayConfig.youtubeChannelLogoOpacity : fallback.youtubeChannelLogoOpacity
     };
   }, [match]);
 
@@ -794,6 +829,14 @@ export const CricketOverlay: React.FC = () => {
             }
           } catch {}
         }
+
+        // Direct YouTube Channel logo sync from local storage
+        try {
+          const ytStored = localStorage.getItem('cricket_youtube_channel_logo') || '';
+          setLocalYoutubeChannelLogo((prev) => (prev !== ytStored ? ytStored : prev));
+          const ytNameStored = localStorage.getItem('cricket_youtube_channel_name') || '';
+          setLocalYoutubeChannelName((prev) => (prev !== ytNameStored ? ytNameStored : prev));
+        } catch {}
       } catch (e) {
         console.warn('[Overlay Sync] Failed to read from localStorage:', e);
       }
@@ -814,6 +857,12 @@ export const CricketOverlay: React.FC = () => {
             }
           }
         } catch {}
+      }
+      if (e.key === 'cricket_youtube_channel_logo') {
+        setLocalYoutubeChannelLogo(e.newValue || '');
+      }
+      if (e.key === 'cricket_youtube_channel_name') {
+        setLocalYoutubeChannelName(e.newValue || '');
       }
     };
 
@@ -1463,6 +1512,73 @@ export const CricketOverlay: React.FC = () => {
     ? '1ST INNINGS • LIVE' 
     : '2ND INNINGS • CHASE';
 
+  // Global Tournament Logo with robust fallbacks
+  const matchTournamentLogo = useMemo(() => {
+    if (match?.tournamentLogo && String(match.tournamentLogo).trim().length > 0) return String(match.tournamentLogo).trim();
+    if ((match as any)?.tournament?.logo) return (match as any).tournament.logo;
+    if ((activeConfig as any)?.tournamentLogo) return (activeConfig as any).tournamentLogo;
+    try {
+      const stored = localStorage.getItem('cricket_tournament_logo');
+      if (stored && stored.trim().length > 0) return stored.trim();
+    } catch (_) {}
+    try {
+      const actStr = localStorage.getItem('cricket_active_match');
+      if (actStr) {
+        const parsed = JSON.parse(actStr);
+        if (parsed?.tournamentLogo && typeof parsed.tournamentLogo === 'string' && parsed.tournamentLogo.trim().length > 0) {
+          return parsed.tournamentLogo.trim();
+        }
+        if (parsed?.tournament?.logo) return parsed.tournament.logo;
+      }
+    } catch (_) {}
+    try {
+      const toursStr = localStorage.getItem('gully_tournaments_v1');
+      if (toursStr) {
+        const tours = JSON.parse(toursStr);
+        if (Array.isArray(tours) && tours.length > 0) {
+          const matching = tours.find((t: any) => 
+            (matchTournamentName && t.name && t.name.toLowerCase() === matchTournamentName.toLowerCase()) || t.logo
+          );
+          if (matching?.logo) return matching.logo;
+        }
+      }
+    } catch (_) {}
+    return undefined;
+  }, [match?.tournamentLogo, (match as any)?.tournament?.logo, (activeConfig as any)?.tournamentLogo, matchTournamentName]);
+
+  // Robust YouTube Channel Logo Resolution (Match State -> Active Config -> Local Storage -> Fallback)
+  const matchYoutubeChannelLogo = useMemo(() => {
+    if (activeConfig?.youtubeChannelLogo && String(activeConfig.youtubeChannelLogo).trim().length > 0) {
+      return String(activeConfig.youtubeChannelLogo).trim();
+    }
+    if (match?.youtubeChannelLogo && String(match.youtubeChannelLogo).trim().length > 0) {
+      return String(match.youtubeChannelLogo).trim();
+    }
+    if ((match as any)?.overlayConfig?.youtubeChannelLogo && String((match as any).overlayConfig.youtubeChannelLogo).trim().length > 0) {
+      return String((match as any).overlayConfig.youtubeChannelLogo).trim();
+    }
+    if (localYoutubeChannelLogo && localYoutubeChannelLogo.trim().length > 0) {
+      return localYoutubeChannelLogo.trim();
+    }
+    try {
+      const stored = localStorage.getItem('cricket_youtube_channel_logo');
+      if (stored && stored.trim().length > 0) return stored.trim();
+    } catch (_) {}
+    try {
+      const actStr = localStorage.getItem('cricket_active_match');
+      if (actStr) {
+        const parsed = JSON.parse(actStr);
+        if (parsed?.youtubeChannelLogo && typeof parsed.youtubeChannelLogo === 'string' && parsed.youtubeChannelLogo.trim().length > 0) {
+          return parsed.youtubeChannelLogo.trim();
+        }
+        if (parsed?.overlayConfig?.youtubeChannelLogo && typeof parsed.overlayConfig.youtubeChannelLogo === 'string' && parsed.overlayConfig.youtubeChannelLogo.trim().length > 0) {
+          return parsed.overlayConfig.youtubeChannelLogo.trim();
+        }
+      }
+    } catch (_) {}
+    return '';
+  }, [activeConfig?.youtubeChannelLogo, match?.youtubeChannelLogo, (match as any)?.overlayConfig?.youtubeChannelLogo, localYoutubeChannelLogo]);
+
   // Accurate calculation of dot balls bowled in the current innings
   const inningsDotBalls = useMemo(() => {
     if (!currentInnings || (currentInnings.ballsBowled || 0) === 0) return 0;
@@ -2002,6 +2118,64 @@ export const CricketOverlay: React.FC = () => {
     );
   };
 
+  // Render continuous YouTube Channel logo watermark in the right side top corner
+  const renderYoutubeChannelWatermark = () => {
+    if (!matchYoutubeChannelLogo || activeConfig.showYoutubeChannelLogo === false) return null;
+
+    const channelName = activeConfig.youtubeChannelName || (match as any)?.youtubeChannelName || localYoutubeChannelName;
+    const scale = activeConfig.youtubeChannelLogoScale !== undefined ? activeConfig.youtubeChannelLogoScale : 1.0;
+    const opacity = activeConfig.youtubeChannelLogoOpacity !== undefined ? activeConfig.youtubeChannelLogoOpacity : 0.95;
+
+    return (
+      <div 
+        id="broadcast-youtube-channel-watermark"
+        className="pointer-events-none absolute top-6 right-8 select-none z-[9999] transition-all duration-300 ease-out"
+        style={{
+          transform: `scale(${scale})`,
+          transformOrigin: 'top right',
+          opacity: opacity,
+        }}
+      >
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-2xl bg-black/70 backdrop-blur-md border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.85)] ring-1 ring-white/10">
+          {/* Pulsing Red Live indicator dot */}
+          <div className="relative flex items-center justify-center shrink-0 w-3 h-3">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-ping absolute" />
+            <span className="w-2.5 h-2.5 rounded-full bg-red-600 relative shrink-0 shadow-[0_0_8px_rgba(220,38,38,0.9)]" />
+          </div>
+
+          {/* YouTube Channel Logo Image */}
+          <div className="h-10 max-h-12 min-w-[36px] flex items-center justify-center overflow-hidden rounded-xl bg-white/10 p-0.5 border border-white/15 shadow-inner">
+            <img 
+              src={matchYoutubeChannelLogo} 
+              alt={channelName ? `${channelName} YouTube Logo` : "YouTube Channel Logo"} 
+              className="h-9 max-h-11 w-auto max-w-[150px] object-contain rounded-lg"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                (e.currentTarget as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+
+          {/* Channel Name & YouTube Live indicator badge */}
+          {channelName ? (
+            <div className="flex flex-col text-left pr-1 leading-tight justify-center">
+              <span className="text-[10px] font-black uppercase tracking-wider text-white drop-shadow-sm font-sans truncate max-w-[170px]">
+                {channelName}
+              </span>
+              <span className="text-[7.5px] font-mono font-black uppercase tracking-widest text-red-400 leading-none mt-0.5 flex items-center gap-1">
+                <span className="text-[7px]">▶</span> YOUTUBE LIVE
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 text-[8px] font-black uppercase tracking-widest text-red-400 pr-1">
+              <span>▶</span> LIVE
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const isFullScreenTransition = [
     'team_lineups', 'lineups', 'playing_xi', 
     'squad_a', 'team_a_squad', 'team_a_squad_card', 'squad_a_alert',
@@ -2014,6 +2188,8 @@ export const CricketOverlay: React.FC = () => {
     'match_presentation', 'potm_card', 'presentation', 
     'tournament_standings', 'points_table', 'standings',
     'prematch_matchup', 'matchup_card', 'matchup', 'match_card',
+    'tournament_logo', 'tournament_brand', 'tournament_logo_alert',
+    'black_board_scoreboard', 'black_board', 'need_board',
     'toss_result', 'toss_card', 'toss', 'toss_report',
     'pitch_weather_report', 'pitch_report', 'pitch_weather', 'weather_report', 'pitch_and_weather',
     'batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro',
@@ -2042,6 +2218,7 @@ export const CricketOverlay: React.FC = () => {
           left: 0
         }}
       >
+        {renderYoutubeChannelWatermark()}
         <div className="absolute inset-0 bg-transparent flex flex-col justify-end p-8 font-sans pointer-events-none select-none">
           <motion.div 
             initial={{ opacity: 0, y: 15 }}
@@ -2093,6 +2270,7 @@ export const CricketOverlay: React.FC = () => {
           left: 0
         }}
       >
+        {renderYoutubeChannelWatermark()}
         <div className="absolute inset-0 bg-transparent flex flex-col items-center justify-center font-sans">
           <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 p-8 rounded-[2rem] text-center shadow-2xl backdrop-blur-md">
             <div className="w-16 h-16 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -2125,6 +2303,7 @@ export const CricketOverlay: React.FC = () => {
           left: 0
         }}
       >
+        {renderYoutubeChannelWatermark()}
         <div className="absolute inset-0 bg-transparent flex items-center justify-center font-sans">
           <div className="bg-slate-900/90 border border-slate-800 p-8 rounded-2xl text-center backdrop-blur-md">
             <p className="text-white font-extrabold uppercase tracking-widest text-sm mb-2">No Active Innings Initialized</p>
@@ -2685,7 +2864,7 @@ export const CricketOverlay: React.FC = () => {
                 // Star TV Scorebug Mini-Overlay Detail Props
                 scorebugOverlayMode={activeConfig.scorebugOverlayMode || 'this_over'}
                 tournamentName={matchTournamentName || match?.tournamentName}
-                tournamentLogo={match?.tournamentLogo}
+                tournamentLogo={matchTournamentLogo || match?.tournamentLogo || (match as any)?.tournament?.logo || (activeConfig as any)?.tournamentLogo}
                 matchStage={matchStageText}
                 matchVenue={match?.venue}
                 groundName={match?.venue}
@@ -4446,6 +4625,65 @@ export const CricketOverlay: React.FC = () => {
           </div>
         )}
 
+        {/* TOURNAMENT LOGO OVERLAY (1:1 REFERENCE CHEVRON BLUE BROADCAST RIBBON & CREST) */}
+        {(activeGraphic === 'tournament_logo' || activeGraphic === 'tournament_brand' || activeGraphic === 'tournament_logo_alert') && match && (
+          <div className="absolute inset-0 flex items-center justify-center z-55 pointer-events-auto bg-black/40 backdrop-blur-xs p-4">
+            <TournamentLogoOverlay
+              match={match}
+              onClose={() => {
+                setActiveGraphic('none');
+                setActiveAlert(null);
+              }}
+              onUpdateLogo={async (newLogo) => {
+                const nextMatch = {
+                  ...match,
+                  tournamentLogo: newLogo,
+                  updatedAt: Date.now()
+                };
+                setMatch(nextMatch as any);
+                try {
+                  localStorage.setItem('cricket_active_match', JSON.stringify(nextMatch));
+                  if (match.id) {
+                    await safeSetDoc(doc(db, 'cricket_matches', match.id), sanitizeForFirestore(nextMatch), { merge: true });
+                  }
+                } catch (e) {
+                  console.warn('Tournament logo save error:', e);
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {/* BLACK BOARD SCOREBOARD OVERLAY (1:1 REFERENCE NEED [runs] RUNS FROM [balls] BALLS - Only during 2nd innings run chase) */}
+        {(activeGraphic === 'black_board_scoreboard' || activeGraphic === 'black_board' || activeGraphic === 'need_board') && match && match.currentInnings === 2 && (match.target ? match.target > 0 : (match.innings?.[0]?.runs !== undefined && match.innings[0].runs > 0)) && (
+          <BlackBoardScoreboardOverlay
+            match={match}
+            onClose={() => {
+              setActiveGraphic('none');
+            }}
+            onUpdateValues={async (runs, balls) => {
+              const updatedConfig = {
+                ...(match.overlayConfig || {}),
+                blackBoardConfig: { runsNeeded: runs, ballsRemaining: balls }
+              };
+              const nextMatch = {
+                ...match,
+                overlayConfig: updatedConfig,
+                updatedAt: Date.now()
+              };
+              setMatch(nextMatch as any);
+              try {
+                localStorage.setItem('cricket_active_match', JSON.stringify(nextMatch));
+                if (match.id) {
+                  await safeSetDoc(doc(db, 'cricket_matches', match.id), sanitizeForFirestore(nextMatch), { merge: true });
+                }
+              } catch (e) {
+                console.warn('Blackboard equation save error:', e);
+              }
+            }}
+          />
+        )}
+
         {/* 9. WICKET ALERT TEMP */}
         {activeGraphic === 'wicket_alert_temp' && (
           <div className="absolute inset-x-0 top-32 flex justify-center z-50 pointer-events-none">
@@ -4779,6 +5017,32 @@ export const CricketOverlay: React.FC = () => {
           >
             ⚔️ Team A VS B
           </button>
+          {/* TOURNAMENT LOGO OVERLAY BUTTON */}
+          <button
+            onClick={() => setActiveGraphic(['tournament_logo', 'tournament_brand'].includes(activeGraphic) ? 'none' : 'tournament_logo')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer flex items-center gap-1 ${
+              ['tournament_logo', 'tournament_brand'].includes(activeGraphic)
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black shadow-lg shadow-blue-500/30 animate-pulse'
+                : 'bg-blue-950/40 hover:bg-blue-900/60 text-blue-300 border border-blue-500/30'
+            }`}
+            title="Show Tournament Logo Overlay on TV (Reference Chevron Ribbon)"
+          >
+            <span>🏆</span>
+            <span>Tournament Logo</span>
+          </button>
+          {/* BLACK BOARD SCOREBOARD OVERLAY BUTTON */}
+          <button
+            onClick={() => setActiveGraphic(['black_board_scoreboard', 'black_board', 'need_board'].includes(activeGraphic) ? 'none' : 'black_board_scoreboard')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer flex items-center gap-1 ${
+              ['black_board_scoreboard', 'black_board', 'need_board'].includes(activeGraphic)
+                ? 'bg-amber-400 text-slate-950 font-black shadow-lg shadow-amber-400/30 animate-pulse'
+                : 'bg-[#04081c] hover:bg-[#09153d] text-amber-300 border border-blue-600/40'
+            }`}
+            title="Show Black Board Scoreboard Overlay on TV (NEED [runs] RUNS FROM [balls] BALLS)"
+          >
+            <span>📋</span>
+            <span>Black Board</span>
+          </button>
           <button
             onClick={() => setActiveGraphic(activeGraphic === 'innings_scorecard' ? 'none' : 'innings_scorecard')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
@@ -5042,6 +5306,7 @@ export const CricketOverlay: React.FC = () => {
       </div>
 
       {renderCustomOverlayImage()}
+      {renderYoutubeChannelWatermark()}
 
       {/* =========================================================================
           4B. RICH ANIMATED OVERLAY ALERTS & STINGERS (SIX, FOUR, WICKET, DISMISSALS, GULLY RULES)

@@ -25,7 +25,13 @@ export type StingerAnimationType =
   | 'fifty'
   | 'hundred'
   | 'super_over'
-  | 'team_vs_team';
+  | 'team_vs_team'
+  | 'high_tension'
+  | 'direct_hit'
+  | 'box_cricket_out'
+  | 'five_wickets'
+  | 'appeal'
+  | 'not_out';
 
 export interface StingerMetadata {
   batterName?: string;
@@ -138,7 +144,7 @@ function playStingerSynthesizer(type: string) {
         osc.start(now + delay);
         osc.stop(now + delay + 0.12);
       });
-    } else if (type === 'fifty' || type === 'hundred' || type === 'hat_trick' || type === 'team_vs_team') {
+    } else if (type === 'fifty' || type === 'hundred' || type === 'hat_trick' || type === 'team_vs_team' || type === 'five_wickets') {
       // Ascending triumphant trumpet fanfare
       [0, 0.12, 0.24, 0.42].forEach((delay, idx) => {
         const freqs = [392, 523.25, 659.25, 783.99]; // G, C, E, G
@@ -152,6 +158,50 @@ function playStingerSynthesizer(type: string) {
         gain.connect(ctx.destination);
         osc.start(now + delay);
         osc.stop(now + delay + 0.3);
+      });
+    } else if (type === 'high_tension') {
+      // Pulsing low bass tension heartbeat and warning rise
+      [0, 0.35, 0.7, 1.05].forEach((delay) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(55, now + delay);
+        osc.frequency.exponentialRampToValueAtTime(110, now + delay + 0.25);
+        gain.gain.setValueAtTime(0.38, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + delay + 0.28);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.28);
+      });
+    } else if (type === 'appeal') {
+      // Umpire / bowler appeal double whoop
+      [0, 0.15].forEach((delay, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(440 + idx * 200, now + delay);
+        osc.frequency.exponentialRampToValueAtTime(880 + idx * 250, now + delay + 0.14);
+        gain.gain.setValueAtTime(0.25, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + delay + 0.15);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.15);
+      });
+    } else if (type === 'not_out') {
+      // Dual bell chime
+      [0, 0.18].forEach((delay, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(idx === 0 ? 587.33 : 880, now + delay);
+        gain.gain.setValueAtTime(0.25, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + delay + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.35);
       });
     }
   } catch (_) {}
@@ -187,6 +237,12 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
     if (lower === 'fifty' || lower === '50') return 'fifty';
     if (lower === 'hundred' || lower === '100' || lower === 'century') return 'hundred';
     if (lower === 'super_over' || lower === 'superover') return 'super_over';
+    if (lower === 'high_tension' || lower === 'tension' || lower === 'pressure' || lower === 'nail_biter') return 'high_tension';
+    if (lower === 'direct_hit' || lower === 'directhit') return 'direct_hit';
+    if (lower === 'box_cricket_out' || lower === 'box_out' || lower === 'net_out') return 'box_cricket_out';
+    if (lower === 'five_wickets' || lower === '5_wickets' || lower === 'fifer') return 'five_wickets';
+    if (lower === 'appeal' || lower === 'howzat') return 'appeal';
+    if (lower === 'not_out' || lower === 'notout') return 'not_out';
     return 'wicket';
   }, [activeAnimation]);
 
@@ -206,11 +262,6 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
     const timers: NodeJS.Timeout[] = [];
 
     // Timing durations:
-    // Six / Four: 2.0s
-    // Wickets / Dismissals: 2.0s
-    // Milestones (50, 100, hat_trick): 3.5s
-    // Free hit / Situational: 2.4s
-    // Team VS Team: 6.2s
     if (normalizedType === 'team_vs_team') {
       timers.push(setTimeout(() => setPhase(2), 100));
       timers.push(setTimeout(() => setPhase(3), 400));
@@ -238,7 +289,11 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
       normalizedType === 'wicket' ||
       normalizedType === 'one_tip_hand' ||
       normalizedType === 'lost_ball' ||
-      normalizedType === 'car_hit'
+      normalizedType === 'car_hit' ||
+      normalizedType === 'direct_hit' ||
+      normalizedType === 'box_cricket_out' ||
+      normalizedType === 'appeal' ||
+      normalizedType === 'not_out'
     ) {
       timers.push(setTimeout(() => setPhase(2), 100));
       timers.push(setTimeout(() => setPhase(3), 350));
@@ -248,7 +303,7 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
         onAnimationComplete();
         setPhase(0);
       }, 2000)); // Exactly 2.0s
-    } else if (normalizedType === 'fifty' || normalizedType === 'hundred' || normalizedType === 'hat_trick') {
+    } else if (normalizedType === 'fifty' || normalizedType === 'hundred' || normalizedType === 'hat_trick' || normalizedType === 'five_wickets') {
       timers.push(setTimeout(() => setPhase(2), 200));
       timers.push(setTimeout(() => setPhase(3), 700));
       timers.push(setTimeout(() => setPhase(4), 1600));
@@ -257,6 +312,15 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
         onAnimationComplete();
         setPhase(0);
       }, 4200));
+    } else if (normalizedType === 'high_tension') {
+      timers.push(setTimeout(() => setPhase(2), 100));
+      timers.push(setTimeout(() => setPhase(3), 400));
+      timers.push(setTimeout(() => setPhase(4), 1000));
+      timers.push(setTimeout(() => setPhase(5), 2800));
+      timers.push(setTimeout(() => {
+        onAnimationComplete();
+        setPhase(0);
+      }, 3400));
     } else {
       // Free hit, Hat-trick ball, Super over
       timers.push(setTimeout(() => setPhase(2), 150));
@@ -1409,6 +1473,216 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                 </h1>
                 <div className="mt-4 inline-block bg-black/85 border-2 border-cyan-400 text-cyan-200 font-black text-xl px-10 py-3 rounded-2xl uppercase tracking-widest font-mono shadow-2xl">
                   ⚡ SCORES TIED • 6 BALLS TO DECIDE THE CHAMPION! ⚡
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            19. HIGH TENSION / NAIL-BITER CLIMAX STINGER
+            ========================================================================= */}
+        {normalizedType === 'high_tension' && (
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
+            {phase >= 1 && (
+              <div className="absolute inset-0 bg-red-950/40 pointer-events-none animate-pulse" />
+            )}
+            {phase >= 2 && (
+              <motion.div
+                className="z-20 text-center flex flex-col items-center"
+                initial={{ scale: 3.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 160 }}
+              >
+                <div className="w-20 h-20 rounded-2xl bg-rose-600 text-white flex items-center justify-center mb-3 shadow-[0_0_50px_#f43f5e] animate-ping">
+                  <Flame className="w-12 h-12" />
+                </div>
+                <h1
+                  className="font-black leading-none uppercase tracking-wide"
+                  style={{
+                    fontSize: 'clamp(55px, 8.5vw, 150px)',
+                    fontFamily: '"Impact", "Arial Black", sans-serif',
+                    color: '#FF2E55',
+                    textShadow: '0 0 45px #E11D48, 0 10px 40px rgba(0,0,0,0.95)',
+                    WebkitTextStroke: '6px #000000'
+                  }}
+                >
+                  HIGH TENSION!
+                </h1>
+                <div className="mt-4 bg-gradient-to-r from-red-600 via-rose-500 to-amber-500 text-white font-black text-xl px-10 py-3 rounded-2xl uppercase tracking-widest font-mono shadow-[0_0_30px_rgba(244,63,94,0.8)] border-2 border-white/80">
+                  ⚡ NAIL-BITER FINISH • EVERY BALL COUNTS! ⚡
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            20. DIRECT HIT OUT (GULLY RULE / RUN OUT)
+            ========================================================================= */}
+        {normalizedType === 'direct_hit' && (
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
+            {phase >= 2 && (
+              <motion.div
+                className="z-20 text-center"
+                initial={{ scale: 4, opacity: 0, rotate: 15 }}
+                animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                transition={{ type: "spring", stiffness: 180 }}
+              >
+                <div className="text-9xl mb-2 animate-bounce">🎯💥</div>
+                <h1
+                  className="font-black leading-none uppercase tracking-wide"
+                  style={{
+                    fontSize: 'clamp(60px, 9vw, 160px)',
+                    fontFamily: '"Impact", "Arial Black", sans-serif',
+                    color: '#38BDF8',
+                    textShadow: '0 0 40px #0284C7, 0 10px 40px rgba(0,0,0,0.95)',
+                    WebkitTextStroke: '6px #000000'
+                  }}
+                >
+                  DIRECT HIT!
+                </h1>
+                <div className="mt-4 inline-block bg-black/85 border-2 border-sky-400 text-sky-200 font-bold text-lg px-8 py-2.5 rounded-2xl uppercase tracking-widest font-mono shadow-2xl">
+                  BULLSEYE ON STUMPS • BATSMAN SHORT OF CREASE!
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            21. BOX CRICKET / NET OUT (GULLY RULE)
+            ========================================================================= */}
+        {normalizedType === 'box_cricket_out' && (
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
+            {phase >= 2 && (
+              <motion.div
+                className="z-20 text-center"
+                initial={{ scale: 3.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring" }}
+              >
+                <div className="text-9xl mb-2 animate-pulse">📦🚫</div>
+                <h1
+                  className="font-black leading-none uppercase tracking-wide"
+                  style={{
+                    fontSize: 'clamp(55px, 8.5vw, 140px)',
+                    fontFamily: '"Impact", "Arial Black", sans-serif',
+                    color: '#A855F7',
+                    textShadow: '0 0 40px #7E22CE, 0 10px 40px rgba(0,0,0,0.95)',
+                    WebkitTextStroke: '6px #000000'
+                  }}
+                >
+                  BOX OUT!
+                </h1>
+                <div className="mt-4 inline-block bg-black/85 border-2 border-purple-500 text-purple-200 font-black text-xl px-10 py-3 rounded-2xl uppercase tracking-widest font-mono">
+                  HIT OVER ROOF / NET • DECLARED OUT!
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            22. 5-WICKET HAUL (FIFER MILESTONE)
+            ========================================================================= */}
+        {normalizedType === 'five_wickets' && (
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
+            {phase >= 1 && renderGoldSparks(40)}
+            {phase >= 2 && (
+              <motion.div
+                className="z-20 text-center flex flex-col items-center"
+                initial={{ scale: 3, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 140 }}
+              >
+                <div className="w-24 h-24 rounded-3xl bg-gradient-to-tr from-cyan-400 to-blue-600 text-white flex items-center justify-center mb-4 shadow-[0_0_50px_#06b6d4] animate-bounce">
+                  <Award className="w-14 h-14" />
+                </div>
+                <h1
+                  className="font-black leading-none uppercase tracking-tight"
+                  style={{
+                    fontSize: 'clamp(70px, 11vw, 190px)',
+                    fontFamily: '"Impact", "Arial Black", sans-serif',
+                    color: '#22D3EE',
+                    textShadow: '0 0 50px #0891B2, 0 10px 40px rgba(0,0,0,0.95)',
+                    WebkitTextStroke: '6px #000000'
+                  }}
+                >
+                  5 WICKETS!
+                </h1>
+                <div className="text-4xl font-black text-white uppercase tracking-widest mb-3">
+                  🔥 SENSATIONAL FIFER SPELL! 🔥
+                </div>
+                {metadata?.bowlerName && (
+                  <div className="bg-black/80 border border-cyan-400/60 px-8 py-2.5 rounded-full text-lg font-bold text-cyan-200 uppercase tracking-widest font-mono">
+                    Match-Winning Bowling by {metadata.bowlerName}!
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            23. APPEAL / HOWZAT POPUP
+            ========================================================================= */}
+        {normalizedType === 'appeal' && (
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
+            {phase >= 2 && (
+              <motion.div
+                className="z-20 text-center"
+                initial={{ scale: 4, opacity: 0 }}
+                animate={{ scale: [1.3, 1], opacity: 1 }}
+                transition={{ type: "spring", stiffness: 200 }}
+              >
+                <h1
+                  className="font-black leading-none uppercase tracking-wide animate-pulse"
+                  style={{
+                    fontSize: 'clamp(75px, 12vw, 210px)',
+                    fontFamily: '"Impact", "Arial Black", sans-serif',
+                    color: '#FACC15',
+                    textShadow: '0 0 45px #CA8A04, 0 10px 40px rgba(0,0,0,0.95)',
+                    WebkitTextStroke: '7px #000000'
+                  }}
+                >
+                  HOWZAT?!
+                </h1>
+                <div className="mt-4 inline-block bg-black/85 border-2 border-yellow-400 text-yellow-300 font-black text-xl px-10 py-3 rounded-2xl uppercase tracking-widest font-mono">
+                  📢 HUGE APPEAL • UMPIRE DECISION AWAITED!
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            24. NOT OUT DECISION CONFIRMED
+            ========================================================================= */}
+        {normalizedType === 'not_out' && (
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
+            {phase >= 2 && (
+              <motion.div
+                className="z-20 text-center"
+                initial={{ scale: 3.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring" }}
+              >
+                <div className="text-9xl mb-2">✅</div>
+                <h1
+                  className="font-black leading-none uppercase tracking-wide"
+                  style={{
+                    fontSize: 'clamp(70px, 11vw, 190px)',
+                    fontFamily: '"Impact", "Arial Black", sans-serif',
+                    color: '#22C55E',
+                    textShadow: '0 0 45px #15803D, 0 10px 40px rgba(0,0,0,0.95)',
+                    WebkitTextStroke: '6px #000000'
+                  }}
+                >
+                  NOT OUT!
+                </h1>
+                <div className="mt-4 inline-block bg-black/85 border-2 border-green-500 text-green-300 font-black text-xl px-10 py-3 rounded-2xl uppercase tracking-widest font-mono">
+                  DECISION CONFIRMED • BATSMAN IS SAFE!
                 </div>
               </motion.div>
             )}

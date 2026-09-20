@@ -121,6 +121,7 @@ export interface StarTVScorebugProps {
   showModeSelectorTabs?: boolean;
   tournamentFours?: number;
   tournamentSixes?: number;
+  brandDisplayMode?: 'alternate' | 'tournament_logo' | 'team_name';
 }
 
 export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
@@ -210,11 +211,72 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   projectedScore,
   showModeSelectorTabs = true,
   tournamentFours,
-  tournamentSixes
+  tournamentSixes,
+  brandDisplayMode = 'alternate'
 }) => {
+  // Robust Tournament Logo resolution (checks props, active match, setup logo, and local tournament stores)
+  const effectiveTournamentLogo = useMemo(() => {
+    if (tournamentLogo && typeof tournamentLogo === 'string' && tournamentLogo.trim().length > 0) {
+      return tournamentLogo.trim();
+    }
+    try {
+      const stored = localStorage.getItem('cricket_tournament_logo');
+      if (stored && stored.trim().length > 0) return stored.trim();
+    } catch (_) {}
+    try {
+      const actStr = localStorage.getItem('cricket_active_match');
+      if (actStr) {
+        const parsed = JSON.parse(actStr);
+        if (parsed?.tournamentLogo && typeof parsed.tournamentLogo === 'string' && parsed.tournamentLogo.trim().length > 0) {
+          return parsed.tournamentLogo.trim();
+        }
+        if (parsed?.tournament?.logo) return parsed.tournament.logo;
+      }
+    } catch (_) {}
+    try {
+      const toursStr = localStorage.getItem('gully_tournaments_v1');
+      if (toursStr) {
+        const tours = JSON.parse(toursStr);
+        if (Array.isArray(tours) && tours.length > 0) {
+          const matching = tours.find((t: any) => 
+            (tournamentName && t.name && t.name.toLowerCase() === tournamentName.toLowerCase()) || t.logo
+          );
+          if (matching?.logo) return matching.logo;
+        }
+      }
+    } catch (_) {}
+    return undefined;
+  }, [tournamentLogo, tournamentName]);
+
   // Scorebug overlay mode state (supports both controlled and uncontrolled usage)
   const [activeScorebugMode, setActiveScorebugMode] = useState<'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr' | 'officials_venue'>(scorebugOverlayMode || 'this_over');
   const [tossEquationMode, setTossEquationMode] = useState<'auto' | 'toss' | 'equation'>('auto');
+
+  // Automated Alternating Display: Team Names Mode vs Tournament Logo Mode
+  // When showing tournament logo on left & right sides: show ONLY the tournament logo (no team name, no team logo).
+  // When showing team names: display team names, team subtexts, and team logos.
+  const [autoBrandFlip, setAutoBrandFlip] = useState<boolean>(false);
+
+  const isTournamentLogoActive = brandDisplayMode === 'tournament_logo' ? true : brandDisplayMode === 'team_name' ? false : autoBrandFlip;
+
+  useEffect(() => {
+    if (brandDisplayMode === 'tournament_logo' || brandDisplayMode === 'team_name') {
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout>;
+    if (!autoBrandFlip) {
+      // Stay in Team Names mode for 7.5 seconds
+      timer = setTimeout(() => {
+        setAutoBrandFlip(true);
+      }, 7500);
+    } else {
+      // Stay in Tournament Logo mode for 5.5 seconds
+      timer = setTimeout(() => {
+        setAutoBrandFlip(false);
+      }, 5500);
+    }
+    return () => clearTimeout(timer);
+  }, [autoBrandFlip, brandDisplayMode]);
 
   useEffect(() => {
     if (scorebugOverlayMode) {
@@ -523,9 +585,9 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         categoryColor: 'text-amber-400',
         content: (
           <span className="text-white inline-flex items-center gap-2 justify-center flex-wrap">
-            {tournamentLogo ? (
+            {effectiveTournamentLogo ? (
               <img 
-                src={tournamentLogo} 
+                src={effectiveTournamentLogo} 
                 alt="Tournament Logo" 
                 className="w-4 h-4 rounded object-cover border border-amber-400/60 inline-block shrink-0 shadow-sm" 
                 referrerPolicy="no-referrer"
@@ -833,38 +895,95 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
             ===================================================================== */}
         <div className="flex-1 flex items-stretch min-w-0 bg-gradient-to-r from-slate-900/90 to-slate-950/80">
           
-          {/* Batting Team Polygonal Brand Block */}
+          {/* Batting Team Polygonal Brand Block (Auto-alternates between Team Name and Tournament Logo) */}
           <div 
-            className="relative px-3.5 sm:px-6 flex items-center gap-2.5 text-white shrink-0 overflow-hidden"
+            className="relative px-3.5 sm:px-6 flex items-center justify-center text-white shrink-0 overflow-hidden cursor-pointer select-none transition-all"
             style={{ 
               backgroundColor: battingTeamColor,
               clipPath: 'polygon(0 0, 100% 0, 88% 100%, 0% 100%)',
-              paddingRight: '2rem'
+              paddingRight: '2.5rem',
+              minWidth: '110px'
             }}
+            onClick={() => setAutoBrandFlip(prev => !prev)}
+            title="Auto-alternates: Team Name vs Official Tournament Logo (Click to flip manually)"
           >
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-white/20 pointer-events-none" />
 
-            {isLive && (
-              <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse shrink-0" />
+            {isLive && !isTournamentLogoActive && (
+              <span className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse shrink-0 mr-1" />
             )}
 
-            {battingTeamLogo ? (
-              <img 
-                src={battingTeamLogo} 
-                alt={battingTeamName} 
-                className="w-9 h-9 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
-                referrerPolicy="no-referrer"
-              />
-            ) : null}
+            <AnimatePresence mode="wait">
+              {!isTournamentLogoActive ? (
+                /* STATE 1: SHOW TEAM NAME & SUBTEXT, HIDE TOURNAMENT LOGO */
+                <motion.div
+                  key="batting-team-name-view"
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 12 }}
+                  transition={{ duration: 0.35, ease: 'easeInOut' }}
+                  className="flex items-center gap-2.5"
+                >
+                  {battingTeamLogo ? (
+                    <img 
+                      src={battingTeamLogo} 
+                      alt={battingTeamName} 
+                      className="w-9 h-9 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full border border-white/40 bg-black/50 flex items-center justify-center font-black text-xs text-white shrink-0 shadow">
+                      {battingTeamName.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
 
-            <div className="flex flex-col">
-              <span className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[120px] xl:max-w-[200px]">
-                {battingTeamName}
-              </span>
-              <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
-                {battingTeamSubtext}
-              </span>
-            </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[120px] xl:max-w-[200px]">
+                      {battingTeamName}
+                    </span>
+                    <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
+                      {battingTeamSubtext}
+                    </span>
+                  </div>
+                </motion.div>
+              ) : (
+                /* STATE 2: SHOW TOURNAMENT LOGO EXCLUSIVELY ON LEFT SIDE (NO TEAM NAME, NO TEAM LOGO) */
+                <motion.div
+                  key="batting-tourn-logo-exclusive-view"
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.85 }}
+                  transition={{ duration: 0.35, ease: 'easeInOut' }}
+                  className="flex items-center justify-center py-1"
+                  title={`Tournament: ${tournamentName || effectiveTournamentName || 'Championship'}`}
+                >
+                  {effectiveTournamentLogo ? (
+                    <div className="relative flex items-center justify-center">
+                      <img 
+                        src={effectiveTournamentLogo} 
+                        alt={tournamentName || effectiveTournamentName || 'Tournament Logo'} 
+                        className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 max-w-full max-h-full object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.85)] filter"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border-2 border-amber-400 bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.6)] shrink-0">
+                        <Trophy size={20} className="fill-current stroke-[2.5]" />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-300 drop-shadow truncate max-w-[120px]">
+                          {tournamentName || effectiveTournamentName || 'TOURNAMENT'}
+                        </span>
+                        <span className="text-[8px] font-bold text-white/75 uppercase tracking-widest leading-none">
+                          OFFICIAL LOGO
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* Batters Details */}
@@ -1108,8 +1227,8 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
-                    {tournamentLogo && (
-                      <img src={tournamentLogo} alt="Logo" className="w-5 h-5 rounded object-cover border border-amber-400/60 shrink-0 shadow-sm" referrerPolicy="no-referrer" />
+                    {effectiveTournamentLogo && (
+                      <img src={effectiveTournamentLogo} alt="Logo" className="w-5 h-5 rounded object-cover border border-amber-400/60 shrink-0 shadow-sm" referrerPolicy="no-referrer" />
                     )}
                     <span className="text-sm sm:text-base md:text-lg font-black uppercase tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-white to-amber-300 truncate drop-shadow-sm">
                       {tournamentName || effectiveTournamentName}
@@ -1311,8 +1430,8 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                     </button>
                   </div>
                   <div className="text-xs sm:text-sm md:text-base font-black uppercase tracking-wide text-white truncate flex items-center gap-2">
-                    {tournamentLogo && (
-                      <img src={tournamentLogo} alt="Logo" className="w-4 h-4 rounded object-cover border border-amber-400/50 shrink-0" referrerPolicy="no-referrer" />
+                    {effectiveTournamentLogo && (
+                      <img src={effectiveTournamentLogo} alt="Logo" className="w-4 h-4 rounded object-cover border border-amber-400/50 shrink-0" referrerPolicy="no-referrer" />
                     )}
                     <span className="text-amber-200 truncate">{effectiveTournamentName}</span>
                     <span className="text-white/40">•</span>
@@ -1412,34 +1531,91 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
           </div>
 
-          {/* Bowling Team Polygonal Brand Block */}
+          {/* Bowling Team Polygonal Brand Block (Auto-alternates between Team Name and Tournament Logo) */}
           <div 
-            className="relative px-3.5 sm:px-6 flex items-center gap-2.5 text-white shrink-0 overflow-hidden text-right"
+            className="relative px-3.5 sm:px-6 flex items-center justify-center text-white shrink-0 overflow-hidden text-right cursor-pointer select-none transition-all"
             style={{ 
               backgroundColor: bowlingTeamColor,
               clipPath: 'polygon(12% 0, 100% 0, 100% 100%, 0% 100%)',
-              paddingLeft: '2rem'
+              paddingLeft: '2.5rem',
+              minWidth: '110px'
             }}
+            onClick={() => setAutoBrandFlip(prev => !prev)}
+            title="Auto-alternates: Team Name vs Official Tournament Logo (Click to flip manually)"
           >
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-white/20 pointer-events-none" />
 
-            <div className="flex flex-col items-end">
-              <span className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[120px] xl:max-w-[200px]">
-                {bowlingTeamName}
-              </span>
-              <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
-                {bowlingTeamSubtext}
-              </span>
-            </div>
+            <AnimatePresence mode="wait">
+              {!isTournamentLogoActive ? (
+                /* STATE 1: SHOW TEAM NAME & SUBTEXT, HIDE TOURNAMENT LOGO */
+                <motion.div
+                  key="bowling-team-name-view"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.35, ease: 'easeInOut' }}
+                  className="flex items-center gap-2.5"
+                >
+                  <div className="flex flex-col items-end">
+                    <span className="text-sm sm:text-base font-black uppercase tracking-wider text-white drop-shadow truncate max-w-[120px] xl:max-w-[200px]">
+                      {bowlingTeamName}
+                    </span>
+                    <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
+                      {bowlingTeamSubtext}
+                    </span>
+                  </div>
 
-            {bowlingTeamLogo ? (
-              <img 
-                src={bowlingTeamLogo} 
-                alt={bowlingTeamName} 
-                className="w-9 h-9 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
-                referrerPolicy="no-referrer"
-              />
-            ) : null}
+                  {bowlingTeamLogo ? (
+                    <img 
+                      src={bowlingTeamLogo} 
+                      alt={bowlingTeamName} 
+                      className="w-9 h-9 rounded-full border border-white/30 bg-black/40 object-contain shrink-0 shadow"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full border border-white/40 bg-black/50 flex items-center justify-center font-black text-xs text-white shrink-0 shadow">
+                      {bowlingTeamName.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                </motion.div>
+              ) : (
+                /* STATE 2: SHOW TOURNAMENT LOGO EXCLUSIVELY ON RIGHT SIDE (NO TEAM NAME, NO TEAM LOGO) */
+                <motion.div
+                  key="bowling-tourn-logo-exclusive-view"
+                  initial={{ opacity: 0, scale: 0.85 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.85 }}
+                  transition={{ duration: 0.35, ease: 'easeInOut' }}
+                  className="flex items-center justify-center py-1"
+                  title={`Tournament: ${tournamentName || effectiveTournamentName || 'Championship'}`}
+                >
+                  {effectiveTournamentLogo ? (
+                    <div className="relative flex items-center justify-center">
+                      <img 
+                        src={effectiveTournamentLogo} 
+                        alt={tournamentName || effectiveTournamentName || 'Tournament Logo'} 
+                        className="h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 max-w-full max-h-full object-contain drop-shadow-[0_4px_12px_rgba(0,0,0,0.85)] filter"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-col items-end">
+                        <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-300 drop-shadow truncate max-w-[120px]">
+                          {tournamentName || effectiveTournamentName || 'TOURNAMENT'}
+                        </span>
+                        <span className="text-[8px] font-bold text-white/75 uppercase tracking-widest leading-none">
+                          OFFICIAL LOGO
+                        </span>
+                      </div>
+                      <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border-2 border-amber-400 bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.6)] shrink-0">
+                        <Trophy size={20} className="fill-current stroke-[2.5]" />
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
         </div>
