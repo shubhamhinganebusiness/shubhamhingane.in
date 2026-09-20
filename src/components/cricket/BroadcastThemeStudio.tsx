@@ -780,20 +780,45 @@ export const BroadcastThemeStudio: React.FC = () => {
                   strikerName="ROHIT SHARMA"
                   strikerRuns={45}
                   strikerBalls={32}
+                  strikerFours={5}
+                  strikerSixes={2}
                   nonStrikerName="VIRAT KOHLI"
                   nonStrikerRuns={28}
                   nonStrikerBalls={18}
+                  nonStrikerFours={3}
+                  nonStrikerSixes={1}
                   score={78}
                   wickets={1}
                   overs="10.2"
+                  oversLimit={20}
+                  crr={7.55}
+                  partnershipRuns={52}
+                  partnershipBalls={34}
+                  last5OversRuns={44}
+                  last5OversWickets={0}
+                  inningsFours={12}
+                  inningsSixes={4}
                   bowlerName="JASPRIT BUMRAH"
                   bowlerFigures="0/14"
                   bowlerOvers="1.2"
+                  bowlerEcon={7.0}
                   thisOverBalls={['1', '0', '4', '0', '1']}
                   bowlingTeamName={theme.teamBName || 'TEAM B'}
                   bowlingTeamSubtext={theme.teamBSubtext || 'BOWLING'}
                   bowlingTeamColor={theme.teamBColor || '#c8102e'}
                   activeStinger={activeStinger}
+                  showWinPredictor={true}
+                  winProbabilityA={68}
+                  winProbabilityB={32}
+                  tournamentName="T20 WORLD CHAMPIONSHIP 2026"
+                  matchStage="FINAL • LIVE"
+                  tossDetails="INDIA WON TOSS & ELECTED TO BAT"
+                  lastBatsmanName="S. GILL"
+                  lastBatsmanRuns={24}
+                  lastBatsmanBalls={16}
+                  lastBatsmanDismissal="c Head b Starc"
+                  lastBatsmanFow="36/1 (4.2 ov)"
+                  projectedScore={188}
                 />
               </div>
             ) : theme.layout === 'docked-corner' ? (

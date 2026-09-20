@@ -7690,12 +7690,14 @@ export const CricketScoreboard: React.FC = () => {
               {(() => {
                 const AVAILABLE_QUEUE_GRAPHICS = [
                   { id: 'score_bug', label: 'Main Scoreboard' },
+                  { id: 'manhattan_graph', label: 'Manhattan Graph' },
+                  { id: 'worm_graph', label: 'Runs Worm Graph' },
+                  { id: 'run_rate_graph', label: 'Run Rate & Projections' },
+                  { id: 'partnership', label: 'Partnerships Profile' },
                   { id: 'batsman_bowler_brush', label: 'Batter & Bowler Pro' },
                   { id: 'player_profile_card', label: 'Player Profile Pro' },
                   { id: 'batsman_stats', label: 'Batsman Stats' },
                   { id: 'bowler_stats', label: 'Bowler Stats' },
-                  { id: 'partnership', label: 'Partnership Card' },
-                  { id: 'worm_graph', label: 'Runs Worm' },
                   { id: 'match_summary', label: 'Match Summary' },
                   { id: 'team_comparison', label: 'Team Comparison' },
                   { id: 'lower_third', label: 'Lower Third Bar' },
@@ -7726,7 +7728,8 @@ export const CricketScoreboard: React.FC = () => {
                   activeGraphic: 'none',
                   lowerThirdMode: 'intro',
                   selectedUmpireSignal: 'out',
-                  customMilestone: null
+                  customMilestone: null,
+                  scorebugOverlayMode: 'this_over'
                 };
 
                 const currentActiveGraphic = activeOverlayConfig.activeGraphic || 'none';
@@ -8130,6 +8133,244 @@ export const CricketScoreboard: React.FC = () => {
                       {/* --- GRAPHICS DISPLAY TAB --- */}
                       {activeControlTab === 'graphics' && (
                         <div className="space-y-2.5">
+                          {/* Star TV Pro Scorebug Over-Section Detail Overlays */}
+                          <div className="space-y-2 bg-gradient-to-br from-indigo-950/40 via-slate-950/80 to-purple-950/30 p-3 border border-indigo-500/30 rounded-2xl shadow-lg">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                                <span>📺 Star TV Pro Scorebug Overlays</span>
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[6.5px] font-mono font-bold">
+                                  REPLACES "THIS OVER"
+                                </span>
+                              </span>
+                              <span className="text-[7px] font-mono text-slate-400 uppercase">
+                                Active: <strong className="text-amber-300">{activeOverlayConfig.scorebugOverlayMode && activeOverlayConfig.scorebugOverlayMode !== 'this_over' ? activeOverlayConfig.scorebugOverlayMode.replace('_', ' ').toUpperCase() : 'THIS OVER'}</strong>
+                              </span>
+                            </div>
+                            
+                            <p className="text-[7.5px] text-slate-300/80 leading-relaxed">
+                              Click any button below to display tournament details, toss/target, last out batsman, partnership, or projected score in place of "THIS OVER" on the Star TV scorebug. Clicking an active button returns to This Over balls.
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {[
+                                {
+                                  id: 'tournament',
+                                  label: '🏆 Tournament Overlay',
+                                  desc: 'Shows tournament name & match stage in scorebug over section',
+                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'tournament',
+                                  onToggle: () => {
+                                    const next = activeOverlayConfig.scorebugOverlayMode === 'tournament' ? 'this_over' : 'tournament';
+                                    updateOverlayProp({ scorebugOverlayMode: next });
+                                    showNotification(next === 'tournament' ? 'Star TV: Tournament Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
+                                  }
+                                },
+                                {
+                                  id: 'toss_equation',
+                                  label: '🪙 Toss / Need Runs / Winner',
+                                  desc: 'Shows toss decision, target chase equation, or match winner',
+                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'toss_equation',
+                                  onToggle: () => {
+                                    const next = activeOverlayConfig.scorebugOverlayMode === 'toss_equation' ? 'this_over' : 'toss_equation';
+                                    updateOverlayProp({ scorebugOverlayMode: next });
+                                    showNotification(next === 'toss_equation' ? 'Star TV: Toss/Target Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
+                                  }
+                                },
+                                {
+                                  id: 'last_batsman',
+                                  label: '⚡ Last Out Batsman',
+                                  desc: 'Shows last dismissed batsman, runs, balls, dismissal & FoW',
+                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'last_batsman',
+                                  onToggle: () => {
+                                    const next = activeOverlayConfig.scorebugOverlayMode === 'last_batsman' ? 'this_over' : 'last_batsman';
+                                    updateOverlayProp({ scorebugOverlayMode: next });
+                                    showNotification(next === 'last_batsman' ? 'Star TV: Last Out Batsman ON AIR' : 'Star TV: Returned to Over Balls', 'info');
+                                  }
+                                },
+                                {
+                                  id: 'partnership',
+                                  label: '🤝 Current Partnership',
+                                  desc: 'Shows current stand runs, balls, and batter split contributions',
+                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'partnership',
+                                  onToggle: () => {
+                                    const next = activeOverlayConfig.scorebugOverlayMode === 'partnership' ? 'this_over' : 'partnership';
+                                    updateOverlayProp({ scorebugOverlayMode: next });
+                                    showNotification(next === 'partnership' ? 'Star TV: Partnership Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
+                                  }
+                                },
+                                {
+                                  id: 'projected_crr',
+                                  label: '📈 Projected Score / CRR / Target',
+                                  desc: 'Shows projected innings total, current run rate & chase equation',
+                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'projected_crr',
+                                  onToggle: () => {
+                                    const next = activeOverlayConfig.scorebugOverlayMode === 'projected_crr' ? 'this_over' : 'projected_crr';
+                                    updateOverlayProp({ scorebugOverlayMode: next });
+                                    showNotification(next === 'projected_crr' ? 'Star TV: Projections/CRR Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
+                                  }
+                                },
+                                {
+                                  id: 'this_over',
+                                  label: '🎯 This Over Balls (Default)',
+                                  desc: 'Standard live ball-by-ball dots, boundaries & extras pills',
+                                  isActive: !activeOverlayConfig.scorebugOverlayMode || activeOverlayConfig.scorebugOverlayMode === 'this_over',
+                                  onToggle: () => {
+                                    updateOverlayProp({ scorebugOverlayMode: 'this_over' });
+                                    showNotification('Star TV: This Over Balls ON AIR', 'info');
+                                  }
+                                }
+                              ].map(item => (
+                                <div
+                                  key={item.id}
+                                  onClick={item.onToggle}
+                                  className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all border select-none ${
+                                    item.isActive
+                                      ? 'bg-gradient-to-r from-indigo-900/50 to-purple-900/50 border-indigo-400/70 shadow-[0_0_14px_rgba(99,102,241,0.3)] ring-1 ring-indigo-400/40'
+                                      : 'bg-slate-950/70 border-white/5 hover:border-white/15 hover:bg-slate-900/60'
+                                  }`}
+                                >
+                                  <div className="text-left min-w-0 pr-1.5">
+                                    <span className={`text-[8.5px] font-black uppercase tracking-wider block truncate ${
+                                      item.isActive ? 'text-indigo-200 font-bold' : 'text-slate-200'
+                                    }`}>
+                                      {item.label}
+                                    </span>
+                                    <span className="text-[7px] text-slate-400 block font-mono truncate">
+                                      {item.desc}
+                                    </span>
+                                  </div>
+                                  <span className={`text-[6.5px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none shrink-0 font-mono ${
+                                    item.isActive ? 'bg-indigo-500 text-white animate-pulse shadow-sm' : 'bg-slate-900 text-slate-500'
+                                  }`}>
+                                    {item.isActive ? 'ON AIR' : 'OFF'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Tournament 4s & 6s Boundary Counter Pop-Up Automation Control */}
+                          <div className="space-y-2 bg-gradient-to-br from-amber-950/25 via-slate-950/40 to-slate-950/20 p-2.5 border border-amber-500/25 rounded-2xl">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[8.5px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                                  <span>💥</span>
+                                  <span>Tournament Boundary Counter Pop-Up</span>
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[6.5px] font-mono font-bold">
+                                  AUTO-TRIGGER 4s & 6s
+                                </span>
+                              </div>
+                              <span className={`text-[6.5px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none font-mono ${
+                                activeOverlayConfig.showBoundaryCounter !== false ? 'bg-amber-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'
+                              }`}>
+                                {activeOverlayConfig.showBoundaryCounter !== false ? 'ENABLED' : 'MUTED'}
+                              </span>
+                            </div>
+
+                            <p className="text-[7.5px] text-slate-300/80 leading-relaxed">
+                              Automatically fires the broadcast popup animation (e.g. Karjat Big Bash League 4s & 6s tally) whenever a batsman strikes a 4 or 6. Includes sound effects and countdown auto-dismiss.
+                            </p>
+
+                            <div className="flex items-center justify-between p-2 bg-slate-950/80 border border-white/5 rounded-xl">
+                              <div className="text-left">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-slate-200 block">
+                                  Auto-Pop on Boundaries
+                                </span>
+                                <span className="text-[6.5px] text-slate-400 block font-mono">
+                                  Show animated 4s & 6s counter on boundary strikes
+                                </span>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const next = activeOverlayConfig.showBoundaryCounter === false;
+                                  updateOverlayProp({ showBoundaryCounter: next });
+                                  showNotification(next ? 'Boundary Counter Pop-Up Enabled' : 'Boundary Counter Pop-Up Muted', 'info');
+                                }}
+                                className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
+                                  activeOverlayConfig.showBoundaryCounter !== false ? 'bg-amber-500' : 'bg-slate-800'
+                                }`}
+                              >
+                                <div
+                                  className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
+                                    activeOverlayConfig.showBoundaryCounter !== false ? 'left-[13px]' : 'left-0.5'
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            {/* Manual Test Trigger Buttons */}
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const currStriker = currentInnings?.batsmen?.[currentInnings.strikerIndex];
+                                  updateOverlayProp({
+                                    manualAlertTrigger: {
+                                      type: 'boundary_counter_four',
+                                      timestamp: Date.now(),
+                                      meta: {
+                                        batterName: currStriker?.name || 'Striker'
+                                      }
+                                    }
+                                  });
+                                  showNotification('Fired Tournament 4s Counter Pop-Up on Broadcast', 'success');
+                                }}
+                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-gradient-to-r from-blue-600/30 to-cyan-500/30 border border-cyan-400/40 text-cyan-300 hover:brightness-125 transition-all text-[8px] font-black uppercase tracking-wider cursor-pointer shadow-sm"
+                              >
+                                <span>⚡</span>
+                                <span>Test 4s Pop-up</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  const currStriker = currentInnings?.batsmen?.[currentInnings.strikerIndex];
+                                  updateOverlayProp({
+                                    manualAlertTrigger: {
+                                      type: 'boundary_counter_six',
+                                      timestamp: Date.now(),
+                                      meta: {
+                                        batterName: currStriker?.name || 'Striker'
+                                      }
+                                    }
+                                  });
+                                  showNotification('Fired Tournament 6s Counter Pop-Up on Broadcast', 'success');
+                                }}
+                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-gradient-to-r from-amber-600/30 to-yellow-500/30 border border-amber-400/40 text-amber-300 hover:brightness-125 transition-all text-[8px] font-black uppercase tracking-wider cursor-pointer shadow-sm"
+                              >
+                                <span>🚀</span>
+                                <span>Test 6s Pop-up</span>
+                              </button>
+                            </div>
+
+                            {/* Pop-Up Screen Position Selector */}
+                            <div className="flex items-center justify-between gap-1 pt-1 border-t border-white/5">
+                              <span className="text-[7px] font-mono font-bold text-slate-400 uppercase">
+                                Position:
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {[
+                                  { id: 'bottom-right', label: 'Bottom-Right' },
+                                  { id: 'bottom-center', label: 'Center' },
+                                  { id: 'top-right', label: 'Top-Right' }
+                                ].map(pos => (
+                                  <button
+                                    key={pos.id}
+                                    onClick={() => {
+                                      updateOverlayProp({ boundaryCounterPosition: pos.id as any });
+                                      showNotification(`Popup position: ${pos.label}`, 'info');
+                                    }}
+                                    className={`px-1.5 py-0.5 rounded text-[7px] font-mono font-bold uppercase transition-all cursor-pointer ${
+                                      (activeOverlayConfig.boundaryCounterPosition || 'bottom-right') === pos.id
+                                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                                        : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
+                                    }`}
+                                  >
+                                    {pos.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
                           {/* Beautiful Custom Toggle Switches for the 8 defined overlay types */}
                           <div className="space-y-1.5 bg-slate-950/20 p-2.5 border border-white/5 rounded-2xl">
                             <span className="text-[7.5px] font-black text-rose-450 uppercase tracking-widest block mb-1.5">Live Displays Toggle Room</span>
@@ -8142,6 +8383,13 @@ export const CricketScoreboard: React.FC = () => {
                                   desc: 'Live score bug overlay in corner',
                                   isActive: activeOverlayConfig.showScoreBug !== false,
                                   onToggle: () => updateOverlayProp({ showScoreBug: activeOverlayConfig.showScoreBug === false })
+                                },
+                                {
+                                  id: 'win_probability_meter',
+                                  label: 'Win Probability Meter (Scorebug)',
+                                  desc: 'Live probability percentage meter floating above the scoreboard',
+                                  isActive: activeOverlayConfig.showWinProbability === true,
+                                  onToggle: () => updateOverlayProp({ showWinProbability: !activeOverlayConfig.showWinProbability })
                                 },
                                 {
                                   id: 'batsman_bowler_brush',
@@ -8179,18 +8427,32 @@ export const CricketScoreboard: React.FC = () => {
                                   onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'bowler_stats' ? 'none' : 'bowler_stats' })
                                 },
                                 {
-                                  id: 'partnership',
-                                  label: 'Partnership Card',
-                                  desc: 'Batsmen runs stand contribution breakdown',
-                                  isActive: currentActiveGraphic === 'partnership',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'partnership' ? 'none' : 'partnership' })
+                                  id: 'manhattan_graph',
+                                  label: 'Manhattan Graph',
+                                  desc: 'Over-by-over runs bar chart with wicket markers & powerplay',
+                                  isActive: ['manhattan_graph', 'manhattan'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['manhattan_graph', 'manhattan'].includes(currentActiveGraphic) ? 'none' : 'manhattan_graph' })
                                 },
                                 {
                                   id: 'worm_graph',
                                   label: 'Runs Worm Graph',
-                                  desc: 'Overs runs cumulative comparison graph',
-                                  isActive: currentActiveGraphic === 'worm_graph',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'worm_graph' ? 'none' : 'worm_graph' })
+                                  desc: 'Innings 1 vs Innings 2 cumulative progression curve',
+                                  isActive: ['worm_graph', 'worm'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['worm_graph', 'worm'].includes(currentActiveGraphic) ? 'none' : 'worm_graph' })
+                                },
+                                {
+                                  id: 'run_rate_graph',
+                                  label: 'Run Rate & Projections',
+                                  desc: 'CRR vs RRR momentum curve, phase split & projected totals',
+                                  isActive: ['run_rate_graph', 'run_rate'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['run_rate_graph', 'run_rate'].includes(currentActiveGraphic) ? 'none' : 'run_rate_graph' })
+                                },
+                                {
+                                  id: 'partnership',
+                                  label: 'Partnerships Profile',
+                                  desc: 'Active stand & chronological wicket partnerships breakdown',
+                                  isActive: ['partnership', 'partnerships_all', 'partnerships'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['partnership', 'partnerships_all', 'partnerships'].includes(currentActiveGraphic) ? 'none' : 'partnership' })
                                 },
                                 {
                                   id: 'match_summary',
@@ -8369,6 +8631,54 @@ export const CricketScoreboard: React.FC = () => {
                                   icon: '📊',
                                   isActive: currentActiveGraphic === 'tournament_standings',
                                   onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'tournament_standings' ? 'none' : 'tournament_standings' })
+                                },
+                                {
+                                  id: 'captains_faceoff',
+                                  label: 'Clash of Titans: Dual Captains Face-Off',
+                                  desc: 'Star TV head-to-head captains duel, career records, strike rates & 3D VS badge',
+                                  icon: '⚔️',
+                                  isActive: currentActiveGraphic === 'captains_faceoff',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'captains_faceoff' ? 'none' : 'captains_faceoff' })
+                                },
+                                {
+                                  id: 'broadcast_wipe_stinger',
+                                  label: '3D Broadcast Wipe Stinger ("Star TV / IPL Wipe")',
+                                  desc: 'Angled polygonal chevron wipe, rotating 3D gold tournament medallion & whoosh FX',
+                                  icon: '💫',
+                                  isActive: currentActiveGraphic === 'broadcast_wipe_stinger',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'broadcast_wipe_stinger' ? 'none' : 'broadcast_wipe_stinger' })
+                                },
+                                {
+                                  id: 'event_six',
+                                  label: 'Holographic SIX! (Maximum Radar Slate)',
+                                  desc: '3D ball trajectory arc, distance radar (104m), exit velocity (148 km/h) & batter card',
+                                  icon: '🔥',
+                                  isActive: currentActiveGraphic === 'event_six',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_six' ? 'none' : 'event_six' })
+                                },
+                                {
+                                  id: 'event_wicket',
+                                  label: 'OUT / WICKET Dramatic Slate',
+                                  desc: 'Giant red & gold impact stamp, dismissal breakdown pill, batsman innings recap & FOW',
+                                  icon: '⚡',
+                                  isActive: currentActiveGraphic === 'event_wicket',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_wicket' ? 'none' : 'event_wicket' })
+                                },
+                                {
+                                  id: 'event_milestone',
+                                  label: 'Player Milestone (50 / 100 Celebration Slate)',
+                                  desc: 'Gold celebration aura, 50* or 100* headline, boundary breakdown & strike rate meter',
+                                  icon: '💯',
+                                  isActive: currentActiveGraphic === 'event_milestone',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_milestone' ? 'none' : 'event_milestone' })
+                                },
+                                {
+                                  id: 'event_innings_break',
+                                  label: 'Innings Break & Target Summary Slate',
+                                  desc: '1st innings total score, target equation for chasing team, top batter & bowler recap',
+                                  icon: '🎯',
+                                  isActive: currentActiveGraphic === 'event_innings_break',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_innings_break' ? 'none' : 'event_innings_break' })
                                 }
                               ].map(item => (
                                 <div key={item.id} className="flex items-center justify-between p-2 bg-slate-950/80 border border-amber-500/10 hover:border-amber-500/30 rounded-xl transition-all">

@@ -2,13 +2,23 @@ import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { BothSquadsImageOverlay } from './BothSquadsImageOverlay';
 import { BatsmanBowlerBrushOverlay, PlayerProfileCardOverlay } from './CricketBroadcastPlayerCards';
+import { StarTVColors, getStarTVThemeTokens, isStarTVThemeActive } from './StarTVThemeTokens';
+import {
+  BroadcastWipeStinger,
+  EventSixSlate,
+  EventWicketSlate,
+  EventMilestoneSlate,
+  EventInningsBreakSlate,
+  StarTVCaptainsFaceoff,
+  ChromaBroadcastContainer
+} from './CricketMatchEventSlates';
 import { 
   Trophy, Award, Star, Shield, Users, 
   TrendingUp, CheckCircle2, ChevronRight,
   MapPin, Sparkles, X, Target, BarChart2,
   Sun, Cloud, Wind, Droplets, Thermometer,
   Layers, Swords, Coins, Gauge, Activity, Flame,
-  Check, Calendar, Clock, Eye
+  Check, Calendar, Clock, Eye, RotateCcw, Quote, Zap
 } from 'lucide-react';
 
 export interface Batsman {
@@ -103,6 +113,9 @@ interface Props {
   activeGraphic: string; // 'team_lineups' | 'lineups' | 'innings_scorecard' | 'match_presentation' | 'tournament_standings' | etc.
   match: MatchState;
   onClose?: () => void;
+  isStarTVTheme?: boolean;
+  starTokens?: StarTVColors;
+  activeConfig?: any;
 }
 
 // Format ball count into standard Cricket overs (e.g. 19 balls -> "3.1")
@@ -1443,9 +1456,17 @@ export const TournamentStandingsOverlay: React.FC<{ match: MatchState; onClose?:
 /* =========================================================================
    PRE-MATCH BUILD-UP 1: THE MATCHUP CARD (SPLIT FULL-SCREEN OR LOWER-THIRD)
    ========================================================================= */
-const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> = ({ match, onClose }) => {
+const MatchupCardOverlay: React.FC<{ 
+  match: MatchState; 
+  onClose?: () => void;
+  isStarTVTheme?: boolean;
+  starTokens?: StarTVColors;
+}> = ({ match, onClose, isStarTVTheme, starTokens }) => {
   // Can be displayed as full screen or large lower-third
   const [displayMode, setDisplayMode] = useState<'fullscreen' | 'lowerthird'>('fullscreen');
+
+  const teamAColor = starTokens?.teamAColor || match.overlayConfig?.teamAColor || '#0143a3';
+  const teamBColor = starTokens?.teamBColor || match.overlayConfig?.teamBColor || '#c8102e';
 
   const tournamentTitle = match.tournamentName || match.seriesName || 'GULLY PREMIER LEAGUE 2026';
   const matchDetails = match.matchNumber || (match.tournamentMatchId ? `MATCH ${match.tournamentMatchId}` : 'MATCH 14 • GROUP STAGE');
@@ -1464,10 +1485,13 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
           animate={{ y: 0, opacity: 1, scale: 1 }}
           exit={{ y: 80, opacity: 0, scale: 0.96 }}
           transition={{ duration: 0.35, ease: 'easeOut' }}
-          className="w-full max-w-5xl bg-gradient-to-r from-slate-950/95 via-slate-900/95 to-slate-950/95 border-2 border-amber-500/40 rounded-3xl p-5 shadow-2xl backdrop-blur-2xl relative overflow-hidden"
+          className="w-full max-w-5xl bg-slate-950/95 border-2 border-white/20 rounded-3xl p-5 shadow-2xl backdrop-blur-2xl relative overflow-hidden"
         >
+          {/* Top Cyan Glint Bar matching Star TV */}
+          <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-sky-400 to-transparent opacity-90 pointer-events-none" />
+
           {/* Ambient Glow */}
-          <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-96 h-24 bg-amber-500/15 blur-3xl pointer-events-none" />
+          <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-96 h-24 bg-sky-500/15 blur-3xl pointer-events-none" />
 
           {/* Top Bar inside lower third */}
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
@@ -1508,14 +1532,24 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
             {/* Team A */}
             <div className="flex items-center gap-3">
               {match.teamALogo ? (
-                <img src={match.teamALogo} alt={match.teamA} className="w-14 h-14 rounded-2xl object-contain bg-slate-950 border border-amber-500/30 p-1 shrink-0 shadow-lg" />
+                <img 
+                  src={match.teamALogo} 
+                  alt={match.teamA} 
+                  className="w-14 h-14 rounded-2xl object-contain bg-slate-950 border p-1 shrink-0 shadow-lg"
+                  style={{ borderColor: `${teamAColor}80` }} 
+                />
               ) : (
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-800 flex items-center justify-center font-black text-white text-lg shrink-0 shadow-lg border border-blue-400/30">
+                <div 
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-white text-lg shrink-0 shadow-lg border"
+                  style={{ backgroundColor: `${teamAColor}30`, borderColor: `${teamAColor}80`, color: teamAColor }}
+                >
                   {match.teamA.slice(0, 3).toUpperCase()}
                 </div>
               )}
               <div className="min-w-0">
-                <span className="text-xs font-mono text-amber-400 uppercase tracking-widest font-black block">TEAM A</span>
+                <span className="text-xs font-mono uppercase tracking-widest font-black block" style={{ color: teamAColor }}>
+                  {match.teamA.toUpperCase()}
+                </span>
                 <h3 className="text-xl font-black text-white uppercase tracking-tight truncate leading-none mt-0.5">{match.teamA}</h3>
                 <span className="text-xs font-mono text-slate-300 block truncate mt-1">Captain: <strong className="text-white">{cleanPlayerName(teamACaptain)}</strong></span>
               </div>
@@ -1523,7 +1557,7 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
 
             {/* Central VS Medallion */}
             <div className="flex flex-col items-center justify-center px-4">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 border-2 border-amber-300">
+              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-400 via-yellow-500 to-amber-600 flex items-center justify-center text-slate-950 font-black text-xs shadow-lg shadow-amber-500/30 border-2 border-amber-300">
                 VS
               </div>
               <span className="text-[8px] font-mono text-amber-300 uppercase tracking-widest font-bold mt-1">LIVE BUILD-UP</span>
@@ -1532,14 +1566,24 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
             {/* Team B */}
             <div className="flex items-center justify-end gap-3 text-right">
               <div className="min-w-0">
-                <span className="text-xs font-mono text-amber-400 uppercase tracking-widest font-black block">TEAM B</span>
+                <span className="text-xs font-mono uppercase tracking-widest font-black block" style={{ color: teamBColor }}>
+                  {match.teamB.toUpperCase()}
+                </span>
                 <h3 className="text-xl font-black text-white uppercase tracking-tight truncate leading-none mt-0.5">{match.teamB}</h3>
                 <span className="text-xs font-mono text-slate-300 block truncate mt-1">Captain: <strong className="text-white">{cleanPlayerName(teamBCaptain)}</strong></span>
               </div>
               {match.teamBLogo ? (
-                <img src={match.teamBLogo} alt={match.teamB} className="w-14 h-14 rounded-2xl object-contain bg-slate-950 border border-amber-500/30 p-1 shrink-0 shadow-lg" />
+                <img 
+                  src={match.teamBLogo} 
+                  alt={match.teamB} 
+                  className="w-14 h-14 rounded-2xl object-contain bg-slate-950 border p-1 shrink-0 shadow-lg"
+                  style={{ borderColor: `${teamBColor}80` }} 
+                />
               ) : (
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-600 to-rose-700 flex items-center justify-center font-black text-white text-lg shrink-0 shadow-lg border border-amber-400/30">
+                <div 
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-white text-lg shrink-0 shadow-lg border"
+                  style={{ backgroundColor: `${teamBColor}30`, borderColor: `${teamBColor}80`, color: teamBColor }}
+                >
                   {match.teamB.slice(0, 3).toUpperCase()}
                 </div>
               )}
@@ -1558,21 +1602,26 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
       exit={{ opacity: 0, scale: 0.98 }}
       className="absolute inset-0 bg-transparent text-white flex flex-col justify-between p-8 z-50 pointer-events-auto font-sans"
     >
+      {/* Top Cyan Glint Bar matching Star TV */}
+      <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-transparent via-sky-400 to-transparent opacity-90 pointer-events-none z-20" />
+
       {/* Dynamic Stadium Lights Ambient Background - Subtle on transparent canvas */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-64 bg-amber-500/10 blur-[140px]" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-64 bg-sky-500/10 blur-[140px]" />
       </div>
 
       {/* Top Broadcast Branding Strip */}
-      <div className="relative z-10 flex items-center justify-between px-6 py-3 bg-slate-950/75 backdrop-blur-md rounded-2xl border border-white/15 shadow-xl">
+      <div className="relative z-10 flex items-center justify-between px-6 py-3 bg-slate-950/85 backdrop-blur-md rounded-2xl border border-white/15 shadow-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-lg">
             <Trophy size={20} />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-amber-400 font-black text-sm uppercase tracking-widest font-mono">{tournamentTitle}</span>
-              <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-450 border border-rose-500/30 text-[9px] font-black uppercase tracking-wider">
+              <span className="text-amber-400 font-black text-sm uppercase tracking-widest font-mono">
+                {isStarTVTheme ? `★ STAR TV BROADCAST • ${tournamentTitle}` : tournamentTitle}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[9px] font-black uppercase tracking-wider">
                 LIVE BUILD-UP
               </span>
             </div>
@@ -1615,19 +1664,25 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
           initial={{ x: -40, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.4 }}
-          className="bg-slate-950/80 border border-blue-500/30 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-md group hover:border-blue-400/60 transition-all"
+          className="bg-slate-950/90 border border-white/20 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-md group hover:border-white/40 transition-all"
         >
-          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-blue-500 via-sky-400 to-indigo-500" />
+          <div className="absolute top-0 inset-x-0 h-2" style={{ backgroundColor: teamAColor }} />
           
-          <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 text-xs font-mono font-black uppercase tracking-widest inline-block mb-5">
-            Team 1
+          <span 
+            className="px-3 py-1 rounded-full text-xs font-mono font-black uppercase tracking-widest inline-block mb-5 border"
+            style={{ backgroundColor: `${teamAColor}30`, borderColor: `${teamAColor}70`, color: '#ffffff' }}
+          >
+            TEAM 1 • {match.teamA.toUpperCase()}
           </span>
 
-          <div className="w-28 h-28 mx-auto mb-5 rounded-3xl bg-slate-950/80 border-2 border-blue-400/40 flex items-center justify-center p-3 shadow-2xl shadow-blue-500/20">
+          <div 
+            className="w-28 h-28 mx-auto mb-5 rounded-3xl bg-slate-950/80 border-2 flex items-center justify-center p-3 shadow-2xl"
+            style={{ borderColor: `${teamAColor}99`, boxShadow: `0 0 25px ${teamAColor}35` }}
+          >
             {match.teamALogo ? (
               <img src={match.teamALogo} alt={match.teamA} className="w-full h-full object-contain" />
             ) : (
-              <span className="font-black text-3xl bg-gradient-to-br from-blue-400 to-indigo-200 bg-clip-text text-transparent">
+              <span className="font-black text-3xl" style={{ color: teamAColor }}>
                 {match.teamA.slice(0, 3).toUpperCase()}
               </span>
             )}
@@ -1675,7 +1730,7 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
             transition={{ repeat: Infinity, duration: 2.5, ease: 'easeInOut' }}
             className="relative"
           >
-            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600 flex items-center justify-center shadow-2xl shadow-amber-500/40 border-4 border-slate-950">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-amber-400 via-yellow-500 to-amber-600 flex items-center justify-center shadow-2xl shadow-amber-500/40 border-4 border-slate-950">
               <Swords size={28} className="text-slate-950" />
             </div>
             <div className="absolute -bottom-2 inset-x-0 flex justify-center">
@@ -1698,19 +1753,25 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
           initial={{ x: 40, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.4 }}
-          className="bg-slate-950/80 border border-amber-500/30 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-md group hover:border-amber-400/60 transition-all"
+          className="bg-slate-950/90 border border-white/20 rounded-3xl p-8 text-center relative overflow-hidden shadow-2xl backdrop-blur-md group hover:border-white/40 transition-all"
         >
-          <div className="absolute top-0 inset-x-0 h-1.5 bg-gradient-to-r from-amber-500 via-orange-400 to-rose-500" />
+          <div className="absolute top-0 inset-x-0 h-2" style={{ backgroundColor: teamBColor }} />
           
-          <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-mono font-black uppercase tracking-widest inline-block mb-5">
-            Team 2
+          <span 
+            className="px-3 py-1 rounded-full text-xs font-mono font-black uppercase tracking-widest inline-block mb-5 border"
+            style={{ backgroundColor: `${teamBColor}30`, borderColor: `${teamBColor}70`, color: '#ffffff' }}
+          >
+            TEAM 2 • {match.teamB.toUpperCase()}
           </span>
 
-          <div className="w-28 h-28 mx-auto mb-5 rounded-3xl bg-slate-950/80 border-2 border-amber-400/40 flex items-center justify-center p-3 shadow-2xl shadow-amber-500/20">
+          <div 
+            className="w-28 h-28 mx-auto mb-5 rounded-3xl bg-slate-950/80 border-2 flex items-center justify-center p-3 shadow-2xl"
+            style={{ borderColor: `${teamBColor}99`, boxShadow: `0 0 25px ${teamBColor}35` }}
+          >
             {match.teamBLogo ? (
               <img src={match.teamBLogo} alt={match.teamB} className="w-full h-full object-contain" />
             ) : (
-              <span className="font-black text-3xl bg-gradient-to-br from-amber-400 to-rose-200 bg-clip-text text-transparent">
+              <span className="font-black text-3xl" style={{ color: teamBColor }}>
                 {match.teamB.slice(0, 3).toUpperCase()}
               </span>
             )}
@@ -1769,131 +1830,361 @@ const MatchupCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> 
 };
 
 /* =========================================================================
-   PRE-MATCH BUILD-UP 2: TOSS RESULT CARD
+   PRE-MATCH BUILD-UP 2: TOSS RESULT CARD (OFFICIAL BROADCAST EDITION)
    ========================================================================= */
-const TossResultCardOverlay: React.FC<{ match: MatchState; onClose?: () => void }> = ({ match, onClose }) => {
+const TossResultCardOverlay: React.FC<{ 
+  match: MatchState; 
+  onClose?: () => void;
+  isStarTVTheme?: boolean;
+  starTokens?: StarTVColors;
+}> = ({ match, onClose, isStarTVTheme = true, starTokens }) => {
   const tossWinner = match.tossWinner || match.teamA;
   const tossChoice = (match.tossChoice || 'bat').toLowerCase() as 'bat' | 'bowl';
-  const oppositionTeam = tossWinner.toLowerCase() === match.teamA.toLowerCase() ? match.teamB : match.teamA;
+  const isWinnerTeamA = tossWinner.toLowerCase() === match.teamA.toLowerCase();
+  const oppositionTeam = isWinnerTeamA ? match.teamB : match.teamA;
 
-  const winnerLogo = tossWinner.toLowerCase() === match.teamA.toLowerCase() ? match.teamALogo : match.teamBLogo;
-  const oppositionLogo = tossWinner.toLowerCase() === match.teamA.toLowerCase() ? match.teamBLogo : match.teamALogo;
+  const teamAColor = starTokens?.teamAColor || match.overlayConfig?.teamAColor || '#0143a3';
+  const teamBColor = starTokens?.teamBColor || match.overlayConfig?.teamBColor || '#c8102e';
+  const winnerColor = isWinnerTeamA ? teamAColor : teamBColor;
+  const oppositionColor = isWinnerTeamA ? teamBColor : teamAColor;
 
-  const winnerCaptain = tossWinner.toLowerCase() === match.teamA.toLowerCase() ? (match.teamACaptain || 'Captain') : (match.teamBCaptain || 'Captain');
-  const oppositionCaptain = tossWinner.toLowerCase() === match.teamA.toLowerCase() ? (match.teamBCaptain || 'Captain') : (match.teamACaptain || 'Captain');
+  const winnerLogo = isWinnerTeamA ? match.teamALogo : match.teamBLogo;
+  const oppositionLogo = isWinnerTeamA ? match.teamBLogo : match.teamALogo;
 
-  const headline = `${tossWinner.toUpperCase()} WON THE TOSS & ELECTED TO ${tossChoice.toUpperCase()} FIRST`;
+  // 3-letter abbreviations
+  const teamACode = match.teamA ? match.teamA.slice(0, 3).toUpperCase() : 'TMA';
+  const teamBCode = match.teamB ? match.teamB.slice(0, 3).toUpperCase() : 'TMB';
+  const winnerCode = isWinnerTeamA ? teamACode : teamBCode;
+  const oppositionCode = isWinnerTeamA ? teamBCode : teamACode;
+
+  // Interactive 3D Coin-Spin State
+  const [isFlipping, setIsFlipping] = useState<boolean>(false);
+  const [coinSide, setCoinSide] = useState<'heads' | 'tails'>('heads');
+  const [chromaMode, setChromaMode] = useState<'dark' | 'transparent' | 'green' | 'blue'>('dark');
+
+  // Trigger Coin Spin
+  const handleFlipCoin = () => {
+    if (isFlipping) return;
+    setIsFlipping(true);
+    setTimeout(() => {
+      setCoinSide(prev => (prev === 'heads' ? 'tails' : 'heads'));
+      setIsFlipping(false);
+    }, 1100);
+  };
+
+  const tournamentBrand = match.tournamentName || match.seriesName || 'ICC MEN\'S T20 CRICKET CHAMPIONSHIP';
+  const matchNumberText = match.matchNumber || 'MATCH 14';
+  const venueLocation = match.groundName || 'Narendra Modi Stadium, Ahmedabad';
 
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      className="absolute inset-0 bg-transparent text-white flex flex-col justify-center items-center p-8 z-50 pointer-events-auto font-sans"
+    <ChromaBroadcastContainer
+      chromaMode={chromaMode}
+      onChromaChange={setChromaMode}
+      onClose={onClose}
+      title="TOSS RESULT OVERLAY"
     >
-      {/* Subtle Ambient Glow on transparent canvas */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-amber-500/20 blur-[130px] rounded-full" />
-      </div>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.94 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.94 }}
+        transition={{ type: "spring", stiffness: 260, damping: 25 }}
+        className="w-full max-w-5xl relative z-10 select-none font-sans"
+      >
+        {/* Dynamic Glow and Color Accents based on Toss Winner */}
+        <div className="absolute -inset-2 rounded-[2.5rem] blur-2xl opacity-40 pointer-events-none transition-all duration-700"
+          style={{
+            background: `radial-gradient(circle at 50% 50%, ${winnerColor}, transparent 75%)`
+          }}
+        />
 
-      {/* Main Center Card */}
-      <div className="relative z-10 w-full max-w-4xl bg-slate-950/80 border-2 border-amber-500/40 rounded-[2.5rem] p-8 md:p-10 shadow-2xl backdrop-blur-md text-center">
-        
-        {/* Top Toss Icon Badge */}
-        <div className="flex items-center justify-between pb-6 border-b border-white/10">
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 font-mono text-xs font-black uppercase tracking-widest flex items-center gap-1.5">
-              <Coins size={14} className="text-amber-400" />
-              OFFICIAL TOSS REPORT
-            </span>
-            <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">
-              {match.tournamentName || match.seriesName || 'GULLY PREMIER LEAGUE 2026'}
-            </span>
-          </div>
+        {/* Master Television Card Box */}
+        <div 
+          className="relative bg-slate-950/95 border-2 rounded-[2.5rem] shadow-[0_30px_90px_rgba(0,0,0,0.95)] overflow-hidden backdrop-blur-3xl flex flex-col"
+          style={{ borderColor: `${winnerColor}99` }}
+        >
+          {/* Top Metallic Gold & Team-Branded Border Ribbon */}
+          <div 
+            className="h-2 w-full"
+            style={{
+              background: `linear-gradient(90deg, ${winnerColor} 0%, #fbbf24 50%, ${winnerColor} 100%)`
+            }}
+          />
 
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white cursor-pointer"
-            >
-              <X size={14} />
-            </button>
-          )}
-        </div>
+          {/* ===================================================================
+              1. MATCH CONTEXT & METADATA (HEADER)
+              Tournament Branding, Match Number, Venue/Location
+             =================================================================== */}
+          <div className="px-6 md:px-8 pt-6 pb-4 border-b border-white/10 bg-slate-900/60 flex flex-wrap items-center justify-between gap-4">
+            
+            {/* Tournament/Series Branding & Match Number */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 font-mono text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.25)]">
+                <Trophy size={14} className="text-amber-400" />
+                <span>{tournamentBrand}</span>
+              </div>
 
-        {/* Central Toss Winner Spotlight */}
-        <div className="my-8 space-y-5">
-          <div className="flex items-center justify-center gap-4">
-            <div className="w-20 h-20 rounded-2xl bg-slate-950/90 border-2 border-amber-400 p-2 shadow-xl shadow-amber-500/20 flex items-center justify-center">
-              {winnerLogo ? (
-                <img src={winnerLogo} alt={tossWinner} className="w-full h-full object-contain" />
-              ) : (
-                <span className="font-black text-2xl text-amber-400">{tossWinner.slice(0, 3).toUpperCase()}</span>
-              )}
+              <span className="text-xs font-mono font-black uppercase tracking-wider text-sky-400 bg-sky-950/80 px-3 py-1.5 rounded-full border border-sky-500/30">
+                {matchNumberText}
+              </span>
+
+              <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-[11px] font-mono font-bold text-slate-300 uppercase">
+                <Sparkles size={12} className="text-amber-400" />
+                OFFICIAL TOSS PROTOCOL
+              </span>
+            </div>
+
+            {/* Venue / Location */}
+            <div className="flex items-center gap-2 text-xs md:text-sm font-mono text-slate-300 bg-slate-950/80 px-3.5 py-1.5 rounded-full border border-white/10">
+              <MapPin size={15} className="text-rose-400 shrink-0" />
+              <span className="font-semibold text-slate-200">{venueLocation}</span>
             </div>
           </div>
 
-          {/* Hero Headline */}
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.15 }}
-            className="space-y-2"
-          >
-            <h1 className="text-2xl md:text-4xl font-black uppercase tracking-tight text-white leading-tight">
-              <span className="text-amber-400 drop-shadow-md">{tossWinner.toUpperCase()}</span> WON THE TOSS
-            </h1>
-            <div className="inline-block px-6 py-2.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-black text-xl md:text-2xl uppercase tracking-wider shadow-xl shadow-amber-500/30">
-              ELECTED TO {tossChoice.toUpperCase()} FIRST
-            </div>
-          </motion.div>
+          {/* ===================================================================
+              MAIN BODY: DYNAMIC COIN, TEAM NAMES & LOGOS, STATEMENT & DECISION
+             =================================================================== */}
+          <div className="p-6 md:p-10 flex flex-col items-center gap-8 relative">
+            
+            {/* Background Color-Blocking Accents (Winner's Side) */}
+            <div 
+              className="absolute inset-y-0 left-0 w-1/3 opacity-20 pointer-events-none blur-3xl"
+              style={{ background: winnerColor }}
+            />
+            <div 
+              className="absolute inset-y-0 right-0 w-1/3 opacity-15 pointer-events-none blur-3xl"
+              style={{ background: oppositionColor }}
+            />
 
-          {/* Strategic Context Pill */}
-          <p className="text-sm md:text-base font-mono text-slate-300 max-w-2xl mx-auto">
-            {tossChoice === 'bat'
-              ? '🏏 Looking to post a commanding target on a fresh 22-yard strip before pitch wears down.'
-              : '🎳 Aiming to capitalize on early moisture and swinging conditions under floodlights.'}
-          </p>
-        </div>
+            {/* =================================================================
+                TEAM NAMES & LOGOS (Crisp Logos, Full Names, 3-letter codes, VS)
+               ================================================================= */}
+            <div className="w-full max-w-3xl flex items-center justify-between gap-4 md:gap-8 z-10">
+              
+              {/* TEAM A CARD */}
+              <div 
+                className={`flex-1 flex items-center gap-4 p-4 md:p-5 rounded-3xl border transition-all ${
+                  isWinnerTeamA 
+                    ? 'bg-slate-900/90 shadow-[0_0_35px_rgba(251,191,36,0.25)] ring-2 ring-amber-400/50' 
+                    : 'bg-slate-950/60 opacity-80'
+                }`}
+                style={{ 
+                  borderColor: isWinnerTeamA ? `${winnerColor}cc` : 'rgba(255,255,255,0.1)',
+                  borderLeft: isWinnerTeamA ? `6px solid ${winnerColor}` : undefined
+                }}
+              >
+                {/* Team A Logo */}
+                <div 
+                  className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-slate-950 border-2 p-2 flex items-center justify-center shrink-0 shadow-lg relative"
+                  style={{ borderColor: `${teamAColor}88` }}
+                >
+                  {match.teamALogo ? (
+                    <img src={match.teamALogo} alt={match.teamA} className="w-full h-full object-contain" />
+                  ) : (
+                    <span className="font-black text-2xl" style={{ color: teamAColor }}>
+                      {teamACode}
+                    </span>
+                  )}
+                  {isWinnerTeamA && (
+                    <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center text-xs shadow-md">
+                      👑
+                    </span>
+                  )}
+                </div>
 
-        {/* Captains & Opposition Row */}
-        <div className="grid grid-cols-2 gap-4 pt-6 border-t border-white/10 text-left">
-          <div className="bg-slate-950/70 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 font-bold text-sm shrink-0">
-              🪙
+                {/* Team A Names */}
+                <div className="min-w-0">
+                  <span className="text-[11px] font-mono uppercase font-black tracking-widest text-slate-400 block">
+                    {teamACode}
+                  </span>
+                  <h3 className="text-lg md:text-2xl font-black uppercase text-white tracking-tight truncate">
+                    {match.teamA}
+                  </h3>
+                  {isWinnerTeamA && (
+                    <span className="inline-block mt-1 text-[10px] font-mono font-black uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                      TOSS WINNER
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* CENTRAL 3D VS & COIN THEME EMBLEM */}
+              <div className="flex flex-col items-center justify-center shrink-0 z-10">
+                <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-slate-900 border-2 border-amber-400/60 shadow-[0_0_20px_rgba(251,191,36,0.3)] flex items-center justify-center text-amber-300 font-black text-sm md:text-base font-mono">
+                  VS
+                </div>
+              </div>
+
+              {/* TEAM B CARD */}
+              <div 
+                className={`flex-1 flex items-center justify-end gap-4 p-4 md:p-5 rounded-3xl border transition-all text-right ${
+                  !isWinnerTeamA 
+                    ? 'bg-slate-900/90 shadow-[0_0_35px_rgba(251,191,36,0.25)] ring-2 ring-amber-400/50' 
+                    : 'bg-slate-950/60 opacity-80'
+                }`}
+                style={{ 
+                  borderColor: !isWinnerTeamA ? `${winnerColor}cc` : 'rgba(255,255,255,0.1)',
+                  borderRight: !isWinnerTeamA ? `6px solid ${winnerColor}` : undefined
+                }}
+              >
+                {/* Team B Names */}
+                <div className="min-w-0">
+                  <span className="text-[11px] font-mono uppercase font-black tracking-widest text-slate-400 block">
+                    {teamBCode}
+                  </span>
+                  <h3 className="text-lg md:text-2xl font-black uppercase text-white tracking-tight truncate">
+                    {match.teamB}
+                  </h3>
+                  {!isWinnerTeamA && (
+                    <span className="inline-block mt-1 text-[10px] font-mono font-black uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                      TOSS WINNER
+                    </span>
+                  )}
+                </div>
+
+                {/* Team B Logo */}
+                <div 
+                  className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-slate-950 border-2 p-2 flex items-center justify-center shrink-0 shadow-lg relative"
+                  style={{ borderColor: `${teamBColor}88` }}
+                >
+                  {match.teamBLogo ? (
+                    <img src={match.teamBLogo} alt={match.teamB} className="w-full h-full object-contain" />
+                  ) : (
+                    <span className="font-black text-2xl" style={{ color: teamBColor }}>
+                      {teamBCode}
+                    </span>
+                  )}
+                  {!isWinnerTeamA && (
+                    <span className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center text-xs shadow-md">
+                      👑
+                    </span>
+                  )}
+                </div>
+              </div>
+
             </div>
-            <div className="min-w-0">
-              <span className="text-[10px] font-mono text-amber-400 uppercase tracking-widest font-black block">TOSS WINNING CAPTAIN</span>
-              <h4 className="text-base font-black text-white truncate leading-tight">{cleanPlayerName(winnerCaptain)}</h4>
-              <span className="text-xs text-slate-400 font-mono block mt-0.5">({tossWinner})</span>
+
+            {/* =================================================================
+                VISUAL GRAPHIC ELEMENT: DYNAMIC 3D COIN ICON
+               ================================================================= */}
+            <div className="flex flex-col items-center justify-center my-1 z-10">
+              <div 
+                className="relative w-28 h-28 md:w-32 md:h-32 [perspective:1000px] cursor-pointer group"
+                onClick={handleFlipCoin}
+                title="Click to flip the official match coin"
+              >
+                <motion.div
+                  animate={{
+                    rotateY: isFlipping ? [0, 720, 1440, 1800, 2160] : (coinSide === 'heads' ? 0 : 180),
+                    scale: isFlipping ? [1, 1.25, 0.9, 1.15, 1] : 1,
+                  }}
+                  transition={{
+                    duration: isFlipping ? 1.1 : 0.6,
+                    ease: "easeInOut"
+                  }}
+                  className="w-full h-full relative rounded-full [transform-style:preserve-3d] shadow-[0_0_40px_rgba(251,191,36,0.65)]"
+                >
+                  {/* HEADS FACE */}
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-amber-200 via-amber-400 to-yellow-600 border-4 border-amber-200 shadow-inner flex flex-col items-center justify-center text-slate-950 [backface-visibility:hidden]">
+                    <div className="w-22 h-22 md:w-26 md:h-26 rounded-full border-2 border-dashed border-amber-900/40 flex flex-col items-center justify-center p-1 bg-gradient-to-t from-amber-400/50 to-transparent">
+                      <Swords size={26} className="text-amber-950 mb-0.5" />
+                      <span className="font-black text-xs md:text-sm uppercase tracking-wider">HEADS</span>
+                      <span className="text-[8px] font-mono uppercase font-black text-amber-950/80">★ OFFICIAL TOSS ★</span>
+                    </div>
+                  </div>
+
+                  {/* TAILS FACE */}
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-yellow-300 via-amber-500 to-amber-700 border-4 border-yellow-200 shadow-inner flex flex-col items-center justify-center text-slate-950 [backface-visibility:hidden] [transform:rotateY(180deg)]">
+                    <div className="w-22 h-22 md:w-26 md:h-26 rounded-full border-2 border-dashed border-amber-900/40 flex flex-col items-center justify-center p-1 bg-gradient-to-t from-amber-500/50 to-transparent">
+                      <Target size={26} className="text-amber-950 mb-0.5" />
+                      <span className="font-black text-xs md:text-sm uppercase tracking-wider">TAILS</span>
+                      <span className="text-[8px] font-mono uppercase font-black text-amber-950/80">★ OFFICIAL TOSS ★</span>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+
+              {/* Coin Landed Indicator */}
+              <button
+                onClick={handleFlipCoin}
+                disabled={isFlipping}
+                className="mt-3 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/90 border border-amber-400/40 text-amber-300 font-mono text-xs font-bold uppercase hover:bg-slate-800 transition-all cursor-pointer shadow-md"
+              >
+                <RotateCcw size={12} className={isFlipping ? 'animate-spin' : ''} />
+                <span>COIN LANDED: <strong className="text-white font-black">{coinSide.toUpperCase()}</strong></span>
+              </button>
+            </div>
+
+            {/* =================================================================
+                TOSS WINNER STATEMENT & THE DECISION
+               ================================================================= */}
+            <div className="w-full max-w-4xl flex flex-col items-center text-center space-y-4 z-10">
+              
+              {/* 1. TOSS WINNER STATEMENT */}
+              <div className="space-y-1">
+                <span className="text-xs md:text-sm font-mono font-black uppercase tracking-[0.25em] text-amber-400 drop-shadow">
+                  ★ OFFICIAL TOSS RESULT ★
+                </span>
+                <h2 className="text-3xl md:text-5xl font-black uppercase text-white tracking-tight drop-shadow-[0_5px_15px_rgba(0,0,0,0.8)]">
+                  {tossWinner} WON THE TOSS
+                </h2>
+              </div>
+
+              {/* 2. THE DECISION (Bold, Clear Lettering Broadcast Ribbon) */}
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.15 }}
+                className="w-full"
+              >
+                <div 
+                  className="w-full py-4 md:py-5 px-6 md:px-10 rounded-2xl md:rounded-3xl shadow-[0_10px_40px_rgba(251,191,36,0.35)] border-2 border-amber-300 flex items-center justify-center gap-3 md:gap-5"
+                  style={{
+                    background: 'linear-gradient(90deg, #f59e0b 0%, #fef08a 50%, #f59e0b 100%)'
+                  }}
+                >
+                  <span className="text-2xl md:text-4xl shrink-0">
+                    {tossChoice === 'bat' ? '🏏' : '🎳'}
+                  </span>
+                  
+                  <span className="text-slate-950 font-black text-xl md:text-3xl uppercase tracking-wider">
+                    ...AND ELECTED TO {tossChoice === 'bat' ? 'BAT' : 'BOWL'} FIRST
+                  </span>
+
+                  <span className="text-2xl md:text-4xl shrink-0">
+                    {tossChoice === 'bat' ? '🏏' : '🎳'}
+                  </span>
+                </div>
+              </motion.div>
+
+              {/* Decision Subtitle / Clarification */}
+              <div className="flex items-center gap-2 text-xs md:text-sm font-mono text-slate-300 pt-1">
+                <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                <span className="font-bold">
+                  DECISION: {tossChoice === 'bat' ? 'BATTING FIRST' : 'BOWLING FIRST'} • {oppositionTeam} WILL {tossChoice === 'bat' ? 'BOWL' : 'BAT'} FIRST
+                </span>
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* Footer Bar */}
+          <div className="px-6 py-3.5 bg-slate-950 border-t border-white/10 flex items-center justify-between text-[11px] font-mono text-slate-400">
+            <div className="flex items-center gap-2">
+              <Clock size={13} className="text-amber-400" />
+              <span>MATCH STARTS SHORTLY • {match.oversLimit || 20} OVERS PER SIDE</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-amber-300 font-bold uppercase tracking-wider">
+                MCC LAW 13 • TOSS RATIFIED
+              </span>
             </div>
           </div>
 
-          <div className="bg-slate-950/70 border border-white/10 rounded-2xl p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-slate-800 border border-white/10 flex items-center justify-center text-slate-400 font-bold text-sm shrink-0">
-              🏏
-            </div>
-            <div className="min-w-0">
-              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-black block">OPPOSITION CAPTAIN</span>
-              <h4 className="text-base font-black text-white truncate leading-tight">{cleanPlayerName(oppositionCaptain)}</h4>
-              <span className="text-xs text-slate-400 font-mono block mt-0.5">({oppositionTeam})</span>
-            </div>
-          </div>
         </div>
-
-        {/* Footer Venue / Match Details */}
-        <div className="flex items-center justify-between pt-6 mt-4 border-t border-white/5 text-xs font-mono text-slate-400">
-          <span className="flex items-center gap-1.5">
-            <MapPin size={13} className="text-amber-400" />
-            {match.groundName || 'Wankhede Cricket Ground'}
-          </span>
-          <span className="text-amber-300 uppercase font-black">
-            Match Starts In Moments • {match.oversLimit || 20} Overs A Side
-          </span>
-        </div>
-
-      </div>
-    </motion.div>
+      </motion.div>
+    </ChromaBroadcastContainer>
   );
 };
 
@@ -2126,10 +2417,22 @@ const PitchWeatherReportOverlay: React.FC<{ match: MatchState; onClose?: () => v
 /* =========================================================================
    MAIN COMPOSITE TRANSITIONS COMPONENT
    ========================================================================= */
-export const CricketFullScreenTransitions: React.FC<Props> = ({ activeGraphic, match, onClose }) => {
+export const CricketFullScreenTransitions: React.FC<Props> = ({ 
+  activeGraphic, 
+  match, 
+  onClose,
+  isStarTVTheme,
+  starTokens: providedStarTokens,
+  activeConfig
+}) => {
   if (!activeGraphic || activeGraphic === 'none') {
     return null;
   }
+
+  const currentInnings = match.currentInningsNum === 1 ? match.innings1 : match.innings2;
+  const config = activeConfig || match.overlayConfig;
+  const isStar = isStarTVTheme ?? isStarTVThemeActive(config);
+  const starTokens = providedStarTokens ?? getStarTVThemeTokens(match, currentInnings, config);
 
   // Pro Broadcast Card 1: Batsman & Bowler Brush Overlay (Image 1 Exact)
   if (
@@ -2155,12 +2458,12 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({ activeGraphic, m
 
   // Pre-Match Build-Up 1: The Matchup Card
   if (activeGraphic === 'prematch_matchup' || activeGraphic === 'matchup_card' || activeGraphic === 'matchup' || activeGraphic === 'match_card') {
-    return <MatchupCardOverlay match={match} onClose={onClose} />;
+    return <MatchupCardOverlay match={match} onClose={onClose} isStarTVTheme={isStar} starTokens={starTokens} />;
   }
 
   // Pre-Match Build-Up 2: Toss Result Card
   if (activeGraphic === 'toss_result' || activeGraphic === 'toss_card' || activeGraphic === 'toss' || activeGraphic === 'toss_report') {
-    return <TossResultCardOverlay match={match} onClose={onClose} />;
+    return <TossResultCardOverlay match={match} onClose={onClose} isStarTVTheme={isStar} starTokens={starTokens} />;
   }
 
   // Pre-Match Build-Up 3: Pitch & Weather Report
@@ -2194,6 +2497,67 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({ activeGraphic, m
   // 4. Tournament Standings / Points Table
   if (activeGraphic === 'tournament_standings' || activeGraphic === 'points_table' || activeGraphic === 'standings') {
     return <TournamentStandingsOverlay match={match} onClose={onClose} />;
+  }
+
+  // 5. 3D Broadcast Wipe Stinger ("The Star TV / IPL Transition")
+  if (
+    activeGraphic === 'broadcast_wipe_stinger' || 
+    activeGraphic === 'wipe_stinger' || 
+    activeGraphic === 'star_wipe' ||
+    activeGraphic === 'tv_wipe'
+  ) {
+    return (
+      <BroadcastWipeStinger 
+        match={match} 
+        onComplete={onClose} 
+        tournamentName={match.tournamentName || 'STAR SPORTS HD'} 
+      />
+    );
+  }
+
+  // 6. High-Impact Match Event Slate: SIX! (MAXIMUM)
+  if (
+    activeGraphic === 'event_six' || 
+    activeGraphic === 'six_slate' || 
+    activeGraphic === 'maximum_slate'
+  ) {
+    return <EventSixSlate match={match} onClose={onClose} />;
+  }
+
+  // 7. High-Impact Match Event Slate: OUT / WICKET
+  if (
+    activeGraphic === 'event_wicket' || 
+    activeGraphic === 'wicket_slate' || 
+    activeGraphic === 'out_slate'
+  ) {
+    return <EventWicketSlate match={match} onClose={onClose} />;
+  }
+
+  // 8. High-Impact Match Event Slate: MILESTONE (50 / 100)
+  if (
+    activeGraphic === 'event_milestone' || 
+    activeGraphic === 'milestone_slate' || 
+    activeGraphic === 'fifty_hundred_slate'
+  ) {
+    return <EventMilestoneSlate match={match} onClose={onClose} />;
+  }
+
+  // 9. High-Impact Match Event Slate: INNINGS BREAK / TARGET SUMMARY
+  if (
+    activeGraphic === 'event_innings_break' || 
+    activeGraphic === 'innings_break' || 
+    activeGraphic === 'target_summary'
+  ) {
+    return <EventInningsBreakSlate match={match} onClose={onClose} />;
+  }
+
+  // 10. Star TV Dual Captains Face-Off & Versus ("Clash of Titans")
+  if (
+    activeGraphic === 'captains_faceoff' || 
+    activeGraphic === 'clash_of_titans' || 
+    activeGraphic === 'captains_versus'
+  ) {
+    return <StarTVCaptainsFaceoff match={match} onClose={onClose} />;
   }
 
   return null;

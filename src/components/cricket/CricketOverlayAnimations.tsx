@@ -38,6 +38,9 @@ export interface StingerMetadata {
   speed?: string;
   distance?: string;
   customText?: string;
+  tournamentFours?: number;
+  tournamentSixes?: number;
+  tournamentName?: string;
 }
 
 export interface CricketOverlayAnimationsProps {
@@ -192,19 +195,19 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
     const timers: NodeJS.Timeout[] = [];
 
     // Timing durations:
-    // Six / Four: 2.4s
-    // Wickets / Dismissals: 3.8s
-    // Milestones (50, 100, hat_trick): 4.2s
-    // Free hit / Situational: 3.2s
+    // Six / Four: 2.0s
+    // Wickets / Dismissals: 2.0s
+    // Milestones (50, 100, hat_trick): 3.5s
+    // Free hit / Situational: 2.4s
     if (normalizedType === 'six' || normalizedType === 'four') {
-      timers.push(setTimeout(() => setPhase(2), 120));
-      timers.push(setTimeout(() => setPhase(3), 400));
-      timers.push(setTimeout(() => setPhase(4), 850));
-      timers.push(setTimeout(() => setPhase(5), 1900)); // Outro fade
+      timers.push(setTimeout(() => setPhase(2), 100));
+      timers.push(setTimeout(() => setPhase(3), 320));
+      timers.push(setTimeout(() => setPhase(4), 700));
+      timers.push(setTimeout(() => setPhase(5), 1650)); // Outro fade
       timers.push(setTimeout(() => {
         onAnimationComplete();
         setPhase(0);
-      }, 2400));
+      }, 2000)); // Exactly 2.0s
     } else if (
       normalizedType === 'bowled' ||
       normalizedType === 'caught' ||
@@ -216,14 +219,14 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
       normalizedType === 'lost_ball' ||
       normalizedType === 'car_hit'
     ) {
-      timers.push(setTimeout(() => setPhase(2), 200));
-      timers.push(setTimeout(() => setPhase(3), 600));
-      timers.push(setTimeout(() => setPhase(4), 1400));
-      timers.push(setTimeout(() => setPhase(5), 3200)); // Outro fade
+      timers.push(setTimeout(() => setPhase(2), 100));
+      timers.push(setTimeout(() => setPhase(3), 350));
+      timers.push(setTimeout(() => setPhase(4), 750));
+      timers.push(setTimeout(() => setPhase(5), 1650)); // Outro fade
       timers.push(setTimeout(() => {
         onAnimationComplete();
         setPhase(0);
-      }, 3800));
+      }, 2000)); // Exactly 2.0s
     } else if (normalizedType === 'fifty' || normalizedType === 'hundred' || normalizedType === 'hat_trick') {
       timers.push(setTimeout(() => setPhase(2), 200));
       timers.push(setTimeout(() => setPhase(3), 700));
@@ -472,11 +475,27 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                 >
                   MAXIMUM!
                 </div>
-                <div className="flex items-center gap-2 bg-gradient-to-r from-amber-500/20 via-yellow-500/30 to-amber-500/20 px-5 py-1.5 rounded-full border border-yellow-400/40 backdrop-blur-md">
+                <div className="flex items-center gap-3 bg-gradient-to-r from-amber-500/20 via-yellow-500/30 to-amber-500/20 px-5 py-1.5 rounded-full border border-yellow-400/40 backdrop-blur-md">
                   <Flame className="w-4 h-4 text-amber-400 animate-bounce" />
                   <span className="text-sm font-mono font-bold text-yellow-300 uppercase tracking-wider">
                     {metadata?.distance ? `DISTANCE: ${metadata.distance}` : `EST. DISTANCE: 94m • MONSTER HIT!`}
                   </span>
+                  {metadata?.batterName && (
+                    <>
+                      <span className="text-yellow-400/40">•</span>
+                      <span className="text-sm font-sans font-black text-white uppercase tracking-wide">
+                        {metadata.batterName} {metadata.runs !== undefined ? `(${metadata.runs}*)` : ''}
+                      </span>
+                    </>
+                  )}
+                  {(metadata?.tournamentSixes !== undefined || metadata?.sixes !== undefined) && (
+                    <>
+                      <span className="text-yellow-400/40">•</span>
+                      <span className="text-xs font-mono font-black bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/40">
+                        {metadata.tournamentName ? `${metadata.tournamentName} 6s:` : 'TOURNAMENT 6s:'} {metadata.tournamentSixes ?? metadata.sixes}
+                      </span>
+                    </>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -556,11 +575,27 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                 >
                   CRACKING FOUR!
                 </div>
-                <div className="flex items-center gap-2 bg-gradient-to-r from-cyan-500/20 via-blue-500/30 to-cyan-500/20 px-5 py-1.5 rounded-full border border-cyan-400/40 backdrop-blur-md">
+                <div className="flex items-center gap-3 bg-gradient-to-r from-cyan-500/20 via-blue-500/30 to-cyan-500/20 px-5 py-1.5 rounded-full border border-cyan-400/40 backdrop-blur-md">
                   <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
                   <span className="text-sm font-mono font-bold text-cyan-300 uppercase tracking-wider">
                     {metadata?.speed ? `RADAR SPEED: ${metadata.speed}` : `RADAR SPEED: 136 km/h • ROCKET TIMING!`}
                   </span>
+                  {metadata?.batterName && (
+                    <>
+                      <span className="text-cyan-400/40">•</span>
+                      <span className="text-sm font-sans font-black text-white uppercase tracking-wide">
+                        {metadata.batterName} {metadata.runs !== undefined ? `(${metadata.runs}*)` : ''}
+                      </span>
+                    </>
+                  )}
+                  {(metadata?.tournamentFours !== undefined || metadata?.fours !== undefined) && (
+                    <>
+                      <span className="text-cyan-400/40">•</span>
+                      <span className="text-xs font-mono font-black bg-cyan-400/20 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-400/40">
+                        {metadata.tournamentName ? `${metadata.tournamentName} 4s:` : 'TOURNAMENT 4s:'} {metadata.tournamentFours ?? metadata.fours}
+                      </span>
+                    </>
+                  )}
                 </div>
               </motion.div>
             )}
