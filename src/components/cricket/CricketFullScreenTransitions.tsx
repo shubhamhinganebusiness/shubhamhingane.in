@@ -1,6 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { BothSquadsImageOverlay } from './BothSquadsImageOverlay';
+import { TeamSquadImageOverlay } from './TeamSquadImageOverlay';
+import { FieldPositionBroadcastOverlay } from './FieldPositionBroadcastOverlay';
+import { BattingSummaryOverlay } from './BattingSummaryOverlay';
+import { BowlingSummaryOverlay } from './BowlingSummaryOverlay';
 import { BatsmanBowlerBrushOverlay, PlayerProfileCardOverlay } from './CricketBroadcastPlayerCards';
 import { StarTVColors, getStarTVThemeTokens, isStarTVThemeActive } from './StarTVThemeTokens';
 import {
@@ -2469,6 +2473,107 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({
   // Pre-Match Build-Up 3: Pitch & Weather Report
   if (activeGraphic === 'pitch_weather_report' || activeGraphic === 'pitch_report' || activeGraphic === 'pitch_weather' || activeGraphic === 'weather_report' || activeGraphic === 'pitch_and_weather') {
     return <PitchWeatherReportOverlay match={match} onClose={onClose} />;
+  }
+
+  // Pre-Match Build-Up 4: Team A Squad List with Images Overlay (1:1 Reference Design)
+  if (
+    activeGraphic === 'squad_a' || 
+    activeGraphic === 'team_a_squad' || 
+    activeGraphic === 'team_a_squad_card' ||
+    activeGraphic === 'team_a_lineup' ||
+    activeGraphic === 'squad_a_alert'
+  ) {
+    return <TeamSquadImageOverlay match={match} initialTeam="teamA" onClose={onClose} />;
+  }
+
+  // Pre-Match Build-Up 5: Team B Squad List with Images Overlay (1:1 Reference Design)
+  if (
+    activeGraphic === 'squad_b' || 
+    activeGraphic === 'team_b_squad' || 
+    activeGraphic === 'team_b_squad_card' ||
+    activeGraphic === 'team_b_lineup' ||
+    activeGraphic === 'squad_b_alert'
+  ) {
+    return <TeamSquadImageOverlay match={match} initialTeam="teamB" onClose={onClose} />;
+  }
+
+  if (
+    activeGraphic === 'team_squad_image' ||
+    activeGraphic === 'squad_image_overlay' ||
+    activeGraphic === 'squad_list_images'
+  ) {
+    return <TeamSquadImageOverlay match={match} initialTeam="teamA" onClose={onClose} />;
+  }
+
+  // Pre-Match / In-Match: Field Position Broadcast Overlay (1:1 Reference Design)
+  if (
+    activeGraphic === 'field_positions' ||
+    activeGraphic === 'field_position' ||
+    activeGraphic === 'field_position_overlay' ||
+    activeGraphic === 'fielding_setup' ||
+    activeGraphic === 'field_positions_alert'
+  ) {
+    return <FieldPositionBroadcastOverlay match={match} onClose={onClose} />;
+  }
+
+  // Batting Summary: Full Screen vs Mini Summary
+  if (
+    activeGraphic === 'batting_summary' ||
+    activeGraphic === 'batting_summary_full' ||
+    activeGraphic === 'batting_summary_alert'
+  ) {
+    return (
+      <BattingSummaryOverlay 
+        match={match} 
+        variant="fullscreen" 
+        onClose={onClose} 
+        isAlert={activeGraphic === 'batting_summary_alert'}
+      />
+    );
+  }
+
+  if (
+    activeGraphic === 'batting_summary_mini' ||
+    activeGraphic === 'batting_summary_mini_alert'
+  ) {
+    return (
+      <BattingSummaryOverlay 
+        match={match} 
+        variant="mini" 
+        onClose={onClose} 
+        isAlert={activeGraphic === 'batting_summary_mini_alert'}
+      />
+    );
+  }
+
+  // Bowling Summary: Full Screen vs Mini Summary
+  if (
+    activeGraphic === 'bowling_summary' ||
+    activeGraphic === 'bowling_summary_full' ||
+    activeGraphic === 'bowling_summary_alert'
+  ) {
+    return (
+      <BowlingSummaryOverlay 
+        match={match} 
+        variant="fullscreen" 
+        onClose={onClose} 
+        isAlert={activeGraphic === 'bowling_summary_alert'}
+      />
+    );
+  }
+
+  if (
+    activeGraphic === 'bowling_summary_mini' ||
+    activeGraphic === 'bowling_summary_mini_alert'
+  ) {
+    return (
+      <BowlingSummaryOverlay 
+        match={match} 
+        variant="mini" 
+        onClose={onClose} 
+        isAlert={activeGraphic === 'bowling_summary_mini_alert'}
+      />
+    );
   }
 
   // 1. Team Lineups / Playing XI / Both Squads

@@ -8,9 +8,9 @@ import { CricketOverlayAnimations } from './CricketOverlayAnimations';
 import { IndividualStatsOverlay } from './IndividualStatsOverlay';
 
 // Firestore imports
-import { db } from '../../lib/firebase';
+import { db, safeSetDoc } from '../../lib/firebase';
 import { doc, onSnapshot, collection, query, where, limit } from 'firebase/firestore';
-import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch } from './cricketStorage';
+import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch, sanitizeForFirestore } from './cricketStorage';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 import { getThemeBackground } from './BroadcastThemeStudio';
 import { StarTVScorebug } from './StarTVScorebug';
@@ -18,6 +18,7 @@ import { isStarTVThemeActive, getStarTVThemeTokens } from './StarTVThemeTokens';
 import { CricketAnalyticsOverlay } from './CricketAnalyticsOverlay';
 import { TournamentBoundaryCounterPopup } from './TournamentBoundaryCounterPopup';
 import { TeamVsTeamOverlay } from './TeamVsTeamOverlay';
+import { FieldPositionManagerModal } from './FieldPositionManagerModal';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -377,6 +378,7 @@ export const CricketOverlay: React.FC = () => {
 
   // Active broadcast graphic state and substates
   const [activeGraphic, setActiveGraphic] = useState<string>('none');
+  const [showFieldPositionModal, setShowFieldPositionModal] = useState<boolean>(false);
   const [activeControlTab, setActiveControlTab] = useState<'alerts' | 'graphics' | 'specials'>('alerts');
   const [lowerThirdMode, setLowerThirdMode] = useState<'intro' | 'equation' | 'umpires'>('intro');
   const [selectedUmpireSignal, setSelectedUmpireSignal] = useState<'out' | 'noball' | 'freehit' | 'deadball' | 'wide'>('out');
@@ -2002,6 +2004,12 @@ export const CricketOverlay: React.FC = () => {
 
   const isFullScreenTransition = [
     'team_lineups', 'lineups', 'playing_xi', 
+    'squad_a', 'team_a_squad', 'team_a_squad_card', 'squad_a_alert',
+    'squad_b', 'team_b_squad', 'team_b_squad_card', 'squad_b_alert',
+    'team_squad_image', 'squad_image_overlay',
+    'field_positions', 'field_position', 'field_position_overlay', 'fielding_setup', 'field_positions_alert',
+    'batting_summary', 'batting_summary_full', 'batting_summary_mini', 'batting_summary_alert', 'batting_summary_mini_alert',
+    'bowling_summary', 'bowling_summary_full', 'bowling_summary_mini', 'bowling_summary_alert', 'bowling_summary_mini_alert',
     'innings_scorecard', 'full_scorecard', 
     'match_presentation', 'potm_card', 'presentation', 
     'tournament_standings', 'points_table', 'standings',
@@ -4716,6 +4724,44 @@ export const CricketOverlay: React.FC = () => {
             🌤️ Pitch & Weather
           </button>
           <button
+            onClick={() => setActiveGraphic((activeGraphic === 'squad_a' || activeGraphic === 'team_a_squad') ? 'none' : 'squad_a')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              (activeGraphic === 'squad_a' || activeGraphic === 'team_a_squad') ? 'bg-blue-500 text-white font-black shadow-lg animate-pulse' : 'bg-white/5 hover:bg-white/10 text-blue-300'
+            }`}
+            title={`Team A (${match?.teamA || 'Team A'}) Squad List with Images Overlay (Exact 1:1 Reference)`}
+          >
+            🛡️ {match?.teamA || 'Team A'} Squad
+          </button>
+          <button
+            onClick={() => setActiveGraphic((activeGraphic === 'squad_b' || activeGraphic === 'team_b_squad') ? 'none' : 'squad_b')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              (activeGraphic === 'squad_b' || activeGraphic === 'team_b_squad') ? 'bg-indigo-500 text-white font-black shadow-lg animate-pulse' : 'bg-white/5 hover:bg-white/10 text-indigo-300'
+            }`}
+            title={`Team B (${match?.teamB || 'Team B'}) Squad List with Images Overlay (Exact 1:1 Reference)`}
+          >
+            🛡️ {match?.teamB || 'Team B'} Squad
+          </button>
+          {/* Field Position: Toggle on air + Set Positions Popup */}
+          <div className="flex items-center rounded-xl bg-white/5 border border-emerald-500/30 p-0.5 shadow-sm">
+            <button
+              onClick={() => setActiveGraphic((activeGraphic === 'field_positions' || activeGraphic === 'field_position') ? 'none' : 'field_positions')}
+              className={`px-2 py-1 rounded-lg font-bold uppercase text-[10px] transition-all cursor-pointer ${
+                (activeGraphic === 'field_positions' || activeGraphic === 'field_position') ? 'bg-emerald-500 text-slate-950 font-black shadow-lg animate-pulse' : 'text-emerald-300 hover:text-white'
+              }`}
+              title="Toggle Field Position on broadcast"
+            >
+              🎯 Field Position
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowFieldPositionModal(true)}
+              className="px-1.5 py-1 rounded-lg text-[9px] font-black uppercase text-emerald-300 hover:text-white hover:bg-emerald-600/40 transition-all border-l border-emerald-500/30 cursor-pointer"
+              title="Open popup to set 11 player field positions for score manager"
+            >
+              ⚙️ Set
+            </button>
+          </div>
+          <button
             onClick={() => setActiveGraphic((activeGraphic === 'team_lineups' || activeGraphic === 'both_squads') ? 'none' : 'team_lineups')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
               (activeGraphic === 'team_lineups' || activeGraphic === 'both_squads') ? 'bg-amber-500 text-slate-950 font-black' : 'bg-white/5 hover:bg-white/10 text-slate-300'
@@ -4741,6 +4787,48 @@ export const CricketOverlay: React.FC = () => {
           >
             📋 Innings Scorecard
           </button>
+          {/* Batting Summary: Full Screen & Mini Toggle */}
+          <div className="flex items-center rounded-xl bg-white/5 border border-amber-500/30 p-0.5">
+            <button
+              onClick={() => setActiveGraphic((activeGraphic === 'batting_summary' || activeGraphic === 'batting_summary_full') ? 'none' : 'batting_summary')}
+              className={`px-2 py-1 rounded-lg font-bold uppercase text-[10px] transition-all cursor-pointer ${
+                (activeGraphic === 'batting_summary' || activeGraphic === 'batting_summary_full') ? 'bg-amber-500 text-slate-950 font-black shadow-lg animate-pulse' : 'text-amber-300 hover:bg-white/10'
+              }`}
+              title="Batting Summary Full Screen Overlay"
+            >
+              🏏 Batting Full
+            </button>
+            <button
+              onClick={() => setActiveGraphic(activeGraphic === 'batting_summary_mini' ? 'none' : 'batting_summary_mini')}
+              className={`px-1.5 py-1 rounded-lg font-bold uppercase text-[9px] transition-all cursor-pointer ${
+                activeGraphic === 'batting_summary_mini' ? 'bg-amber-400 text-slate-950 font-black shadow-lg animate-pulse' : 'text-amber-400/70 hover:text-amber-300 hover:bg-white/10'
+              }`}
+              title="Batting Mini Summary Lower-Third Card"
+            >
+              Mini
+            </button>
+          </div>
+          {/* Bowling Summary: Full Screen & Mini Toggle */}
+          <div className="flex items-center rounded-xl bg-white/5 border border-cyan-500/30 p-0.5">
+            <button
+              onClick={() => setActiveGraphic((activeGraphic === 'bowling_summary' || activeGraphic === 'bowling_summary_full') ? 'none' : 'bowling_summary')}
+              className={`px-2 py-1 rounded-lg font-bold uppercase text-[10px] transition-all cursor-pointer ${
+                (activeGraphic === 'bowling_summary' || activeGraphic === 'bowling_summary_full') ? 'bg-cyan-500 text-slate-950 font-black shadow-lg animate-pulse' : 'text-cyan-300 hover:bg-white/10'
+              }`}
+              title="Bowling Summary Full Screen Overlay"
+            >
+              🎯 Bowling Full
+            </button>
+            <button
+              onClick={() => setActiveGraphic(activeGraphic === 'bowling_summary_mini' ? 'none' : 'bowling_summary_mini')}
+              className={`px-1.5 py-1 rounded-lg font-bold uppercase text-[9px] transition-all cursor-pointer ${
+                activeGraphic === 'bowling_summary_mini' ? 'bg-cyan-400 text-slate-950 font-black shadow-lg animate-pulse' : 'text-cyan-400/70 hover:text-cyan-300 hover:bg-white/10'
+              }`}
+              title="Bowling Mini Summary Lower-Third Card"
+            >
+              Mini
+            </button>
+          </div>
           <button
             onClick={() => setActiveGraphic(activeGraphic === 'match_presentation' ? 'none' : 'match_presentation')}
             className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
@@ -4984,6 +5072,80 @@ export const CricketOverlay: React.FC = () => {
         onClose={() => setBoundaryCounterPopup(prev => ({ ...prev, visible: false }))}
         soundEnabled={true}
       />
+
+      {/* =========================================================================
+          4D. INTERACTIVE FIELD POSITION MANAGER MODAL FOR SCORE MANAGER / BROADCASTER
+          ========================================================================= */}
+      {(() => {
+        const curInn = currentInnings;
+        const currentBowlingTeam = curInn?.bowlingTeam || (curInn?.battingTeam === match?.teamA ? match?.teamB : match?.teamA) || (match?.tossChoice === 'bowl' ? match?.tossWinner : (match?.tossWinner === match?.teamA ? match?.teamB : match?.teamA)) || match?.teamB || 'Team B';
+        const fieldingRoster = currentBowlingTeam === match?.teamA
+          ? (match?.teamASquad && match?.teamASquad.length > 0 ? match?.teamASquad : [])
+          : (match?.teamBSquad && match?.teamBSquad.length > 0 ? match?.teamBSquad : []);
+        const fieldingPlayerNames = Array.isArray(fieldingRoster) && fieldingRoster.length > 0
+          ? fieldingRoster.map((p: any, idx: number) => typeof p === 'string' ? p : (p?.name || `Player ${idx + 1}`))
+          : [];
+
+        return (
+          <FieldPositionManagerModal
+            isOpen={showFieldPositionModal}
+            onClose={() => setShowFieldPositionModal(false)}
+            currentPositions={match?.overlayConfig?.fieldPositions}
+            onSavePositions={async (positions) => {
+              if (!match) return;
+              const updatedConfig = {
+                ...(match.overlayConfig || {}),
+                fieldPositions: positions
+              };
+              const nextMatch = {
+                ...match,
+                overlayConfig: updatedConfig,
+                updatedAt: Date.now()
+              };
+              setMatch(nextMatch as any);
+              try {
+                localStorage.setItem('cricket_active_match', JSON.stringify(nextMatch));
+                if (match.id) {
+                  await safeSetDoc(doc(db, 'cricket_matches', match.id), sanitizeForFirestore(nextMatch), { merge: true });
+                }
+              } catch (e) {
+                console.warn('Field positions sync error:', e);
+              }
+            }}
+            onShowOnBroadcast={async (positions) => {
+              if (!match) return;
+              const updatedConfig = {
+                ...(match.overlayConfig || {}),
+                fieldPositions: positions,
+                activeGraphic: 'field_positions'
+              };
+              const nextMatch = {
+                ...match,
+                overlayConfig: updatedConfig,
+                updatedAt: Date.now()
+              };
+              setMatch(nextMatch as any);
+              setActiveGraphic('field_positions');
+              setShowFieldPositionModal(false);
+              try {
+                localStorage.setItem('cricket_active_match', JSON.stringify(nextMatch));
+                if (match.id) {
+                  await safeSetDoc(doc(db, 'cricket_matches', match.id), sanitizeForFirestore(nextMatch), { merge: true });
+                }
+              } catch (e) {
+                console.warn('Field positions sync error:', e);
+              }
+            }}
+            isLiveOnAir={
+              activeGraphic === 'field_positions' ||
+              activeGraphic === 'field_position' ||
+              activeGraphic === 'field_positions_alert'
+            }
+            fieldingTeamName={currentBowlingTeam}
+            fieldingPlayers={fieldingPlayerNames}
+          />
+        );
+      })()}
 
     </div>
   );

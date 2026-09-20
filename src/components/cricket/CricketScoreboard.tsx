@@ -40,6 +40,8 @@ import { CricketTournamentTab } from './CricketTournamentTab';
 import { DLSCalculatorModal } from './DLSCalculatorModal';
 import { SpinCoinModal, SpinCoinResult } from './SpinCoinModal';
 import { VoiceAssistedScorer } from './VoiceAssistedScorer';
+import { FieldPositionManagerModal } from './FieldPositionManagerModal';
+import { FielderPosition } from './FieldPositionTypes';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
 import { computeFighterOfTheMatch, extractSquadPlayersForCertificates } from '../../utils/certificateVerification';
 import { 
@@ -933,6 +935,9 @@ export const CricketScoreboard: React.FC = () => {
   // Innings break timer states
   const [inningsBreakTimeLeft, setInningsBreakTimeLeft] = useState<number>(300); // 5 min
   const [isInningsBreakTimerRunning, setIsInningsBreakTimerRunning] = useState<boolean>(true);
+
+  // Field Position Manager Modal state
+  const [showFieldPositionModal, setShowFieldPositionModal] = useState<boolean>(false);
 
   // Audio specific toggles
   const [soundWicketEnabled, setSoundWicketEnabled] = useState<boolean>(() => {
@@ -7113,6 +7118,50 @@ export const CricketScoreboard: React.FC = () => {
           onClose={() => setShowSponsorModal(false)}
           matchId={match.id}
         />
+
+        {/* Interactive Field Position Manager Modal (Popup for 11 Players) */}
+        {(() => {
+          const currentBowlingTeam = currentInnings?.bowlingTeam || (currentInnings?.battingTeam === match.teamA ? match.teamB : match.teamA) || (match.tossChoice === 'bowl' ? match.tossWinner : (match.tossWinner === match.teamA ? match.teamB : match.teamA)) || match.teamB || 'Team B';
+          const fieldingRoster = currentBowlingTeam === match.teamA
+            ? (match.teamASquad && match.teamASquad.length > 0 ? match.teamASquad : selectedTeamARoster)
+            : (match.teamBSquad && match.teamBSquad.length > 0 ? match.teamBSquad : selectedTeamBRoster);
+          const fieldingPlayerNames = Array.isArray(fieldingRoster) && fieldingRoster.length > 0
+            ? fieldingRoster.map((p: any, idx: number) => typeof p === 'string' ? p : (p?.name || `Player ${idx + 1}`))
+            : [];
+
+          return (
+            <FieldPositionManagerModal
+              isOpen={showFieldPositionModal}
+              onClose={() => setShowFieldPositionModal(false)}
+              currentPositions={match.overlayConfig?.fieldPositions}
+              onSavePositions={(positions) => {
+                const updated = {
+                  ...(match.overlayConfig || {}),
+                  fieldPositions: positions
+                };
+                syncMatch({ ...match, overlayConfig: updated });
+                showNotification('Field positions saved successfully', 'success');
+              }}
+              onShowOnBroadcast={(positions) => {
+                const updated = {
+                  ...(match.overlayConfig || {}),
+                  fieldPositions: positions,
+                  activeGraphic: 'field_positions'
+                };
+                syncMatch({ ...match, overlayConfig: updated });
+                setShowFieldPositionModal(false);
+                showNotification('Field Position Overlay is now LIVE ON AIR!', 'success');
+              }}
+              isLiveOnAir={
+                match.overlayConfig?.activeGraphic === 'field_positions' ||
+                match.overlayConfig?.activeGraphic === 'field_position' ||
+                match.overlayConfig?.activeGraphic === 'field_positions_alert'
+              }
+              fieldingTeamName={currentBowlingTeam}
+              fieldingPlayers={fieldingPlayerNames}
+            />
+          );
+        })()}
       </>
     );
   };
@@ -7818,6 +7867,10 @@ export const CricketScoreboard: React.FC = () => {
               {(() => {
                 const AVAILABLE_QUEUE_GRAPHICS = [
                   { id: 'score_bug', label: 'Main Scoreboard' },
+                  { id: 'batting_summary', label: 'Batting Summary (Full)' },
+                  { id: 'batting_summary_mini', label: 'Batting Summary (Mini)' },
+                  { id: 'bowling_summary', label: 'Bowling Summary (Full)' },
+                  { id: 'bowling_summary_mini', label: 'Bowling Summary (Mini)' },
                   { id: 'manhattan_graph', label: 'Manhattan Graph' },
                   { id: 'worm_graph', label: 'Runs Worm Graph' },
                   { id: 'run_rate_graph', label: 'Run Rate & Projections' },
@@ -7866,22 +7919,46 @@ export const CricketScoreboard: React.FC = () => {
                   const updated = { ...activeOverlayConfig, ...updates };
                   syncMatch({ ...match, overlayConfig: updated });
 
-                  // Handle auto-close for Wicket, Milestone, and Team VS Team alerts after timeout
+                  // Handle auto-close for Wicket, Milestone, Team VS Team, Squad, Field Position, and Summary alerts after timeout
                   if (
                     updates.activeGraphic === 'wicket_alert_temp' ||
                     updates.activeGraphic === 'milestone_alert_temp' ||
-                    updates.activeGraphic === 'team_vs_team_alert'
+                    updates.activeGraphic === 'team_vs_team_alert' ||
+                    updates.activeGraphic === 'squad_a_alert' ||
+                    updates.activeGraphic === 'squad_b_alert' ||
+                    updates.activeGraphic === 'field_positions_alert' ||
+                    updates.activeGraphic === 'batting_summary_alert' ||
+                    updates.activeGraphic === 'batting_summary_mini_alert' ||
+                    updates.activeGraphic === 'bowling_summary_alert' ||
+                    updates.activeGraphic === 'bowling_summary_mini_alert'
                   ) {
                     if (graphicDismissTimerRef.current) {
                       clearTimeout(graphicDismissTimerRef.current);
                     }
-                    const dismissTime = updates.activeGraphic === 'team_vs_team_alert' ? 7000 : 5000;
+                    const dismissTime = (
+                      updates.activeGraphic === 'batting_summary_alert' ||
+                      updates.activeGraphic === 'batting_summary_mini_alert' ||
+                      updates.activeGraphic === 'bowling_summary_alert' ||
+                      updates.activeGraphic === 'bowling_summary_mini_alert'
+                    ) ? 8000 : (
+                      updates.activeGraphic === 'team_vs_team_alert' || 
+                      updates.activeGraphic === 'squad_a_alert' || 
+                      updates.activeGraphic === 'squad_b_alert' ||
+                      updates.activeGraphic === 'field_positions_alert'
+                    ) ? 7000 : 5000;
                     graphicDismissTimerRef.current = setTimeout(() => {
                       setMatch((latestMatch) => {
                         if (
                           latestMatch.overlayConfig?.activeGraphic === 'wicket_alert_temp' ||
                           latestMatch.overlayConfig?.activeGraphic === 'milestone_alert_temp' ||
-                          latestMatch.overlayConfig?.activeGraphic === 'team_vs_team_alert'
+                          latestMatch.overlayConfig?.activeGraphic === 'team_vs_team_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'squad_a_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'squad_b_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'field_positions_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'batting_summary_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'batting_summary_mini_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'bowling_summary_alert' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'bowling_summary_mini_alert'
                         ) {
                           const noneConfig = { ...latestMatch.overlayConfig, activeGraphic: 'none' };
                           const nextMatch = { ...latestMatch, overlayConfig: noneConfig };
@@ -8133,6 +8210,121 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
 
+                          {/* Team Squad List with Images Overlay (Two Different Buttons: Team A Squad & Team B Squad) */}
+                          <div className="border border-blue-500/30 bg-gradient-to-r from-blue-950/70 via-slate-950/90 to-indigo-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 flex items-center justify-center text-xs shadow-md shrink-0 border border-blue-400/40">
+                                  👥
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
+                                    Team Squad List with Images Overlay (1:1 TV Graphic)
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-slate-300 block truncate">
+                                    Photos / Avatars • Metallic Bar • Gold Bottom Toss Banner • 11 Squad
+                                  </span>
+                                </div>
+                              </div>
+                              {(currentActiveGraphic === 'squad_a' || currentActiveGraphic === 'squad_b') && (
+                                <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
+                                  {currentActiveGraphic === 'squad_a' ? `${(match.teamA || 'TEAM A').toUpperCase()} SQUAD LIVE` : `${(match.teamB || 'TEAM B').toUpperCase()} SQUAD LIVE`}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* TWO DIFFERENT BUTTONS FOR TEAM A AND TEAM B SQUAD LIST */}
+                            <div className="grid grid-cols-2 gap-2">
+                              {/* BUTTON 1: TEAM A SQUAD */}
+                              <div className="p-2 rounded-xl bg-slate-950/80 border border-blue-500/30 flex flex-col justify-between gap-1.5 shadow-md">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[8.5px] font-black uppercase text-blue-300 truncate">
+                                    🛡️ {match.teamA || 'Team A'} Squad
+                                  </span>
+                                  {currentActiveGraphic === 'squad_a' && (
+                                    <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping shrink-0" />
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      const nextState = currentActiveGraphic === 'squad_a' ? 'none' : 'squad_a';
+                                      updateOverlayProp({ activeGraphic: nextState });
+                                      showNotification(
+                                        nextState === 'squad_a' ? `${match.teamA || 'Team A'} squad list overlay live on air!` : 'Squad overlay dismissed.',
+                                        nextState === 'squad_a' ? 'success' : 'info'
+                                      );
+                                    }}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow ${
+                                      currentActiveGraphic === 'squad_a'
+                                        ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/40'
+                                    }`}
+                                  >
+                                    <span>{currentActiveGraphic === 'squad_a' ? '🔴 Dismiss' : '📺 Show Team A'}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      triggerManualAlert('squad_a', {
+                                        teamName: match.teamA || 'Team A',
+                                        tournamentName: match.tournamentName || 'STAR TV PREMIER LEAGUE',
+                                        matchStage: 'Match No. 2 , Group Match'
+                                      });
+                                    }}
+                                    className="py-1.5 px-1.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[7px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all shrink-0"
+                                    title="Trigger 7s Auto-Dismiss Alert"
+                                  >
+                                    ⚡ 7s
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* BUTTON 2: TEAM B SQUAD */}
+                              <div className="p-2 rounded-xl bg-slate-950/80 border border-indigo-500/30 flex flex-col justify-between gap-1.5 shadow-md">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[8.5px] font-black uppercase text-indigo-300 truncate">
+                                    🛡️ {match.teamB || 'Team B'} Squad
+                                  </span>
+                                  {currentActiveGraphic === 'squad_b' && (
+                                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping shrink-0" />
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      const nextState = currentActiveGraphic === 'squad_b' ? 'none' : 'squad_b';
+                                      updateOverlayProp({ activeGraphic: nextState });
+                                      showNotification(
+                                        nextState === 'squad_b' ? `${match.teamB || 'Team B'} squad list overlay live on air!` : 'Squad overlay dismissed.',
+                                        nextState === 'squad_b' ? 'success' : 'info'
+                                      );
+                                    }}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow ${
+                                      currentActiveGraphic === 'squad_b'
+                                        ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                        : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-indigo-400/40'
+                                    }`}
+                                  >
+                                    <span>{currentActiveGraphic === 'squad_b' ? '🔴 Dismiss' : '📺 Show Team B'}</span>
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      triggerManualAlert('squad_b', {
+                                        teamName: match.teamB || 'Team B',
+                                        tournamentName: match.tournamentName || 'STAR TV PREMIER LEAGUE',
+                                        matchStage: 'Match No. 2 , Group Match'
+                                      });
+                                    }}
+                                    className="py-1.5 px-1.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[7px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all shrink-0"
+                                    title="Trigger 7s Auto-Dismiss Alert"
+                                  >
+                                    ⚡ 7s
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
                           {/* Featured Team A VS Team B 3D Tournament Overlay Option */}
                           <div className="border border-blue-500/30 bg-gradient-to-r from-blue-950/60 via-slate-950/90 to-red-950/60 p-2.5 rounded-2xl space-y-2 shadow-lg">
                             <div className="flex items-center justify-between">
@@ -8194,13 +8386,253 @@ export const CricketScoreboard: React.FC = () => {
                               >
                                 <span>⚡ 6s Stinger Alert</span>
                               </button>
+                              </div>
+                          </div>
+
+                          {/* Field Position Overlay Option (Interactive 11 Players Ground Graphic) */}
+                          <div className="border border-emerald-500/40 bg-gradient-to-r from-emerald-950/70 via-slate-950/95 to-teal-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-emerald-600 via-teal-600 to-slate-900 flex items-center justify-center text-xs shadow-md shrink-0 border border-emerald-400/40">
+                                  🎯
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
+                                    Field Position Overlay (11 Players Ground)
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-emerald-300/80 block truncate">
+                                    Interactive Ground Popup • Draggable 11 Players • 1:1 TV Broadcast Graphic
+                                  </span>
+                                </div>
+                              </div>
+                              {(currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position' || currentActiveGraphic === 'field_positions_alert') && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
+                                  LIVE ON AIR
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
+                              {/* BUTTON: Open Field Position Setup Popup Modal (11 Players available) */}
+                              <button
+                                type="button"
+                                onClick={() => setShowFieldPositionModal(true)}
+                                className="sm:col-span-6 py-2 px-2.5 rounded-xl border border-emerald-500/50 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                                title="Open interactive popup to set 11 player field positions on cricket ground"
+                              >
+                                <span>🎯</span>
+                                <span>Set Field Positions (Popup)</span>
+                              </button>
+
+                              {/* Live Broadcast Toggle Button */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextState = (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? 'none' : 'field_positions';
+                                  updateOverlayProp({ activeGraphic: nextState });
+                                  showNotification(
+                                    nextState === 'field_positions' ? 'Field Position overlay is LIVE ON AIR!' : 'Field Position overlay dismissed.',
+                                    nextState === 'field_positions' ? 'success' : 'info'
+                                  );
+                                }}
+                                className={`sm:col-span-4 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-md ${
+                                  (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-white/10 hover:bg-white/15 text-emerald-300 border-white/15'
+                                }`}
+                              >
+                                <span>{(currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? '🔴 Dismiss' : '📺 Show On TV'}</span>
+                              </button>
+
+                              {/* 7s Auto-Dismiss Alert Button */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updateOverlayProp({ activeGraphic: 'field_positions_alert' });
+                                  showNotification('Field Position Overlay: 7s Stinger Alert triggered on air!', 'info');
+                                }}
+                                className="sm:col-span-2 py-2 px-1.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                title="Trigger 7s Auto-Dismiss Field Position Alert"
+                              >
+                                <span>⚡ 7s</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 🏏 BATTING SUMMARY OVERLAY: TWO OPTIONS (FULL SCREEN & MINI SUMMARY) */}
+                          <div className="border border-amber-500/40 bg-gradient-to-r from-amber-950/70 via-slate-950/95 to-orange-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-amber-500 via-amber-600 to-orange-700 flex items-center justify-center text-xs shadow-md shrink-0 border border-amber-400/40 text-slate-950 font-black">
+                                  🏏
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
+                                    Batting Summary Overlay (1:1 Broadcast TV Graphic)
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-amber-300/80 block truncate">
+                                    Two Display Modes: Full Screen Breakdown & Non-intrusive Mini Lower-Third
+                                  </span>
+                                </div>
+                              </div>
+                              {/* Active Status Badge */}
+                              {(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full' || currentActiveGraphic === 'batting_summary_mini' || currentActiveGraphic === 'batting_summary_alert' || currentActiveGraphic === 'batting_summary_mini_alert') && (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
+                                  {currentActiveGraphic.includes('mini') ? 'MINI SUMMARY LIVE' : 'FULL SCREEN LIVE'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* TWO OPTIONS BUTTONS GRID: FULL SCREEN & MINI SUMMARY */}
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
+                              {/* OPTION 1: FULL SCREEN BATTING SUMMARY */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isFullActive = currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full';
+                                  const next = isFullActive ? 'none' : 'batting_summary';
+                                  updateOverlayProp({ activeGraphic: next });
+                                  showNotification(
+                                    next === 'batting_summary' ? 'Full Screen Batting Summary LIVE ON AIR!' : 'Batting Summary dismissed.',
+                                    next === 'batting_summary' ? 'success' : 'info'
+                                  );
+                                }}
+                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                  (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full')
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white border-amber-400/40'
+                                }`}
+                                title="Show Full Screen Batting Breakdown Scorecard on TV stream"
+                              >
+                                <span>{(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full') ? '🔴 Dismiss Full' : '📺 Full Screen Summary'}</span>
+                              </button>
+
+                              {/* OPTION 2: MINI SUMMARY LOWER-THIRD */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isMiniActive = currentActiveGraphic === 'batting_summary_mini';
+                                  const next = isMiniActive ? 'none' : 'batting_summary_mini';
+                                  updateOverlayProp({ activeGraphic: next });
+                                  showNotification(
+                                    next === 'batting_summary_mini' ? 'Mini Batting Summary LIVE ON AIR!' : 'Mini Batting Summary dismissed.',
+                                    next === 'batting_summary_mini' ? 'success' : 'info'
+                                  );
+                                }}
+                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                  currentActiveGraphic === 'batting_summary_mini'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/30'
+                                }`}
+                                title="Show Non-intrusive Lower-Third Mini Batting Card on TV stream"
+                              >
+                                <span>{currentActiveGraphic === 'batting_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Mini Summary (Lower-Third)'}</span>
+                              </button>
+
+                              {/* 8s Auto-Dismiss Alert */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updateOverlayProp({ activeGraphic: 'batting_summary_alert' });
+                                  showNotification('Batting Summary: 8s Alert triggered on air!', 'info');
+                                }}
+                                className="sm:col-span-2 py-2 px-1 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                title="Trigger 8s Auto-Dismiss Batting Alert"
+                              >
+                                <span>⚡ 8s</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 🎯 BOWLING SUMMARY OVERLAY: TWO OPTIONS (FULL SCREEN & MINI SUMMARY) */}
+                          <div className="border border-cyan-500/40 bg-gradient-to-r from-cyan-950/70 via-slate-950/95 to-teal-950/70 p-2.5 rounded-2xl space-y-2 shadow-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-cyan-500 via-teal-600 to-slate-900 flex items-center justify-center text-xs shadow-md shrink-0 border border-cyan-400/40 text-slate-950 font-black">
+                                  🎯
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
+                                    Bowling Summary Overlay (1:1 Broadcast TV Graphic)
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-cyan-300/80 block truncate">
+                                    Two Display Modes: Full Screen Spell Breakdown & Non-intrusive Mini Lower-Third
+                                  </span>
+                                </div>
+                              </div>
+                              {/* Active Status Badge */}
+                              {(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full' || currentActiveGraphic === 'bowling_summary_mini' || currentActiveGraphic === 'bowling_summary_alert' || currentActiveGraphic === 'bowling_summary_mini_alert') && (
+                                <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
+                                  {currentActiveGraphic.includes('mini') ? 'MINI SUMMARY LIVE' : 'FULL SCREEN LIVE'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* TWO OPTIONS BUTTONS GRID: FULL SCREEN & MINI SUMMARY */}
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-1.5">
+                              {/* OPTION 1: FULL SCREEN BOWLING SUMMARY */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isFullActive = currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full';
+                                  const next = isFullActive ? 'none' : 'bowling_summary';
+                                  updateOverlayProp({ activeGraphic: next });
+                                  showNotification(
+                                    next === 'bowling_summary' ? 'Full Screen Bowling Summary LIVE ON AIR!' : 'Bowling Summary dismissed.',
+                                    next === 'bowling_summary' ? 'success' : 'info'
+                                  );
+                                }}
+                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                  (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full')
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white border-cyan-400/40'
+                                }`}
+                                title="Show Full Screen Bowling Spell Breakdown Scorecard on TV stream"
+                              >
+                                <span>{(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full') ? '🔴 Dismiss Full' : '📺 Full Screen Summary'}</span>
+                              </button>
+
+                              {/* OPTION 2: MINI SUMMARY LOWER-THIRD */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isMiniActive = currentActiveGraphic === 'bowling_summary_mini';
+                                  const next = isMiniActive ? 'none' : 'bowling_summary_mini';
+                                  updateOverlayProp({ activeGraphic: next });
+                                  showNotification(
+                                    next === 'bowling_summary_mini' ? 'Mini Bowling Summary LIVE ON AIR!' : 'Mini Bowling Summary dismissed.',
+                                    next === 'bowling_summary_mini' ? 'success' : 'info'
+                                  );
+                                }}
+                                className={`sm:col-span-5 py-2 px-2 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                  currentActiveGraphic === 'bowling_summary_mini'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border-cyan-500/30'
+                                }`}
+                                title="Show Non-intrusive Lower-Third Mini Bowling Card on TV stream"
+                              >
+                                <span>{currentActiveGraphic === 'bowling_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Mini Summary (Lower-Third)'}</span>
+                              </button>
+
+                              {/* 8s Auto-Dismiss Alert */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updateOverlayProp({ activeGraphic: 'bowling_summary_alert' });
+                                  showNotification('Bowling Summary: 8s Alert triggered on air!', 'info');
+                                }}
+                                className="sm:col-span-2 py-2 px-1 bg-white/5 hover:bg-white/10 border border-white/15 text-cyan-300 hover:text-cyan-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-0.5"
+                                title="Trigger 8s Auto-Dismiss Bowling Alert"
+                              >
+                                <span>⚡ 8s</span>
+                              </button>
                             </div>
                           </div>
 
                           {/* Manual Transient Overlay Animations */}
                           <div className="border border-white/5 bg-slate-950/40 p-2 rounded-2xl space-y-1.5">
                             <span className="text-[7.5px] font-black text-rose-400 uppercase tracking-widest block">Manual Transient Animations</span>
-                            <div className="grid grid-cols-4 gap-1.5">
+                            <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
                               <button
                                 onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wicket_alert_temp' ? 'none' : 'wicket_alert_temp' })}
                                 className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
@@ -8210,7 +8642,7 @@ export const CricketScoreboard: React.FC = () => {
                                 }`}
                               >
                                 <span className="text-[9px]">🏏</span>
-                                <span>Wicket Pop</span>
+                                <span>Wicket</span>
                               </button>
                               <button
                                 onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'milestone_alert_temp' ? 'none' : 'milestone_alert_temp' })}
@@ -8224,6 +8656,30 @@ export const CricketScoreboard: React.FC = () => {
                                 <span>Milestone</span>
                               </button>
                               <button
+                                onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini') ? 'none' : 'batting_summary' })}
+                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
+                                  (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini')
+                                    ? 'bg-amber-500/25 border-amber-500/50 text-amber-300 font-black shadow-md'
+                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                }`}
+                                title="Toggle Batting Summary"
+                              >
+                                <span className="text-[9px]">🏏</span>
+                                <span>Bat Sum</span>
+                              </button>
+                              <button
+                                onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini') ? 'none' : 'bowling_summary' })}
+                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
+                                  (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini')
+                                    ? 'bg-cyan-500/25 border-cyan-500/50 text-cyan-300 font-black shadow-md'
+                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                }`}
+                                title="Toggle Bowling Summary"
+                              >
+                                <span className="text-[9px]">🎯</span>
+                                <span>Bowl Sum</span>
+                              </button>
+                              <button
                                 onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wagon_wheel' ? 'none' : 'wagon_wheel' })}
                                 className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
                                   currentActiveGraphic === 'wagon_wheel'
@@ -8232,7 +8688,7 @@ export const CricketScoreboard: React.FC = () => {
                                 }`}
                               >
                                 <span className="text-[9px]">🎡</span>
-                                <span>Wagon Wheel</span>
+                                <span>Wagon</span>
                               </button>
                               <button
                                 onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })}
@@ -8244,6 +8700,18 @@ export const CricketScoreboard: React.FC = () => {
                               >
                                 <span className="text-[9px]">⚔️</span>
                                 <span>VS Shield</span>
+                              </button>
+                              <button
+                                onClick={() => setShowFieldPositionModal(true)}
+                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
+                                  (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
+                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 font-bold shadow-md'
+                                    : 'bg-slate-950 border-emerald-500/20 text-emerald-400/90 hover:bg-emerald-950/40'
+                                }`}
+                                title="Open Field Position Popup (11 Players Setup)"
+                              >
+                                <span className="text-[9px]">🎯</span>
+                                <span>Field Pos</span>
                               </button>
                             </div>
 
@@ -8622,6 +9090,20 @@ export const CricketScoreboard: React.FC = () => {
                                   onToggle: () => updateOverlayProp({ activeGraphic: ['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(currentActiveGraphic) ? 'none' : 'individual_stats' })
                                 },
                                 {
+                                  id: 'batting_summary',
+                                  label: '🏏 Batting Summary (Full & Mini)',
+                                  desc: 'Star TV broadcast batting summary breakdown with full screen & mini lower-third modes',
+                                  isActive: ['batting_summary', 'batting_summary_full', 'batting_summary_mini', 'batting_summary_alert', 'batting_summary_mini_alert'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['batting_summary', 'batting_summary_full', 'batting_summary_mini', 'batting_summary_alert', 'batting_summary_mini_alert'].includes(currentActiveGraphic) ? 'none' : 'batting_summary' })
+                                },
+                                {
+                                  id: 'bowling_summary',
+                                  label: '🎯 Bowling Summary (Full & Mini)',
+                                  desc: 'Star TV broadcast bowling spell breakdown with full screen & mini lower-third modes',
+                                  isActive: ['bowling_summary', 'bowling_summary_full', 'bowling_summary_mini', 'bowling_summary_alert', 'bowling_summary_mini_alert'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: ['bowling_summary', 'bowling_summary_full', 'bowling_summary_mini', 'bowling_summary_alert', 'bowling_summary_mini_alert'].includes(currentActiveGraphic) ? 'none' : 'bowling_summary' })
+                                },
+                                {
                                   id: 'batsman_stats',
                                   label: 'Batsman Stats',
                                   desc: 'Current strikers scores/match data',
@@ -8736,6 +9218,30 @@ export const CricketScoreboard: React.FC = () => {
                             <div className="space-y-1.5">
                               {[
                                 {
+                                  id: 'squad_a',
+                                  label: `${match.teamA || 'Team A'} Squad (XI) with Images`,
+                                  desc: `Official 11 playing squad card with player photos/avatars & gold TV broadcast bar`,
+                                  icon: '👥',
+                                  isActive: currentActiveGraphic === 'squad_a' || currentActiveGraphic === 'team_a_squad',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'squad_a' || currentActiveGraphic === 'team_a_squad') ? 'none' : 'squad_a' })
+                                },
+                                {
+                                  id: 'squad_b',
+                                  label: `${match.teamB || 'Team B'} Squad (XI) with Images`,
+                                  desc: `Official 11 playing squad card with player photos/avatars & gold TV broadcast bar`,
+                                  icon: '👥',
+                                  isActive: currentActiveGraphic === 'squad_b' || currentActiveGraphic === 'team_b_squad',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'squad_b' || currentActiveGraphic === 'team_b_squad') ? 'none' : 'squad_b' })
+                                },
+                                {
+                                  id: 'field_positions',
+                                  label: 'Field Position Overlay (11 Players Ground)',
+                                  desc: 'Interactive broadcast cricket ground graphic with 11 draggable fielders, 30-yard ring & tactical card',
+                                  icon: '🎯',
+                                  isActive: currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? 'none' : 'field_positions' })
+                                },
+                                {
                                   id: 'team_vs_team',
                                   label: 'Team A VS Team B 3D Shield',
                                   desc: 'Official tournament VS overlay: dual metallic shields, center league medallion & team bars',
@@ -8780,6 +9286,20 @@ export const CricketScoreboard: React.FC = () => {
                                   </div>
 
                                   <div className="flex items-center gap-2 shrink-0">
+                                    {item.id === 'field_positions' && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setShowFieldPositionModal(true);
+                                        }}
+                                        className="px-2 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded text-[7.5px] font-black uppercase tracking-wider flex items-center gap-1 border border-emerald-400/40 cursor-pointer shadow-sm active:scale-95"
+                                        title="Open popup to set 11 player field positions"
+                                      >
+                                        <span>🎯</span>
+                                        <span>Set Field</span>
+                                      </button>
+                                    )}
                                     <span className={`text-[6px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none ${item.isActive ? 'bg-sky-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'}`}>
                                       {item.isActive ? 'ON AIR' : 'STANDBY'}
                                     </span>
