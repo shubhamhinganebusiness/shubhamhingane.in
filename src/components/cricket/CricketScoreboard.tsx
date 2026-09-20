@@ -18512,29 +18512,22 @@ export const CricketScoreboard: React.FC = () => {
                           {/* Controls Grid */}
                           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center">
                             {/* Logo Preview Avatar */}
-                            <div className="sm:col-span-3 flex flex-col items-center justify-center p-3 rounded-xl bg-black/60 border border-white/10 text-center relative overflow-hidden">
-                              <span className="text-[7.5px] uppercase font-mono font-bold text-slate-500 mb-1.5 tracking-wider">Live Preview</span>
-                              <div className="relative flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-black/80 border border-white/15 shadow-inner">
-                                <span className="w-2 h-2 rounded-full bg-red-600 animate-ping absolute -top-0.5 -right-0.5" />
-                                <span className="w-2 h-2 rounded-full bg-red-600 absolute -top-0.5 -right-0.5" />
+                            <div className="sm:col-span-3 flex flex-col items-center justify-center p-3 rounded-xl bg-black/40 border border-white/10 text-center relative overflow-hidden">
+                              <span className="text-[7.5px] uppercase font-mono font-bold text-slate-500 mb-1.5 tracking-wider">Broadcast TV Bug Preview</span>
+                              <div className="relative flex items-center justify-center p-2 rounded-xl min-h-[50px] w-full">
                                 {ytLogo ? (
                                   <img 
                                     src={ytLogo} 
                                     alt="YouTube Logo" 
-                                    className="h-8 w-auto max-w-[80px] object-contain" 
+                                    className="h-10 w-auto max-w-[120px] object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]" 
                                     referrerPolicy="no-referrer" 
                                   />
                                 ) : (
-                                  <span className="text-xl">📺</span>
-                                )}
-                                {ytName && (
-                                  <span className="text-[8px] font-black text-white uppercase tracking-tight max-w-[60px] truncate">
-                                    {ytName}
-                                  </span>
+                                  <span className="text-xl opacity-60">📺</span>
                                 )}
                               </div>
-                              <span className="text-[8px] font-medium text-slate-400 mt-1.5">
-                                {ytLogo ? 'Logo Loaded' : 'No Logo Set'}
+                              <span className="text-[8px] font-medium text-slate-400 mt-1">
+                                {ytLogo ? 'Clean TV Bug Active' : 'No Logo Set'}
                               </span>
                             </div>
 
