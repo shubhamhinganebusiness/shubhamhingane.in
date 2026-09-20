@@ -812,6 +812,12 @@ export const BroadcastThemeStudio: React.FC = () => {
                   winProbabilityB={32}
                   tournamentName="T20 WORLD CHAMPIONSHIP 2026"
                   matchStage="FINAL • LIVE"
+                  matchVenue="Wankhede Stadium, Mumbai"
+                  groundName="Wankhede Stadium, Mumbai"
+                  umpire1Name="Richard Kettleborough"
+                  umpire2Name="Nitin Menon"
+                  commentatorName="Harsha Bhogle & Ravi Shastri"
+                  scoreboardManagerName="Gully Official Scorer"
                   tossDetails="INDIA WON TOSS & ELECTED TO BAT"
                   lastBatsmanName="S. GILL"
                   lastBatsmanRuns={24}

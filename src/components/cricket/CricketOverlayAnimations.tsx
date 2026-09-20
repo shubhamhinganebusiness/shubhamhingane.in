@@ -5,6 +5,7 @@ import {
   Target, Sparkles, Volume2, VolumeX, ShieldAlert, 
   CheckCircle2, XCircle, Siren, Compass, Award, Flag
 } from 'lucide-react';
+import { TeamVsTeamOverlay } from './TeamVsTeamOverlay';
 
 export type StingerAnimationType =
   | 'six'
@@ -23,7 +24,8 @@ export type StingerAnimationType =
   | 'car_hit'
   | 'fifty'
   | 'hundred'
-  | 'super_over';
+  | 'super_over'
+  | 'team_vs_team';
 
 export interface StingerMetadata {
   batterName?: string;
@@ -41,6 +43,14 @@ export interface StingerMetadata {
   tournamentFours?: number;
   tournamentSixes?: number;
   tournamentName?: string;
+  tournamentLogo?: string;
+  teamAName?: string;
+  teamBName?: string;
+  teamALogo?: string;
+  teamBLogo?: string;
+  matchStage?: string;
+  matchVenue?: string;
+  matchNumber?: string | number;
 }
 
 export interface CricketOverlayAnimationsProps {
@@ -128,7 +138,7 @@ function playStingerSynthesizer(type: string) {
         osc.start(now + delay);
         osc.stop(now + delay + 0.12);
       });
-    } else if (type === 'fifty' || type === 'hundred' || type === 'hat_trick') {
+    } else if (type === 'fifty' || type === 'hundred' || type === 'hat_trick' || type === 'team_vs_team') {
       // Ascending triumphant trumpet fanfare
       [0, 0.12, 0.24, 0.42].forEach((delay, idx) => {
         const freqs = [392, 523.25, 659.25, 783.99]; // G, C, E, G
@@ -159,6 +169,7 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
   const normalizedType = useMemo<StingerAnimationType | null>(() => {
     if (!activeAnimation) return null;
     const lower = activeAnimation.toLowerCase().trim();
+    if (lower === 'team_vs_team' || lower === 'team_vs_team_alert' || lower === 'vs' || lower === 'team_matchup') return 'team_vs_team';
     if (lower === 'six' || lower === 'maximum') return 'six';
     if (lower === 'four' || lower === 'boundary') return 'four';
     if (lower === 'bowled') return 'bowled';
@@ -199,7 +210,17 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
     // Wickets / Dismissals: 2.0s
     // Milestones (50, 100, hat_trick): 3.5s
     // Free hit / Situational: 2.4s
-    if (normalizedType === 'six' || normalizedType === 'four') {
+    // Team VS Team: 6.2s
+    if (normalizedType === 'team_vs_team') {
+      timers.push(setTimeout(() => setPhase(2), 100));
+      timers.push(setTimeout(() => setPhase(3), 400));
+      timers.push(setTimeout(() => setPhase(4), 1000));
+      timers.push(setTimeout(() => setPhase(5), 5800)); // Outro
+      timers.push(setTimeout(() => {
+        onAnimationComplete();
+        setPhase(0);
+      }, 6400));
+    } else if (normalizedType === 'six' || normalizedType === 'four') {
       timers.push(setTimeout(() => setPhase(2), 100));
       timers.push(setTimeout(() => setPhase(3), 320));
       timers.push(setTimeout(() => setPhase(4), 700));
@@ -1390,6 +1411,33 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
                   ⚡ SCORES TIED • 6 BALLS TO DECIDE THE CHAMPION! ⚡
                 </div>
               </motion.div>
+            )}
+          </div>
+        )}
+
+        {/* =========================================================================
+            18. TEAM A VS TEAM B 3D SHIELD OVERLAY ANIMATION
+            ========================================================================= */}
+        {normalizedType === 'team_vs_team' && (
+          <div className="relative w-full h-full flex items-center justify-center p-3 sm:p-6">
+            {phase >= 2 && (
+              <div className="w-full max-w-[880px]">
+                <TeamVsTeamOverlay
+                  tournamentName={metadata?.tournamentName || 'KARJAT BIG BASH LEAGUE'}
+                  tournamentLogo={metadata?.tournamentLogo}
+                  matchStage={metadata?.matchStage || 'Match No. 1, Group Match'}
+                  matchVenue={metadata?.matchVenue}
+                  matchNumber={metadata?.matchNumber}
+                  teamAName={metadata?.teamAName || 'JAMKHED 11'}
+                  teamBName={metadata?.teamBName || 'KARJAT 11'}
+                  teamALogo={metadata?.teamALogo}
+                  teamBLogo={metadata?.teamBLogo}
+                  onClose={() => {
+                    onAnimationComplete();
+                    setPhase(0);
+                  }}
+                />
+              </div>
             )}
           </div>
         )}

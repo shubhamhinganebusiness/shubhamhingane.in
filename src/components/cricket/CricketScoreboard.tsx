@@ -282,8 +282,17 @@ export interface MatchState {
   managerName?: string;
   streamKey?: string;
   tournamentName?: string;
+  tournamentLogo?: string;
   seriesName?: string;
   groundName?: string;
+  umpire1Name?: string;
+  umpire1Photo?: string;
+  umpire2Name?: string;
+  umpire2Photo?: string;
+  scoreboardManagerName?: string;
+  scoreboardManagerPhoto?: string;
+  commentatorName?: string;
+  commentatorPhoto?: string;
   isHidden?: boolean;
   isBlocked?: boolean;
   isSynthetic?: boolean;
@@ -1120,6 +1129,15 @@ export const CricketScoreboard: React.FC = () => {
   const [seriesName, setSeriesName] = useState('Bilateral Series');
   const [groundName, setGroundName] = useState('Gully Ground');
   const [tournamentName, setTournamentName] = useState('Bilateral Cup');
+  const [tournamentLogo, setTournamentLogo] = useState('');
+  const [umpire1Name, setUmpire1Name] = useState('');
+  const [umpire1Photo, setUmpire1Photo] = useState('');
+  const [umpire2Name, setUmpire2Name] = useState('');
+  const [umpire2Photo, setUmpire2Photo] = useState('');
+  const [scoreboardManagerName, setScoreboardManagerName] = useState('');
+  const [scoreboardManagerPhoto, setScoreboardManagerPhoto] = useState('');
+  const [commentatorName, setCommentatorName] = useState('');
+  const [commentatorPhoto, setCommentatorPhoto] = useState('');
   const [setupOpeningBatsman1, setSetupOpeningBatsman1] = useState('');
   const [setupOpeningBatsman2, setSetupOpeningBatsman2] = useState('');
   const [setupOpeningBowler, setSetupOpeningBowler] = useState('');
@@ -1133,6 +1151,23 @@ export const CricketScoreboard: React.FC = () => {
         const reader = new FileReader();
         reader.onload = (event) => {
           if (typeof event.target?.result === 'string' && event.target.result.length < 60000) {
+            callback(event.target.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  };
+
+  // Process and scale official photos and tournament logos compactly
+  const processOfficialPhotoFile = (file: File, callback: (result: string) => void) => {
+    compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+      if (compressed) {
+        callback(compressed);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (typeof event.target?.result === 'string' && event.target.result.length < 50000) {
             callback(event.target.result);
           }
         };
@@ -1457,6 +1492,17 @@ export const CricketScoreboard: React.FC = () => {
   const [editModalRuns, setEditModalRuns] = useState(0);
   const [editModalWickets, setEditModalWickets] = useState(0);
   const [editModalBallsBowled, setEditModalBallsBowled] = useState(0);
+  const [editModalTournamentLogo, setEditModalTournamentLogo] = useState('');
+  const [editModalTournamentName, setEditModalTournamentName] = useState('');
+  const [editModalGroundName, setEditModalGroundName] = useState('');
+  const [editModalUmpire1Name, setEditModalUmpire1Name] = useState('');
+  const [editModalUmpire1Photo, setEditModalUmpire1Photo] = useState('');
+  const [editModalUmpire2Name, setEditModalUmpire2Name] = useState('');
+  const [editModalUmpire2Photo, setEditModalUmpire2Photo] = useState('');
+  const [editModalScoreboardManagerName, setEditModalScoreboardManagerName] = useState('');
+  const [editModalScoreboardManagerPhoto, setEditModalScoreboardManagerPhoto] = useState('');
+  const [editModalCommentatorName, setEditModalCommentatorName] = useState('');
+  const [editModalCommentatorPhoto, setEditModalCommentatorPhoto] = useState('');
 
   // Career Player Card, Tournament Leaderboard, and Sponsor Manager modal states
   const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<PlayerCareerStats | null>(null);
@@ -1671,6 +1717,50 @@ export const CricketScoreboard: React.FC = () => {
     if (editModalMatchBannerUrl !== undefined) {
       updated.matchBannerUrl = editModalMatchBannerUrl;
       setMatchBannerUrl(editModalMatchBannerUrl);
+    }
+    if (editModalTournamentLogo !== undefined) {
+      updated.tournamentLogo = editModalTournamentLogo;
+      setTournamentLogo(editModalTournamentLogo);
+    }
+    if (editModalTournamentName !== undefined) {
+      updated.tournamentName = editModalTournamentName;
+      setTournamentName(editModalTournamentName);
+    }
+    if (editModalGroundName !== undefined) {
+      updated.groundName = editModalGroundName;
+      setGroundName(editModalGroundName);
+    }
+    if (editModalUmpire1Name !== undefined) {
+      updated.umpire1Name = editModalUmpire1Name;
+      setUmpire1Name(editModalUmpire1Name);
+    }
+    if (editModalUmpire1Photo !== undefined) {
+      updated.umpire1Photo = editModalUmpire1Photo;
+      setUmpire1Photo(editModalUmpire1Photo);
+    }
+    if (editModalUmpire2Name !== undefined) {
+      updated.umpire2Name = editModalUmpire2Name;
+      setUmpire2Name(editModalUmpire2Name);
+    }
+    if (editModalUmpire2Photo !== undefined) {
+      updated.umpire2Photo = editModalUmpire2Photo;
+      setUmpire2Photo(editModalUmpire2Photo);
+    }
+    if (editModalScoreboardManagerName !== undefined) {
+      updated.scoreboardManagerName = editModalScoreboardManagerName;
+      setScoreboardManagerName(editModalScoreboardManagerName);
+    }
+    if (editModalScoreboardManagerPhoto !== undefined) {
+      updated.scoreboardManagerPhoto = editModalScoreboardManagerPhoto;
+      setScoreboardManagerPhoto(editModalScoreboardManagerPhoto);
+    }
+    if (editModalCommentatorName !== undefined) {
+      updated.commentatorName = editModalCommentatorName;
+      setCommentatorName(editModalCommentatorName);
+    }
+    if (editModalCommentatorPhoto !== undefined) {
+      updated.commentatorPhoto = editModalCommentatorPhoto;
+      setCommentatorPhoto(editModalCommentatorPhoto);
     }
 
     syncMatch(updated);
@@ -2883,8 +2973,17 @@ export const CricketScoreboard: React.FC = () => {
       tournamentId: match?.tournamentId || null,
       tournamentMatchId: match?.tournamentMatchId || null,
       tournamentName: tournamentName || null,
+      tournamentLogo: tournamentLogo || match?.tournamentLogo || undefined,
       seriesName: seriesName || 'Bilateral Series',
       groundName: groundName || 'Gully Ground',
+      umpire1Name: umpire1Name || match?.umpire1Name || undefined,
+      umpire1Photo: umpire1Photo || match?.umpire1Photo || undefined,
+      umpire2Name: umpire2Name || match?.umpire2Name || undefined,
+      umpire2Photo: umpire2Photo || match?.umpire2Photo || undefined,
+      scoreboardManagerName: scoreboardManagerName || match?.scoreboardManagerName || currentManagerName || undefined,
+      scoreboardManagerPhoto: scoreboardManagerPhoto || match?.scoreboardManagerPhoto || undefined,
+      commentatorName: commentatorName || match?.commentatorName || undefined,
+      commentatorPhoto: commentatorPhoto || match?.commentatorPhoto || undefined,
       createdBy: currentManagerId || user?.email || user?.uid || 'anonymous',
       managerId: currentManagerId || undefined,
       managerName: currentManagerName || undefined,
@@ -5411,6 +5510,15 @@ export const CricketScoreboard: React.FC = () => {
     setOversLimit(5);
     setTossWinner('Team A');
     setTossChoice('bat');
+    setTournamentLogo('');
+    setUmpire1Name('');
+    setUmpire1Photo('');
+    setUmpire2Name('');
+    setUmpire2Photo('');
+    setScoreboardManagerName('');
+    setScoreboardManagerPhoto('');
+    setCommentatorName('');
+    setCommentatorPhoto('');
     showNotification('Scoreboard and match setup reset.', 'info');
   };
 
@@ -5932,8 +6040,17 @@ export const CricketScoreboard: React.FC = () => {
       tournamentId: match?.tournamentId || null,
       tournamentMatchId: match?.tournamentMatchId || null,
       tournamentName: tournamentName || null,
+      tournamentLogo: tournamentLogo || match?.tournamentLogo || undefined,
       seriesName: seriesName || 'Bilateral Series',
       groundName: groundName || 'Gully Ground',
+      umpire1Name: umpire1Name || match?.umpire1Name || undefined,
+      umpire1Photo: umpire1Photo || match?.umpire1Photo || undefined,
+      umpire2Name: umpire2Name || match?.umpire2Name || undefined,
+      umpire2Photo: umpire2Photo || match?.umpire2Photo || undefined,
+      scoreboardManagerName: scoreboardManagerName || match?.scoreboardManagerName || currentManagerName || undefined,
+      scoreboardManagerPhoto: scoreboardManagerPhoto || match?.scoreboardManagerPhoto || undefined,
+      commentatorName: commentatorName || match?.commentatorName || undefined,
+      commentatorPhoto: commentatorPhoto || match?.commentatorPhoto || undefined,
       createdBy: currentManagerId || user?.email || user?.uid || 'anonymous',
       managerId: currentManagerId || undefined,
       managerName: currentManagerName || undefined,
@@ -7269,6 +7386,17 @@ export const CricketScoreboard: React.FC = () => {
                       setEditModalBallsBowled(0);
                     }
                     setEditModalMatchBannerUrl(match.matchBannerUrl || '');
+                    setEditModalTournamentLogo(match.tournamentLogo || '');
+                    setEditModalTournamentName(match.tournamentName || '');
+                    setEditModalGroundName(match.groundName || '');
+                    setEditModalUmpire1Name(match.umpire1Name || '');
+                    setEditModalUmpire1Photo(match.umpire1Photo || '');
+                    setEditModalUmpire2Name(match.umpire2Name || '');
+                    setEditModalUmpire2Photo(match.umpire2Photo || '');
+                    setEditModalScoreboardManagerName(match.scoreboardManagerName || '');
+                    setEditModalScoreboardManagerPhoto(match.scoreboardManagerPhoto || '');
+                    setEditModalCommentatorName(match.commentatorName || '');
+                    setEditModalCommentatorPhoto(match.commentatorPhoto || '');
                     setShowEditMatchModal(true);
                   }}
                   className="h-8 sm:h-9 px-1.5 sm:px-3 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white font-extrabold border border-indigo-550/30 rounded-lg sm:rounded-xl text-[10px] uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
@@ -7738,16 +7866,22 @@ export const CricketScoreboard: React.FC = () => {
                   const updated = { ...activeOverlayConfig, ...updates };
                   syncMatch({ ...match, overlayConfig: updated });
 
-                  // Handle auto-close for Wicket and Milestone alerts after 5 seconds to keep broadcast clean
-                  if (updates.activeGraphic === 'wicket_alert_temp' || updates.activeGraphic === 'milestone_alert_temp') {
+                  // Handle auto-close for Wicket, Milestone, and Team VS Team alerts after timeout
+                  if (
+                    updates.activeGraphic === 'wicket_alert_temp' ||
+                    updates.activeGraphic === 'milestone_alert_temp' ||
+                    updates.activeGraphic === 'team_vs_team_alert'
+                  ) {
                     if (graphicDismissTimerRef.current) {
                       clearTimeout(graphicDismissTimerRef.current);
                     }
+                    const dismissTime = updates.activeGraphic === 'team_vs_team_alert' ? 7000 : 5000;
                     graphicDismissTimerRef.current = setTimeout(() => {
                       setMatch((latestMatch) => {
                         if (
                           latestMatch.overlayConfig?.activeGraphic === 'wicket_alert_temp' ||
-                          latestMatch.overlayConfig?.activeGraphic === 'milestone_alert_temp'
+                          latestMatch.overlayConfig?.activeGraphic === 'milestone_alert_temp' ||
+                          latestMatch.overlayConfig?.activeGraphic === 'team_vs_team_alert'
                         ) {
                           const noneConfig = { ...latestMatch.overlayConfig, activeGraphic: 'none' };
                           const nextMatch = { ...latestMatch, overlayConfig: noneConfig };
@@ -7756,8 +7890,8 @@ export const CricketScoreboard: React.FC = () => {
                         }
                         return latestMatch;
                       });
-                      showNotification('Broadcast alert overlay auto-closed after 5 seconds.', 'info');
-                    }, 5000);
+                      showNotification('Broadcast alert overlay auto-closed.', 'info');
+                    }, dismissTime);
                   }
                 };
 
@@ -7999,15 +8133,79 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
 
+                          {/* Featured Team A VS Team B 3D Tournament Overlay Option */}
+                          <div className="border border-blue-500/30 bg-gradient-to-r from-blue-950/60 via-slate-950/90 to-red-950/60 p-2.5 rounded-2xl space-y-2 shadow-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-blue-600 via-slate-800 to-rose-600 flex items-center justify-center text-xs shadow-md shrink-0 border border-white/20">
+                                  ⚔️
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-[8.5px] font-black uppercase tracking-wider text-white block truncate leading-tight">
+                                    Team A VS Team B Overlay Animation
+                                  </span>
+                                  <span className="text-[6.5px] font-mono text-slate-300 block truncate">
+                                    {match.teamA || 'JAMKHED 11'} VS {match.teamB || 'KARJAT 11'} • 3D Shield Graphic
+                                  </span>
+                                </div>
+                              </div>
+                              {currentActiveGraphic === 'team_vs_team' && (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[7px] font-black uppercase tracking-widest animate-pulse shrink-0">
+                                  LIVE ON AIR
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {/* Live Toggle button */}
+                              <button
+                                onClick={() => {
+                                  const nextState = currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team';
+                                  updateOverlayProp({ activeGraphic: nextState });
+                                  showNotification(
+                                    nextState === 'team_vs_team' ? 'Team A VS Team B overlay live on air!' : 'Team A VS Team B overlay dismissed.',
+                                    nextState === 'team_vs_team' ? 'success' : 'info'
+                                  );
+                                }}
+                                className={`py-2 px-2.5 rounded-xl border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-md ${
+                                  currentActiveGraphic === 'team_vs_team'
+                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.6)] animate-pulse'
+                                    : 'bg-gradient-to-r from-blue-600 to-rose-600 hover:from-blue-500 hover:to-rose-500 text-white border-white/20'
+                                }`}
+                              >
+                                <span>{currentActiveGraphic === 'team_vs_team' ? '🔴 Dismiss VS' : '📺 Show VS Overlay'}</span>
+                              </button>
+
+                              {/* 6.5s Auto-Stinger Alert Trigger button */}
+                              <button
+                                onClick={() => {
+                                  triggerManualAlert('team_vs_team', {
+                                    tournamentName: match.tournamentName || 'KARJAT BIG BASH LEAGUE',
+                                    tournamentLogo: match.tournamentLogo,
+                                    matchStage: match.status === 'completed' ? 'FINAL RESULT' : 'Match No. 1, Group Match',
+                                    matchVenue: match.venue,
+                                    teamAName: match.teamA || 'JAMKHED 11',
+                                    teamBName: match.teamB || 'KARJAT 11',
+                                    teamALogo: match.teamALogo,
+                                    teamBLogo: match.teamBLogo
+                                  });
+                                }}
+                                className="py-2 px-2.5 bg-white/5 hover:bg-white/10 border border-white/15 text-amber-300 hover:text-amber-200 text-[8px] font-black uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                              >
+                                <span>⚡ 6s Stinger Alert</span>
+                              </button>
+                            </div>
+                          </div>
+
                           {/* Manual Transient Overlay Animations */}
                           <div className="border border-white/5 bg-slate-950/40 p-2 rounded-2xl space-y-1.5">
                             <span className="text-[7.5px] font-black text-rose-400 uppercase tracking-widest block">Manual Transient Animations</span>
-                            <div className="grid grid-cols-3 gap-1.5">
+                            <div className="grid grid-cols-4 gap-1.5">
                               <button
                                 onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wicket_alert_temp' ? 'none' : 'wicket_alert_temp' })}
                                 className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
                                   currentActiveGraphic === 'wicket_alert_temp'
-                                    ? 'bg-red-500/20 border-red-500/40 text-red-00'
+                                    ? 'bg-red-500/20 border-red-500/40 text-red-400'
                                     : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
                                 }`}
                               >
@@ -8035,6 +8233,17 @@ export const CricketScoreboard: React.FC = () => {
                               >
                                 <span className="text-[9px]">🎡</span>
                                 <span>Wagon Wheel</span>
+                              </button>
+                              <button
+                                onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })}
+                                className={`py-1.5 rounded-xl border text-[8px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 ${
+                                  currentActiveGraphic === 'team_vs_team'
+                                    ? 'bg-gradient-to-r from-blue-600/40 to-rose-600/40 border-rose-400 text-white font-black shadow-md'
+                                    : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
+                                }`}
+                              >
+                                <span className="text-[9px]">⚔️</span>
+                                <span>VS Shield</span>
                               </button>
                             </div>
 
@@ -8526,6 +8735,14 @@ export const CricketScoreboard: React.FC = () => {
                             
                             <div className="space-y-1.5">
                               {[
+                                {
+                                  id: 'team_vs_team',
+                                  label: 'Team A VS Team B 3D Shield',
+                                  desc: 'Official tournament VS overlay: dual metallic shields, center league medallion & team bars',
+                                  icon: '🛡️',
+                                  isActive: currentActiveGraphic === 'team_vs_team',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })
+                                },
                                 {
                                   id: 'prematch_matchup',
                                   label: 'The Matchup Card',
@@ -11024,7 +11241,7 @@ export const CricketScoreboard: React.FC = () => {
                 initial={{ scale: 0.85, opacity: 0, y: 50 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
                 exit={{ scale: 0.85, opacity: 0, y: 50 }}
-                className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-700/50 rounded-[2rem] max-w-md w-full p-6 shadow-2xl relative z-10 text-white overflow-hidden"
+                className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-700/50 rounded-[2rem] max-w-2xl w-full p-6 shadow-2xl relative z-10 text-white max-h-[90vh] overflow-y-auto"
               >
                 <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-indigo-500 to-teal-500" />
                 <div className="flex justify-between items-center mb-6">
@@ -11041,26 +11258,29 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
 
                 <div className="space-y-4 font-sans text-left">
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Team A Name</label>
-                    <input
-                      type="text"
-                      value={editModalTeamA}
-                      onChange={(e) => setEditModalTeamA(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
-                      placeholder="Team A"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Team A Name</label>
+                      <input
+                        type="text"
+                        value={editModalTeamA}
+                        onChange={(e) => setEditModalTeamA(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                        placeholder="Team A"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Team B Name</label>
+                      <input
+                        type="text"
+                        value={editModalTeamB}
+                        onChange={(e) => setEditModalTeamB(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                        placeholder="Team B"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Team B Name</label>
-                    <input
-                      type="text"
-                      value={editModalTeamB}
-                      onChange={(e) => setEditModalTeamB(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
-                      placeholder="Team B"
-                    />
-                  </div>
+
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Overs Limit</label>
                     <input
@@ -11108,6 +11328,355 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Tournament & Venue Details */}
+                  <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-300 block">
+                      🏆 Tournament & Venue Details
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Tournament Name</label>
+                        <input
+                          type="text"
+                          value={editModalTournamentName}
+                          onChange={(e) => setEditModalTournamentName(e.target.value)}
+                          placeholder="Tournament name"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Ground / Venue</label>
+                        <input
+                          type="text"
+                          value={editModalGroundName}
+                          onChange={(e) => setEditModalGroundName(e.target.value)}
+                          placeholder="Ground / venue name"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Tournament Logo */}
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-300 flex items-center gap-1.5">
+                          <Award size={11} className="text-amber-400" />
+                          Tournament Logo
+                        </span>
+                        {editModalTournamentLogo && (
+                          <button
+                            type="button"
+                            onClick={() => setEditModalTournamentLogo('')}
+                            className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                          >
+                            Remove Logo
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                          {editModalTournamentLogo ? (
+                            <img src={editModalTournamentLogo} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-lg">🏆</span>
+                          )}
+                        </div>
+                        <div className="flex-1 space-y-1.5">
+                          <div className="relative overflow-hidden inline-block w-full">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-tournament-logo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalTournamentLogo(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-tournament-logo-file"
+                              className="w-full block py-1.5 px-2 bg-slate-850 hover:bg-slate-800 text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              📁 Upload Logo
+                            </label>
+                          </div>
+                          <input
+                            type="url"
+                            value={editModalTournamentLogo}
+                            onChange={(e) => setEditModalTournamentLogo(e.target.value)}
+                            placeholder="Or logo URL (https://...)"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[9px] text-slate-200 outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Match Officials & Broadcast Crew */}
+                  <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-300 block">
+                      👨‍⚖️ Match Officials & Broadcast Crew
+                    </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Umpire 1 */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            ⚖️ Umpire 1
+                          </span>
+                          {editModalUmpire1Photo && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalUmpire1Photo('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalUmpire1Photo ? (
+                              <img src={editModalUmpire1Photo} alt="Umpire 1" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">👨‍⚖️</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-umpire1-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalUmpire1Photo(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-umpire1-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalUmpire1Name}
+                          onChange={(e) => setEditModalUmpire1Name(e.target.value)}
+                          placeholder="Umpire 1 name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalUmpire1Photo}
+                          onChange={(e) => setEditModalUmpire1Photo(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Umpire 2 */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            ⚖️ Umpire 2
+                          </span>
+                          {editModalUmpire2Photo && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalUmpire2Photo('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalUmpire2Photo ? (
+                              <img src={editModalUmpire2Photo} alt="Umpire 2" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">👨‍⚖️</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-umpire2-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalUmpire2Photo(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-umpire2-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalUmpire2Name}
+                          onChange={(e) => setEditModalUmpire2Name(e.target.value)}
+                          placeholder="Umpire 2 name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalUmpire2Photo}
+                          onChange={(e) => setEditModalUmpire2Photo(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Scoreboard Manager */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            📋 Manager
+                          </span>
+                          {editModalScoreboardManagerPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalScoreboardManagerPhoto('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalScoreboardManagerPhoto ? (
+                              <img src={editModalScoreboardManagerPhoto} alt="Manager" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">💻</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-manager-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalScoreboardManagerPhoto(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-manager-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalScoreboardManagerName}
+                          onChange={(e) => setEditModalScoreboardManagerName(e.target.value)}
+                          placeholder="Manager / Scorer name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalScoreboardManagerPhoto}
+                          onChange={(e) => setEditModalScoreboardManagerPhoto(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Commentator */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            🎙️ Commentator
+                          </span>
+                          {editModalCommentatorPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalCommentatorPhoto('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalCommentatorPhoto ? (
+                              <img src={editModalCommentatorPhoto} alt="Commentator" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">🎙️</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-commentator-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalCommentatorPhoto(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-commentator-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalCommentatorName}
+                          onChange={(e) => setEditModalCommentatorName(e.target.value)}
+                          placeholder="Commentator name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalCommentatorPhoto}
+                          onChange={(e) => setEditModalCommentatorPhoto(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Match Banner Option (1280x720) */}
                   <div className="pt-2 border-t border-slate-800/80 space-y-2">
@@ -13931,27 +14500,482 @@ export const CricketScoreboard: React.FC = () => {
                 ) : null}
               </div>
 
-              {/* Match Details Extra Fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Tournament Name (Optional)</label>
-                  <input
-                    type="text"
-                    value={tournamentName}
-                    onChange={(e) => setTournamentName(e.target.value)}
-                    placeholder="E.g. Bilateral Cup"
-                    className="w-full bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
-                  />
+              {/* Tournament & Ground Branding */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 space-y-4 text-left">
+                <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🏆</span>
+                    <div>
+                      <h4 className="text-xs font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider">
+                        Tournament & Venue Details
+                      </h4>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                        Configure tournament identity, emblem logo, and playing ground name.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[8.5px] font-black uppercase tracking-wider">
+                    Branding
+                  </span>
                 </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Ground / Venue Name</label>
-                  <input
-                    type="text"
-                    value={groundName}
-                    onChange={(e) => setGroundName(e.target.value)}
-                    placeholder="E.g. Gully Ground"
-                    className="w-full bg-slate-50/80 dark:bg-slate-950/85 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
-                  />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="setup-tournament-name" className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+                      Tournament Name (Optional)
+                    </label>
+                    <input
+                      id="setup-tournament-name"
+                      type="text"
+                      value={tournamentName}
+                      onChange={(e) => setTournamentName(e.target.value)}
+                      placeholder="E.g. Bilateral Cup 2026 / Premier Gully League"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white placeholder-slate-400"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="setup-ground-name" className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+                      Ground / Venue Name
+                    </label>
+                    <input
+                      id="setup-ground-name"
+                      type="text"
+                      value={groundName}
+                      onChange={(e) => setGroundName(e.target.value)}
+                      placeholder="E.g. Gully Ground / National Stadium"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white placeholder-slate-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Tournament Logo Upload & URL */}
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-250 dark:border-slate-800">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2.5">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                        <Award size={12} className="text-amber-500" />
+                        Tournament Logo / Emblem
+                      </span>
+                      <p className="text-[9.5px] text-slate-400 font-medium mt-0.5">
+                        Shown next to tournament name in spectator scorecard, header, and live broadcasts.
+                      </p>
+                    </div>
+                    {tournamentLogo && (
+                      <button
+                        type="button"
+                        id="btn-remove-tournament-logo"
+                        onClick={() => setTournamentLogo('')}
+                        className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/20 rounded-xl text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors flex items-center gap-1"
+                      >
+                        <Trash2 size={10} /> Clear Logo
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
+                    {/* Logo Preview Avatar */}
+                    <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-center shrink-0 overflow-hidden shadow-xs">
+                      {tournamentLogo ? (
+                        <img
+                          src={tournamentLogo}
+                          alt="Tournament Logo Preview"
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span className="text-2xl" title="No logo uploaded">🏆</span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 w-full space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="relative overflow-hidden inline-block flex-1">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="setup-tournament-logo-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processOfficialPhotoFile(file, (dataUrl) => {
+                                  setTournamentLogo(dataUrl);
+                                  showNotification('Tournament logo uploaded successfully!', 'success');
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label
+                            htmlFor="setup-tournament-logo-file"
+                            className="w-full flex items-center justify-center gap-1.5 py-2 px-3 bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 text-center font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer border border-amber-500/30 transition-all"
+                          >
+                            <Camera size={12} />
+                            Upload Tournament Logo
+                          </label>
+                        </div>
+                      </div>
+                      <input
+                        id="setup-tournament-logo-url"
+                        type="url"
+                        value={tournamentLogo}
+                        onChange={(e) => setTournamentLogo(e.target.value)}
+                        placeholder="Or paste tournament logo image URL (https://...)"
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-[10px] font-medium text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:border-amber-500 transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Match Officials & Broadcast Crew (Two Umpires, Scoreboard Manager, Commentator) */}
+              <div className="p-4 sm:p-5 rounded-3xl bg-slate-50 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 space-y-4 text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">👨‍⚖️</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider">
+                          Match Officials & Broadcast Crew
+                        </h4>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-[8.5px] font-black uppercase tracking-wider">
+                          Optional
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                        Add two official umpires, scoreboard manager, and live commentator with their full names and profile photos.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Umpire 1 (On-Field) */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-3 shadow-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 tracking-wider flex items-center gap-1">
+                          ⚖️ Umpire 1 (Main)
+                        </span>
+                        {umpire1Photo && (
+                          <button
+                            type="button"
+                            onClick={() => setUmpire1Photo('')}
+                            className="text-[9px] text-rose-500 font-bold hover:underline cursor-pointer border-none bg-transparent"
+                            title="Remove photo"
+                          >
+                            Clear Photo
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Photo preview & uploader */}
+                      <div className="flex items-center gap-2.5 mb-2.5">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
+                          {umpire1Photo ? (
+                            <img
+                              src={umpire1Photo}
+                              alt="Umpire 1"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-lg" title="No photo">👨‍⚖️</span>
+                          )}
+                        </div>
+                        <div className="flex-1 relative overflow-hidden">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="setup-umpire1-photo-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processOfficialPhotoFile(file, (dataUrl) => {
+                                  setUmpire1Photo(dataUrl);
+                                  showNotification('Umpire 1 photo uploaded!', 'success');
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label
+                            htmlFor="setup-umpire1-photo-file"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                          >
+                            📷 Upload Photo
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Name input */}
+                      <div className="space-y-1.5">
+                        <label htmlFor="setup-umpire-1-name" className="text-[9px] font-black uppercase text-slate-400 block">
+                          Umpire 1 Name
+                        </label>
+                        <input
+                          id="setup-umpire-1-name"
+                          type="text"
+                          value={umpire1Name}
+                          onChange={(e) => setUmpire1Name(e.target.value)}
+                          placeholder="E.g. Kumar Dharmasena"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                        <input
+                          type="url"
+                          value={umpire1Photo}
+                          onChange={(e) => setUmpire1Photo(e.target.value)}
+                          placeholder="Or photo URL (https://...)"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5 text-[9px] font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Umpire 2 (Square Leg) */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-3 shadow-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 tracking-wider flex items-center gap-1">
+                          ⚖️ Umpire 2 (Leg)
+                        </span>
+                        {umpire2Photo && (
+                          <button
+                            type="button"
+                            onClick={() => setUmpire2Photo('')}
+                            className="text-[9px] text-rose-500 font-bold hover:underline cursor-pointer border-none bg-transparent"
+                            title="Remove photo"
+                          >
+                            Clear Photo
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Photo preview & uploader */}
+                      <div className="flex items-center gap-2.5 mb-2.5">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
+                          {umpire2Photo ? (
+                            <img
+                              src={umpire2Photo}
+                              alt="Umpire 2"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-lg" title="No photo">👨‍⚖️</span>
+                          )}
+                        </div>
+                        <div className="flex-1 relative overflow-hidden">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="setup-umpire2-photo-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processOfficialPhotoFile(file, (dataUrl) => {
+                                  setUmpire2Photo(dataUrl);
+                                  showNotification('Umpire 2 photo uploaded!', 'success');
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label
+                            htmlFor="setup-umpire2-photo-file"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                          >
+                            📷 Upload Photo
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Name input */}
+                      <div className="space-y-1.5">
+                        <label htmlFor="setup-umpire-2-name" className="text-[9px] font-black uppercase text-slate-400 block">
+                          Umpire 2 Name
+                        </label>
+                        <input
+                          id="setup-umpire-2-name"
+                          type="text"
+                          value={umpire2Name}
+                          onChange={(e) => setUmpire2Name(e.target.value)}
+                          placeholder="E.g. Marais Erasmus"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                        <input
+                          type="url"
+                          value={umpire2Photo}
+                          onChange={(e) => setUmpire2Photo(e.target.value)}
+                          placeholder="Or photo URL (https://...)"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5 text-[9px] font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scoreboard Manager */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-3 shadow-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 tracking-wider flex items-center gap-1">
+                          📋 Scoreboard Manager
+                        </span>
+                        {scoreboardManagerPhoto && (
+                          <button
+                            type="button"
+                            onClick={() => setScoreboardManagerPhoto('')}
+                            className="text-[9px] text-rose-500 font-bold hover:underline cursor-pointer border-none bg-transparent"
+                            title="Remove photo"
+                          >
+                            Clear Photo
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Photo preview & uploader */}
+                      <div className="flex items-center gap-2.5 mb-2.5">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
+                          {scoreboardManagerPhoto ? (
+                            <img
+                              src={scoreboardManagerPhoto}
+                              alt="Scoreboard Manager"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-lg" title="No photo">💻</span>
+                          )}
+                        </div>
+                        <div className="flex-1 relative overflow-hidden">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="setup-manager-photo-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processOfficialPhotoFile(file, (dataUrl) => {
+                                  setScoreboardManagerPhoto(dataUrl);
+                                  showNotification('Scoreboard Manager photo uploaded!', 'success');
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label
+                            htmlFor="setup-manager-photo-file"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                          >
+                            📷 Upload Photo
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Name input */}
+                      <div className="space-y-1.5">
+                        <label htmlFor="setup-scoreboard-manager-name" className="text-[9px] font-black uppercase text-slate-400 block">
+                          Manager Name
+                        </label>
+                        <input
+                          id="setup-scoreboard-manager-name"
+                          type="text"
+                          value={scoreboardManagerName}
+                          onChange={(e) => setScoreboardManagerName(e.target.value)}
+                          placeholder={currentManagerName || "E.g. Official Scorer / Admin"}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                        <input
+                          type="url"
+                          value={scoreboardManagerPhoto}
+                          onChange={(e) => setScoreboardManagerPhoto(e.target.value)}
+                          placeholder="Or photo URL (https://...)"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5 text-[9px] font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Commentator */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-3 shadow-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 tracking-wider flex items-center gap-1">
+                          🎙️ Commentator
+                        </span>
+                        {commentatorPhoto && (
+                          <button
+                            type="button"
+                            onClick={() => setCommentatorPhoto('')}
+                            className="text-[9px] text-rose-500 font-bold hover:underline cursor-pointer border-none bg-transparent"
+                            title="Remove photo"
+                          >
+                            Clear Photo
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Photo preview & uploader */}
+                      <div className="flex items-center gap-2.5 mb-2.5">
+                        <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
+                          {commentatorPhoto ? (
+                            <img
+                              src={commentatorPhoto}
+                              alt="Commentator"
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-lg" title="No photo">🎙️</span>
+                          )}
+                        </div>
+                        <div className="flex-1 relative overflow-hidden">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="setup-commentator-photo-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processOfficialPhotoFile(file, (dataUrl) => {
+                                  setCommentatorPhoto(dataUrl);
+                                  showNotification('Commentator photo uploaded!', 'success');
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label
+                            htmlFor="setup-commentator-photo-file"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                          >
+                            📷 Upload Photo
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Name input */}
+                      <div className="space-y-1.5">
+                        <label htmlFor="setup-commentator-name" className="text-[9px] font-black uppercase text-slate-400 block">
+                          Commentator Name
+                        </label>
+                        <input
+                          id="setup-commentator-name"
+                          type="text"
+                          value={commentatorName}
+                          onChange={(e) => setCommentatorName(e.target.value)}
+                          placeholder="E.g. Harsha Bhogle / Danny Morrison"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                        <input
+                          type="url"
+                          value={commentatorPhoto}
+                          onChange={(e) => setCommentatorPhoto(e.target.value)}
+                          placeholder="Or photo URL (https://...)"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5 text-[9px] font-medium text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 transition-all placeholder-slate-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -14899,6 +15923,17 @@ export const CricketScoreboard: React.FC = () => {
                           setEditModalBallsBowled(0);
                         }
                         setEditModalMatchBannerUrl(match.matchBannerUrl || '');
+                        setEditModalTournamentLogo(match.tournamentLogo || '');
+                        setEditModalTournamentName(match.tournamentName || '');
+                        setEditModalGroundName(match.groundName || '');
+                        setEditModalUmpire1Name(match.umpire1Name || '');
+                        setEditModalUmpire1Photo(match.umpire1Photo || '');
+                        setEditModalUmpire2Name(match.umpire2Name || '');
+                        setEditModalUmpire2Photo(match.umpire2Photo || '');
+                        setEditModalScoreboardManagerName(match.scoreboardManagerName || '');
+                        setEditModalScoreboardManagerPhoto(match.scoreboardManagerPhoto || '');
+                        setEditModalCommentatorName(match.commentatorName || '');
+                        setEditModalCommentatorPhoto(match.commentatorPhoto || '');
                         setShowEditMatchModal(true);
                       }}
                       className="px-3 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1"
@@ -19186,7 +20221,7 @@ export const CricketScoreboard: React.FC = () => {
               initial={{ scale: 0.85, opacity: 0, y: 50 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.85, opacity: 0, y: 50 }}
-              className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-700/50 rounded-[2rem] max-w-md w-full p-6 shadow-2xl relative z-10 text-white overflow-hidden"
+              className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-700/50 rounded-[2rem] max-w-2xl w-full p-6 shadow-2xl relative z-10 text-white max-h-[90vh] overflow-y-auto"
             >
               <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-indigo-500 to-teal-500" />
               <div className="flex justify-between items-center mb-6">
@@ -19202,29 +20237,32 @@ export const CricketScoreboard: React.FC = () => {
                 </button>
               </div>
 
-              <div className="space-y-4 font-sans">
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 label-required">Team A Name</label>
-                  <input
-                    type="text"
-                    value={editModalTeamA}
-                    onChange={(e) => setEditModalTeamA(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
-                    placeholder="Team A"
-                  />
+              <div className="space-y-4 font-sans text-left">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Team A Name</label>
+                    <input
+                      type="text"
+                      value={editModalTeamA}
+                      onChange={(e) => setEditModalTeamA(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                      placeholder="Team A"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Team B Name</label>
+                    <input
+                      type="text"
+                      value={editModalTeamB}
+                      onChange={(e) => setEditModalTeamB(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                      placeholder="Team B"
+                    />
+                  </div>
                 </div>
+
                 <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 label-required">Team B Name</label>
-                  <input
-                    type="text"
-                    value={editModalTeamB}
-                    onChange={(e) => setEditModalTeamB(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-bold outline-none text-white focus:border-indigo-500"
-                    placeholder="Team B"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 label-required">Overs Limit</label>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5 label-required">Overs Limit</label>
                   <input
                     type="number"
                     min="1"
@@ -19238,7 +20276,7 @@ export const CricketScoreboard: React.FC = () => {
                 {currentInnings && (
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Current Runs</label>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5">Current Runs</label>
                       <input
                         type="number"
                         min="0"
@@ -19248,7 +20286,7 @@ export const CricketScoreboard: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Wickets</label>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5">Wickets</label>
                       <input
                         type="number"
                         min="0"
@@ -19259,7 +20297,7 @@ export const CricketScoreboard: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1.5">Balls Bowled</label>
+                      <label className="text-[10px] font-black uppercase tracking-widest text-[#a1a1aa] block mb-1.5">Balls Bowled</label>
                       <input
                         type="number"
                         min="0"
@@ -19270,6 +20308,355 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {/* Tournament & Venue Details */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-300 block">
+                    🏆 Tournament & Venue Details
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Tournament Name</label>
+                      <input
+                        type="text"
+                        value={editModalTournamentName}
+                        onChange={(e) => setEditModalTournamentName(e.target.value)}
+                        placeholder="Tournament name"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1">Ground / Venue</label>
+                      <input
+                        type="text"
+                        value={editModalGroundName}
+                        onChange={(e) => setEditModalGroundName(e.target.value)}
+                        placeholder="Ground / venue name"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs font-bold outline-none text-white focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tournament Logo */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-300 flex items-center gap-1.5">
+                        <Award size={11} className="text-amber-400" />
+                        Tournament Logo
+                      </span>
+                      {editModalTournamentLogo && (
+                        <button
+                          type="button"
+                          onClick={() => setEditModalTournamentLogo('')}
+                          className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                        >
+                          Remove Logo
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                        {editModalTournamentLogo ? (
+                          <img src={editModalTournamentLogo} alt="Logo" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          <span className="text-lg">🏆</span>
+                        )}
+                      </div>
+                      <div className="flex-1 space-y-1.5">
+                        <div className="relative overflow-hidden inline-block w-full">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="edit-modal-2-tournament-logo-file"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                processOfficialPhotoFile(file, (dataUrl) => {
+                                  setEditModalTournamentLogo(dataUrl);
+                                });
+                              }
+                            }}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <label
+                            htmlFor="edit-modal-2-tournament-logo-file"
+                            className="w-full block py-1.5 px-2 bg-slate-850 hover:bg-slate-800 text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                          >
+                            📁 Upload Logo
+                          </label>
+                        </div>
+                        <input
+                          type="url"
+                          value={editModalTournamentLogo}
+                          onChange={(e) => setEditModalTournamentLogo(e.target.value)}
+                          placeholder="Or logo URL (https://...)"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[9px] text-slate-200 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Match Officials & Broadcast Crew */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-300 block">
+                    👨‍⚖️ Match Officials & Broadcast Crew
+                  </label>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Umpire 1 */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            ⚖️ Umpire 1
+                          </span>
+                          {editModalUmpire1Photo && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalUmpire1Photo('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalUmpire1Photo ? (
+                              <img src={editModalUmpire1Photo} alt="Umpire 1" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">👨‍⚖️</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-2-umpire1-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalUmpire1Photo(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-2-umpire1-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalUmpire1Name}
+                          onChange={(e) => setEditModalUmpire1Name(e.target.value)}
+                          placeholder="Umpire 1 name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalUmpire1Photo}
+                          onChange={(e) => setEditModalUmpire1Photo(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Umpire 2 */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            ⚖️ Umpire 2
+                          </span>
+                          {editModalUmpire2Photo && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalUmpire2Photo('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalUmpire2Photo ? (
+                              <img src={editModalUmpire2Photo} alt="Umpire 2" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">👨‍⚖️</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-2-umpire2-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalUmpire2Photo(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-2-umpire2-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalUmpire2Name}
+                          onChange={(e) => setEditModalUmpire2Name(e.target.value)}
+                          placeholder="Umpire 2 name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalUmpire2Photo}
+                          onChange={(e) => setEditModalUmpire2Photo(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Scoreboard Manager */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            📋 Manager
+                          </span>
+                          {editModalScoreboardManagerPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalScoreboardManagerPhoto('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalScoreboardManagerPhoto ? (
+                              <img src={editModalScoreboardManagerPhoto} alt="Manager" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">💻</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-2-manager-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalScoreboardManagerPhoto(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-2-manager-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalScoreboardManagerName}
+                          onChange={(e) => setEditModalScoreboardManagerName(e.target.value)}
+                          placeholder="Manager / Scorer name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalScoreboardManagerPhoto}
+                          onChange={(e) => setEditModalScoreboardManagerPhoto(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Commentator */}
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/90 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-300">
+                            🎙️ Commentator
+                          </span>
+                          {editModalCommentatorPhoto && (
+                            <button
+                              type="button"
+                              onClick={() => setEditModalCommentatorPhoto('')}
+                              className="text-[9px] text-rose-400 font-bold hover:underline bg-transparent border-none cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 shrink-0 overflow-hidden flex items-center justify-center">
+                            {editModalCommentatorPhoto ? (
+                              <img src={editModalCommentatorPhoto} alt="Commentator" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-base">🎙️</span>
+                            )}
+                          </div>
+                          <div className="flex-1 relative overflow-hidden">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              id="edit-modal-2-commentator-photo-file"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  processOfficialPhotoFile(file, (dataUrl) => {
+                                    setEditModalCommentatorPhoto(dataUrl);
+                                  });
+                                }
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label
+                              htmlFor="edit-modal-2-commentator-photo-file"
+                              className="block py-1 px-2 bg-slate-850 hover:bg-slate-800 text-slate-300 text-center font-bold text-[8.5px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-700/60"
+                            >
+                              Photo
+                            </label>
+                          </div>
+                        </div>
+                        <input
+                          type="text"
+                          value={editModalCommentatorName}
+                          onChange={(e) => setEditModalCommentatorName(e.target.value)}
+                          placeholder="Commentator name"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] font-bold text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          type="url"
+                          value={editModalCommentatorPhoto}
+                          onChange={(e) => setEditModalCommentatorPhoto(e.target.value)}
+                          placeholder="Photo URL"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-[8.5px] text-slate-300 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                </div>
 
                 <div className="flex gap-3 pt-4 font-sans">
                   <button

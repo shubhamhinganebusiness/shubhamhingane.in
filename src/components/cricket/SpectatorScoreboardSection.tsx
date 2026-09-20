@@ -155,6 +155,15 @@ interface MatchState {
   tournamentId?: string | null;
   tournamentMatchId?: string | null;
   tournamentName?: string | null;
+  tournamentLogo?: string | null;
+  umpire1Name?: string | null;
+  umpire1Photo?: string | null;
+  umpire2Name?: string | null;
+  umpire2Photo?: string | null;
+  scoreboardManagerName?: string | null;
+  scoreboardManagerPhoto?: string | null;
+  commentatorName?: string | null;
+  commentatorPhoto?: string | null;
   teamAId?: string | null;
   teamBId?: string | null;
   teamALogo?: string | null;
@@ -539,8 +548,16 @@ export const LiveMatchGlobalBanner = () => {
               <span className="text-white">{activeMatch.teamB}</span>
             </div>
             {activeMatch.tournamentName && (
-              <span className="text-[10px] font-semibold text-amber-400/90 truncate max-w-[160px] sm:max-w-[240px]">
-                🏆 {activeMatch.tournamentName}
+              <span className="text-[10px] font-semibold text-amber-400/90 truncate max-w-[160px] sm:max-w-[240px] flex items-center gap-1">
+                {activeMatch.tournamentLogo && (
+                  <img
+                    src={activeMatch.tournamentLogo}
+                    alt="Logo"
+                    className="w-3.5 h-3.5 object-cover rounded-full border border-amber-400/40 shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
+                <span>🏆 {activeMatch.tournamentName}</span>
               </span>
             )}
           </div>
@@ -6224,6 +6241,97 @@ export const SpectatorScoreboardSection = ({
                 {activeTab === 'standing' && (
                   <div className="space-y-6 animate-fade-in">
                     
+                    {/* Match Officials & Broadcast Panel */}
+                    {(selectedMatch.umpire1Name || selectedMatch.umpire2Name || selectedMatch.scoreboardManagerName || selectedMatch.commentatorName) && (
+                      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm">
+                        <div className="pb-3 border-b border-slate-50 dark:border-slate-800 mb-4 flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            {selectedMatch.tournamentLogo && (
+                              <img
+                                src={selectedMatch.tournamentLogo}
+                                alt="Tournament Logo"
+                                className="w-8 h-8 object-cover rounded-xl border border-amber-400/40 shrink-0"
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                            <div>
+                              <span className="text-[9px] font-black uppercase text-indigo-500 dark:text-indigo-400 tracking-wider block mb-0.5">
+                                Match Officials & Broadcast Crew
+                              </span>
+                              <h4 className="text-sm font-black text-slate-800 dark:text-white">
+                                {selectedMatch.tournamentName ? `${selectedMatch.tournamentName} • ` : ''}Official Panel
+                              </h4>
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-mono text-slate-400 bg-slate-50 dark:bg-slate-950 px-2.5 py-0.5 rounded border border-slate-200/50 dark:border-slate-800">
+                            VERIFIED CREW
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                          {/* Umpire 1 */}
+                          {selectedMatch.umpire1Name && (
+                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800/80 flex flex-col items-center text-center">
+                              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center mb-2 shadow-xs">
+                                {selectedMatch.umpire1Photo ? (
+                                  <img src={selectedMatch.umpire1Photo} alt={selectedMatch.umpire1Name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="text-xl">👨‍⚖️</span>
+                                )}
+                              </div>
+                              <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Umpire 1</span>
+                              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-full">{selectedMatch.umpire1Name}</span>
+                            </div>
+                          )}
+
+                          {/* Umpire 2 */}
+                          {selectedMatch.umpire2Name && (
+                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800/80 flex flex-col items-center text-center">
+                              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center mb-2 shadow-xs">
+                                {selectedMatch.umpire2Photo ? (
+                                  <img src={selectedMatch.umpire2Photo} alt={selectedMatch.umpire2Name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="text-xl">👨‍⚖️</span>
+                                )}
+                              </div>
+                              <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Umpire 2</span>
+                              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-full">{selectedMatch.umpire2Name}</span>
+                            </div>
+                          )}
+
+                          {/* Scoreboard Manager */}
+                          {selectedMatch.scoreboardManagerName && (
+                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800/80 flex flex-col items-center text-center">
+                              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center mb-2 shadow-xs">
+                                {selectedMatch.scoreboardManagerPhoto ? (
+                                  <img src={selectedMatch.scoreboardManagerPhoto} alt={selectedMatch.scoreboardManagerName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="text-xl">💻</span>
+                                )}
+                              </div>
+                              <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Scoreboard Manager</span>
+                              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-full">{selectedMatch.scoreboardManagerName}</span>
+                            </div>
+                          )}
+
+                          {/* Commentator */}
+                          {selectedMatch.commentatorName && (
+                            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800/80 flex flex-col items-center text-center">
+                              <div className="w-12 h-12 rounded-full bg-slate-200 dark:bg-slate-850 border border-slate-300 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center mb-2 shadow-xs">
+                                {selectedMatch.commentatorPhoto ? (
+                                  <img src={selectedMatch.commentatorPhoto} alt={selectedMatch.commentatorName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="text-xl">🎙️</span>
+                                )}
+                              </div>
+                              <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Commentator</span>
+                              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate max-w-full">{selectedMatch.commentatorName}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Squad XI Section - Auto rosters completion */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       

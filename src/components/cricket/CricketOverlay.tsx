@@ -17,6 +17,7 @@ import { StarTVScorebug } from './StarTVScorebug';
 import { isStarTVThemeActive, getStarTVThemeTokens } from './StarTVThemeTokens';
 import { CricketAnalyticsOverlay } from './CricketAnalyticsOverlay';
 import { TournamentBoundaryCounterPopup } from './TournamentBoundaryCounterPopup';
+import { TeamVsTeamOverlay } from './TeamVsTeamOverlay';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -1452,6 +1453,96 @@ export const CricketOverlay: React.FC = () => {
     };
   }, [currentInnings, match]);
 
+  // Global Tournament Name & Match Stage (accessible across all scorebugs, previews, and full-screen overlays)
+  const matchTournamentName = match?.tournamentName || (match as any)?.seriesName || (match as any)?.tournament || (match as any)?.cupName || 'STAR TV PREMIER LEAGUE 2026';
+  const matchStageText = match?.status === 'completed' 
+    ? 'FINAL RESULT' 
+    : inningsNum === 1 
+    ? '1ST INNINGS • LIVE' 
+    : '2ND INNINGS • CHASE';
+
+  // Accurate calculation of dot balls bowled in the current innings
+  const inningsDotBalls = useMemo(() => {
+    if (!currentInnings || (currentInnings.ballsBowled || 0) === 0) return 0;
+    
+    // 1. Calculate from commentaryList if available
+    const validBalls = (currentInnings.commentaryList || []).filter(c => {
+      if (!c) return false;
+      const t = (c as any).type;
+      if (t === 'milestone' || t === 'announcement' || t === 'break' || t === 'info') return false;
+      return true;
+    });
+
+    if (validBalls.length > 0) {
+      return validBalls.filter(c => {
+        const bs = String((c as any).ballScore || '').trim().toLowerCase();
+        if (bs === '0' || bs === '•' || bs === 'dot') return true;
+        if (bs === 'w' && !((c as any).runsOffBat > 0)) return true; // clean wicket with 0 runs
+        if (c.type === 'normal' && ((c as any).runsOffBat === 0 || (c as any).runsOffBat === '0')) return true;
+        const desc = (c.description || '').toLowerCase();
+        if (desc.includes('dot ball') || desc.includes('no run') || desc.includes('0 run') || desc.includes('plays a dot')) return true;
+        return false;
+      }).length;
+    }
+
+    // 2. Fallback: check bowlers array
+    let bowlerDots = 0;
+    (currentInnings.bowlers || []).forEach(bw => {
+      if ((bw as any).dotBalls !== undefined && typeof (bw as any).dotBalls === 'number') {
+        bowlerDots += (bw as any).dotBalls;
+      }
+    });
+    if (bowlerDots > 0) return Math.min(currentInnings.ballsBowled, bowlerDots);
+
+    // 3. Fallback: estimate from balls bowled minus boundaries
+    const fours = matchStats?.totalFours || 0;
+    const sixes = matchStats?.totalSixes || 0;
+    return Math.max(0, (currentInnings.ballsBowled || 0) - fours - sixes);
+  }, [currentInnings, matchStats]);
+
+  // Robust resolution of Toss Details across all sources (match props, local storage, commentary)
+  const resolvedToss = useMemo(() => {
+    let winner = (match?.tossWinner || (match as any)?.toss?.winner || (match as any)?.tossResult?.winner || '').trim();
+    let choice = (match?.tossChoice || (match as any)?.toss?.choice || (match as any)?.tossDecision || (match as any)?.tossResult?.choice || 'bat').trim().toLowerCase() as 'bat' | 'bowl';
+
+    if (!winner) {
+      try {
+        const rawToss = localStorage.getItem('gully_last_toss_data');
+        if (rawToss) {
+          const parsed = JSON.parse(rawToss);
+          if (parsed?.tossWinner) {
+            winner = parsed.tossWinner.trim();
+            choice = (parsed.tossChoice || parsed.elected || 'bat').trim().toLowerCase() as 'bat' | 'bowl';
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!winner && currentInnings?.commentaryList) {
+      for (const c of currentInnings.commentaryList) {
+        const desc = c?.description || '';
+        const m = desc.match(/\(([^)]+?)\s+won toss & elected to\s+(bat|bowl)\s+first\)/i) ||
+                  desc.match(/([A-Za-z0-9\s]+?)\s+won (?:the )?toss and (?:elected|chose) to\s+(bat|bowl)/i);
+        if (m) {
+          winner = m[1].trim();
+          choice = m[2].trim().toLowerCase() as 'bat' | 'bowl';
+          break;
+        }
+      }
+    }
+
+    if (!winner && currentInnings?.battingTeam) {
+      winner = currentInnings.battingTeam;
+      choice = 'bat';
+    }
+
+    const detailsText = winner 
+      ? `${winner.toUpperCase()} WON TOSS & ELECTED TO ${choice.toUpperCase()}`
+      : 'TOSS COMPLETED • 1ST INNINGS';
+
+    return { winner, choice, detailsText };
+  }, [match, currentInnings]);
+
   // Delivery Style Pill Resolver
   const getPillDetails = (b: CommentaryItem) => {
     if (!b) return { label: '', style: 'hidden' };
@@ -2503,15 +2594,7 @@ export const CricketOverlay: React.FC = () => {
             const projectedTotal = currentInnings && currentInnings.ballsBowled > 6 
               ? Math.round(((currentInnings.runs / currentInnings.ballsBowled) * (match?.oversLimit || 20) * 6)) 
               : undefined;
-            const matchTournamentName = match?.tournamentName || (match as any)?.seriesName || (match as any)?.tournament || (match as any)?.cupName || 'STAR TV PREMIER LEAGUE 2026';
-            const matchStageText = match?.status === 'completed' 
-              ? 'FINAL RESULT' 
-              : inningsNum === 1 
-              ? '1ST INNINGS • LIVE' 
-              : '2ND INNINGS • CHASE';
-            const tossDetailsText = match?.tossWinner 
-              ? `${match.tossWinner.toUpperCase()} OPTED TO ${(match.tossChoice || 'bat').toUpperCase()}`
-              : undefined;
+            const tossDetailsText = resolvedToss.detailsText;
             const equationDetailsText = match?.targetRuns && inningsNum === 2 
               ? `NEED ${Math.max(0, match.targetRuns - (currentInnings?.runs ?? 0))} RUNS IN ${Math.max(0, ((match?.oversLimit || 20) * 6) - (currentInnings?.ballsBowled ?? 0))} BALLS`
               : undefined;
@@ -2586,19 +2669,29 @@ export const CricketOverlay: React.FC = () => {
                 last5OversWickets={matchStats?.last5Wickets}
                 inningsFours={matchStats?.totalFours}
                 inningsSixes={matchStats?.totalSixes}
-                inningsDotBalls={bowlingStats?.dotBallPct ? Math.round(((currentInnings?.ballsBowled ?? 0) * bowlingStats.dotBallPct) / 100) : 18}
+                inningsDotBalls={inningsDotBalls}
                 isFreeHit={Boolean(match?.freeHitNext || (currentOverBalls && currentOverBalls.length > 0 && /nb/i.test(getPillDetails(currentOverBalls[currentOverBalls.length - 1]).label)))}
                 isDrsActive={activeAlert === 'drs'}
                 showWinPredictor={showWinPredictorOverlay}
 
                 // Star TV Scorebug Mini-Overlay Detail Props
                 scorebugOverlayMode={activeConfig.scorebugOverlayMode || 'this_over'}
-                tournamentName={matchTournamentName}
+                tournamentName={matchTournamentName || match?.tournamentName}
+                tournamentLogo={match?.tournamentLogo}
                 matchStage={matchStageText}
                 matchVenue={match?.venue}
+                groundName={match?.venue}
+                umpire1Name={match?.umpire1Name}
+                umpire1Photo={match?.umpire1Photo}
+                umpire2Name={match?.umpire2Name}
+                umpire2Photo={match?.umpire2Photo}
+                scoreboardManagerName={match?.scoreboardManagerName}
+                scoreboardManagerPhoto={match?.scoreboardManagerPhoto}
+                commentatorName={match?.commentatorName}
+                commentatorPhoto={match?.commentatorPhoto}
                 tossDetails={tossDetailsText}
-                tossWinner={match?.tossWinner}
-                tossChoice={match?.tossChoice}
+                tossWinner={resolvedToss.winner}
+                tossChoice={resolvedToss.choice}
                 equationText={equationDetailsText}
                 winnerDetails={winnerDetailsText}
                 lastBatsmanName={lastOutBatsman?.name}
@@ -4323,6 +4416,28 @@ export const CricketOverlay: React.FC = () => {
           </div>
         )}
 
+        {/* TEAM A VS TEAM B 3D SHIELD TOURNAMENT OVERLAY */}
+        {(activeGraphic === 'team_vs_team' || activeGraphic === 'team_vs_team_alert' || activeAlert === 'team_vs_team') && (
+          <div className="absolute inset-0 flex items-center justify-center z-55 pointer-events-auto bg-black/60 backdrop-blur-sm p-4">
+            <TeamVsTeamOverlay
+              tournamentName={matchTournamentName || match?.tournamentName || 'KARJAT BIG BASH LEAGUE'}
+              tournamentLogo={match?.tournamentLogo}
+              matchStage={matchStageText || 'Match No. 1, Group Match'}
+              matchVenue={match?.venue}
+              teamAName={match?.teamA || 'JAMKHED 11'}
+              teamBName={match?.teamB || 'KARJAT 11'}
+              teamALogo={match?.teamALogo}
+              teamBLogo={match?.teamBLogo}
+              teamAColor={activeConfig.teamAColor}
+              teamBColor={activeConfig.teamBColor}
+              onClose={() => {
+                setActiveGraphic('none');
+                setActiveAlert(null);
+              }}
+            />
+          </div>
+        )}
+
         {/* 9. WICKET ALERT TEMP */}
         {activeGraphic === 'wicket_alert_temp' && (
           <div className="absolute inset-x-0 top-32 flex justify-center z-50 pointer-events-none">
@@ -4608,6 +4723,15 @@ export const CricketOverlay: React.FC = () => {
             title="Both Squads Overlay: Gold broadcast 3D TV graphic showing both teams playing 11, team logos & VS emblem"
           >
             👥 Both Squads (XI)
+          </button>
+          <button
+            onClick={() => setActiveGraphic(activeGraphic === 'team_vs_team' ? 'none' : 'team_vs_team')}
+            className={`px-2 py-1 rounded-xl font-bold uppercase text-[10px] transition-all cursor-pointer ${
+              activeGraphic === 'team_vs_team' ? 'bg-gradient-to-r from-blue-600 to-rose-600 text-white font-black shadow-lg animate-pulse' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+            }`}
+            title="Team A VS Team B 3D Shield Matchup Overlay"
+          >
+            ⚔️ Team A VS B
           </button>
           <button
             onClick={() => setActiveGraphic(activeGraphic === 'innings_scorecard' ? 'none' : 'innings_scorecard')}

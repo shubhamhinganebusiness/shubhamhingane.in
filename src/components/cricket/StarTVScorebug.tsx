@@ -15,7 +15,11 @@ import {
   Users,
   Coins,
   Crown,
-  Flame
+  Flame,
+  MapPin,
+  Mic,
+  Scale,
+  Monitor
 } from 'lucide-react';
 
 export interface StarTVBall {
@@ -85,11 +89,21 @@ export interface StarTVScorebugProps {
   showWinPredictor?: boolean;
 
   // Star TV Scorebug Mini-Overlay Detail Props
-  scorebugOverlayMode?: 'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr';
-  onSelectOverlayMode?: (mode: 'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr') => void;
+  scorebugOverlayMode?: 'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr' | 'officials_venue';
+  onSelectOverlayMode?: (mode: 'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr' | 'officials_venue') => void;
   tournamentName?: string;
+  tournamentLogo?: string;
   matchStage?: string;
   matchVenue?: string;
+  groundName?: string;
+  umpire1Name?: string;
+  umpire1Photo?: string;
+  umpire2Name?: string;
+  umpire2Photo?: string;
+  scoreboardManagerName?: string;
+  scoreboardManagerPhoto?: string;
+  commentatorName?: string;
+  commentatorPhoto?: string;
   tossDetails?: string;
   tossWinner?: string;
   tossChoice?: 'bat' | 'bowl';
@@ -168,8 +182,18 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   scorebugOverlayMode = 'this_over',
   onSelectOverlayMode,
   tournamentName = 'STAR TV PREMIER LEAGUE 2026',
+  tournamentLogo,
   matchStage = 'GROUP STAGE • LIVE',
   matchVenue,
+  groundName,
+  umpire1Name,
+  umpire1Photo,
+  umpire2Name,
+  umpire2Photo,
+  scoreboardManagerName,
+  scoreboardManagerPhoto,
+  commentatorName,
+  commentatorPhoto,
   tossDetails,
   tossWinner,
   tossChoice,
@@ -189,7 +213,8 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   tournamentSixes
 }) => {
   // Scorebug overlay mode state (supports both controlled and uncontrolled usage)
-  const [activeScorebugMode, setActiveScorebugMode] = useState<'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr'>(scorebugOverlayMode || 'this_over');
+  const [activeScorebugMode, setActiveScorebugMode] = useState<'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr' | 'officials_venue'>(scorebugOverlayMode || 'this_over');
+  const [tossEquationMode, setTossEquationMode] = useState<'auto' | 'toss' | 'equation'>('auto');
 
   useEffect(() => {
     if (scorebugOverlayMode) {
@@ -197,7 +222,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
     }
   }, [scorebugOverlayMode]);
 
-  const handleSetOverlayMode = (mode: 'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr') => {
+  const handleSetOverlayMode = (mode: 'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr' | 'officials_venue') => {
     setActiveScorebugMode(mode);
     onSelectOverlayMode?.(mode);
   };
@@ -241,20 +266,19 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   const strikerSR = strikerBalls > 0 ? ((strikerRuns / strikerBalls) * 100).toFixed(1) : '0.0';
   const nonStrikerSR = nonStrikerBalls > 0 ? ((nonStrikerRuns / nonStrikerBalls) * 100).toFixed(1) : '0.0';
 
+  // Effective match and official names
+  const effectiveGroundName = groundName || matchVenue || 'Gully Stadium';
+  const effectiveTournamentName = tournamentName || 'STAR TV PREMIER LEAGUE 2026';
+  const effectiveUmpire1 = umpire1Name || 'Official Umpire 1';
+  const effectiveUmpire2 = umpire2Name || 'Official Umpire 2';
+  const effectiveCommentator = commentatorName || 'Live Commentary Desk';
+  const effectiveManager = scoreboardManagerName || 'Official Scorer';
+
   // ---------------------------------------------------------------------------
   // ENHANCEMENT 1: DYNAMIC ROTATING CONTEXT TICKER
   // ---------------------------------------------------------------------------
   const [tickerIndex, setTickerIndex] = useState<number>(0);
   const [isTickerPaused, setIsTickerPaused] = useState<boolean>(false);
-
-  // Auto-rotate ticker every 6.5s
-  useEffect(() => {
-    if (isTickerPaused) return;
-    const interval = setInterval(() => {
-      setTickerIndex(prev => (prev + 1) % 4);
-    }, 6500);
-    return () => clearInterval(interval);
-  }, [isTickerPaused]);
 
   // Computed Run Rates
   const computedCRR = useMemo(() => {
@@ -387,10 +411,13 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
     normalizedBalls.forEach(b => {
       const lbl = b.label.toLowerCase();
-      if (b.type === 'wicket' || lbl === 'w') wickets += 1;
-      else if (b.type === 'six' || lbl === '6') { sixes += 1; runsInOver += 6; }
+      if (b.type === 'wicket' || lbl === 'w') {
+        wickets += 1;
+        // Clean wicket with 0 runs is a dot ball in bowling analysis
+        dots += 1;
+      } else if (b.type === 'six' || lbl === '6') { sixes += 1; runsInOver += 6; }
       else if (b.type === 'four' || lbl === '4') { fours += 1; runsInOver += 4; }
-      else if (b.type === 'dot' || lbl === '0' || lbl === '•') dots += 1;
+      else if (b.type === 'dot' || lbl === '0' || lbl === '•' || lbl === 'dot') dots += 1;
       else {
         const digits = lbl.match(/\d+/);
         if (digits) runsInOver += parseInt(digits[0], 10);
@@ -486,6 +513,199 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   const nonStrikerWagonShots = useMemo(() => {
     return getBatterShots(nonStrikerName, nonStrikerRuns, nonStrikerFours, nonStrikerSixes, nonStrikerShots);
   }, [nonStrikerName, nonStrikerRuns, nonStrikerFours, nonStrikerSixes, nonStrikerShots]);
+
+  // Dynamic automatic slides for the Scorebug Ticker Carousel
+  const tickerSlides = useMemo(() => {
+    return [
+      {
+        id: 'tournament_venue',
+        category: 'TOURNAMENT & VENUE',
+        categoryColor: 'text-amber-400',
+        content: (
+          <span className="text-white inline-flex items-center gap-2 justify-center flex-wrap">
+            {tournamentLogo ? (
+              <img 
+                src={tournamentLogo} 
+                alt="Tournament Logo" 
+                className="w-4 h-4 rounded object-cover border border-amber-400/60 inline-block shrink-0 shadow-sm" 
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <Trophy size={13} className="text-amber-400 shrink-0 inline-block" />
+            )}
+            <span className="text-amber-400 font-bold">TOURNAMENT:</span>
+            <strong className="text-amber-200 font-black tracking-wide">{effectiveTournamentName}</strong>
+            <span className="text-white/30">•</span>
+            <MapPin size={12} className="text-sky-400 shrink-0 inline-block" />
+            <span className="text-sky-400 font-bold">GROUND / VENUE:</span>
+            <strong className="text-sky-200 font-black tracking-wide">{effectiveGroundName}</strong>
+            {matchStage && (
+              <>
+                <span className="text-white/30">•</span>
+                <span className="text-emerald-400 font-bold text-[10px] uppercase">({matchStage})</span>
+              </>
+            )}
+          </span>
+        )
+      },
+      {
+        id: 'umpires',
+        category: 'MATCH UMPIRES',
+        categoryColor: 'text-sky-400',
+        content: (
+          <span className="text-white inline-flex items-center gap-2 justify-center flex-wrap">
+            <Scale size={13} className="text-amber-400 shrink-0 inline-block" />
+            {umpire1Photo ? (
+              <img src={umpire1Photo} alt={effectiveUmpire1} className="w-4 h-4 rounded-full object-cover border border-amber-400/60 inline-block shrink-0 shadow-sm" referrerPolicy="no-referrer" />
+            ) : null}
+            <span className="text-slate-400 font-bold">UMPIRE 1:</span>
+            <strong className="text-amber-300 font-black">{effectiveUmpire1}</strong>
+            <span className="text-white/30">•</span>
+            {umpire2Photo ? (
+              <img src={umpire2Photo} alt={effectiveUmpire2} className="w-4 h-4 rounded-full object-cover border border-sky-400/60 inline-block shrink-0 shadow-sm" referrerPolicy="no-referrer" />
+            ) : null}
+            <span className="text-slate-400 font-bold">UMPIRE 2:</span>
+            <strong className="text-sky-300 font-black">{effectiveUmpire2}</strong>
+          </span>
+        )
+      },
+      {
+        id: 'commentary_manager',
+        category: 'COMMENTARY & SCORING',
+        categoryColor: 'text-emerald-400',
+        content: (
+          <span className="text-white inline-flex items-center gap-2 justify-center flex-wrap">
+            <Mic size={13} className="text-emerald-400 shrink-0 inline-block" />
+            {commentatorPhoto ? (
+              <img src={commentatorPhoto} alt={effectiveCommentator} className="w-4 h-4 rounded-full object-cover border border-emerald-400/60 inline-block shrink-0 shadow-sm" referrerPolicy="no-referrer" />
+            ) : null}
+            <span className="text-slate-400 font-bold">COMMENTARY:</span>
+            <strong className="text-emerald-300 font-black">{effectiveCommentator}</strong>
+            <span className="text-white/30">•</span>
+            <Monitor size={13} className="text-purple-400 shrink-0 inline-block" />
+            {scoreboardManagerPhoto ? (
+              <img src={scoreboardManagerPhoto} alt={effectiveManager} className="w-4 h-4 rounded-full object-cover border border-purple-400/60 inline-block shrink-0 shadow-sm" referrerPolicy="no-referrer" />
+            ) : null}
+            <span className="text-slate-400 font-bold">SCOREBOARD MANAGER:</span>
+            <strong className="text-purple-300 font-black">{effectiveManager}</strong>
+          </span>
+        )
+      },
+      {
+        id: 'rates_chase',
+        category: targetRuns && targetRuns > 0 ? 'CHASE EQUATION' : 'RUN RATES & PROJECTIONS',
+        categoryColor: 'text-amber-400',
+        content: targetRuns && targetRuns > 0 ? (
+          <span className="text-white">
+            CRR: <strong className="text-amber-300">{computedCRR}</strong>
+            <span className="text-white/30 mx-2">•</span>
+            REQ RR: <strong className="text-rose-400">{computedRRR ?? '0.0'}</strong>
+            <span className="text-white/30 mx-2">•</span>
+            TARGET: <strong className="text-sky-300">{targetRuns}</strong> (Need {remainingRuns ?? Math.max(0, targetRuns - score)} off {remainingBalls ?? 0}b)
+          </span>
+        ) : (
+          <span className="text-white">
+            CRR: <strong className="text-amber-300">{computedCRR}</strong>
+            <span className="text-white/30 mx-2">•</span>
+            PROJECTED TOTAL: <strong className="text-emerald-400">{projectedScores.projCurrent}</strong> (at current RR)
+            <span className="text-white/30 mx-2">•</span>
+            {projectedScores.proj8} (@ 8.0)
+            <span className="text-white/30 mx-2">•</span>
+            {projectedScores.proj10} (@ 10.0)
+          </span>
+        )
+      },
+      {
+        id: 'partnership',
+        category: 'ACTIVE PARTNERSHIP',
+        categoryColor: 'text-indigo-400',
+        content: (
+          <span className="text-white">
+            PARTNERSHIP: <strong className="text-amber-300">{computedPartnership.runs}*</strong> ({computedPartnership.balls}b)
+            <span className="text-white/30 mx-2">•</span>
+            {strikerName}: <strong className="text-sky-300">{strikerRuns}</strong> ({strikerBalls}b)
+            <span className="text-white/30 mx-1">&</span>
+            {nonStrikerName}: <strong className="text-slate-300">{nonStrikerRuns}</strong> ({nonStrikerBalls}b)
+          </span>
+        )
+      },
+      {
+        id: 'phase_rhythm',
+        category: 'MATCH RHYTHM & PHASE',
+        categoryColor: 'text-rose-400',
+        content: (
+          <span className="text-white">
+            PHASE: <strong className={matchPhase.color}>{matchPhase.name}</strong>
+            <span className="text-white/30 mx-2">•</span>
+            LAST 5 OVERS: <strong className="text-emerald-300">{last5OversRuns ?? Math.round(score * 0.35)}/{last5OversWickets ?? 1}</strong> (RR {((last5OversRuns ?? Math.round(score * 0.35)) / 5).toFixed(1)})
+          </span>
+        )
+      },
+      {
+        id: 'boundaries_dots',
+        category: 'INNINGS BOUNDARY ANALYSIS',
+        categoryColor: 'text-amber-400',
+        content: (
+          <span className="text-white">
+            BOUNDARIES: <strong className="text-sky-400">{inningsFours ?? (strikerFours + nonStrikerFours)}</strong> FOURS
+            <span className="text-white/30 mx-1.5">•</span>
+            <strong className="text-amber-400">{inningsSixes ?? (strikerSixes + nonStrikerSixes)}</strong> SIXES
+            <span className="text-white/30 mx-1.5">•</span>
+            DOT BALLS: <strong className="text-slate-300">{inningsDotBalls ?? 0}</strong>
+          </span>
+        )
+      }
+    ];
+  }, [
+    tournamentLogo,
+    effectiveTournamentName,
+    effectiveGroundName,
+    matchStage,
+    umpire1Photo,
+    effectiveUmpire1,
+    umpire2Photo,
+    effectiveUmpire2,
+    commentatorPhoto,
+    effectiveCommentator,
+    scoreboardManagerPhoto,
+    effectiveManager,
+    targetRuns,
+    computedCRR,
+    computedRRR,
+    remainingRuns,
+    remainingBalls,
+    score,
+    projectedScores,
+    computedPartnership,
+    strikerName,
+    strikerRuns,
+    strikerBalls,
+    nonStrikerName,
+    nonStrikerRuns,
+    nonStrikerBalls,
+    matchPhase,
+    last5OversRuns,
+    last5OversWickets,
+    inningsFours,
+    strikerFours,
+    nonStrikerFours,
+    inningsSixes,
+    strikerSixes,
+    nonStrikerSixes,
+    inningsDotBalls
+  ]);
+
+  // Automatic rotation for ticker every 5.5s
+  useEffect(() => {
+    if (isTickerPaused || tickerSlides.length === 0) return;
+    const interval = setInterval(() => {
+      setTickerIndex(prev => (prev + 1) % tickerSlides.length);
+    }, 5500);
+    return () => clearInterval(interval);
+  }, [isTickerPaused, tickerSlides.length]);
+
+  const safeTickerIndex = tickerSlides.length > 0 ? tickerIndex % tickerSlides.length : 0;
+  const currentSlide = tickerSlides[safeTickerIndex] || tickerSlides[0];
 
   return (
     <div 
@@ -802,10 +1022,10 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         <div className="flex-1 flex items-stretch min-w-0 bg-gradient-to-l from-slate-900/90 to-slate-950/80">
           
           {/* Bowler Details & This Over Balls */}
-          <div className="flex-1 px-2 sm:px-5 flex items-center justify-around gap-2 min-w-0 overflow-hidden">
+          <div className={`flex-1 px-2 sm:px-4 flex items-center ${activeScorebugMode !== 'this_over' ? 'justify-between' : 'justify-around'} gap-2 sm:gap-4 min-w-0 overflow-hidden`}>
             
             {/* Active Bowler */}
-            <div className="flex flex-col justify-center min-w-0 relative">
+            <div className={`flex flex-col justify-center relative ${activeScorebugMode !== 'this_over' ? 'shrink-0 min-w-[105px] sm:min-w-[130px]' : 'min-w-0'}`}>
               {/* 3+ Wicket Spell Alert */}
               {bowlerSpellAlert && (
                 <div className="absolute -top-3.5 left-0 px-2 py-0.2 bg-gradient-to-r from-purple-600 to-pink-500 text-white text-[8px] font-black font-mono rounded shadow-[0_0_8px_rgba(168,85,247,0.8)] animate-pulse flex items-center gap-1 z-20">
@@ -866,158 +1086,241 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
             <div className="h-8 w-px bg-white/10 shrink-0" />
 
             {/* ---------------- ENHANCEMENT 4: THIS OVER / OVER RECAP OR DETAIL OVERLAYS ---------------- */}
-            <div className="flex flex-col justify-center shrink-0 min-w-[150px] sm:min-w-[190px] max-w-[280px]">
+            <div className={`flex flex-col justify-center transition-all duration-300 ${activeScorebugMode !== 'this_over' ? 'flex-1 min-w-[280px] sm:min-w-[360px] md:min-w-[460px] lg:min-w-[560px] max-w-[680px]' : 'shrink-0 min-w-[150px] sm:min-w-[190px] max-w-[280px]'}`}>
               {activeScorebugMode === 'tournament' ? (
                 <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
+                  initial={{ opacity: 0, scale: 0.96 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col justify-center py-1 px-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-slate-900/95 to-amber-500/10 border border-amber-400/50 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
+                  className="flex flex-col justify-center py-1.5 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-amber-500/25 via-slate-900/95 to-amber-500/15 border border-amber-400/60 shadow-[0_0_20px_rgba(245,158,11,0.25)]"
                 >
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[7.5px] sm:text-[8px] font-black uppercase tracking-widest text-amber-400 font-mono flex items-center gap-1">
-                      <Trophy size={9} className="text-amber-400" />
+                    <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-widest text-amber-400 font-mono flex items-center gap-1.5">
+                      <Trophy size={11} className="text-amber-400" />
                       TOURNAMENT
                     </span>
                     <button
                       type="button"
                       onClick={() => handleSetOverlayMode('this_over')}
-                      className="text-[7px] font-mono text-slate-400 hover:text-white px-1 py-0.2 rounded bg-white/5 hover:bg-white/10 cursor-pointer transition-all"
+                      className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-amber-300 hover:text-white px-1.5 py-0.5 rounded bg-amber-400/15 hover:bg-amber-400/30 border border-amber-400/30 cursor-pointer transition-all"
                       title="Return to Over Balls"
                     >
                       ✕ BALLS
                     </button>
                   </div>
-                  <span className="text-xs sm:text-sm font-black uppercase tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-white to-amber-300 truncate max-w-[230px] drop-shadow-sm">
-                    {tournamentName}
-                  </span>
-                  <span className="text-[7.5px] sm:text-[8px] font-mono font-bold text-sky-300 uppercase truncate mt-0.5">
-                    {matchStage}
-                  </span>
-                </motion.div>
-              ) : activeScorebugMode === 'toss_equation' ? (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col justify-center py-1 px-2.5 rounded-xl bg-gradient-to-r from-emerald-500/20 via-slate-900/95 to-sky-500/15 border border-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
-                >
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[7.5px] sm:text-[8px] font-black uppercase tracking-widest text-emerald-400 font-mono flex items-center gap-1">
-                      {winnerDetails ? <Trophy size={9} className="text-amber-400" /> : (equationText || targetRuns) ? <Target size={9} className="text-emerald-400" /> : <Coins size={9} className="text-sky-400" />}
-                      {winnerDetails ? 'MATCH WINNER' : (equationText || targetRuns) ? 'TARGET EQUATION' : 'TOSS RESULT'}
+                  <div className="flex items-center gap-2">
+                    {tournamentLogo && (
+                      <img src={tournamentLogo} alt="Logo" className="w-5 h-5 rounded object-cover border border-amber-400/60 shrink-0 shadow-sm" referrerPolicy="no-referrer" />
+                    )}
+                    <span className="text-sm sm:text-base md:text-lg font-black uppercase tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-white to-amber-300 truncate drop-shadow-sm">
+                      {tournamentName || effectiveTournamentName}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => handleSetOverlayMode('this_over')}
-                      className="text-[7px] font-mono text-slate-400 hover:text-white px-1 py-0.2 rounded bg-white/5 hover:bg-white/10 cursor-pointer transition-all"
-                      title="Return to Over Balls"
-                    >
-                      ✕ BALLS
-                    </button>
                   </div>
-                  <span className="text-xs sm:text-sm font-black uppercase tracking-wide text-white truncate max-w-[230px]">
-                    {winnerDetails || equationText || (remainingRuns !== undefined && remainingBalls !== undefined ? `NEED ${remainingRuns} OFF ${remainingBalls} BALLS` : tossDetails || (tossWinner ? `${tossWinner} OPTED TO ${tossChoice?.toUpperCase() || 'BAT'}` : 'TOSS COMPLETED'))}
-                  </span>
-                  <span className="text-[7.5px] sm:text-[8px] font-mono font-bold text-emerald-300 uppercase truncate mt-0.5">
-                    {winnerDetails ? 'MATCH CONCLUDED' : rrr !== undefined ? `RRR: ${rrr} • TARGET: ${targetRuns}` : targetRuns ? `TARGET: ${targetRuns}` : '1ST INNINGS IN PLAY'}
+                  <span className="text-[8.5px] sm:text-[10px] font-mono font-bold text-sky-300 uppercase truncate mt-0.5">
+                    {matchStage} {effectiveGroundName ? `• 📍 ${effectiveGroundName}` : ''}
                   </span>
                 </motion.div>
-              ) : activeScorebugMode === 'last_batsman' ? (
+              ) : activeScorebugMode === 'toss_equation' ? (() => {
+                const effectiveTossWinner = (tossWinner || (tossDetails ? tossDetails.split(' ')[0] : '') || battingTeamName || 'TEAM A').toUpperCase();
+                const effectiveTossChoice = (tossChoice || (tossDetails && /bowl/i.test(tossDetails) ? 'BOWL' : 'BAT')).toUpperCase();
+                const resolvedTossText = tossDetails || `${effectiveTossWinner} WON TOSS & ELECTED TO ${effectiveTossChoice}`;
+                const hasChaseTarget = Boolean(targetRuns || equationText || remainingRuns !== undefined);
+                const isShowingToss = tossEquationMode === 'toss' || (!hasChaseTarget && !winnerDetails);
+
+                return (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.96 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex flex-col justify-center py-1.5 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-emerald-500/25 via-slate-900/95 to-sky-500/20 border border-emerald-400/60 shadow-[0_0_20px_rgba(16,185,129,0.25)]"
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-widest text-emerald-400 font-mono flex items-center gap-1.5">
+                          {winnerDetails ? <Trophy size={11} className="text-amber-400" /> : isShowingToss ? <Coins size={11} className="text-sky-400" /> : <Target size={11} className="text-emerald-400" />}
+                          {winnerDetails ? 'MATCH WINNER' : isShowingToss ? 'TOSS RESULT' : 'TARGET EQUATION'}
+                        </span>
+
+                        {/* Interactive toggle between Toss and Chase view when target exists */}
+                        {hasChaseTarget && !winnerDetails && (
+                          <button
+                            type="button"
+                            onClick={() => setTossEquationMode(prev => prev === 'toss' ? 'equation' : 'toss')}
+                            className="text-[7.5px] font-mono font-bold text-sky-300 hover:text-white px-1.5 py-0.2 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 cursor-pointer transition-all"
+                            title="Toggle between Toss Result & Target Equation"
+                          >
+                            {isShowingToss ? '⇄ VIEW CHASE' : '⇄ VIEW TOSS'}
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSetOverlayMode('this_over')}
+                        className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-emerald-300 hover:text-white px-1.5 py-0.5 rounded bg-emerald-400/15 hover:bg-emerald-400/30 border border-emerald-400/30 cursor-pointer transition-all"
+                        title="Return to Over Balls"
+                      >
+                        ✕ BALLS
+                      </button>
+                    </div>
+
+                    {/* Main Headline */}
+                    {winnerDetails ? (
+                      <span className="text-sm sm:text-base md:text-lg font-black uppercase tracking-wide text-amber-300 truncate drop-shadow">
+                        {winnerDetails}
+                      </span>
+                    ) : isShowingToss ? (
+                      <span className="text-sm sm:text-base md:text-lg font-black uppercase tracking-wide text-white truncate drop-shadow">
+                        {resolvedTossText}
+                      </span>
+                    ) : (
+                      <span className="text-sm sm:text-base md:text-lg font-black uppercase tracking-wide text-emerald-300 truncate drop-shadow">
+                        {equationText || (remainingRuns !== undefined && remainingBalls !== undefined ? `NEED ${remainingRuns} RUNS IN ${remainingBalls} BALLS` : `TARGET: ${targetRuns} RUNS`)}
+                      </span>
+                    )}
+
+                    {/* Subtitle with Context */}
+                    <span className="text-[8.5px] sm:text-[10px] font-mono font-bold text-slate-200 uppercase truncate mt-0.5">
+                      {winnerDetails ? (
+                        `MATCH CONCLUDED • TOSS: ${resolvedTossText}`
+                      ) : isShowingToss ? (
+                        hasChaseTarget ? `${equationText || `NEED ${remainingRuns} OFF ${remainingBalls}`} • RRR: ${rrr ?? '-'}` : `1ST INNINGS IN PLAY • ${battingTeamName} BATTING FIRST`
+                      ) : (
+                        `${rrr !== undefined ? `RRR: ${rrr} • ` : ''}TOSS: ${resolvedTossText}`
+                      )}
+                    </span>
+                  </motion.div>
+                );
+              })() : activeScorebugMode === 'last_batsman' ? (
                 <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
+                  initial={{ opacity: 0, scale: 0.96 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col justify-center py-1 px-2.5 rounded-xl bg-gradient-to-r from-rose-500/20 via-slate-900/95 to-amber-500/10 border border-rose-400/50 shadow-[0_0_15px_rgba(244,63,94,0.2)]"
+                  className="flex flex-col justify-center py-1.5 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-rose-500/25 via-slate-900/95 to-amber-500/15 border border-rose-400/60 shadow-[0_0_20px_rgba(244,63,94,0.25)]"
                 >
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[7.5px] sm:text-[8px] font-black uppercase tracking-widest text-rose-400 font-mono flex items-center gap-1">
-                      <Zap size={9} className="text-rose-400" />
+                    <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-widest text-rose-400 font-mono flex items-center gap-1.5">
+                      <Zap size={11} className="text-rose-400" />
                       LAST OUT BATSMAN
                     </span>
                     <button
                       type="button"
                       onClick={() => handleSetOverlayMode('this_over')}
-                      className="text-[7px] font-mono text-slate-400 hover:text-white px-1 py-0.2 rounded bg-white/5 hover:bg-white/10 cursor-pointer transition-all"
+                      className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-rose-300 hover:text-white px-1.5 py-0.5 rounded bg-rose-400/15 hover:bg-rose-400/30 border border-rose-400/30 cursor-pointer transition-all"
                       title="Return to Over Balls"
                     >
                       ✕ BALLS
                     </button>
                   </div>
-                  <div className="flex items-baseline gap-1.5 truncate max-w-[230px]">
-                    <span className="text-xs sm:text-sm font-black uppercase tracking-wide text-white truncate">
+                  <div className="flex items-baseline gap-2 truncate">
+                    <span className="text-sm sm:text-base md:text-lg font-black uppercase tracking-wide text-white truncate drop-shadow">
                       {lastBatsmanName || 'NO WICKETS DOWN'}
                     </span>
                     {lastBatsmanRuns !== undefined && (
-                      <span className="text-[11px] font-mono font-black text-rose-300">
-                        {lastBatsmanRuns} <span className="text-[9px] text-slate-400 font-normal">({lastBatsmanBalls || 0})</span>
+                      <span className="text-xs sm:text-sm font-mono font-black text-rose-300">
+                        {lastBatsmanRuns} <span className="text-[10px] text-slate-400 font-normal">({lastBatsmanBalls || 0}b)</span>
+                        {lastBatsmanSR !== undefined && (
+                          <span className="text-[9.5px] text-slate-400 font-mono font-medium ml-1.5">SR {lastBatsmanSR}</span>
+                        )}
                       </span>
                     )}
                   </div>
-                  <span className="text-[7.5px] sm:text-[8px] font-mono font-bold text-slate-400 uppercase truncate mt-0.5">
+                  <span className="text-[8.5px] sm:text-[10px] font-mono font-bold text-slate-300 uppercase truncate mt-0.5">
                     {lastBatsmanDismissal || (lastBatsmanFow ? `FoW: ${lastBatsmanFow}` : 'YET TO FALL')}
                   </span>
                 </motion.div>
               ) : activeScorebugMode === 'partnership' ? (
                 <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
+                  initial={{ opacity: 0, scale: 0.96 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col justify-center py-1 px-2.5 rounded-xl bg-gradient-to-r from-sky-500/20 via-slate-900/95 to-indigo-500/15 border border-sky-400/50 shadow-[0_0_15px_rgba(56,189,248,0.2)]"
+                  className="flex flex-col justify-center py-1.5 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-sky-500/25 via-slate-900/95 to-indigo-500/20 border border-sky-400/60 shadow-[0_0_20px_rgba(56,189,248,0.25)]"
                 >
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[7.5px] sm:text-[8px] font-black uppercase tracking-widest text-sky-400 font-mono flex items-center gap-1">
-                      <Users size={9} className="text-sky-400" />
+                    <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-widest text-sky-400 font-mono flex items-center gap-1.5">
+                      <Users size={11} className="text-sky-400" />
                       CURRENT PARTNERSHIP
                     </span>
                     <button
                       type="button"
                       onClick={() => handleSetOverlayMode('this_over')}
-                      className="text-[7px] font-mono text-slate-400 hover:text-white px-1 py-0.2 rounded bg-white/5 hover:bg-white/10 cursor-pointer transition-all"
+                      className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-sky-300 hover:text-white px-1.5 py-0.5 rounded bg-sky-400/15 hover:bg-sky-400/30 border border-sky-400/30 cursor-pointer transition-all"
                       title="Return to Over Balls"
                     >
                       ✕ BALLS
                     </button>
                   </div>
-                  <div className="flex items-baseline gap-1.5 truncate max-w-[230px]">
-                    <span className="text-xs sm:text-sm font-black font-mono text-cyan-300">
+                  <div className="flex items-baseline gap-2 truncate">
+                    <span className="text-sm sm:text-base md:text-lg font-black font-mono text-cyan-300 drop-shadow">
                       {partnershipRuns ?? 0} RUNS
                     </span>
-                    <span className="text-[9.5px] font-mono text-slate-400">
+                    <span className="text-xs sm:text-sm font-mono text-slate-400">
                       ({partnershipBalls ?? 0} balls)
                     </span>
                   </div>
-                  <span className="text-[7.5px] sm:text-[8px] font-mono font-bold text-slate-300 uppercase truncate mt-0.5">
-                    {strikerName.split(' ')[0]} {strikerRuns} • {nonStrikerName.split(' ')[0]} {nonStrikerRuns}
+                  <span className="text-[8.5px] sm:text-[10px] font-mono font-bold text-slate-200 uppercase truncate mt-0.5">
+                    {strikerName.split(' ')[0]} {strikerRuns} ({strikerBalls}b) • {nonStrikerName.split(' ')[0]} {nonStrikerRuns} ({nonStrikerBalls}b)
                   </span>
                 </motion.div>
               ) : activeScorebugMode === 'projected_crr' ? (
                 <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
+                  initial={{ opacity: 0, scale: 0.96 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="flex flex-col justify-center py-1 px-2.5 rounded-xl bg-gradient-to-r from-emerald-500/20 via-slate-900/95 to-amber-500/15 border border-emerald-400/50 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                  className="flex flex-col justify-center py-1.5 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-emerald-500/25 via-slate-900/95 to-amber-500/20 border border-emerald-400/60 shadow-[0_0_20px_rgba(16,185,129,0.25)]"
                 >
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[7.5px] sm:text-[8px] font-black uppercase tracking-widest text-emerald-400 font-mono flex items-center gap-1">
-                      <TrendingUp size={9} className="text-emerald-400" />
+                    <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-widest text-emerald-400 font-mono flex items-center gap-1.5">
+                      <TrendingUp size={11} className="text-emerald-400" />
                       PROJECTIONS & CRR
                     </span>
                     <button
                       type="button"
                       onClick={() => handleSetOverlayMode('this_over')}
-                      className="text-[7px] font-mono text-slate-400 hover:text-white px-1 py-0.2 rounded bg-white/5 hover:bg-white/10 cursor-pointer transition-all"
+                      className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-emerald-300 hover:text-white px-1.5 py-0.5 rounded bg-emerald-400/15 hover:bg-emerald-400/30 border border-emerald-400/30 cursor-pointer transition-all"
                       title="Return to Over Balls"
                     >
                       ✕ BALLS
                     </button>
                   </div>
-                  <div className="flex items-baseline gap-2 truncate max-w-[230px]">
-                    <span className="text-xs sm:text-sm font-black font-mono text-emerald-300">
+                  <div className="flex items-baseline gap-2.5 truncate">
+                    <span className="text-sm sm:text-base md:text-lg font-black font-mono text-emerald-300 drop-shadow">
                       PROJ: {projectedScore || Math.round((crr || 6) * (oversLimit || 20))}
                     </span>
-                    <span className="text-[10px] font-mono font-black text-amber-300">
+                    <span className="text-xs sm:text-sm font-mono font-black text-amber-300">
                       CRR: {crr !== undefined ? crr.toFixed(2) : '0.00'}
                     </span>
                   </div>
-                  <span className="text-[7.5px] sm:text-[8px] font-mono font-bold text-slate-300 uppercase truncate mt-0.5">
+                  <span className="text-[8.5px] sm:text-[10px] font-mono font-bold text-slate-300 uppercase truncate mt-0.5">
                     {targetRuns ? `TARGET: ${targetRuns} ${rrr ? `(RRR: ${rrr.toFixed(2)})` : ''}` : `AT 8 RPO: ${Math.round(8 * (oversLimit || 20))} • AT 10 RPO: ${Math.round(10 * (oversLimit || 20))}`}
                   </span>
+                </motion.div>
+              ) : activeScorebugMode === 'officials_venue' ? (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex flex-col justify-center py-1.5 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-amber-500/25 via-slate-900/95 to-sky-500/20 border border-amber-400/60 shadow-[0_0_20px_rgba(245,158,11,0.25)]"
+                >
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[8.5px] sm:text-[9.5px] font-black uppercase tracking-widest text-amber-400 font-mono flex items-center gap-1.5">
+                      <Trophy size={11} className="text-amber-400" />
+                      OFFICIALS & VENUE
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSetOverlayMode('this_over')}
+                      className="text-[7.5px] sm:text-[8.5px] font-mono font-bold text-amber-300 hover:text-white px-1.5 py-0.5 rounded bg-amber-400/15 hover:bg-amber-400/30 border border-amber-400/30 cursor-pointer transition-all"
+                      title="Return to Over Balls"
+                    >
+                      ✕ BALLS
+                    </button>
+                  </div>
+                  <div className="text-xs sm:text-sm md:text-base font-black uppercase tracking-wide text-white truncate flex items-center gap-2">
+                    {tournamentLogo && (
+                      <img src={tournamentLogo} alt="Logo" className="w-4 h-4 rounded object-cover border border-amber-400/50 shrink-0" referrerPolicy="no-referrer" />
+                    )}
+                    <span className="text-amber-200 truncate">{effectiveTournamentName}</span>
+                    <span className="text-white/40">•</span>
+                    <span className="text-sky-300 truncate">📍 {effectiveGroundName}</span>
+                  </div>
+                  <div className="text-[8.5px] sm:text-[10px] font-mono font-bold text-slate-300 uppercase truncate mt-0.5">
+                    ⚖️ {effectiveUmpire1} & {effectiveUmpire2} • 🎙️ {effectiveCommentator} • 💻 {effectiveManager}
+                  </div>
                 </motion.div>
               ) : (
                 /* DEFAULT: THIS OVER / OVER RECAP */
@@ -1148,118 +1451,66 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
           ========================================================================= */}
       <div 
         id="star-tv-context-ticker"
-        className="relative w-full h-[32px] sm:h-[34px] bg-slate-950/98 border-t border-white/15 border-b border-black/80 flex items-center justify-between px-4 sm:px-8 text-white font-mono text-xs shadow-lg backdrop-blur-xl"
+        onMouseEnter={() => setIsTickerPaused(true)}
+        onMouseLeave={() => setIsTickerPaused(false)}
+        className="relative w-full min-h-[32px] sm:min-h-[34px] py-1 bg-slate-950/98 border-t border-white/15 border-b border-black/80 flex items-center justify-between px-3 sm:px-6 text-white font-mono text-xs shadow-lg backdrop-blur-xl transition-all"
       >
         {/* Left Badge: Category Indicator */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-[9.5px] sm:text-[10.5px] font-black uppercase tracking-wider text-amber-400">
-            {tickerIndex === 0 && (targetRuns ? 'CHASE EQUATION' : 'RUN RATES & PROJECTIONS')}
-            {tickerIndex === 1 && 'ACTIVE PARTNERSHIP'}
-            {tickerIndex === 2 && 'MATCH RHYTHM & PHASE'}
-            {tickerIndex === 3 && 'INNINGS BOUNDARY ANALYSIS'}
+          <span className={`text-[9px] sm:text-[10.5px] font-black uppercase tracking-wider ${currentSlide?.categoryColor || 'text-amber-400'}`}>
+            {currentSlide?.category}
           </span>
         </div>
 
         {/* Center Carousel Slide */}
-        <div className="flex-1 mx-4 overflow-hidden text-center">
+        <div className="flex-1 mx-2 sm:mx-4 overflow-hidden text-center">
           <AnimatePresence mode="wait">
             <motion.div
-              key={tickerIndex}
+              key={safeTickerIndex}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.25 }}
-              className="text-[10.5px] sm:text-[11.5px] font-bold tracking-wide truncate"
+              className="text-[10px] sm:text-[11.5px] font-bold tracking-wide truncate"
             >
-              {/* Slide 0: Rates, Targets & Projections */}
-              {tickerIndex === 0 && (
-                targetRuns && targetRuns > 0 ? (
-                  <span className="text-white">
-                    CRR: <strong className="text-amber-300">{computedCRR}</strong>
-                    <span className="text-white/30 mx-2">•</span>
-                    REQ RR: <strong className="text-rose-400">{computedRRR ?? '0.0'}</strong>
-                    <span className="text-white/30 mx-2">•</span>
-                    TARGET: <strong className="text-sky-300">{targetRuns}</strong> (Need {remainingRuns ?? Math.max(0, targetRuns - score)} off {remainingBalls ?? 0}b)
-                  </span>
-                ) : (
-                  <span className="text-white">
-                    CRR: <strong className="text-amber-300">{computedCRR}</strong>
-                    <span className="text-white/30 mx-2">•</span>
-                    PROJECTED TOTAL: <strong className="text-emerald-400">{projectedScores.projCurrent}</strong> (at current RR)
-                    <span className="text-white/30 mx-2">•</span>
-                    {projectedScores.proj8} (@ 8.0)
-                    <span className="text-white/30 mx-2">•</span>
-                    {projectedScores.proj10} (@ 10.0)
-                  </span>
-                )
-              )}
-
-              {/* Slide 1: Partnership */}
-              {tickerIndex === 1 && (
-                <span className="text-white">
-                  PARTNERSHIP: <strong className="text-amber-300">{computedPartnership.runs}*</strong> ({computedPartnership.balls}b)
-                  <span className="text-white/30 mx-2">•</span>
-                  {strikerName}: <strong className="text-sky-300">{strikerRuns}</strong> ({strikerBalls}b)
-                  <span className="text-white/30 mx-1">&</span>
-                  {nonStrikerName}: <strong className="text-slate-300">{nonStrikerRuns}</strong> ({nonStrikerBalls}b)
-                </span>
-              )}
-
-              {/* Slide 2: Match Phase & Last 5 Overs */}
-              {tickerIndex === 2 && (
-                <span className="text-white">
-                  PHASE: <strong className={matchPhase.color}>{matchPhase.name}</strong>
-                  <span className="text-white/30 mx-2">•</span>
-                  LAST 5 OVERS: <strong className="text-emerald-300">{last5OversRuns ?? Math.round(score * 0.35)}/{last5OversWickets ?? 1}</strong> (RR {((last5OversRuns ?? Math.round(score * 0.35)) / 5).toFixed(1)})
-                </span>
-              )}
-
-              {/* Slide 3: Boundary Count & Dots */}
-              {tickerIndex === 3 && (
-                <span className="text-white">
-                  BOUNDARIES: <strong className="text-sky-400">{inningsFours ?? (strikerFours + nonStrikerFours)}</strong> FOURS
-                  <span className="text-white/30 mx-1.5">•</span>
-                  <strong className="text-amber-400">{inningsSixes ?? (strikerSixes + nonStrikerSixes)}</strong> SIXES
-                  <span className="text-white/30 mx-1.5">•</span>
-                  DOT BALLS: <strong className="text-slate-300">{inningsDotBalls ?? 18}</strong>
-                </span>
-              )}
+              {currentSlide?.content}
             </motion.div>
           </AnimatePresence>
         </div>
 
         {/* Right Navigation Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <div className="flex items-center gap-1 mr-2">
-            {[0, 1, 2, 3].map(i => (
+          <div className="hidden sm:flex items-center gap-1 mr-1">
+            {tickerSlides.map((slide, i) => (
               <button
-                key={i}
+                key={slide.id}
                 type="button"
                 onClick={() => {
                   setTickerIndex(i);
                   setIsTickerPaused(true);
                 }}
-                className={`w-1.5 h-1.5 rounded-full transition-all cursor-pointer ${
-                  tickerIndex === i ? 'bg-amber-400 w-3' : 'bg-white/20 hover:bg-white/40'
+                className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                  safeTickerIndex === i ? 'bg-amber-400 w-3.5' : 'bg-white/20 hover:bg-white/40 w-1.5'
                 }`}
+                title={slide.category}
               />
             ))}
           </div>
 
           <button
             type="button"
-            onClick={() => setTickerIndex(prev => (prev - 1 + 4) % 4)}
+            onClick={() => setTickerIndex(prev => (prev - 1 + tickerSlides.length) % tickerSlides.length)}
             className="w-5 h-5 rounded flex items-center justify-center bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="Previous Stat"
+            title="Previous Info Slide"
           >
             <ChevronLeft size={12} />
           </button>
           <button
             type="button"
-            onClick={() => setTickerIndex(prev => (prev + 1) % 4)}
+            onClick={() => setTickerIndex(prev => (prev + 1) % tickerSlides.length)}
             className="w-5 h-5 rounded flex items-center justify-center bg-white/5 hover:bg-white/15 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="Next Stat"
+            title="Next Info Slide"
           >
             <ChevronRight size={12} />
           </button>

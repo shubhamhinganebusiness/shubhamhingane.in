@@ -100,7 +100,17 @@ export function pruneOversizedDataForFirestore(data: any, maxByteSize = 820000):
   console.warn(`[Firestore Pruner] Document payload (${currentSize} bytes) exceeds limit (${maxByteSize} bytes). Pruning...`);
 
   // Step 1: Strip large base64 strings (> 25KB) from standard image keys
-  const imageKeys = ['teamALogo', 'teamBLogo', 'matchBannerUrl', 'customOverlayImg'];
+  const imageKeys = [
+    'teamALogo',
+    'teamBLogo',
+    'matchBannerUrl',
+    'customOverlayImg',
+    'tournamentLogo',
+    'umpire1Photo',
+    'umpire2Photo',
+    'scoreboardManagerPhoto',
+    'commentatorPhoto'
+  ];
   for (const k of imageKeys) {
     if (typeof clone[k] === 'string' && clone[k].length > 25000) {
       clone[k] = '';

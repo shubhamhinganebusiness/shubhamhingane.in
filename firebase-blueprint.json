@@ -225,6 +225,15 @@
         "targetRuns": { "type": "number" },
         "freeHitNext": { "type": "boolean" },
         "lastBallResult": { "type": "string" },
+        "tournamentLogo": { "type": "string" },
+        "umpire1Name": { "type": "string" },
+        "umpire1Photo": { "type": "string" },
+        "umpire2Name": { "type": "string" },
+        "umpire2Photo": { "type": "string" },
+        "scoreboardManagerName": { "type": "string" },
+        "scoreboardManagerPhoto": { "type": "string" },
+        "commentatorName": { "type": "string" },
+        "commentatorPhoto": { "type": "string" },
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "teamA", "teamB", "oversLimit", "status"]
