@@ -98,6 +98,7 @@ import { enqueueMatchBallSave, processOfflineScoringQueue, isNetworkOnline } fro
 import { CareerPlayerCardModal, PlayerCareerStats } from './CareerPlayerCardModal';
 import { LiveTournamentLeaderboardWidget } from './LiveTournamentLeaderboardWidget';
 import { SponsorBannerManagementModal } from './SponsorBannerManagementModal';
+import { PrizeManagementModal } from './PrizeManagementModal';
 
 // Types & Interfaces
 export interface Batsman {
@@ -1544,6 +1545,7 @@ export const CricketScoreboard: React.FC = () => {
   const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<PlayerCareerStats | null>(null);
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
   const [showSponsorModal, setShowSponsorModal] = useState(false);
+  const [showPrizeModal, setShowPrizeModal] = useState(false);
 
   const openCareerCardByName = (playerName: string, teamHint?: string) => {
     if (!playerName) return;
@@ -7194,6 +7196,19 @@ export const CricketScoreboard: React.FC = () => {
           matchId={match.id}
         />
 
+        {/* Tournament Prize Money Management Modal (Above Scorebug) */}
+        <PrizeManagementModal
+          isOpen={showPrizeModal}
+          onClose={() => setShowPrizeModal(false)}
+          matchId={match.id}
+          onSaved={(updated) => {
+            syncMatch((prev) => ({
+              ...prev,
+              tournamentPrizes: updated,
+            }));
+          }}
+        />
+
         {/* Interactive Field Position Manager Modal (Popup for 11 Players) */}
         {(() => {
           const currentBowlingTeam = currentInnings?.bowlingTeam || (currentInnings?.battingTeam === match.teamA ? match.teamB : match.teamA) || (match.tossChoice === 'bowl' ? match.tossWinner : (match.tossWinner === match.teamA ? match.teamB : match.teamA)) || match.teamB || 'Team B';
@@ -7352,6 +7367,16 @@ export const CricketScoreboard: React.FC = () => {
                 >
                   <Award size={12} className="text-emerald-400" />
                   <span className="hidden sm:inline">Sponsors</span>
+                </button>
+
+                {/* Tournament Prize Money Manager (Above Scorebug: Best Batsman, Best Bowler, Man of the Series, 4th Prize) */}
+                <button
+                  onClick={() => setShowPrizeModal(true)}
+                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500 hover:to-yellow-400 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 shadow-xs"
+                  title="Manage Tournament Prize Money (Best Batsman, Best Bowler, Man of the Series, etc. Above Scorebug)"
+                >
+                  <Trophy size={12} className="text-yellow-400" />
+                  <span className="hidden sm:inline">Prize Money</span>
                 </button>
 
                 <button
@@ -9629,6 +9654,13 @@ export const CricketScoreboard: React.FC = () => {
                                   desc: 'Live score bug overlay in corner',
                                   isActive: activeOverlayConfig.showScoreBug !== false,
                                   onToggle: () => updateOverlayProp({ showScoreBug: activeOverlayConfig.showScoreBug === false })
+                                },
+                                {
+                                  id: 'tournament_prize_money',
+                                  label: '🏆 Tournament Prize Money (Above Scorebug)',
+                                  desc: 'Best Batsman, Best Bowler, Man of the Series & 4th Prize sponsor display continuously above scorebug',
+                                  isActive: true,
+                                  onToggle: () => setShowPrizeModal(true)
                                 },
                                 {
                                   id: 'win_probability_meter',
@@ -18763,9 +18795,19 @@ export const CricketScoreboard: React.FC = () => {
                             Real-Time TV Graphics System Preview
                           </h5>
                         </div>
-                        <span className="text-[10px] font-black text-slate-500 uppercase font-mono tracking-widest bg-slate-950 px-2 py-0.5 rounded border border-white/5">
-                          16:9 Transparent Overlay Emulator
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setShowPrizeModal(true)}
+                            className="px-2.5 py-1 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500 hover:to-yellow-400 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                            title="Manage Tournament Prize Money (Best Batsman, Best Bowler, Man of the Series, 4th Prize)"
+                          >
+                            <Trophy size={11} className="text-yellow-400" />
+                            <span>Prize Money Settings</span>
+                          </button>
+                          <span className="text-[10px] font-black text-slate-500 uppercase font-mono tracking-widest bg-slate-950 px-2 py-0.5 rounded border border-white/5">
+                            16:9 Transparent Overlay Emulator
+                          </span>
+                        </div>
                       </div>
                       <div className={`aspect-video w-full max-w-4xl mx-auto rounded-3xl bg-[#030712] overflow-hidden relative shadow-inner transition-all duration-500 border-4 ${
                         wicketTriggerAlert 

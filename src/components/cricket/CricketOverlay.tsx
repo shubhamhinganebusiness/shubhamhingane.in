@@ -21,6 +21,7 @@ import { TeamVsTeamOverlay } from './TeamVsTeamOverlay';
 import { FieldPositionManagerModal } from './FieldPositionManagerModal';
 import { TournamentLogoOverlay } from './TournamentLogoOverlay';
 import { BlackBoardScoreboardOverlay } from './BlackBoardScoreboardOverlay';
+import { ContinuousPrizeMoneyBanner } from './ContinuousPrizeMoneyBanner';
 
 // Types & Interfaces matching host application
 interface Batsman {
@@ -2729,6 +2730,20 @@ export const CricketOverlay: React.FC = () => {
       </AnimatePresence>
 
       {/* =========================================================================
+          CONTINUOUS TOURNAMENT PRIZE MONEY BANNER (ABOVE SCOREBUG)
+          Renders continuously above ANY active scorebug layout (Slanted Pro, Star TV, Ribbon, etc.)
+          Automatically hidden if score manager has not added prize details.
+          ========================================================================= */}
+      {activeConfig.showScoreBug && !isFullScreenTransition && (
+        <ContinuousPrizeMoneyBanner
+          matchId={match?.id || matchId}
+          prizes={match?.tournamentPrizes}
+          layout={activeLayout}
+          position={activeConfig.bugPosition}
+        />
+      )}
+
+      {/* =========================================================================
           3-STAR. STAR TV PRO SCOREBUG (OFFICIAL TELEVISION REFERENCE DESIGN)
           ========================================================================= */}
       {activeConfig.showScoreBug && activeLayout === 'star-tv-broadcast' && (
@@ -2864,6 +2879,9 @@ export const CricketOverlay: React.FC = () => {
                 projectedScore={projectedTotal}
                 tournamentFours={tournamentBoundaries.fours}
                 tournamentSixes={tournamentBoundaries.sixes}
+                tournamentPrizes={match?.tournamentPrizes}
+                matchId={match?.id}
+                showPrizeMoneyBanner={false}
               />
             );
           })()}
