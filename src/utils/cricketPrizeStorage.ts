@@ -1,25 +1,94 @@
 import { db, safeSetDoc } from '../lib/firebase';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 
-export type PrizeCategory = 'best_batsman' | 'best_bowler' | 'man_of_series' | 'fourth_prize' | 'custom';
+export type PrizeCategory =
+  | 'tournament_1st'
+  | 'tournament_2nd'
+  | 'tournament_3rd'
+  | 'tournament_4th'
+  | 'best_batsman'
+  | 'best_bowler'
+  | 'man_of_series'
+  | 'fourth_prize'
+  | 'custom';
 
 export interface TournamentPrize {
-  id: string; // 'best_batsman' | 'best_bowler' | 'man_of_series' | 'fourth_prize'
+  id: string; // 'tournament_1st' | 'tournament_2nd' | 'tournament_3rd' | 'tournament_4th' | 'best_batsman' | etc or custom ID
   category: PrizeCategory;
-  title: string; // e.g. "Best Batsman Award", "Best Bowler Award", "Man of the Series"
-  personName: string; // The person who gave the prize money
+  title: string; // e.g. "Tournament 1st Prize / Champion", "Tournament 2nd Prize / Runner-Up", etc.
+  personName: string; // The person or sponsor who gave the prize money
   personPhoto: string; // URL or base64 data URL
-  personDesignation?: string; // e.g. "Sarpanch", "Cricket Patron", "Chief Guest"
-  amount: string; // e.g. "21,000" or "51,000"
+  personDesignation?: string; // e.g. "Sarpanch", "Cricket Patron", "Chief Guest", "Firm Name"
+  amount: string; // e.g. "51,000", "31,000", "21,000"
   currency: string; // default "₹"
-  tagline?: string; // e.g. "Prize Money Sponsored By"
+  tagline?: string; // e.g. "Champion Trophy & Cash Sponsored By"
   isActive: boolean; // toggle visibility
   updatedAt?: number;
 }
 
 const STORAGE_KEY = 'gullyscore_tournament_prizes_v1';
 
-export const DEFAULT_FOUR_PRIZES: TournamentPrize[] = [
+export const STANDARD_TOURNAMENT_PRIZES: TournamentPrize[] = [
+  {
+    id: 'tournament_1st',
+    category: 'tournament_1st',
+    title: 'Tournament 1st Prize / Champion',
+    personName: '',
+    personPhoto: '',
+    personDesignation: '',
+    amount: '',
+    currency: '₹',
+    tagline: 'Champion Trophy & Cash Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'tournament_2nd',
+    category: 'tournament_2nd',
+    title: 'Tournament 2nd Prize / Runner-Up',
+    personName: '',
+    personPhoto: '',
+    personDesignation: '',
+    amount: '',
+    currency: '₹',
+    tagline: 'Runner-Up Trophy & Cash Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'tournament_3rd',
+    category: 'tournament_3rd',
+    title: 'Tournament 3rd Prize',
+    personName: '',
+    personPhoto: '',
+    personDesignation: '',
+    amount: '',
+    currency: '₹',
+    tagline: '3rd Prize Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'tournament_4th',
+    category: 'tournament_4th',
+    title: 'Tournament 4th Prize',
+    personName: '',
+    personPhoto: '',
+    personDesignation: '',
+    amount: '',
+    currency: '₹',
+    tagline: '4th Prize Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'man_of_series',
+    category: 'man_of_series',
+    title: 'Man of the Series Award',
+    personName: '',
+    personPhoto: '',
+    personDesignation: '',
+    amount: '',
+    currency: '₹',
+    tagline: 'Grand Award Sponsored By',
+    isActive: true,
+  },
   {
     id: 'best_batsman',
     category: 'best_batsman',
@@ -44,31 +113,9 @@ export const DEFAULT_FOUR_PRIZES: TournamentPrize[] = [
     tagline: 'Cash Prize Sponsored By',
     isActive: true,
   },
-  {
-    id: 'man_of_series',
-    category: 'man_of_series',
-    title: 'Man of the Series Award',
-    personName: '',
-    personPhoto: '',
-    personDesignation: '',
-    amount: '',
-    currency: '₹',
-    tagline: 'Grand Prize Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'fourth_prize',
-    category: 'fourth_prize',
-    title: 'Tournament 1st Prize / Champion',
-    personName: '',
-    personPhoto: '',
-    personDesignation: '',
-    amount: '',
-    currency: '₹',
-    tagline: 'Cash Prize Sponsored By',
-    isActive: true,
-  },
 ];
+
+export const DEFAULT_FOUR_PRIZES: TournamentPrize[] = STANDARD_TOURNAMENT_PRIZES;
 
 /**
  * Filter prizes that have valid details entered by the score manager.
@@ -129,25 +176,32 @@ export function getTournamentPrizes(matchId?: string): TournamentPrize[] {
     }
 
     if (!raw) {
-      return DEFAULT_FOUR_PRIZES;
+      return STANDARD_TOURNAMENT_PRIZES;
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure all 4 categories exist
-      const merged = DEFAULT_FOUR_PRIZES.map((def) => {
-        const found = parsed.find((p: TournamentPrize) => p.id === def.id || p.category === def.category);
-        return found ? { ...def, ...found } : def;
+      // Ensure all standard tournament prizes (1st, 2nd, 3rd, 4th, awards) exist
+      const merged = STANDARD_TOURNAMENT_PRIZES.map((def) => {
+        const found = parsed.find(
+          (p: TournamentPrize) =>
+            p.id === def.id ||
+            p.category === def.category ||
+            (def.id === 'tournament_1st' && (p.id === 'fourth_prize' || p.category === 'fourth_prize'))
+        );
+        return found ? { ...def, ...found, id: def.id, category: def.category } : def;
       });
-      // Append any custom additional prizes if exists
+      // Append any custom additional prizes if exist
       const additional = parsed.filter(
-        (p: TournamentPrize) => !DEFAULT_FOUR_PRIZES.some((def) => def.id === p.id || def.category === p.category)
+        (p: TournamentPrize) =>
+          !STANDARD_TOURNAMENT_PRIZES.some((def) => def.id === p.id || def.category === p.category) &&
+          p.id !== 'fourth_prize'
       );
       return [...merged, ...additional];
     }
-    return DEFAULT_FOUR_PRIZES;
+    return STANDARD_TOURNAMENT_PRIZES;
   } catch (err) {
     console.warn('Error reading tournament prizes from storage:', err);
-    return DEFAULT_FOUR_PRIZES;
+    return STANDARD_TOURNAMENT_PRIZES;
   }
 }
 
@@ -317,27 +371,51 @@ export function subscribeToTournamentPrizes(
  */
 export const SAMPLE_DEMO_PRIZES: TournamentPrize[] = [
   {
-    id: 'best_batsman',
-    category: 'best_batsman',
-    title: 'Best Batsman Award',
-    personName: 'Shri Ramesh Patil',
-    personPhoto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Sarpanch, Gram Panchayat',
-    amount: '11,000',
+    id: 'tournament_1st',
+    category: 'tournament_1st',
+    title: 'Tournament 1st Prize / Champion',
+    personName: 'Choudhary Brothers Construction',
+    personPhoto: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Main Tournament Sponsor',
+    amount: '51,000',
     currency: '₹',
-    tagline: 'Cash Prize Sponsored By',
+    tagline: 'Champion Trophy & Cash Sponsored By',
     isActive: true,
   },
   {
-    id: 'best_bowler',
-    category: 'best_bowler',
-    title: 'Best Bowler Award',
-    personName: 'Dr. Ashok Deshmukh',
-    personPhoto: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Patron & Sports Enthusiast',
+    id: 'tournament_2nd',
+    category: 'tournament_2nd',
+    title: 'Tournament 2nd Prize / Runner-Up',
+    personName: 'Shri Ramesh Patil',
+    personPhoto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Sarpanch, Gram Panchayat',
+    amount: '31,000',
+    currency: '₹',
+    tagline: 'Runner-Up Trophy & Cash Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'tournament_3rd',
+    category: 'tournament_3rd',
+    title: 'Tournament 3rd Prize',
+    personName: 'Balaji Developers & Infra',
+    personPhoto: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Cricket Patron & Donor',
+    amount: '21,000',
+    currency: '₹',
+    tagline: '3rd Prize Trophy Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'tournament_4th',
+    category: 'tournament_4th',
+    title: 'Tournament 4th Prize',
+    personName: 'Maa Bhavani Sports Club',
+    personPhoto: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Youth Sports Foundation',
     amount: '11,000',
     currency: '₹',
-    tagline: 'Cash Prize Sponsored By',
+    tagline: '4th Prize Sponsored By',
     isActive: true,
   },
   {
@@ -347,21 +425,45 @@ export const SAMPLE_DEMO_PRIZES: TournamentPrize[] = [
     personName: 'Vikramaditya Shinde',
     personPhoto: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&auto=format&fit=crop&q=80',
     personDesignation: 'President, Yuva Krida Mandal',
-    amount: '25,000',
+    amount: '15,000',
     currency: '₹',
     tagline: 'Grand Cash Prize Sponsored By',
     isActive: true,
   },
   {
-    id: 'fourth_prize',
-    category: 'fourth_prize',
-    title: 'Tournament 1st Prize / Champion',
-    personName: 'Choudhary Brothers Construction',
-    personPhoto: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Main Tournament Sponsor',
-    amount: '51,000',
+    id: 'best_batsman',
+    category: 'best_batsman',
+    title: 'Best Batsman Award',
+    personName: 'Dr. Ashok Deshmukh',
+    personPhoto: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Patron & Sports Enthusiast',
+    amount: '7,000',
     currency: '₹',
-    tagline: 'Champion Trophy & Cash Sponsored By',
+    tagline: 'Cash Prize Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'best_bowler',
+    category: 'best_bowler',
+    title: 'Best Bowler Award',
+    personName: 'Ganesh Auto Electricals',
+    personPhoto: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Local Business Partner',
+    amount: '7,000',
+    currency: '₹',
+    tagline: 'Cash Prize Sponsored By',
+    isActive: true,
+  },
+  {
+    id: 'custom_sixes',
+    category: 'custom',
+    title: 'Maximum Sixes Award',
+    personName: 'Sai Samarth Jewellers',
+    personPhoto: 'https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Gold Medal & Trophy Sponsor',
+    amount: '5,000',
+    currency: '₹',
+    tagline: 'Award Sponsored By',
     isActive: true,
   },
 ];

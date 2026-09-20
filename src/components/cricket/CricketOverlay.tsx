@@ -1892,9 +1892,11 @@ export const CricketOverlay: React.FC = () => {
 
     // Scorebug is active at bottom of screen:
     if (activeLayout === 'star-tv-broadcast') {
-      // Star TV scorebug sits at bottom-0 with height ~82px (border/flashing ~86px).
-      // bottom-[100px] leaves a 14px clean gap above the scorebug so the scorebug is 100% visible!
-      return 'bottom-[100px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]';
+      // Star TV scorebug has bottom context ticker (~38px) + master scorebug (86px) = 124px.
+      // With the top win predictor probability bar (~44px), total scorebug height is ~168px.
+      return showWinPredictorOverlay
+        ? 'bottom-[182px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]'
+        : 'bottom-[138px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]';
     }
 
     if (activeLayout === 'ribbon-full' || activeLayout === 'single-line') {
@@ -1923,7 +1925,7 @@ export const CricketOverlay: React.FC = () => {
 
     // Default standard bottom clearance:
     return 'bottom-[104px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]';
-  }, [activeConfig.bugPosition, activeConfig.showScoreBug, activeLayout]);
+  }, [activeConfig.bugPosition, activeConfig.showScoreBug, activeLayout, showWinPredictorOverlay]);
 
   // Active Template Style configs mapper
   const isNeon = activeTheme === 'neon-sport';
@@ -2740,6 +2742,13 @@ export const CricketOverlay: React.FC = () => {
           prizes={match?.tournamentPrizes}
           layout={activeLayout}
           position={activeConfig.bugPosition}
+          hasWinPredictor={showWinPredictorOverlay}
+          language={activeConfig.commentaryLanguage}
+          lastBdryFlash={lastBdryFlash}
+          wicketPopup={wicketPopup}
+          boundaryCounterPopup={boundaryCounterPopup}
+          activeAlert={activeAlert}
+          customMilestone={customMilestone}
         />
       )}
 
