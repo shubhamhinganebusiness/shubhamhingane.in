@@ -947,6 +947,20 @@ export const CricketOverlay: React.FC = () => {
     };
   }, [matchId, searchParams]);
 
+  // Listener for instant graphic trigger events (e.g. from PrizeManagementModal)
+  useEffect(() => {
+    const handleTriggerGraphic = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail && customEvent.detail.graphic) {
+        setActiveGraphic(customEvent.detail.graphic);
+      }
+    };
+    window.addEventListener('cricket_trigger_active_graphic', handleTriggerGraphic);
+    return () => {
+      window.removeEventListener('cricket_trigger_active_graphic', handleTriggerGraphic);
+    };
+  }, []);
+
   // Sync incoming real-time alerts
   useEffect(() => {
     if (activeConfig.manualAlertTrigger && activeConfig.manualAlertTrigger.timestamp > lastProcessedAlertRef.current) {
@@ -2175,6 +2189,7 @@ export const CricketOverlay: React.FC = () => {
     'event_milestone', 'milestone_slate', 'fifty_hundred_slate',
     'event_innings_break', 'innings_break', 'target_summary',
     'captains_faceoff', 'clash_of_titans', 'captains_versus',
+    'grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board', 'full_prize_board',
     'manhattan_graph', 'manhattan', 'worm_graph', 'worm', 'run_rate_graph', 'run_rate', 'partnerships_all', 'partnership', 'partnerships'
   ].includes(activeGraphic);
 

@@ -25,6 +25,8 @@ interface PrizeManagementModalProps {
   onClose: () => void;
   matchId?: string;
   onSaved?: (prizes: TournamentPrize[]) => void;
+  onTriggerPresentationBoard?: () => void;
+  isPresentationBoardLive?: boolean;
 }
 
 const AVATAR_PRESETS = [
@@ -66,15 +68,45 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
   onClose,
   matchId,
   onSaved,
+  onTriggerPresentationBoard,
+  isPresentationBoardLive = false,
 }) => {
   const [prizes, setPrizes] = useState<TournamentPrize[]>(STANDARD_TOURNAMENT_PRIZES);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [boardTriggerSuccess, setBoardTriggerSuccess] = useState(false);
   const [saveNotification, setSaveNotification] = useState<SaveNotificationData | null>(null);
   const [activeFilter, setActiveFilter] = useState<'all' | 'podium' | 'awards' | 'custom' | 'active'>('all');
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [activeLang, setLang] = useCommentaryLanguage();
   const [spotlightType, setSpotlightType] = useState<'six' | 'wicket' | 'fifty' | null>(null);
+
+  const handleTriggerGrandBoard = async () => {
+    // 1. First save all current prize settings to storage so broadcast picks it up immediately
+    await saveTournamentPrizes(prizes, matchId);
+    onSaved?.(prizes);
+
+    // 2. Trigger presentation board on broadcast
+    if (onTriggerPresentationBoard) {
+      onTriggerPresentationBoard();
+    } else {
+      try {
+        window.dispatchEvent(
+          new CustomEvent('cricket_trigger_active_graphic', {
+            detail: { graphic: 'grand_presentation_board' },
+          })
+        );
+      } catch (_) {}
+      try {
+        const bc = new BroadcastChannel('cricket_overlay_channel');
+        bc.postMessage({ type: 'SET_ACTIVE_GRAPHIC', graphic: 'grand_presentation_board' });
+        setTimeout(() => { try { bc.close(); } catch (_) {} }, 500);
+      } catch (_) {}
+    }
+
+    setBoardTriggerSuccess(true);
+    setTimeout(() => setBoardTriggerSuccess(false), 3500);
+  };
 
   const handleSetLanguage = (l: CommentaryLanguage) => {
     setLang(l);
@@ -1044,7 +1076,31 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
+            {/* Show Grand Presentation Board on TV */}
+            <button
+              type="button"
+              onClick={handleTriggerGrandBoard}
+              className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer border flex items-center justify-center gap-1.5 active:scale-95 shadow-lg ${
+                isPresentationBoardLive
+                  ? 'bg-red-600 hover:bg-red-500 text-white border-red-400 shadow-red-500/30 animate-pulse'
+                  : 'bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 hover:from-amber-300 hover:to-yellow-200 text-slate-950 border-amber-300 shadow-amber-500/25'
+              }`}
+              title="Show 3D 4-Prize Podium, Sponsors & Total Purse on Live Broadcast"
+            >
+              <Crown size={15} className={isPresentationBoardLive ? 'animate-bounce text-white' : 'text-slate-950'} />
+              <span>
+                {boardTriggerSuccess
+                  ? '🏆 Sent to Broadcast!'
+                  : isPresentationBoardLive
+                  ? 'Hide Grand Board'
+                  : '🏆 Show Grand Board on TV'}
+              </span>
+              {isPresentationBoardLive && (
+                <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+              )}
+            </button>
+
             <button
               type="button"
               onClick={onClose}

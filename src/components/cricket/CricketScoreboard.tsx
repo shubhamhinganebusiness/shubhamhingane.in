@@ -6,7 +6,7 @@ import {
   ChevronRight, Smile, Settings, Volume2, VolumeX, Edit, Edit3, ChevronDown, ChevronUp, Sun, Moon, Info, HelpCircle,
   Share2, FileDown, PlusCircle, BarChart3, Radio, Flame, ShieldAlert, Award, Zap, Lock, UserPlus,
   Eye, EyeOff, Search, Save, Download, X, CloudRain, Link2, Copy, ExternalLink, Send, Smartphone, Shield, Tv,
-  Camera, Image as ImageIcon, Ban, CheckCircle2, Unlock
+  Camera, Image as ImageIcon, Ban, CheckCircle2, Unlock, Crown, FileText, Medal
 } from 'lucide-react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
@@ -2678,6 +2678,94 @@ export const CricketScoreboard: React.FC = () => {
     setTimeout(() => {
       setFeedback(null);
     }, 4000);
+  };
+
+  const activeOverlayConfig = match.overlayConfig || {
+    template: 'broadcast-pro',
+    theme: 'broadcast-pro',
+    layout: 'ribbon-full',
+    bugPosition: 'bottom-full',
+    showBallByBallDots: true,
+    showStrikeRates: true,
+    showWinProbability: false,
+    showSponsorBadge: true,
+    sponsorText: 'GULLY PREMIER LEAGUE',
+    showStatsPanel: true,
+    showTicker: true,
+    tickerMessage: 'LIVE BROADCAST PRESENTATION',
+    forceInningsLayout: 0,
+    manualWicketTrigger: false,
+    manualOutsDisplay: 'none',
+    manualFreeHitTrigger: false,
+    teamAColor: '#ea002a',
+    teamBColor: '#00529b',
+    showScoreBug: true,
+    customBanner: 'none',
+    customBannerText: '',
+    activeGraphic: 'none',
+    lowerThirdMode: 'intro',
+    selectedUmpireSignal: 'out',
+    customMilestone: null,
+    scorebugOverlayMode: 'this_over'
+  };
+
+  const currentActiveGraphic = activeOverlayConfig.activeGraphic || 'none';
+
+  const updateOverlayProp = (updates: Partial<typeof activeOverlayConfig>) => {
+    const updated = { ...activeOverlayConfig, ...updates };
+    syncMatch({ ...match, overlayConfig: updated });
+
+    // Handle auto-close for Wicket, Milestone, Team VS Team, Squad, Field Position, and Summary alerts after timeout
+    if (
+      updates.activeGraphic === 'wicket_alert_temp' ||
+      updates.activeGraphic === 'milestone_alert_temp' ||
+      updates.activeGraphic === 'team_vs_team_alert' ||
+      updates.activeGraphic === 'squad_a_alert' ||
+      updates.activeGraphic === 'squad_b_alert' ||
+      updates.activeGraphic === 'field_positions_alert' ||
+      updates.activeGraphic === 'batting_summary_alert' ||
+      updates.activeGraphic === 'batting_summary_mini_alert' ||
+      updates.activeGraphic === 'bowling_summary_alert' ||
+      updates.activeGraphic === 'bowling_summary_mini_alert'
+    ) {
+      if (graphicDismissTimerRef.current) {
+        clearTimeout(graphicDismissTimerRef.current);
+      }
+      const dismissTime = (
+        updates.activeGraphic === 'batting_summary_alert' ||
+        updates.activeGraphic === 'batting_summary_mini_alert' ||
+        updates.activeGraphic === 'bowling_summary_alert' ||
+        updates.activeGraphic === 'bowling_summary_mini_alert'
+      ) ? 8000 : (
+        updates.activeGraphic === 'team_vs_team_alert' || 
+        updates.activeGraphic === 'squad_a_alert' || 
+        updates.activeGraphic === 'squad_b_alert' ||
+        updates.activeGraphic === 'field_positions_alert'
+      ) ? 7000 : 5000;
+      graphicDismissTimerRef.current = setTimeout(() => {
+        setMatch((latestMatch) => {
+          if (
+            latestMatch.overlayConfig?.activeGraphic === 'wicket_alert_temp' ||
+            latestMatch.overlayConfig?.activeGraphic === 'milestone_alert_temp' ||
+            latestMatch.overlayConfig?.activeGraphic === 'team_vs_team_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'squad_a_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'squad_b_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'field_positions_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'batting_summary_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'batting_summary_mini_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'bowling_summary_alert' ||
+            latestMatch.overlayConfig?.activeGraphic === 'bowling_summary_mini_alert'
+          ) {
+            const noneConfig = { ...latestMatch.overlayConfig, activeGraphic: 'none' };
+            const nextMatch = { ...latestMatch, overlayConfig: noneConfig };
+            setTimeout(() => queueDebouncedSave(nextMatch), 0);
+            return nextMatch;
+          }
+          return latestMatch;
+        });
+        showNotification('Broadcast alert overlay auto-closed.', 'info');
+      }, dismissTime);
+    }
   };
 
   const handleScoreManagerLogout = async () => {
@@ -7201,6 +7289,12 @@ export const CricketScoreboard: React.FC = () => {
           isOpen={showPrizeModal}
           onClose={() => setShowPrizeModal(false)}
           matchId={match.id}
+          isPresentationBoardLive={['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic)}
+          onTriggerPresentationBoard={() => {
+            const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
+            updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
+            showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
+          }}
           onSaved={(updated) => {
             syncMatch((prev) => ({
               ...prev,
@@ -7377,6 +7471,27 @@ export const CricketScoreboard: React.FC = () => {
                 >
                   <Trophy size={12} className="text-yellow-400" />
                   <span className="hidden sm:inline">Prize Money</span>
+                </button>
+
+                {/* Full-Screen Grand Presentation Board (3D 4-Prize Podium & Sponsors) */}
+                <button
+                  onClick={() => {
+                    const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
+                    updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
+                    showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
+                  }}
+                  className={`h-8 sm:h-9 px-1.5 sm:px-2.5 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 shadow-xs border ${
+                    ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic)
+                      ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.5)] animate-pulse'
+                      : 'bg-amber-500/10 hover:bg-amber-500/25 text-amber-300 border-amber-500/30'
+                  }`}
+                  title="Toggle Full-Screen Grand Presentation Board on Broadcast (Toss, Innings Break, Post-Match)"
+                >
+                  <Crown size={12} className={['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? 'text-slate-950' : 'text-amber-400'} />
+                  <span className="hidden sm:inline">Grand Prize Board</span>
+                  {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping" />
+                  )}
                 </button>
 
                 <button
@@ -9661,6 +9776,17 @@ export const CricketScoreboard: React.FC = () => {
                                   desc: 'Best Batsman, Best Bowler, Man of the Series & 4th Prize sponsor display continuously above scorebug',
                                   isActive: true,
                                   onToggle: () => setShowPrizeModal(true)
+                                },
+                                {
+                                  id: 'grand_presentation',
+                                  label: '🏆 Grand Prize Presentation Board (Full-Screen 3D)',
+                                  desc: '3D 4-Prize Podium: 1st, 2nd, 3rd, 4th prizes, sponsors, photos & total purse for toss, innings break & post-match presentation',
+                                  isActive: ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic),
+                                  onToggle: () => {
+                                    const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
+                                    updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
+                                    showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
+                                  }
                                 },
                                 {
                                   id: 'win_probability_meter',
@@ -18796,6 +18922,22 @@ export const CricketScoreboard: React.FC = () => {
                           </h5>
                         </div>
                         <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
+                              updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
+                              showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-xs border ${
+                              ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic)
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-amber-400/20'
+                                : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/30'
+                            }`}
+                            title="Toggle Full-Screen Grand Presentation Board (3D 4-Prize Podium)"
+                          >
+                            <Crown size={11} className={['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? 'text-slate-950' : 'text-yellow-400'} />
+                            <span>{['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? 'Hide Grand Board' : '🏆 Grand Prize Board'}</span>
+                          </button>
                           <button
                             onClick={() => setShowPrizeModal(true)}
                             className="px-2.5 py-1 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500 hover:to-yellow-400 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg text-[9.5px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all shadow-xs"

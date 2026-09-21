@@ -16,6 +16,7 @@ import {
   StarTVCaptainsFaceoff,
   ChromaBroadcastContainer
 } from './CricketMatchEventSlates';
+import { FullScreenPrizePodiumOverlay } from './FullScreenPrizePodiumOverlay';
 import { 
   Trophy, Award, Star, Shield, Users, 
   TrendingUp, CheckCircle2, ChevronRight,
@@ -2663,6 +2664,24 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({
     activeGraphic === 'captains_versus'
   ) {
     return <StarTVCaptainsFaceoff match={match} onClose={onClose} />;
+  }
+
+  // 11. Full-Screen Grand Presentation Board (3D 4-Prize Podium, Sponsors, Purse)
+  if (
+    activeGraphic === 'grand_presentation' ||
+    activeGraphic === 'grand_presentation_board' ||
+    activeGraphic === 'presentation_board' ||
+    activeGraphic === 'prize_presentation' ||
+    activeGraphic === 'tournament_prizes_fullscreen' ||
+    activeGraphic === 'prizes_board' ||
+    activeGraphic === 'full_prize_board'
+  ) {
+    return (
+      <FullScreenPrizePodiumOverlay 
+        match={match} 
+        onClose={onClose} 
+      />
+    );
   }
 
   return null;
