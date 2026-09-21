@@ -5,16 +5,13 @@ import {
   Medal, 
   Crown, 
   Sparkles, 
-  ChevronLeft, 
-  ChevronRight, 
   Coins, 
   Gift, 
   Award,
   Star,
   Flame,
   Target,
-  Zap,
-  Languages
+  Zap
 } from 'lucide-react';
 import { 
   TournamentPrize, 
@@ -26,8 +23,7 @@ import {
 import { BroadcastLayout } from './CricketOverlay';
 import { 
   useCommentaryLanguage, 
-  CommentaryLanguage, 
-  setStoredCommentaryLanguage 
+  CommentaryLanguage
 } from './commentaryLanguage';
 
 export interface ContinuousPrizeMoneyBannerProps {
@@ -213,7 +209,7 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
   customMilestone,
   boundaryCounterPopup,
 }) => {
-  const [currentLang, setLang] = useCommentaryLanguage(propLanguage);
+  const [currentLang] = useCommentaryLanguage(propLanguage);
   const activeLang: CommentaryLanguage = propLanguage || currentLang || 'en';
 
   const [internalPrizes, setInternalPrizes] = useState<TournamentPrize[]>(() => {
@@ -436,14 +432,6 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
     return () => clearInterval(interval);
   }, [isPaused, Boolean(spotlight), activePrizes.length]);
 
-  // Language cycle handler
-  const handleCycleLanguage = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    const nextLang: CommentaryLanguage = activeLang === 'en' ? 'mr' : activeLang === 'mr' ? 'hi' : 'en';
-    setLang(nextLang);
-    setStoredCommentaryLanguage(nextLang);
-  }, [activeLang, setLang]);
-
   // If score manager has not added details, render NOTHING
   if (activePrizes.length === 0) {
     return null;
@@ -461,35 +449,35 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
   if (isTop) {
     if (layout === 'star-tv-broadcast') {
       positionClasses = showWinBar
-        ? 'top-[182px] sm:top-[192px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]'
-        : 'top-[138px] sm:top-[148px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+        ? 'top-[186px] sm:top-[196px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]'
+        : 'top-[142px] sm:top-[152px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'slanted-pro-design') {
-      positionClasses = 'top-[176px] sm:top-[184px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+      positionClasses = 'top-[180px] sm:top-[190px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'ribbon-full' || layout === 'single-line') {
-      positionClasses = 'top-[130px] sm:top-[138px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+      positionClasses = 'top-[132px] sm:top-[140px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'score-bug-1900-200') {
-      positionClasses = 'top-[calc(50%-155px)] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+      positionClasses = 'top-[calc(50%-165px)] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'minimal-pill') {
-      positionClasses = 'top-[120px] sm:top-[128px] left-1/2 -translate-x-1/2 w-[980px] max-w-[95%]';
+      positionClasses = 'top-[124px] sm:top-[132px] left-1/2 -translate-x-1/2 w-[980px] max-w-[95%]';
     } else if (layout === 'docked-corner') {
       positionClasses = 'top-[420px] sm:top-[430px] left-16 w-[680px] max-w-[90%]';
     } else {
-      positionClasses = 'top-[140px] sm:top-[150px] left-1/2 -translate-x-1/2 w-[1200px] max-w-[95%]';
+      positionClasses = 'top-[144px] sm:top-[154px] left-1/2 -translate-x-1/2 w-[1200px] max-w-[95%]';
     }
   } else {
     // Scorebug is at bottom of screen
     if (layout === 'star-tv-broadcast') {
       positionClasses = showWinBar
-        ? 'bottom-[182px] sm:bottom-[192px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]'
-        : 'bottom-[138px] sm:bottom-[148px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+        ? 'bottom-[186px] sm:bottom-[196px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]'
+        : 'bottom-[142px] sm:bottom-[152px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'slanted-pro-design') {
-      positionClasses = 'bottom-[176px] sm:bottom-[184px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+      positionClasses = 'bottom-[180px] sm:bottom-[190px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'ribbon-full' || layout === 'single-line') {
-      positionClasses = 'bottom-[130px] sm:bottom-[138px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+      positionClasses = 'bottom-[132px] sm:bottom-[140px] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'score-bug-1900-200') {
-      positionClasses = 'bottom-[calc(50%+115px)] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
+      positionClasses = 'bottom-[calc(50%+125px)] left-1/2 -translate-x-1/2 w-[1480px] max-w-[96%]';
     } else if (layout === 'minimal-pill') {
-      positionClasses = 'bottom-[120px] sm:bottom-[128px] left-1/2 -translate-x-1/2 w-[980px] max-w-[95%]';
+      positionClasses = 'bottom-[124px] sm:bottom-[132px] left-1/2 -translate-x-1/2 w-[980px] max-w-[95%]';
     } else if (layout === 'docked-corner') {
       if (position === 'bottom-right') {
         positionClasses = 'bottom-[420px] sm:bottom-[430px] right-16 w-[680px] max-w-[90%]';
@@ -499,9 +487,9 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
         positionClasses = 'bottom-[420px] sm:bottom-[430px] left-16 w-[680px] max-w-[90%]';
       }
     } else if (layout === 'mobile-vertical') {
-      positionClasses = 'bottom-[475px] sm:bottom-[485px] left-1/2 -translate-x-1/2 w-[460px] max-w-[92vw]';
+      positionClasses = 'bottom-[490px] sm:bottom-[500px] left-1/2 -translate-x-1/2 w-[460px] max-w-[92vw]';
     } else {
-      positionClasses = 'bottom-[140px] sm:bottom-[150px] left-1/2 -translate-x-1/2 w-[1200px] max-w-[96%]';
+      positionClasses = 'bottom-[144px] sm:bottom-[154px] left-1/2 -translate-x-1/2 w-[1200px] max-w-[96%]';
     }
   }
 
@@ -769,7 +757,7 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
           </AnimatePresence>
         </div>
 
-        {/* 5. RIGHT: Cash Amount Badge, Language Pill, and Navigation */}
+        {/* 5. RIGHT: Cash Amount Badge */}
         <div className="flex items-center gap-2 shrink-0 z-10">
           {/* Glowing Cash Pill */}
           <div className={`px-2.5 sm:px-3.5 py-1 ${theme.cashPill} font-black rounded-lg sm:rounded-xl text-[11px] sm:text-xs tracking-tight flex items-center gap-1 transition-all duration-500`}>
@@ -780,54 +768,6 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
               {currentPrize.currency || '₹'} {currentPrize.amount || '0'}
             </span>
           </div>
-
-          {/* Multilingual Switcher Chip (English | मराठी | हिंदी) */}
-          <button
-            type="button"
-            onClick={handleCycleLanguage}
-            className="px-1.5 py-0.5 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/15 text-[9px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
-            title={`Switch Overlay Language (Current: ${activeLang.toUpperCase()})`}
-          >
-            <Languages size={10} className="text-amber-400" />
-            <span className="font-mono uppercase font-black">
-              {activeLang === 'mr' ? 'मराठी' : activeLang === 'hi' ? 'हिंदी' : 'EN'}
-            </span>
-          </button>
-
-          {/* Quick Pagination Controls if > 1 Prize */}
-          {activePrizes.length > 1 && (
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setActivePrizeIndex((prev) => (prev - 1 + activePrizes.length) % activePrizes.length)}
-                className="w-5 h-5 rounded flex items-center justify-center bg-white/5 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer border-none"
-                title="Previous Award"
-              >
-                <ChevronLeft size={12} />
-              </button>
-              <div className="hidden md:flex items-center gap-1">
-                {activePrizes.map((p, i) => (
-                  <button
-                    key={p.id || i}
-                    type="button"
-                    onClick={() => setActivePrizeIndex(i)}
-                    className={`h-1.5 rounded-full transition-all cursor-pointer border-none ${
-                      safeIndex === i ? 'bg-amber-400 w-3.5' : 'bg-white/25 hover:bg-white/40 w-1.5'
-                    }`}
-                    title={p.title}
-                  />
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => setActivePrizeIndex((prev) => (prev + 1) % activePrizes.length)}
-                className="w-5 h-5 rounded flex items-center justify-center bg-white/5 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer border-none"
-                title="Next Award"
-              >
-                <ChevronRight size={12} />
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>

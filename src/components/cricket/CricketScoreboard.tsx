@@ -4972,18 +4972,22 @@ export const CricketScoreboard: React.FC = () => {
       recordBallDelivery(nextMatchState.id, deliveryPayload).catch(() => {});
     }
 
-    // Auto-clear wicket banner in overlayConfig after 5 seconds so it doesn't stay permanently stuck
+    // Auto-clear transient alerts and banners in overlayConfig after 5 seconds so they don't persist permanently
     setTimeout(() => {
       syncMatch(prev => {
         if (!prev) return prev;
         const latest = prev.overlayConfig;
-        if (latest && (latest.customBanner === 'out' || latest.customBanner === 'drinks' || latest.manualAlertTrigger?.type === 'wicket')) {
+        if (!latest) return prev;
+        const isTransientBanner = ['out', 'drinks', 'four', 'six', 'fifty', 'hundred', 'free_hit'].includes(latest.customBanner || '');
+        const isTransientAlert = latest.manualAlertTrigger && (Date.now() - (latest.manualAlertTrigger.timestamp || 0) >= 4500);
+        if (isTransientBanner || isTransientAlert) {
           return {
             ...prev,
             overlayConfig: {
               ...latest,
-              customBanner: 'none',
-              customBannerText: ''
+              customBanner: isTransientBanner ? 'none' : latest.customBanner,
+              customBannerText: isTransientBanner ? '' : latest.customBannerText,
+              manualAlertTrigger: isTransientAlert ? undefined : latest.manualAlertTrigger
             }
           };
         }

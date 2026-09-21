@@ -369,6 +369,14 @@ export const CricketOverlay: React.FC = () => {
   const [prevRuns, setPrevRuns] = useState<number>(0);
   const [prevWickets, setPrevWickets] = useState<number>(0);
 
+  // Synchronization refs to ensure historical database alerts or initial score states do NOT auto-trigger on page load
+  const mountTimeRef = useRef<number>(Date.now());
+  const lastProcessedAlertRef = useRef<number>(Date.now());
+  const isInitialScoreSyncedRef = useRef<boolean>(false);
+  const lastInningsKeyRef = useRef<string>('');
+  const prevRunsRef = useRef<number | null>(null);
+  const prevWicketsRef = useRef<number | null>(null);
+
   // Auto-pop tournament boundary counter popup (Matches Karjat Big Bash League 4s & 6s counter)
   const [boundaryCounterPopup, setBoundaryCounterPopup] = useState<{
     visible: boolean;
@@ -416,11 +424,19 @@ export const CricketOverlay: React.FC = () => {
   const [localOutsDismissed, setLocalOutsDismissed] = useState<boolean>(false);
   const [wicketSecondsRemaining, setWicketSecondsRemaining] = useState<number>(5);
 
-  // Keep track of the last processed synced alert to prevent double triggering
-  const lastProcessedAlertRef = useRef<number>(0);
-
   // Dynamic scaling state for preview container fitting
   const [dimensions, setDimensions] = useState({ scale: 1, translateX: 0, translateY: 0 });
+
+  useEffect(() => {
+    const prevBodyBg = document.body.style.backgroundColor;
+    const prevHtmlBg = document.documentElement.style.backgroundColor;
+    document.body.style.backgroundColor = 'transparent';
+    document.documentElement.style.backgroundColor = 'transparent';
+    return () => {
+      document.body.style.backgroundColor = prevBodyBg;
+      document.documentElement.style.backgroundColor = prevHtmlBg;
+    };
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -963,8 +979,20 @@ export const CricketOverlay: React.FC = () => {
 
   // Sync incoming real-time alerts
   useEffect(() => {
-    if (activeConfig.manualAlertTrigger && activeConfig.manualAlertTrigger.timestamp > lastProcessedAlertRef.current) {
-      lastProcessedAlertRef.current = activeConfig.manualAlertTrigger.timestamp;
+    if (!activeConfig.manualAlertTrigger) return;
+    const alertTime = activeConfig.manualAlertTrigger.timestamp || 0;
+    const now = Date.now();
+
+    // STRICT GUARD: Only process alerts triggered AFTER this overlay component mounted,
+    // with a strictly newer timestamp than previously processed, and within 4.5s of real-time.
+    // This prevents historical alerts (e.g. past six/four) saved in the database from replaying
+    // automatically when opening or refreshing the overlay preview page.
+    if (
+      alertTime > mountTimeRef.current &&
+      alertTime > lastProcessedAlertRef.current &&
+      now - alertTime < 4500
+    ) {
+      lastProcessedAlertRef.current = alertTime;
       const alertType = activeConfig.manualAlertTrigger.type;
       if (alertType === 'four' || alertType === 'six' || alertType === 'boundary_counter_four' || alertType === 'boundary_counter_six') {
         const bType: 'four' | 'six' = (alertType === 'six' || alertType === 'boundary_counter_six') ? 'six' : 'four';
@@ -980,6 +1008,9 @@ export const CricketOverlay: React.FC = () => {
       }
       setActiveAlert(activeConfig.manualAlertTrigger.type);
       setActiveAlertMeta((activeConfig.manualAlertTrigger as any).meta);
+    } else if (alertTime <= mountTimeRef.current && lastProcessedAlertRef.current < alertTime) {
+      // Advance lastProcessedAlertRef for past database records without triggering any animation
+      lastProcessedAlertRef.current = alertTime;
     }
   }, [activeConfig.manualAlertTrigger, currentInnings, activeConfig.showBoundaryCounter]);
 
@@ -1062,9 +1093,27 @@ export const CricketOverlay: React.FC = () => {
   useEffect(() => {
     if (!currentInnings) return;
 
-    // Detect Runs boundary flashes & auto-trigger stinger animations
-    if (prevRuns !== undefined && currentInnings.runs > prevRuns) {
-      const diff = currentInnings.runs - prevRuns;
+    const inningsKey = `${match?.id || 'default'}_inn_${inningsNum}`;
+
+    // On initial mount or when switching matches/innings, synchronize baseline runs & wickets
+    // WITHOUT evaluating any boundary or wicket animations. This strictly prevents initial
+    // scores (e.g. 4/0 or 6/0) from triggering boundary alerts when opening the overlay preview page.
+    if (!isInitialScoreSyncedRef.current || lastInningsKeyRef.current !== inningsKey) {
+      isInitialScoreSyncedRef.current = true;
+      lastInningsKeyRef.current = inningsKey;
+      prevRunsRef.current = currentInnings.runs;
+      prevWicketsRef.current = currentInnings.wickets;
+      setPrevRuns(currentInnings.runs);
+      setPrevWickets(currentInnings.wickets);
+      return;
+    }
+
+    const previousRuns = prevRunsRef.current ?? currentInnings.runs;
+    const previousWickets = prevWicketsRef.current ?? currentInnings.wickets;
+
+    // Detect Runs boundary flashes & auto-trigger stinger animations ONLY when new runs are scored in real time
+    if (currentInnings.runs > previousRuns) {
+      const diff = currentInnings.runs - previousRuns;
       const currStriker = currentInnings.batsmen?.[currentInnings.strikerIndex] || currentInnings.batsmen?.find(b => b?.isStriker);
       const currBowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings.bowlers?.find(b => b?.isCurrent);
 
@@ -1120,10 +1169,9 @@ export const CricketOverlay: React.FC = () => {
         }
       }
     }
-    setPrevRuns(currentInnings.runs);
 
     // Detect Wickets Fall popups & auto-trigger dismissal animations (2.0s duration)
-    if (prevWickets > 0 && currentInnings.wickets > prevWickets) {
+    if (previousWickets > 0 && currentInnings.wickets > previousWickets) {
       setLocalWicketDismissed(false);
       setWicketSecondsRemaining(2);
       setWicketTriggerAlert(true);
@@ -1171,8 +1219,12 @@ export const CricketOverlay: React.FC = () => {
         });
       }
     }
+
+    prevRunsRef.current = currentInnings.runs;
+    prevWicketsRef.current = currentInnings.wickets;
+    setPrevRuns(currentInnings.runs);
     setPrevWickets(currentInnings.wickets);
-  }, [currentInnings?.runs, currentInnings?.wickets]);
+  }, [currentInnings?.runs, currentInnings?.wickets, currentInnings?.strikerIndex, currentInnings?.currentBowlerIndex, match?.tournamentName, activeConfig.showBoundaryCounter, autoStingersEnabled, tournamentBoundaries, match?.id, inningsNum]);
 
   // Detect New Batter / New Bowler
   useEffect(() => {
@@ -2746,10 +2798,12 @@ export const CricketOverlay: React.FC = () => {
         )}
       </AnimatePresence>
 
+
+
       {/* =========================================================================
-          CONTINUOUS TOURNAMENT PRIZE MONEY BANNER (ABOVE SCOREBUG)
-          Renders continuously above ANY active scorebug layout (Slanted Pro, Star TV, Ribbon, etc.)
-          Automatically hidden if score manager has not added prize details.
+          CONTINUOUS TOURNAMENT PRIZE MONEY BANNER / SLIDER (ABOVE SCOREBUG)
+          Renders continuously above ANY active scorebug layout (Star TV, Ribbon, Slanted Pro, etc.)
+          Automatically rotates through tournament prizes (1st, 2nd, 3rd, Man of Series, etc.)
           ========================================================================= */}
       {activeConfig.showScoreBug && !isFullScreenTransition && (
         <ContinuousPrizeMoneyBanner
@@ -2905,7 +2959,7 @@ export const CricketOverlay: React.FC = () => {
                 tournamentSixes={tournamentBoundaries.sixes}
                 tournamentPrizes={match?.tournamentPrizes}
                 matchId={match?.id}
-                showPrizeMoneyBanner={false}
+                showPrizeMoneyBanner={true}
               />
             );
           })()}
