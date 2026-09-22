@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Plus, Trash2, Calendar, MapPin, Users, HelpCircle, 
-  Map, Check, Clock, User, DollarSign, CloudRain, Bell, RefreshCw
+  Map, Check, Clock, User, DollarSign, CloudRain, Bell, RefreshCw,
+  Trophy, Image as ImageIcon, Sparkles, Upload
 } from 'lucide-react';
+import { TournamentHierarchyPointsTable } from './TournamentHierarchyPointsTable';
 
 export interface Ground {
   id: string;
@@ -113,7 +115,11 @@ export const TournamentVenueScheduler: React.FC<TournamentVenueSchedulerProps> =
   });
 
   // Active subtab
-  const [schedulerSubTab, setSchedulerSubTab] = useState<'rosters' | 'grounds' | 'scheduling' | 'officials'>('rosters');
+  const [schedulerSubTab, setSchedulerSubTab] = useState<'rosters' | 'grounds' | 'scheduling' | 'officials' | 'standings'>('rosters');
+
+  // Match Banner editor modal
+  const [bannerModalMatch, setBannerModalMatch] = useState<any | null>(null);
+  const [bannerInputUrl, setBannerInputUrl] = useState<string>('');
 
   // Ground Editor modal
   const [showGroundModal, setShowGroundModal] = useState(false);
@@ -553,6 +559,19 @@ export const TournamentVenueScheduler: React.FC<TournamentVenueSchedulerProps> =
         >
           Smart Schedule Engine
         </button>
+
+        <button
+          onClick={() => setSchedulerSubTab('standings')}
+          className={`py-2 px-4.5 font-black uppercase text-[10px] sm:text-xs tracking-wider rounded-xl cursor-pointer shrink-0 border-none transition-all flex items-center gap-1.5 ${
+            schedulerSubTab === 'standings' 
+              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/10' 
+              : 'text-emerald-600 hover:text-emerald-900 dark:text-emerald-400 dark:hover:text-white bg-transparent hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20'
+          }`}
+        >
+          <Trophy size={13} className="text-amber-400" />
+          <span>Points Table (Auto-Configured)</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+        </button>
       </div>
 
       {/* TEAM & PLAYER REGISTRATION SUBTAB */}
@@ -890,17 +909,48 @@ export const TournamentVenueScheduler: React.FC<TournamentVenueSchedulerProps> =
                   <tbody>
                     {matches.filter(m => m.status === 'scheduled').map((m: any) => (
                       <tr key={m.id} className="border-b border-slate-50 dark:border-slate-900/40 hover:bg-white dark:hover:bg-slate-900/60 transition-all">
-                        <td className="py-3 px-4 text-slate-850 dark:text-slate-100 font-extrabold">{m.teamAName || m.teamA} <span className="text-slate-350">vs</span> {m.teamBName || m.teamB}</td>
+                        <td className="py-3 px-4 text-slate-850 dark:text-slate-100 font-extrabold">
+                          <div className="flex items-center gap-2">
+                            {m.matchBannerUrl && (
+                              <img 
+                                src={m.matchBannerUrl} 
+                                alt="Banner" 
+                                className="w-8 h-5 object-cover rounded border border-amber-400/40 shrink-0" 
+                              />
+                            )}
+                            <div>
+                              <span>{m.teamAName || m.teamA} <span className="text-slate-350 font-normal">vs</span> {m.teamBName || m.teamB}</span>
+                              {m.stage && <span className="text-[9px] text-slate-400 font-bold block normal-case">{m.stage}</span>}
+                            </div>
+                          </div>
+                        </td>
                         <td className="py-3 px-4 text-slate-500">{m.date}</td>
                         <td className="py-3 px-4 text-slate-500 font-mono">{m.time}</td>
                         <td className="py-3 px-4 text-emerald-600 dark:text-emerald-450">{m.venue}</td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            onClick={() => setEditingMatch(m)}
-                            className="px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg border-none font-black uppercase tracking-wider text-[10px] cursor-pointer transition-all"
-                          >
-                            Reschedule
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <button
+                              onClick={() => setEditingMatch(m)}
+                              className="px-2.5 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg border-none font-black uppercase tracking-wider text-[10px] cursor-pointer transition-all"
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              onClick={() => {
+                                setBannerModalMatch(m);
+                                setBannerInputUrl(m.matchBannerUrl || '');
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg border font-black uppercase tracking-wider text-[10px] cursor-pointer transition-all flex items-center gap-1 ${
+                                m.matchBannerUrl 
+                                  ? 'bg-amber-500/15 text-amber-500 border-amber-500/40 hover:bg-amber-500/25' 
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-200'
+                              }`}
+                              title="Add or update match banner for live score setup"
+                            >
+                              <ImageIcon size={11} />
+                              <span>{m.matchBannerUrl ? 'Banner Set ✓' : '+ Banner'}</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -912,7 +962,44 @@ export const TournamentVenueScheduler: React.FC<TournamentVenueSchedulerProps> =
         </div>
       )}
 
-      {/* SQUAD REGISTER POPUP MODAL */}
+      {/* AUTOMATIC TOURNAMENT POINTS TABLE SUBTAB IN TOURNAMENT SETUP */}
+      {schedulerSubTab === 'standings' && (
+        <div className="space-y-6 text-left">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-emerald-500/10 p-5 rounded-3xl border border-emerald-500/20">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 font-mono text-[9px] font-black uppercase border border-emerald-500/30 flex items-center gap-1">
+                  <Sparkles size={11} /> Auto-Configuring
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase">Official Standings Engine</span>
+              </div>
+              <h4 className="text-base font-black uppercase text-slate-900 dark:text-white flex items-center gap-2 mt-1">
+                <Trophy size={18} className="text-amber-500" /> Tournament Points Table & Net Run Rate
+              </h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                Standings, points, wins, losses, and Net Run Rate (NRR) update automatically in real-time as fixtures are scheduled and completed.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-emerald-500">
+                {teams.length} Teams Registered
+              </span>
+            </div>
+          </div>
+
+          <TournamentHierarchyPointsTable
+            tournament={{
+              id: tournamentId,
+              name: 'Tournament Championship',
+              format: format,
+              type: roundsType,
+              teams: teams.map(t => ({ id: t.id, name: t.name, captain: t.captain })),
+              matches: matches
+            }}
+            qualifyingThreshold={4}
+          />
+        </div>
+      )}
       <AnimatePresence>
         {showRegModal && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[201] flex items-center justify-center p-4">
@@ -1170,6 +1257,26 @@ export const TournamentVenueScheduler: React.FC<TournamentVenueSchedulerProps> =
                 </div>
 
                 <div>
+                  <label className="text-[9px] text-slate-404 font-bold block uppercase mb-1">Match Banner Graphic URL</label>
+                  <input
+                    type="text"
+                    placeholder="https://... or paste image data"
+                    value={editingMatch.matchBannerUrl || ''}
+                    onChange={(e) => setEditingMatch({ ...editingMatch, matchBannerUrl: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl text-slate-800 dark:text-white text-xs font-mono"
+                  />
+                  {editingMatch.matchBannerUrl && (
+                    <div className="mt-2 relative rounded-xl overflow-hidden border border-amber-400/40 max-h-24">
+                      <img 
+                        src={editingMatch.matchBannerUrl} 
+                        alt="Match Banner Preview" 
+                        className="w-full h-24 object-cover" 
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div>
                   <label className="text-[9px] text-slate-404 font-bold block uppercase mb-1">Assigned Ground Arena</label>
                   <select
                     value={editingMatch.venue}
@@ -1202,6 +1309,141 @@ export const TournamentVenueScheduler: React.FC<TournamentVenueSchedulerProps> =
                   className="flex-1 py-1.5 bg-indigo-500 hover:bg-indigo-650 text-white rounded-xl font-black uppercase text-[10px] border-none cursor-pointer"
                 >
                   Broadcast & Save
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* MATCH BANNER SETUP MODAL */}
+      <AnimatePresence>
+        {bannerModalMatch && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[205] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-slate-900 border border-amber-500/40 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-left"
+            >
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center">
+                    <ImageIcon size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">Configure Match Banner</h3>
+                    <p className="text-[10px] text-slate-400 font-medium">Automatically configures into Match Setup & Live Scoreboard</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setBannerModalMatch(null)}
+                  className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center font-bold text-xs border-none cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs">
+                <span className="text-[9px] font-black uppercase text-amber-500 tracking-wider block">Fixture</span>
+                <strong className="text-slate-900 dark:text-white block mt-0.5">
+                  {bannerModalMatch.teamAName || bannerModalMatch.teamA} vs {bannerModalMatch.teamBName || bannerModalMatch.teamB}
+                </strong>
+                <span className="text-[10px] text-slate-400 block mt-0.5">
+                  {bannerModalMatch.date} • {bannerModalMatch.time} • {bannerModalMatch.venue}
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Banner Image URL</label>
+                  <input
+                    type="text"
+                    placeholder="https://images.unsplash.com/... or paste image URL"
+                    value={bannerInputUrl}
+                    onChange={(e) => setBannerInputUrl(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-800 dark:text-white text-xs font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Or Upload Custom Graphic</label>
+                  <label className="w-full py-3 px-4 border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-amber-500 rounded-xl flex items-center justify-center gap-2 cursor-pointer bg-slate-50 dark:bg-slate-950/50">
+                    <Upload size={14} className="text-amber-500" />
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300">Upload Banner Image File</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            if (typeof reader.result === 'string') {
+                              setBannerInputUrl(reader.result);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {/* Popular Cricket Themed Presets */}
+                <div>
+                  <label className="text-[9px] text-slate-400 font-bold uppercase block mb-1.5">Or Choose Graphic Preset</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { name: 'Stadium Glow', url: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=800&auto=format&fit=crop&q=80' },
+                      { name: 'Turf Sunset', url: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=800&auto=format&fit=crop&q=80' },
+                      { name: 'Night Lights', url: 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800&auto=format&fit=crop&q=80' }
+                    ].map((preset, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setBannerInputUrl(preset.url)}
+                        className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-amber-400 text-left bg-slate-50 dark:bg-slate-950 cursor-pointer"
+                      >
+                        <img src={preset.url} alt={preset.name} className="w-full h-10 object-cover rounded-lg mb-1" />
+                        <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 block truncate">{preset.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {bannerInputUrl && (
+                  <div className="space-y-1">
+                    <span className="text-[9px] font-bold uppercase text-slate-400 block">Preview</span>
+                    <div className="relative rounded-xl overflow-hidden border-2 border-amber-400 shadow-md">
+                      <img src={bannerInputUrl} alt="Banner Preview" className="w-full h-24 object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent flex items-end p-2">
+                        <span className="text-[10px] font-black text-amber-300 uppercase">Banner Ready for Live Score</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setBannerModalMatch(null)}
+                  className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 rounded-xl font-black uppercase text-xs border-none cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updated = matches.map(m => m.id === bannerModalMatch.id ? { ...m, matchBannerUrl: bannerInputUrl } : m);
+                    onUpdateSchedule(updated);
+                    addNotification(`Match banner configured for ${bannerModalMatch.teamAName || bannerModalMatch.teamA} vs ${bannerModalMatch.teamBName || bannerModalMatch.teamB}!`, 'schedule');
+                    setBannerModalMatch(null);
+                  }}
+                  className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl uppercase text-xs border-none cursor-pointer shadow-md shadow-amber-500/20"
+                >
+                  Save & Apply Banner
                 </button>
               </div>
             </motion.div>

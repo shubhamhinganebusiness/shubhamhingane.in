@@ -4,6 +4,7 @@ import {
   OperationType, 
   isQuotaError, 
   recordFirestoreQuotaExhaustion,
+  isFirestoreQuotaExhausted,
   safeDeleteDoc,
   safeSetDoc,
   removeMatchFromRealtimeDB
@@ -286,6 +287,9 @@ export function subscribeToLiveSummary(
   onUpdate: (summary: MatchLiveSummary) => void
 ): () => void {
   if (!matchId) return () => {};
+  if (isFirestoreQuotaExhausted()) {
+    return () => {};
+  }
   try {
     const summaryRef = doc(db, 'cricket_live_summaries', matchId);
     return onSnapshot(summaryRef, (snap) => {
@@ -293,10 +297,13 @@ export function subscribeToLiveSummary(
         onUpdate(snap.data() as MatchLiveSummary);
       }
     }, (err) => {
-      console.warn('[cricketDb] subscribeToLiveSummary error:', err);
+      if (isQuotaError(err)) {
+        recordFirestoreQuotaExhaustion(5);
+      }
+      console.warn('[cricketDb] subscribeToLiveSummary note:', err?.message || err);
     });
   } catch (err) {
-    console.warn('[cricketDb] subscribeToLiveSummary init failed:', err);
+    console.warn('[cricketDb] subscribeToLiveSummary init note:', err);
     return () => {};
   }
 }

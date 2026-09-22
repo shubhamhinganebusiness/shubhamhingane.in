@@ -14,6 +14,8 @@ import { useAuth } from '../AuthContext';
 import { uploadImageToStorage, STORAGE_FOLDERS, StorageFolder } from '../../utils/imageUpload';
 import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from '../../utils/imageUrlHelper';
 import { CricketMatchBanner } from './CricketImageFallback';
+import { DEFAULT_PRESET_SPONSORS } from '../../utils/cricketSponsorsStorage';
+import { SPECTATOR_SLIDER_CACHE_KEY } from './useSpectatorSliderImages';
 
 export interface SliderImageDoc {
   id: string;
@@ -99,12 +101,48 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
         });
       });
       setImages(list);
+      try {
+        localStorage.setItem(SPECTATOR_SLIDER_CACHE_KEY, JSON.stringify(list));
+        window.dispatchEvent(new CustomEvent('spectator_slider_updated', { detail: list }));
+      } catch (_) {}
     } catch (err: any) {
       console.error('Error fetching spectator slider images:', err);
       handleFirestoreError(err, OperationType.LIST, 'spectator_slider_images');
       setError('Could not fetch slider images. Please check permissions.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Seed sample sponsor advertisements if collection is empty
+  const handleSeedPresetSponsors = async () => {
+    if (!isSuperAdmin) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const presets = DEFAULT_PRESET_SPONSORS.filter(s => s.bannerUrl && s.isActive).slice(0, 3);
+      for (let i = 0; i < presets.length; i++) {
+        const s = presets[i];
+        const docId = `preset_ad_${s.id}`;
+        await setDoc(doc(db, 'spectator_slider_images', docId), {
+          imageUrl: s.bannerUrl,
+          title: s.name,
+          order: i,
+          isActive: true,
+          folder: STORAGE_FOLDERS.ADS,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          createdBy: user?.email || 'super_admin'
+        }, { merge: true });
+      }
+      setSuccessMsg('Sample tournament sponsor ads loaded successfully!');
+      await fetchImages();
+      setTimeout(() => setSuccessMsg(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to seed preset sponsor ads:', err);
+      setError(`Failed to seed sponsors: ${err.message || 'Error'}`);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -317,10 +355,10 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
             </span>
           </div>
           <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            Spectator Details Page Slider
+            Home Page Active Live Match & Spectator 16:9 Banner Slider
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium max-w-2xl leading-relaxed">
-            Manage promotional graphics, tournament announcements, and sponsor banners for the 16:9 slider on the spectator scoreboard details page. In this slider, the official Match Banner will also appear automatically whenever a match has one!
+            Manage sponsor advertisement banners and promotional graphics for the 16:9 image slider displayed on the <strong>Home Page Active Live Match Banner</strong>, in live match cards, the top live match header, and full spectator scoreboards.
           </p>
         </div>
 
@@ -334,6 +372,19 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
+
+          {images.length === 0 && (
+            <button
+              type="button"
+              onClick={handleSeedPresetSponsors}
+              disabled={saving}
+              className="px-4 py-3 bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 shadow-sm"
+              title="Populate authentic sample sponsor advertisements"
+            >
+              <Sparkles size={15} className="text-amber-500" />
+              <span>Load Preset Sponsor Ads</span>
+            </button>
+          )}
 
           <button
             type="button"

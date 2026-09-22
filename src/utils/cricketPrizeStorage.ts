@@ -1,469 +1,501 @@
-import { db, safeSetDoc } from '../lib/firebase';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-
-export type PrizeCategory =
-  | 'tournament_1st'
-  | 'tournament_2nd'
-  | 'tournament_3rd'
-  | 'tournament_4th'
-  | 'best_batsman'
-  | 'best_bowler'
-  | 'man_of_series'
-  | 'fourth_prize'
-  | 'custom';
+/**
+ * cricketPrizeStorage.ts
+ * Manages tournament & match prize money, sponsors, trophies, and broadcast tickers.
+ */
 
 export interface TournamentPrize {
-  id: string; // 'tournament_1st' | 'tournament_2nd' | 'tournament_3rd' | 'tournament_4th' | 'best_batsman' | etc or custom ID
-  category: PrizeCategory;
-  title: string; // e.g. "Tournament 1st Prize / Champion", "Tournament 2nd Prize / Runner-Up", etc.
-  personName: string; // The person or sponsor who gave the prize money
-  personPhoto: string; // URL or base64 data URL
-  personDesignation?: string; // e.g. "Sarpanch", "Cricket Patron", "Chief Guest", "Firm Name"
-  amount: string; // e.g. "51,000", "31,000", "21,000"
-  currency: string; // default "₹"
-  tagline?: string; // e.g. "Champion Trophy & Cash Sponsored By"
-  isActive: boolean; // toggle visibility
-  updatedAt?: number;
+  id: string;
+  category?: 'tournament_1st' | 'tournament_2nd' | 'tournament_3rd' | 'tournament_4th' | 'man_of_series' | 'best_batsman' | 'best_bowler' | 'custom' | string;
+  title: string;
+  subtitle?: string;
+  amount: string;
+  currency?: string;
+  currencySymbol?: string;
+  personName?: string;
+  personPhoto?: string;
+  personDesignation?: string;
+  sponsorName?: string;
+  sponsorPhoto?: string;
+  sponsorDesignation?: string;
+  tagline?: string;
+  trophyType?: string;
+  isActive?: boolean;
+  customBadge?: string;
+  iconType?: string;
 }
-
-const STORAGE_KEY = 'gullyscore_tournament_prizes_v1';
 
 export const STANDARD_TOURNAMENT_PRIZES: TournamentPrize[] = [
   {
-    id: 'tournament_1st',
+    id: 'first_prize',
     category: 'tournament_1st',
-    title: 'Tournament 1st Prize / Champion',
+    title: '1st Prize / Champion',
+    subtitle: 'Grand Champions Cup & Cash',
+    amount: '75,000',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
     tagline: 'Champion Trophy & Cash Sponsored By',
+    trophyType: 'gold',
     isActive: true,
   },
   {
-    id: 'tournament_2nd',
+    id: 'second_prize',
     category: 'tournament_2nd',
-    title: 'Tournament 2nd Prize / Runner-Up',
+    title: '2nd Prize / Runner-Up',
+    subtitle: 'Runners-Up Shield & Cash',
+    amount: '35,000',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
     tagline: 'Runner-Up Trophy & Cash Sponsored By',
+    trophyType: 'silver',
     isActive: true,
   },
   {
-    id: 'tournament_3rd',
+    id: 'third_prize',
     category: 'tournament_3rd',
-    title: 'Tournament 3rd Prize',
+    title: '3rd Prize',
+    subtitle: '3rd Place Trophy & Cash',
+    amount: '15,000',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
-    tagline: '3rd Prize Sponsored By',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
+    tagline: '3rd Prize Trophy Sponsored By',
+    trophyType: 'bronze',
     isActive: true,
   },
   {
-    id: 'tournament_4th',
+    id: 'fourth_prize',
     category: 'tournament_4th',
-    title: 'Tournament 4th Prize',
+    title: '4th Prize',
+    subtitle: 'Semi-Finalist Trophy & Cash',
+    amount: '7,500',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
     tagline: '4th Prize Sponsored By',
-    isActive: true,
+    trophyType: 'bronze',
+    isActive: false,
   },
   {
     id: 'man_of_series',
     category: 'man_of_series',
-    title: 'Man of the Series Award',
+    title: 'Man of the Series',
+    subtitle: 'Player of the Tournament',
+    amount: '5,000',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
-    tagline: 'Grand Award Sponsored By',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
+    tagline: 'Grand Cash Prize Sponsored By',
+    trophyType: 'special',
     isActive: true,
   },
   {
     id: 'best_batsman',
     category: 'best_batsman',
     title: 'Best Batsman Award',
+    subtitle: 'Orange Cap Leading Run Scorer',
+    amount: '3,000',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
     tagline: 'Cash Prize Sponsored By',
+    trophyType: 'bat',
     isActive: true,
   },
   {
     id: 'best_bowler',
     category: 'best_bowler',
     title: 'Best Bowler Award',
+    subtitle: 'Purple Cap Leading Wicket Taker',
+    amount: '3,000',
+    currency: '₹',
+    currencySymbol: '₹',
     personName: '',
     personPhoto: '',
     personDesignation: '',
-    amount: '',
-    currency: '₹',
+    sponsorName: '',
+    sponsorPhoto: '',
+    sponsorDesignation: '',
     tagline: 'Cash Prize Sponsored By',
+    trophyType: 'ball',
     isActive: true,
   },
 ];
 
-export const DEFAULT_FOUR_PRIZES: TournamentPrize[] = STANDARD_TOURNAMENT_PRIZES;
+export const SAMPLE_DEMO_PRIZES: TournamentPrize[] = [
+  {
+    id: 'first_prize',
+    category: 'tournament_1st',
+    title: '1st Prize / Champion',
+    subtitle: 'Gully Champions Trophy & Cash',
+    amount: '1,00,000',
+    currency: '₹',
+    currencySymbol: '₹',
+    personName: 'Shri Sharad Pawar',
+    personPhoto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Chief Patron & MLA',
+    sponsorName: 'Shri Sharad Pawar',
+    sponsorPhoto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
+    sponsorDesignation: 'Chief Patron & MLA',
+    tagline: 'Champion Trophy & Cash Sponsored By',
+    trophyType: 'gold',
+    isActive: true,
+  },
+  {
+    id: 'second_prize',
+    category: 'tournament_2nd',
+    title: '2nd Prize / Runner-Up',
+    subtitle: 'Runners-Up Shield & Cash',
+    amount: '51,000',
+    currency: '₹',
+    currencySymbol: '₹',
+    personName: 'Dattatray Patil',
+    personPhoto: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Sarpanch, Grampanchayat',
+    sponsorName: 'Dattatray Patil',
+    sponsorPhoto: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
+    sponsorDesignation: 'Sarpanch, Grampanchayat',
+    tagline: 'Runner-Up Trophy & Cash Sponsored By',
+    trophyType: 'silver',
+    isActive: true,
+  },
+  {
+    id: 'third_prize',
+    category: 'tournament_3rd',
+    title: '3rd Prize',
+    subtitle: '3rd Place Trophy & Cash',
+    amount: '25,000',
+    currency: '₹',
+    currencySymbol: '₹',
+    personName: 'Sunil Jagtap',
+    personPhoto: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Youth Sports President',
+    sponsorName: 'Sunil Jagtap',
+    sponsorPhoto: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&auto=format&fit=crop&q=80',
+    sponsorDesignation: 'Youth Sports President',
+    tagline: '3rd Prize Trophy Sponsored By',
+    trophyType: 'bronze',
+    isActive: true,
+  },
+  {
+    id: 'man_of_series',
+    category: 'man_of_series',
+    title: 'Man of the Series',
+    subtitle: 'Player of the Tournament',
+    amount: '11,000',
+    currency: '₹',
+    currencySymbol: '₹',
+    personName: 'Ganesh Shinde',
+    personPhoto: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&auto=format&fit=crop&q=80',
+    personDesignation: 'Sports Club Secretary',
+    sponsorName: 'Ganesh Shinde',
+    sponsorPhoto: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&auto=format&fit=crop&q=80',
+    sponsorDesignation: 'Sports Club Secretary',
+    tagline: 'Grand Cash Prize Sponsored By',
+    trophyType: 'special',
+    isActive: true,
+  },
+  {
+    id: 'best_batsman',
+    category: 'best_batsman',
+    title: 'Best Batsman Award',
+    subtitle: 'Orange Cap Leading Run Scorer',
+    amount: '5,000',
+    currency: '₹',
+    currencySymbol: '₹',
+    personName: 'Ravi Deshmukh',
+    personPhoto: '',
+    personDesignation: 'Merchant Association',
+    sponsorName: 'Ravi Deshmukh',
+    sponsorPhoto: '',
+    sponsorDesignation: 'Merchant Association',
+    tagline: 'Cash Prize Sponsored By',
+    trophyType: 'bat',
+    isActive: true,
+  },
+  {
+    id: 'best_bowler',
+    category: 'best_bowler',
+    title: 'Best Bowler Award',
+    subtitle: 'Purple Cap Leading Wicket Taker',
+    amount: '5,000',
+    currency: '₹',
+    currencySymbol: '₹',
+    personName: 'Vikas Kadam',
+    personPhoto: '',
+    personDesignation: 'Gully Cricket Club',
+    sponsorName: 'Vikas Kadam',
+    sponsorPhoto: '',
+    sponsorDesignation: 'Gully Cricket Club',
+    tagline: 'Cash Prize Sponsored By',
+    trophyType: 'ball',
+    isActive: true,
+  },
+];
 
-/**
- * Filter prizes that have valid details entered by the score manager.
- * Requirement: "if score manager not added this details it will not show"
- */
-export function getValidActivePrizes(prizes: TournamentPrize[]): TournamentPrize[] {
-  if (!Array.isArray(prizes)) return [];
-  return prizes.filter((p) => {
-    if (!p.isActive) return false;
-    const hasName = typeof p.personName === 'string' && p.personName.trim().length > 0;
-    const hasAmount = typeof p.amount === 'string' && p.amount.trim().length > 0;
-    // Must have at least a sponsor name or an amount to show
-    return hasName || hasAmount;
-  });
+const GLOBAL_PRIZES_KEY = 'cricket_tournament_prizes';
+
+function normalizePrize(p: any): TournamentPrize {
+  return {
+    id: p.id || `prize_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    category: p.category || 'custom',
+    title: p.title || 'Tournament Award',
+    subtitle: p.subtitle || '',
+    amount: String(p.amount ?? ''),
+    currency: p.currency || p.currencySymbol || '₹',
+    currencySymbol: p.currencySymbol || p.currency || '₹',
+    personName: p.personName || p.sponsorName || '',
+    personPhoto: p.personPhoto || p.sponsorPhoto || '',
+    personDesignation: p.personDesignation || p.sponsorDesignation || '',
+    sponsorName: p.sponsorName || p.personName || '',
+    sponsorPhoto: p.sponsorPhoto || p.personPhoto || '',
+    sponsorDesignation: p.sponsorDesignation || p.personDesignation || '',
+    tagline: p.tagline || 'Award Sponsored By',
+    trophyType: p.trophyType || 'special',
+    isActive: p.isActive !== false,
+    customBadge: p.customBadge || '',
+    iconType: p.iconType || '',
+  };
 }
 
-function getStorageKey(matchId?: string): string {
-  if (matchId && matchId.trim().length > 0) {
-    return `${STORAGE_KEY}_${matchId.trim()}`;
-  }
-  return STORAGE_KEY;
-}
-
 /**
- * Get tournament prizes from localStorage.
+ * Get prizes for a match (or globally if no matchId or matchId specific key doesn't exist)
  */
 export function getTournamentPrizes(matchId?: string): TournamentPrize[] {
-  if (typeof window === 'undefined') return DEFAULT_FOUR_PRIZES;
   try {
-    const key = getStorageKey(matchId);
-    let raw = localStorage.getItem(key);
-    
-    // Check if match-specific storage has valid details
-    let useGlobalFallback = false;
-    if (raw && matchId) {
-      try {
-        const parsedMatch = JSON.parse(raw);
-        if (getValidActivePrizes(parsedMatch).length === 0) {
-          useGlobalFallback = true;
+    if (matchId) {
+      const matchKey = `cricket_tournament_prizes_${matchId}`;
+      const matchStored = localStorage.getItem(matchKey);
+      if (matchStored) {
+        const parsed = JSON.parse(matchStored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(normalizePrize);
         }
-      } catch (_) {
-        useGlobalFallback = true;
-      }
-    } else if (!raw && matchId) {
-      useGlobalFallback = true;
-    }
-
-    if (useGlobalFallback) {
-      const globalRaw = localStorage.getItem(STORAGE_KEY);
-      if (globalRaw) {
-        try {
-          const parsedGlobal = JSON.parse(globalRaw);
-          if (getValidActivePrizes(parsedGlobal).length > 0 || !raw) {
-            raw = globalRaw;
-          }
-        } catch (_) {}
       }
     }
 
-    if (!raw) {
-      return STANDARD_TOURNAMENT_PRIZES;
+    const stored = localStorage.getItem(GLOBAL_PRIZES_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(normalizePrize);
+      }
     }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      // Ensure all standard tournament prizes (1st, 2nd, 3rd, 4th, awards) exist
-      const merged = STANDARD_TOURNAMENT_PRIZES.map((def) => {
-        const found = parsed.find(
-          (p: TournamentPrize) =>
-            p.id === def.id ||
-            p.category === def.category ||
-            (def.id === 'tournament_1st' && (p.id === 'fourth_prize' || p.category === 'fourth_prize'))
-        );
-        return found ? { ...def, ...found, id: def.id, category: def.category } : def;
-      });
-      // Append any custom additional prizes if exist
-      const additional = parsed.filter(
-        (p: TournamentPrize) =>
-          !STANDARD_TOURNAMENT_PRIZES.some((def) => def.id === p.id || def.category === p.category) &&
-          p.id !== 'fourth_prize'
-      );
-      return [...merged, ...additional];
-    }
-    return STANDARD_TOURNAMENT_PRIZES;
   } catch (err) {
-    console.warn('Error reading tournament prizes from storage:', err);
+    console.warn('Error reading tournament prizes from localStorage:', err);
+  }
+
+  return STANDARD_TOURNAMENT_PRIZES;
+}
+
+/**
+ * Get tournament prizes by tournamentId
+ */
+export function getTournamentPrizesByTournamentId(tournamentId?: string): TournamentPrize[] {
+  try {
+    if (tournamentId) {
+      const tourKey = `cricket_tournament_prizes_${tournamentId}`;
+      const tourStored = localStorage.getItem(tourKey);
+      if (tourStored) {
+        const parsed = JSON.parse(tourStored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(normalizePrize);
+        }
+      }
+    }
+    return getTournamentPrizes();
+  } catch (err) {
+    console.warn('Error reading tournament prizes for tournament ID:', err);
     return STANDARD_TOURNAMENT_PRIZES;
   }
 }
 
 /**
- * Save tournament prizes to localStorage and sync with Firestore & event bus.
+ * Save tournament prizes
  */
 export async function saveTournamentPrizes(prizes: TournamentPrize[], matchId?: string): Promise<void> {
-  if (typeof window === 'undefined') return;
-  const key = getStorageKey(matchId);
-  const data = prizes.map((p) => ({ ...p, updatedAt: Date.now() }));
-  
+  const normalized = prizes.map(normalizePrize);
+  const json = JSON.stringify(normalized);
+
   try {
-    localStorage.setItem(key, JSON.stringify(data));
-    // Also save to global key as current active tournament prizes
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(GLOBAL_PRIZES_KEY, json);
+    if (matchId) {
+      localStorage.setItem(`cricket_tournament_prizes_${matchId}`, json);
+    }
   } catch (err) {
-    console.warn('Error saving tournament prizes to localStorage:', err);
+    console.warn('Error writing tournament prizes to localStorage:', err);
   }
 
-  // Dispatch custom window event so scorebug and overlay update immediately
+  // Dispatch events for live components and multi-tab sync
   try {
     window.dispatchEvent(
       new CustomEvent('cricket_prizes_updated', {
-        detail: { matchId, prizes: data },
+        detail: { prizes: normalized, matchId },
       })
     );
   } catch (_) {}
 
-  // Broadcast across tabs and all iframes via BroadcastChannel
   try {
-    const bc = new BroadcastChannel('cricket_prizes_channel');
-    bc.postMessage({ type: 'PRIZES_UPDATED', matchId, prizes: data });
+    const bc = new BroadcastChannel('cricket_overlay_channel');
+    bc.postMessage({ type: 'PRIZES_UPDATED', prizes: normalized, matchId });
     setTimeout(() => {
-      try { bc.close(); } catch (_) {}
+      try {
+        bc.close();
+      } catch (_) {}
     }, 500);
   } catch (_) {}
-
-  // Post to all child iframes (for overlay preview iframes)
-  if (typeof document !== 'undefined') {
-    try {
-      const iframes = document.querySelectorAll('iframe');
-      iframes.forEach((frame) => {
-        try {
-          frame.contentWindow?.postMessage({ type: 'PRIZES_UPDATED', matchId, prizes: data }, '*');
-        } catch (_) {}
-      });
-    } catch (_) {}
-  }
-
-  // Post to parent window if running inside an iframe
-  if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
-    try {
-      window.parent.postMessage({ type: 'PRIZES_UPDATED', matchId, prizes: data }, '*');
-    } catch (_) {}
-  }
-
-  // Sync to Firestore if online
-  if (db) {
-    try {
-      const docId = matchId ? `prizes_${matchId}` : 'prizes_current';
-      await safeSetDoc(doc(db, 'cricket_tournament_prizes', docId), {
-        matchId: matchId || null,
-        prizes: data,
-        updatedAt: Date.now(),
-      });
-
-      // Also persist to match document if matchId is provided
-      if (matchId) {
-        try {
-          await safeSetDoc(doc(db, 'cricket_matches', matchId), {
-            tournamentPrizes: data,
-          }, { merge: true });
-        } catch (_) {}
-      }
-    } catch (err) {
-      console.warn('Firestore sync for tournament prizes failed (offline fallback active):', err);
-    }
-  }
 }
 
 /**
- * Subscribe to tournament prize updates (via CustomEvent, StorageEvent, and Firestore).
+ * Save tournament prizes specifically for a tournamentId
+ */
+export async function saveTournamentPrizesForTournament(tournamentId: string, prizes: TournamentPrize[]): Promise<void> {
+  const normalized = prizes.map(normalizePrize);
+  const json = JSON.stringify(normalized);
+
+  try {
+    if (tournamentId) {
+      localStorage.setItem(`cricket_tournament_prizes_${tournamentId}`, json);
+    }
+    localStorage.setItem(GLOBAL_PRIZES_KEY, json);
+  } catch (err) {
+    console.warn('Error writing tournament prizes for tournament to localStorage:', err);
+  }
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent('cricket_prizes_updated', {
+        detail: { prizes: normalized, tournamentId },
+      })
+    );
+  } catch (_) {}
+
+  try {
+    const bc = new BroadcastChannel('cricket_overlay_channel');
+    bc.postMessage({ type: 'PRIZES_UPDATED', prizes: normalized, tournamentId });
+    setTimeout(() => {
+      try {
+        bc.close();
+      } catch (_) {}
+    }, 500);
+  } catch (_) {}
+}
+
+/**
+ * Filter valid and active prizes (must be active and have either personName or amount)
+ */
+export function getValidActivePrizes(prizes?: TournamentPrize[]): TournamentPrize[] {
+  if (!Array.isArray(prizes)) return [];
+  return prizes.filter(
+    (p) =>
+      p.isActive !== false &&
+      (Boolean(p.personName?.trim()) ||
+        Boolean(p.sponsorName?.trim()) ||
+        Boolean(p.amount?.trim()))
+  );
+}
+
+/**
+ * Subscribe to realtime updates for tournament prizes
  */
 export function subscribeToTournamentPrizes(
   callback: (prizes: TournamentPrize[]) => void,
   matchId?: string
 ): () => void {
-  const handleEvent = (e: Event) => {
-    const custom = e as CustomEvent;
-    if (custom.detail?.prizes) {
-      callback(custom.detail.prizes);
+  const handleUpdate = (e: Event) => {
+    const customEvt = e as CustomEvent;
+    if (customEvt.detail?.prizes) {
+      callback(customEvt.detail.prizes.map(normalizePrize));
     } else {
       callback(getTournamentPrizes(matchId));
     }
   };
 
   const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY || (matchId && e.key === getStorageKey(matchId))) {
+    if (e.key === GLOBAL_PRIZES_KEY || (matchId && e.key === `cricket_tournament_prizes_${matchId}`)) {
       callback(getTournamentPrizes(matchId));
     }
   };
 
-  // 1. Window Event and Storage listeners
-  const handleMessage = (e: MessageEvent) => {
-    if (e.data && e.data.type === 'PRIZES_UPDATED') {
-      if (!matchId || !e.data.matchId || e.data.matchId === matchId) {
-        if (Array.isArray(e.data.prizes)) {
-          callback(e.data.prizes);
-        } else {
-          callback(getTournamentPrizes(matchId));
-        }
-      }
-    }
-  };
+  window.addEventListener('cricket_prizes_updated', handleUpdate);
+  window.addEventListener('storage', handleStorage);
 
-  let prizesBc: BroadcastChannel | null = null;
+  let bc: BroadcastChannel | null = null;
   try {
-    prizesBc = new BroadcastChannel('cricket_prizes_channel');
-    prizesBc.onmessage = handleMessage;
+    bc = new BroadcastChannel('cricket_overlay_channel');
+    bc.onmessage = (msg) => {
+      if (msg.data?.type === 'PRIZES_UPDATED' && msg.data?.prizes) {
+        callback(msg.data.prizes.map(normalizePrize));
+      }
+    };
   } catch (_) {}
 
-  if (typeof window !== 'undefined') {
-    window.addEventListener('cricket_prizes_updated', handleEvent);
-    window.addEventListener('storage', handleStorage);
-    window.addEventListener('message', handleMessage);
-  }
-
-  // Firestore live listener
-  let unsubFirestore: (() => void) | null = null;
-  if (db) {
-    try {
-      const docId = matchId ? `prizes_${matchId}` : 'prizes_current';
-      unsubFirestore = onSnapshot(
-        doc(db, 'cricket_tournament_prizes', docId),
-        (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            if (Array.isArray(data?.prizes)) {
-              callback(data.prizes);
-            }
-          }
-        },
-        () => {
-          // ignore offline error
-        }
-      );
-    } catch (_) {}
-  }
-
   return () => {
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('cricket_prizes_updated', handleEvent);
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('message', handleMessage);
-    }
-    if (prizesBc) {
-      try { prizesBc.close(); } catch (_) {}
-    }
-    if (unsubFirestore) {
-      unsubFirestore();
+    window.removeEventListener('cricket_prizes_updated', handleUpdate);
+    window.removeEventListener('storage', handleStorage);
+    if (bc) {
+      try {
+        bc.close();
+      } catch (_) {}
     }
   };
 }
 
 /**
- * Sample Demo Presets for quick 1-click preview / test by the score manager
+ * Format a single prize sponsor description for tickers / commentary
  */
-export const SAMPLE_DEMO_PRIZES: TournamentPrize[] = [
-  {
-    id: 'tournament_1st',
-    category: 'tournament_1st',
-    title: 'Tournament 1st Prize / Champion',
-    personName: 'Choudhary Brothers Construction',
-    personPhoto: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Main Tournament Sponsor',
-    amount: '51,000',
-    currency: '₹',
-    tagline: 'Champion Trophy & Cash Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'tournament_2nd',
-    category: 'tournament_2nd',
-    title: 'Tournament 2nd Prize / Runner-Up',
-    personName: 'Shri Ramesh Patil',
-    personPhoto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Sarpanch, Gram Panchayat',
-    amount: '31,000',
-    currency: '₹',
-    tagline: 'Runner-Up Trophy & Cash Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'tournament_3rd',
-    category: 'tournament_3rd',
-    title: 'Tournament 3rd Prize',
-    personName: 'Balaji Developers & Infra',
-    personPhoto: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Cricket Patron & Donor',
-    amount: '21,000',
-    currency: '₹',
-    tagline: '3rd Prize Trophy Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'tournament_4th',
-    category: 'tournament_4th',
-    title: 'Tournament 4th Prize',
-    personName: 'Maa Bhavani Sports Club',
-    personPhoto: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Youth Sports Foundation',
-    amount: '11,000',
-    currency: '₹',
-    tagline: '4th Prize Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'man_of_series',
-    category: 'man_of_series',
-    title: 'Man of the Series Award',
-    personName: 'Vikramaditya Shinde',
-    personPhoto: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'President, Yuva Krida Mandal',
-    amount: '15,000',
-    currency: '₹',
-    tagline: 'Grand Cash Prize Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'best_batsman',
-    category: 'best_batsman',
-    title: 'Best Batsman Award',
-    personName: 'Dr. Ashok Deshmukh',
-    personPhoto: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Patron & Sports Enthusiast',
-    amount: '7,000',
-    currency: '₹',
-    tagline: 'Cash Prize Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'best_bowler',
-    category: 'best_bowler',
-    title: 'Best Bowler Award',
-    personName: 'Ganesh Auto Electricals',
-    personPhoto: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Local Business Partner',
-    amount: '7,000',
-    currency: '₹',
-    tagline: 'Cash Prize Sponsored By',
-    isActive: true,
-  },
-  {
-    id: 'custom_sixes',
-    category: 'custom',
-    title: 'Maximum Sixes Award',
-    personName: 'Sai Samarth Jewellers',
-    personPhoto: 'https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=200&auto=format&fit=crop&q=80',
-    personDesignation: 'Gold Medal & Trophy Sponsor',
-    amount: '5,000',
-    currency: '₹',
-    tagline: 'Award Sponsored By',
-    isActive: true,
-  },
-];
+export function formatPrizeSponsorText(prize: TournamentPrize): string {
+  const title = prize.title || 'Tournament Award';
+  const curr = prize.currencySymbol || prize.currency || '₹';
+  const amtStr = prize.amount ? `${curr}${prize.amount}` : '';
+  const sponsor = prize.personName || prize.sponsorName || '';
+  const desig = prize.personDesignation || prize.sponsorDesignation || '';
+
+  const parts: string[] = [title];
+  if (amtStr) parts.push(`(${amtStr})`);
+  if (sponsor) {
+    const spStr = desig ? `${sponsor} [${desig}]` : sponsor;
+    parts.push(`Sponsored by: ${spStr}`);
+  }
+  return parts.join(' • ');
+}
+
+/**
+ * Format all active prizes into a continuous broadcast sponsor ticker
+ */
+export function formatAllPrizesSponsorTicker(prizes: TournamentPrize[]): string {
+  const valid = getValidActivePrizes(prizes);
+  if (valid.length === 0) return '';
+  return valid.map((p) => formatPrizeSponsorText(p)).join('   🏆   ');
+}

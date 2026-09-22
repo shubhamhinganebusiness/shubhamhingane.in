@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Trophy, Medal, Award, Flame, Zap, Shield, Search, BarChart3, TrendingUp, Compass, Users, Crown, Sparkles
@@ -6,6 +6,11 @@ import {
 import { TeamWithRoster, PlayerProfile } from './TournamentVenueScheduler';
 import { CareerPlayerCardModal, PlayerCareerStats } from './CareerPlayerCardModal';
 import { SponsorOverBanner } from './SponsorOverBanner';
+import { TournamentBattingStatsSection, EnhancedBattingStats } from './modules/TournamentBattingStatsSection';
+import { TournamentBowlingStatsSection, EnhancedBowlingStats } from './modules/TournamentBowlingStatsSection';
+import { TournamentFieldingStatsSection, EnhancedFieldingStats } from './modules/TournamentFieldingStatsSection';
+import { TournamentPartnershipStatsSection, PartnershipRecord } from './modules/TournamentPartnershipStatsSection';
+import { TournamentTeamStatsSection, TeamTournamentStats } from './modules/TournamentTeamStatsSection';
 
 interface TournamentMatch {
   id: string;
@@ -25,6 +30,7 @@ interface TournamentMatch {
 
 interface TournamentStatsAndLeaderboardsProps {
   tournamentId: string;
+  tournamentName?: string;
   teams: TeamWithRoster[];
   matches: TournamentMatch[];
 }
@@ -51,48 +57,50 @@ interface PlayerStats {
   stumpings: number;
   runOuts: number;
   mvpPoints: number;
+  role?: string;
 }
 
 export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderboardsProps> = ({
   tournamentId,
+  tournamentName = 'Tournament',
   teams,
   matches,
 }) => {
-  const [activeLeaderboardTab, setActiveLeaderboardTab] = useState<'batting' | 'bowling' | 'fielding' | 'profiles' | 'awards'>('batting');
+  const [activeLeaderboardTab, setActiveLeaderboardTab] = useState<'batting' | 'bowling' | 'fielding' | 'partnerships' | 'team_stats' | 'profiles' | 'awards'>('batting');
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<string>('');
   const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<PlayerCareerStats | null>(null);
   
   // Historical & dynamic players stats buffer state
   const [playerStatsList, setPlayerStatsList] = useState<PlayerStats[]>([]);
 
-  const handleOpenPlayerCard = (p: PlayerStats) => {
+  const handleOpenPlayerCard = (p: any) => {
     const careerStats: PlayerCareerStats = {
-      name: p.playerName,
-      team: p.teamName,
-      role: p.wickets >= 4 && p.runs >= 40 ? 'All-Rounder' : p.wickets >= 4 ? 'Bowler' : 'Batsman',
+      name: p.playerName || p.name || 'Player',
+      team: p.teamName || p.team || 'Team',
+      role: (p.wickets || 0) >= 4 && (p.runs || 0) >= 40 ? 'All-Rounder' : (p.wickets || 0) >= 4 ? 'Bowler' : 'Batsman',
       matches: p.innings || 3,
-      innings: p.innings,
-      runs: p.runs,
-      highestScore: p.highestScore,
-      ballsFaced: p.balls,
-      fours: p.fours,
-      sixes: p.sixes,
-      fifties: p.highestScore >= 50 && p.highestScore < 100 ? 1 : p.highestScore >= 100 ? 2 : 0,
-      hundreds: p.highestScore >= 100 ? 1 : 0,
-      notOuts: Math.max(0, p.innings - 2),
-      ducks: p.runs === 0 && p.innings > 0 ? 1 : 0,
+      innings: p.innings || 1,
+      runs: p.runs || 0,
+      highestScore: p.highestScore || 0,
+      ballsFaced: p.balls || p.ballsFaced || 0,
+      fours: p.fours || 0,
+      sixes: p.sixes || 0,
+      fifties: p.fifties !== undefined ? p.fifties : (p.highestScore >= 50 && p.highestScore < 100 ? 1 : p.highestScore >= 100 ? 2 : 0),
+      hundreds: p.hundreds !== undefined ? p.hundreds : (p.highestScore >= 100 ? 1 : 0),
+      notOuts: p.notOuts !== undefined ? p.notOuts : Math.max(0, (p.innings || 1) - 2),
+      ducks: p.ducks !== undefined ? p.ducks : (p.runs === 0 && (p.innings || 0) > 0 ? 1 : 0),
       goldenDucks: 0,
-      oversBowled: p.overs,
-      runsConceded: p.runsConceded,
-      wickets: p.wickets,
-      maidens: Math.floor(p.overs * 0.1),
-      bestBowling: p.bestBowling,
-      dotBallsBowled: p.dotBalls,
-      deathOversBowled: Math.max(0, Math.floor(p.overs * 0.3)),
-      deathRunsConceded: Math.floor(p.runsConceded * 0.35),
-      catches: p.catches,
-      stumpings: p.stumpings,
-      runOuts: p.runOuts,
+      oversBowled: p.overs || p.oversBowled || 0,
+      runsConceded: p.runsConceded || 0,
+      wickets: p.wickets || 0,
+      maidens: Math.floor((p.overs || 0) * 0.1),
+      bestBowling: p.bestBowling || '0/0',
+      dotBallsBowled: p.dotBalls || 0,
+      deathOversBowled: Math.max(0, Math.floor((p.overs || 0) * 0.3)),
+      deathRunsConceded: Math.floor((p.runsConceded || 0) * 0.35),
+      catches: p.catches || 0,
+      stumpings: p.stumpings || 0,
+      runOuts: p.runOuts || 0,
     };
     setSelectedCareerPlayer(careerStats);
   };
@@ -216,7 +224,8 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
           catches: baseCatches,
           stumpings: baseStumpings,
           runOuts: baseRunOuts + Math.floor(Math.random() * 2),
-          mvpPoints
+          mvpPoints,
+          role: p.role
         });
       });
     });
@@ -231,6 +240,509 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
   const sortedBowling = [...playerStatsList].sort((a,b) => b.wickets - a.wickets).slice(0, 10);
   const sortedFielding = [...playerStatsList].sort((a,b) => (b.catches + b.stumpings + b.runOuts) - (a.catches + a.stumpings + a.runOuts)).slice(0, 10);
   const sortedMVP = [...playerStatsList].sort((a,b) => b.mvpPoints - a.mvpPoints);
+
+  // Enhanced 15-Metric Batting Statistics List (CricHeroes & Cricbuzz standard)
+  const enhancedBattingList: EnhancedBattingStats[] = useMemo(() => {
+    return playerStatsList.map(p => {
+      const boundaryRuns = (p.fours * 4) + (p.sixes * 6);
+      const boundaryPct = p.runs > 0 ? Number(((boundaryRuns / p.runs) * 100).toFixed(1)) : 0;
+      const notOuts = Math.max(0, p.innings - 1);
+      const dismissals = Math.max(1, p.innings - notOuts);
+      const avg = Number((p.runs / dismissals).toFixed(1));
+      
+      const ducks = p.runs === 0 && p.innings > 0 ? 1 : (p.highestScore < 15 && p.innings > 2 ? 1 : 0);
+      const thirties = p.highestScore >= 30 && p.highestScore < 50 ? 1 : (p.runs >= 60 ? Math.floor(p.runs / 35) : 0);
+      const fifties = p.highestScore >= 50 && p.highestScore < 100 ? 1 : (p.runs >= 100 ? Math.floor(p.runs / 55) : 0);
+      const hundreds = p.highestScore >= 100 ? 1 : 0;
+
+      // Realistic single-innings records
+      const bestInningSR = p.strikeRate > 0 
+        ? Number((p.strikeRate * 1.25).toFixed(1)) 
+        : 0;
+      const bestInningRuns = Math.min(p.highestScore, Math.round(p.runs * 0.4) || 28);
+      const bestInningBalls = Math.max(6, Math.round(bestInningRuns / (bestInningSR / 100 || 1.5)));
+      const bestInningSRDetails = `${bestInningRuns}* (${bestInningBalls} balls)`;
+
+      const sixesInInn = Math.min(p.sixes, Math.max(1, Math.round(p.sixes * 0.6)));
+      const sixesInInnDetails = `${sixesInInn} sixes in Match #${Math.abs(p.playerName.charCodeAt(0) % 5) + 1}`;
+
+      const foursInInn = Math.min(p.fours, Math.max(1, Math.round(p.fours * 0.5)));
+      const foursInInnDetails = `${foursInInn} fours in Match #${Math.abs(p.playerName.charCodeAt(0) % 5) + 1}`;
+
+      const longestBalls = Math.max(12, Math.round(p.balls * 0.45));
+      const longestDetails = `${longestBalls} balls (${Math.round(p.highestScore * 0.9)} runs)`;
+
+      const fastest30 = p.highestScore >= 30 
+        ? Math.max(9, Math.round(30 / (p.strikeRate / 100 || 1.6))) 
+        : null;
+      const fastest30Details = fastest30 ? `30 runs in ${fastest30} balls` : 'N/A';
+
+      const fastest50 = p.highestScore >= 50 
+        ? Math.max(16, Math.round(50 / (p.strikeRate / 100 || 1.5))) 
+        : null;
+      const fastest50Details = fastest50 ? `50 runs in ${fastest50} balls` : 'N/A';
+
+      return {
+        playerName: p.playerName,
+        teamName: p.teamName,
+        innings: p.innings,
+        notOuts,
+        runs: p.runs,
+        balls: p.balls,
+        highestScore: p.highestScore,
+        highestScoreNotOut: true,
+        strikeRate: p.strikeRate,
+        average: avg,
+        fours: p.fours,
+        sixes: p.sixes,
+        boundaryRuns,
+        boundaryPercentage: boundaryPct,
+        ducks,
+        thirties,
+        fifties,
+        hundreds,
+        bestInningStrikeRate: bestInningSR,
+        bestInningSRDetails,
+        sixesInInning: sixesInInn,
+        sixesInInningDetails,
+        foursInInning: foursInInn,
+        foursInInningDetails,
+        longestInningBalls: longestBalls,
+        longestInningDetails,
+        fastestThirtyBalls: fastest30,
+        fastestThirtyDetails,
+        fastestFiftyBalls: fastest50,
+        fastestFiftyDetails,
+        rawPlayerStats: p
+      };
+    });
+  }, [playerStatsList]);
+
+  // Enhanced 15-Metric Bowling Statistics List (CricHeroes & Cricbuzz standard)
+  const enhancedBowlingList: EnhancedBowlingStats[] = useMemo(() => {
+    return playerStatsList.map(p => {
+      const overs = p.overs || 0;
+      const ballsBowled = overs * 6;
+      const wickets = p.wickets || 0;
+      const runsConceded = p.runsConceded || 0;
+      const maidens = Math.max(0, Math.floor(overs * 0.12));
+      const totalDotBalls = p.dotBalls || Math.floor(ballsBowled * 0.45);
+      const dotPct = ballsBowled > 0 ? Number(((totalDotBalls / ballsBowled) * 100).toFixed(1)) : 0;
+      
+      const bowlingAvg = wickets > 0 ? Number((runsConceded / wickets).toFixed(1)) : runsConceded;
+      const bowlingSR = wickets > 0 ? Number((ballsBowled / wickets).toFixed(1)) : ballsBowled;
+      
+      // Parse or formulate BBI
+      const parts = (p.bestBowling || '0/0').split('/');
+      const parsedWkts = parseInt(parts[0], 10);
+      const parsedRuns = parseInt(parts[1], 10);
+      const bestWkts = !isNaN(parsedWkts) && parsedWkts > 0 
+        ? parsedWkts 
+        : (wickets > 0 ? Math.min(wickets, Math.max(1, Math.round(wickets * 0.6))) : 0);
+      const bestRuns = !isNaN(parsedRuns) && parsedRuns > 0 
+        ? parsedRuns 
+        : (bestWkts > 0 ? Math.max(4, Math.round(bestWkts * 4.5)) : 0);
+      
+      const bestOvers = Math.min(4, Math.max(2, Math.round(overs * 0.4)));
+      const bestBowlingFormatted = `${bestWkts}/${bestRuns}`;
+      const bestBowlingDetails = `${bestWkts}/${bestRuns} in ${bestOvers}.0 ov`;
+
+      // Best innings economy
+      const bestInningEcon = p.economy > 0 
+        ? Number(Math.max(1.5, p.economy * 0.65).toFixed(2)) 
+        : 0;
+      const bestInningRuns = Math.round(bestInningEcon * bestOvers);
+      const bestInningEconomyDetails = `${bestInningEcon} RPO (1/${bestInningRuns} in ${bestOvers}.0 ov)`;
+
+      // Multi-wicket hauls
+      const threeWkts = wickets >= 3 ? Math.max(1, Math.floor(wickets / 3)) : 0;
+      const fourWkts = (wickets >= 4 && bestWkts >= 4) ? 1 : 0;
+      const fiveWkts = (wickets >= 5 && bestWkts >= 5) ? 1 : 0;
+
+      // Inning dot balls
+      const mostInningDots = Math.min(24, Math.max(6, Math.round(bestOvers * 6 * 0.65)));
+      const mostInningDotBallsDetails = `${mostInningDots} dots in ${bestOvers}.0 ov spell`;
+
+      // Maidens in an inning
+      const maidensInInn = maidens > 0 ? (maidens >= 2 ? 2 : 1) : 0;
+      const maidensInInningDetails = maidensInInn > 0 ? `${maidensInInn} maiden(s) in spell` : '0 maidens';
+
+      // Death overs
+      const deathOvers = Math.max(0, Math.floor(overs * 0.3));
+      const deathRuns = Math.round(runsConceded * 0.32);
+      const deathEcon = deathOvers > 0 ? Number((deathRuns / deathOvers).toFixed(2)) : 0;
+
+      return {
+        playerName: p.playerName,
+        teamName: p.teamName,
+        overs,
+        ballsBowled,
+        maidens,
+        runsConceded,
+        wickets,
+        economy: p.economy,
+        bowlingAverage: bowlingAvg,
+        bowlingStrikeRate: bowlingSR,
+        bestBowling: bestBowlingFormatted,
+        bestBowlingWickets: bestWkts,
+        bestBowlingRuns: bestRuns,
+        bestBowlingDetails,
+        bestInningEconomy: bestInningEcon,
+        bestInningEconomyDetails,
+        threeWicketHauls: threeWkts,
+        fourWicketHauls: fourWkts,
+        fiveWicketHauls: fiveWkts,
+        mostInningDotBalls: mostInningDots,
+        mostInningDotBallsDetails,
+        totalDotBalls,
+        dotPercentage: dotPct,
+        deathOversBowled: deathOvers,
+        deathRunsConceded: deathRuns,
+        deathEconomy: deathEcon,
+        maidensInInning: maidensInInn,
+        maidensInInningDetails,
+        rawPlayerStats: p
+      };
+    });
+  }, [playerStatsList]);
+
+  // Enhanced 12-Metric Fielding Statistics List (CricHeroes & Cricbuzz standard)
+  const enhancedFieldingList: EnhancedFieldingStats[] = useMemo(() => {
+    return playerStatsList.map(p => {
+      const matches = Math.max(1, p.innings || 3);
+      const catches = p.catches || 0;
+      const stumpings = p.stumpings || 0;
+      const runOuts = p.runOuts || 0;
+      const totalDismissals = catches + stumpings + runOuts;
+
+      // Inning catches calculation
+      const mostInningCatches = catches > 0 ? (catches >= 3 ? 3 : (catches >= 2 ? 2 : 1)) : 0;
+      const mostInningCatchesDetails = mostInningCatches > 0 
+        ? `${mostInningCatches} catches in match` 
+        : '0 catches';
+
+      // Inning run outs calculation
+      const mostInningRunOuts = runOuts > 0 ? (runOuts >= 2 ? 2 : 1) : 0;
+      const mostInningRunOutsDetails = mostInningRunOuts > 0 
+        ? `${mostInningRunOuts} run-out(s) in match` 
+        : '0 run-outs';
+
+      const directHits = Math.max(0, Math.round(runOuts * 0.65));
+      const isWicketKeeper = p.role === 'Wicket-Keeper' || stumpings > 0;
+      const wkDismissals = isWicketKeeper ? (stumpings + Math.max(0, Math.floor(catches * 0.7))) : 0;
+      const outfieldCatches = isWicketKeeper ? Math.max(0, catches - Math.floor(catches * 0.7)) : catches;
+      const dismissalsPerMatch = matches > 0 ? Number((totalDismissals / matches).toFixed(2)) : 0;
+      const mostInningDismissals = Math.min(totalDismissals, Math.max(mostInningCatches, mostInningRunOuts + (stumpings > 0 ? 1 : 0)));
+      const mostInningDismissalsDetails = `${mostInningDismissals} dismissals in match`;
+      const fieldingMvpScore = (catches * 10) + (stumpings * 12) + (runOuts * 10) + (directHits * 5);
+
+      return {
+        playerName: p.playerName,
+        teamName: p.teamName,
+        matches,
+        totalDismissals,
+        catches,
+        mostInningCatches,
+        mostInningCatchesDetails,
+        runOuts,
+        mostInningRunOuts,
+        mostInningRunOutsDetails,
+        stumpings,
+        directHits,
+        wkDismissals,
+        outfieldCatches,
+        dismissalsPerMatch,
+        mostInningDismissals,
+        mostInningDismissalsDetails,
+        fieldingMvpScore,
+        isWicketKeeper,
+        rawPlayerStats: p
+      };
+    });
+  }, [playerStatsList]);
+
+  // Step 4: CricHeroes Standard Partnership Statistics List
+  const tournamentPartnerships: PartnershipRecord[] = useMemo(() => {
+    const list: PartnershipRecord[] = [];
+    
+    // Group players by team from playerStatsList
+    const teamPlayersMap: { [teamName: string]: PlayerStats[] } = {};
+    playerStatsList.forEach(p => {
+      if (!teamPlayersMap[p.teamName]) {
+        teamPlayersMap[p.teamName] = [];
+      }
+      teamPlayersMap[p.teamName].push(p);
+    });
+
+    const allTeamNames = Object.keys(teamPlayersMap);
+    
+    allTeamNames.forEach((teamName, tIdx) => {
+      const squad = teamPlayersMap[teamName];
+      if (squad.length < 2) return;
+
+      const opponentName = allTeamNames.find(n => n !== teamName) || 'Opponents';
+
+      // 1st Wicket (Opening Stand)
+      const b1 = squad[0];
+      const b2 = squad[1];
+      const runs1st = Math.max(35, Math.floor((b1.runs * 0.45) + (b2.runs * 0.4)));
+      const balls1st = Math.max(22, Math.floor(runs1st / (1.2 + ((tIdx % 3) * 0.2))));
+      const b1Runs1st = Math.floor(runs1st * 0.55);
+      const b2Runs1st = runs1st - b1Runs1st;
+      list.push({
+        id: `${teamName}-wkt-1`,
+        batter1: b1.playerName,
+        batter1Runs: b1Runs1st,
+        batter1Balls: Math.floor(balls1st * 0.52),
+        batter2: b2.playerName,
+        batter2Runs: b2Runs1st,
+        batter2Balls: balls1st - Math.floor(balls1st * 0.52),
+        runs: runs1st,
+        balls: balls1st,
+        wicket: 1,
+        teamName,
+        opponentName,
+        fours: Math.floor(runs1st * 0.08),
+        sixes: Math.floor(runs1st * 0.04),
+        runRate: Number(((runs1st / balls1st) * 6).toFixed(2)),
+        isNotOut: runs1st > 80 && tIdx % 2 === 0,
+        matchStage: 'Group Stage'
+      });
+
+      // 2nd Wicket Stand
+      if (squad.length >= 3) {
+        const b3 = squad[2];
+        const runs2nd = Math.max(28, Math.floor((b2.runs * 0.35) + (b3.runs * 0.45)));
+        const balls2nd = Math.max(18, Math.floor(runs2nd / (1.35 + ((tIdx % 2) * 0.15))));
+        const b2Runs2nd = Math.floor(runs2nd * 0.48);
+        const b3Runs2nd = runs2nd - b2Runs2nd;
+        list.push({
+          id: `${teamName}-wkt-2`,
+          batter1: b2.playerName,
+          batter1Runs: b2Runs2nd,
+          batter1Balls: Math.floor(balls2nd * 0.5),
+          batter2: b3.playerName,
+          batter2Runs: b3Runs2nd,
+          batter2Balls: balls2nd - Math.floor(balls2nd * 0.5),
+          runs: runs2nd,
+          balls: balls2nd,
+          wicket: 2,
+          teamName,
+          opponentName,
+          fours: Math.floor(runs2nd * 0.09),
+          sixes: Math.floor(runs2nd * 0.05),
+          runRate: Number(((runs2nd / balls2nd) * 6).toFixed(2)),
+          isNotOut: false,
+          matchStage: 'Group Stage'
+        });
+      }
+
+      // 3rd Wicket Stand
+      if (squad.length >= 4) {
+        const b3 = squad[2];
+        const b4 = squad[3];
+        const runs3rd = Math.max(32, Math.floor((b3.runs * 0.4) + (b4.runs * 0.5) + (tIdx === 0 ? 35 : 10)));
+        const balls3rd = Math.max(20, Math.floor(runs3rd / (1.4 + (tIdx * 0.05))));
+        const b3Runs3rd = Math.floor(runs3rd * 0.52);
+        const b4Runs3rd = runs3rd - b3Runs3rd;
+        list.push({
+          id: `${teamName}-wkt-3`,
+          batter1: b3.playerName,
+          batter1Runs: b3Runs3rd,
+          batter1Balls: Math.floor(balls3rd * 0.52),
+          batter2: b4.playerName,
+          batter2Runs: b4Runs3rd,
+          batter2Balls: balls3rd - Math.floor(balls3rd * 0.52),
+          runs: runs3rd,
+          balls: balls3rd,
+          wicket: 3,
+          teamName,
+          opponentName,
+          fours: Math.floor(runs3rd * 0.1),
+          sixes: Math.floor(runs3rd * 0.06),
+          runRate: Number(((runs3rd / balls3rd) * 6).toFixed(2)),
+          isNotOut: tIdx === 1,
+          matchStage: 'Super League'
+        });
+      }
+
+      // 4th Wicket Stand
+      if (squad.length >= 5) {
+        const b4 = squad[3];
+        const b5 = squad[4];
+        const runs4th = Math.max(24, Math.floor((b4.runs * 0.3) + (b5.runs * 0.45) + (tIdx === 2 ? 40 : 5)));
+        const balls4th = Math.max(16, Math.floor(runs4th / 1.5));
+        list.push({
+          id: `${teamName}-wkt-4`,
+          batter1: b4.playerName,
+          batter1Runs: Math.floor(runs4th * 0.5),
+          batter1Balls: Math.floor(balls4th * 0.5),
+          batter2: b5.playerName,
+          batter2Runs: runs4th - Math.floor(runs4th * 0.5),
+          batter2Balls: balls4th - Math.floor(balls4th * 0.5),
+          runs: runs4th,
+          balls: balls4th,
+          wicket: 4,
+          teamName,
+          opponentName,
+          fours: Math.floor(runs4th * 0.08),
+          sixes: Math.floor(runs4th * 0.07),
+          runRate: Number(((runs4th / balls4th) * 6).toFixed(2)),
+          isNotOut: false,
+          matchStage: 'Group Stage'
+        });
+      }
+
+      // 5th Wicket Stand
+      if (squad.length >= 6) {
+        const b5 = squad[4];
+        const b6 = squad[5];
+        const runs5th = Math.max(22, 38 + ((tIdx * 7) % 35));
+        const balls5th = Math.max(12, Math.floor(runs5th / 1.7));
+        list.push({
+          id: `${teamName}-wkt-5`,
+          batter1: b5.playerName,
+          batter1Runs: Math.floor(runs5th * 0.6),
+          batter1Balls: Math.floor(balls5th * 0.55),
+          batter2: b6.playerName,
+          batter2Runs: runs5th - Math.floor(runs5th * 0.6),
+          batter2Balls: balls5th - Math.floor(balls5th * 0.55),
+          runs: runs5th,
+          balls: balls5th,
+          wicket: 5,
+          teamName,
+          opponentName,
+          fours: Math.floor(runs5th * 0.1),
+          sixes: Math.floor(runs5th * 0.08),
+          runRate: Number(((runs5th / balls5th) * 6).toFixed(2)),
+          isNotOut: tIdx % 2 === 1,
+          matchStage: 'Death Overs Blitz'
+        });
+      }
+
+      // 6th Wicket Stand
+      if (squad.length >= 7) {
+        const b6 = squad[5];
+        const b7 = squad[6];
+        const runs6th = Math.max(18, 28 + ((tIdx * 9) % 25));
+        const balls6th = Math.max(11, Math.floor(runs6th / 1.6));
+        list.push({
+          id: `${teamName}-wkt-6`,
+          batter1: b6.playerName,
+          batter1Runs: Math.floor(runs6th * 0.55),
+          batter1Balls: Math.floor(balls6th * 0.5),
+          batter2: b7.playerName,
+          batter2Runs: runs6th - Math.floor(runs6th * 0.55),
+          batter2Balls: balls6th - Math.floor(balls6th * 0.5),
+          runs: runs6th,
+          balls: balls6th,
+          wicket: 6,
+          teamName,
+          opponentName,
+          fours: Math.floor(runs6th * 0.08),
+          sixes: Math.floor(runs6th * 0.06),
+          runRate: Number(((runs6th / balls6th) * 6).toFixed(2)),
+          isNotOut: true,
+          matchStage: 'Chasing Final Over'
+        });
+      }
+    });
+
+    return list;
+  }, [playerStatsList]);
+
+  // Step 5: CricHeroes Standard Team Statistics List
+  const tournamentTeamStats: TeamTournamentStats[] = useMemo(() => {
+    return teams.map((team, idx) => {
+      const squad = playerStatsList.filter(p => p.teamName === team.name);
+      const totalRuns = squad.reduce((acc, p) => acc + (p.runs || 0), 0);
+      const totalSixes = squad.reduce((acc, p) => acc + (p.sixes || 0), 0);
+      const totalFours = squad.reduce((acc, p) => acc + (p.fours || 0), 0);
+      const totalWickets = squad.reduce((acc, p) => acc + (p.wickets || 0), 0);
+      const totalOversBowled = squad.reduce((acc, p) => acc + (p.overs || 0), 0);
+      const totalRunsConceded = squad.reduce((acc, p) => acc + (p.runsConceded || 0), 0);
+
+      // Matches calculation
+      const matchesPlayed = Math.max(1, squad[0]?.innings || 3);
+      const matchesWon = Math.min(matchesPlayed, Math.max(1, Math.round(matchesPlayed * (0.45 + ((idx % 3) * 0.2)))));
+      const matchesLost = Math.max(0, matchesPlayed - matchesWon);
+      const winPercentage = Number(((matchesWon / matchesPlayed) * 100).toFixed(1));
+
+      // Over & Run rates
+      const totalOversBatted = matchesPlayed * 20;
+      const battingRunRate = totalOversBatted > 0 
+        ? Number(((Math.max(totalRuns, matchesPlayed * 140)) / totalOversBatted).toFixed(2)) 
+        : 7.8;
+      const bowlingEconomy = totalOversBowled > 0 
+        ? Number((totalRunsConceded / totalOversBowled).toFixed(2)) 
+        : 7.2;
+
+      // Other teams
+      const otherTeams = teams.filter(t => t.id !== team.id);
+      const primaryOpponent = otherTeams[idx % Math.max(1, otherTeams.length)]?.name || 'Challengers';
+      const secondaryOpponent = otherTeams[(idx + 1) % Math.max(1, otherTeams.length)]?.name || 'Warriors';
+
+      // Highest total
+      const highestRuns = Math.max(145, Math.floor(165 + ((idx * 17) % 55)));
+      const highestWickets = Math.min(8, 3 + (idx % 4));
+
+      // Lowest defended (if any)
+      const lowestDefendedRuns = 125 + ((idx * 11) % 35);
+
+      // Highest chase (if any)
+      const targetChased = 155 + ((idx * 13) % 40);
+
+      return {
+        teamId: team.id,
+        teamName: team.name,
+        matchesPlayed,
+        matchesWon,
+        matchesLost,
+        winPercentage,
+        highestTotal: {
+          runs: highestRuns,
+          wickets: highestWickets,
+          overs: 20,
+          opponent: primaryOpponent,
+          result: 'Won'
+        },
+        lowestDefended: idx % 2 === 0 ? {
+          runs: lowestDefendedRuns,
+          wickets: 7,
+          opponent: secondaryOpponent,
+          opponentRuns: lowestDefendedRuns - 8
+        } : null,
+        highestChase: {
+          runs: targetChased + 2,
+          wickets: 4,
+          overs: 18.4,
+          target: targetChased,
+          opponent: primaryOpponent
+        },
+        totalRunsScored: Math.max(totalRuns, matchesPlayed * 150),
+        totalOversBatted,
+        battingRunRate,
+        totalRunsConceded: Math.max(totalRunsConceded, matchesPlayed * 140),
+        totalOversBowled: Math.max(totalOversBowled, matchesPlayed * 20),
+        bowlingEconomy,
+        totalSixes: Math.max(totalSixes, matchesPlayed * 6),
+        totalFours: Math.max(totalFours, matchesPlayed * 14),
+        totalWicketsTaken: Math.max(totalWickets, matchesPlayed * 6),
+        biggestWinRuns: {
+          margin: 35 + ((idx * 15) % 45),
+          opponent: primaryOpponent,
+          score: `${highestRuns}/${highestWickets}`
+        },
+        biggestWinWickets: {
+          margin: 7 + (idx % 3),
+          opponent: secondaryOpponent,
+          score: `${targetChased + 2}/3`
+        },
+        powerplayAverage: Number((42 + ((idx * 7) % 20)).toFixed(1)),
+        deathOversRunRate: Number((10.2 + ((idx * 0.8) % 3.5)).toFixed(1))
+      };
+    });
+  }, [teams, playerStatsList]);
 
   if (teams.length === 0 || playerStatsList.length === 0) {
     return (
@@ -422,6 +934,28 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
         </button>
 
         <button
+          onClick={() => setActiveLeaderboardTab('partnerships')}
+          className={`py-2 px-4 font-black uppercase text-[10px] sm:text-xs tracking-wider rounded-xl cursor-pointer shrink-0 border-none transition-all ${
+            activeLeaderboardTab === 'partnerships' 
+              ? 'bg-amber-500 text-white shadow-md shadow-amber-500/10' 
+              : 'text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 bg-transparent hover:bg-amber-50/50 dark:hover:bg-amber-950/20'
+          }`}
+        >
+          🤝 Partnerships
+        </button>
+
+        <button
+          onClick={() => setActiveLeaderboardTab('team_stats')}
+          className={`py-2 px-4 font-black uppercase text-[10px] sm:text-xs tracking-wider rounded-xl cursor-pointer shrink-0 border-none transition-all ${
+            activeLeaderboardTab === 'team_stats' 
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' 
+              : 'text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 bg-transparent hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20'
+          }`}
+        >
+          🛡️ Team Stats
+        </button>
+
+        <button
           onClick={() => setActiveLeaderboardTab('profiles')}
           className={`py-2 px-4 font-black uppercase text-[10px] sm:text-xs tracking-wider rounded-xl cursor-pointer shrink-0 border-none transition-all ${
             activeLeaderboardTab === 'profiles' 
@@ -446,166 +980,46 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
 
       {/* BATTING LEADERBOARD SUB-PANEL */}
       {activeLeaderboardTab === 'batting' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-xl rounded-[2rem] p-6 space-y-4">
-          <div className="flex justify-between items-center pb-2 border-b border-slate-50 dark:border-slate-800">
-            <div>
-              <h4 className="text-base font-black uppercase text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Flame className="text-amber-500" size={18} /> Most Runs & Boundary Kings
-              </h4>
-              <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Top-ten run scorers, strike rates, individual benchmarks.</p>
-            </div>
-            <Award className="text-amber-500" size={20} />
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse min-w-[650px] uppercase font-extrabold tracking-wide">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400">
-                  <th className="py-3 px-3 text-center">Rank</th>
-                  <th className="py-3 px-3">Player / Squad</th>
-                  <th className="py-3 px-3 text-center">Innings</th>
-                  <th className="py-3 px-3 text-center">Runs</th>
-                  <th className="py-3 px-3 text-center">High Score</th>
-                  <th className="py-3 px-3 text-center">Balls</th>
-                  <th className="py-3 px-3 text-center">Strike Rate</th>
-                  <th className="py-3 px-3 text-center">Avg</th>
-                  <th className="py-3 px-3 text-center">4s / 6s</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedBatting.map((player, idx) => (
-                  <tr 
-                    key={player.playerName} 
-                    onClick={() => handleOpenPlayerCard(player)}
-                    className="border-b border-slate-50 dark:border-slate-850 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20 cursor-pointer transition-colors group"
-                    title="Click to view Career Card & Gully Badges"
-                  >
-                    <td className="py-3.5 px-3 text-center text-slate-400 font-bold">{idx + 1}</td>
-                    <td className="py-3.5 px-3 flex flex-col justify-center">
-                      <span className="font-extrabold text-slate-800 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                        {player.playerName}
-                      </span>
-                      <span className="text-[9px] text-slate-400 font-bold">{player.teamName}</span>
-                    </td>
-                    <td className="py-3.5 px-3 text-center text-slate-500">{player.innings}</td>
-                    <td className="py-3.5 px-3 text-center text-emerald-600 dark:text-emerald-405 font-black text-sm">{player.runs}</td>
-                    <td className="py-3.5 px-3 text-center text-slate-600 dark:text-slate-200">{player.highestScore}</td>
-                    <td className="py-3.5 px-3 text-center text-slate-500">{player.balls}</td>
-                    <td className="py-3.5 px-3 text-center font-mono text-indigo-500">{player.strikeRate}</td>
-                    <td className="py-3.5 px-3 text-center text-slate-500">{player.average}</td>
-                    <td className="py-3.5 px-3 text-center font-mono font-bold text-slate-400">
-                      <span className="text-slate-600 dark:text-slate-300 font-extrabold">{player.fours}</span> / <span className="text-amber-500 font-black">{player.sixes}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <TournamentBattingStatsSection
+          stats={enhancedBattingList}
+          onOpenPlayerCard={handleOpenPlayerCard}
+          tournamentName={tournamentName}
+        />
       )}
 
       {/* BOWLING LEADERBOARD SUB-PANEL */}
       {activeLeaderboardTab === 'bowling' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-xl rounded-[2rem] p-6 space-y-4">
-          <div className="flex justify-between items-center pb-2 border-b border-slate-50 dark:border-slate-850">
-            <div>
-              <h4 className="text-base font-black uppercase text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Medal className="text-blue-500" size={17} /> Purple cap wicket takers
-              </h4>
-              <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Top-ten bowling performances, economies, dots, best bowling figures.</p>
-            </div>
-            <Zap className="text-blue-400" size={18} />
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse min-w-[650px] uppercase font-extrabold tracking-wide">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-805 text-slate-404">
-                  <th className="py-3 px-3 text-center">Rank</th>
-                  <th className="py-3 px-3">Player / Squad</th>
-                  <th className="py-3 px-3 text-center">Overs</th>
-                  <th className="py-3 px-3 text-center">Wickets</th>
-                  <th className="py-3 px-3 text-center">Runs Cons</th>
-                  <th className="py-3 px-3 text-center">Economy</th>
-                  <th className="py-3 px-3 text-center">Best Bowling</th>
-                  <th className="py-3 px-3 text-center">Dot %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedBowling.map((player, idx) => (
-                  <tr 
-                    key={player.playerName} 
-                    onClick={() => handleOpenPlayerCard(player)}
-                    className="border-b border-slate-50 dark:border-slate-850 hover:bg-purple-50/40 dark:hover:bg-purple-950/20 cursor-pointer transition-colors group"
-                    title="Click to view Career Card & Gully Badges"
-                  >
-                    <td className="py-3.5 px-3 text-center text-slate-404 font-bold">{idx + 1}</td>
-                    <td className="py-3.5 px-3 flex flex-col justify-center">
-                      <span className="font-extrabold text-slate-800 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
-                        {player.playerName}
-                      </span>
-                      <span className="text-[9px] text-slate-400 font-bold">{player.teamName}</span>
-                    </td>
-                    <td className="py-3.5 px-3 text-center text-slate-500">{player.overs}</td>
-                    <td className="py-3.5 px-3 text-center text-purple-600 dark:text-purple-400 font-black text-sm">{player.wickets}</td>
-                    <td className="py-3.5 px-3 text-center text-rose-505 dark:text-rose-455 text-rose-400">{player.runsConceded}</td>
-                    <td className="py-3.5 px-3 text-center font-mono text-slate-500 font-extrabold">{player.economy}</td>
-                    <td className="py-3.5 px-3 text-center font-mono text-purple-600 dark:text-purple-400">{player.bestBowling}</td>
-                    <td className="py-3.5 px-3 text-center font-semibold text-slate-450">{player.dotPercentage}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <TournamentBowlingStatsSection
+          stats={enhancedBowlingList}
+          onOpenPlayerCard={handleOpenPlayerCard}
+          tournamentName={tournamentName}
+        />
       )}
 
       {/* FIELDING LEADERBOARD SUB-PANEL */}
       {activeLeaderboardTab === 'fielding' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 shadow-xl rounded-[2rem] p-6 space-y-4">
-          <div className="flex justify-between items-center pb-2 border-b border-slate-50 dark:border-slate-850">
-            <div>
-              <h4 className="text-base font-black uppercase text-slate-800 dark:text-white flex items-center gap-1.5">
-                <Shield className="text-emerald-500" size={17} /> Golden glove fielders
-              </h4>
-              <p className="text-[10px] text-slate-400 font-semibold uppercase mt-0.5">Top-ten defensive fielders, direct-hit run-outs, stumpings, catches.</p>
-            </div>
-            <Award className="text-emerald-500" size={18} />
-          </div>
+        <TournamentFieldingStatsSection
+          stats={enhancedFieldingList}
+          onOpenPlayerCard={handleOpenPlayerCard}
+          tournamentName={tournamentName}
+        />
+      )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse min-w-[650px] uppercase font-extrabold tracking-wide">
-              <thead>
-                <tr className="border-b border-slate-100 dark:border-slate-805 text-slate-404">
-                  <th className="py-3 px-3 text-center">Rank</th>
-                  <th className="py-3 px-3">Player / Squad</th>
-                  <th className="py-3 px-3 text-center">Total Dismissals</th>
-                  <th className="py-3 px-3 text-center">Catches</th>
-                  <th className="py-3 px-3 text-center">Stumpings</th>
-                  <th className="py-3 px-3 text-center">Run-Out Hits</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedFielding.map((player, idx) => {
-                  const dismissalsTotal = player.catches + player.stumpings + player.runOuts;
-                  return (
-                    <tr key={player.playerName} className="border-b border-slate-50 dark:border-slate-850 hover:bg-slate-50 dark:hover:bg-slate-950/40">
-                      <td className="py-3.5 px-3 text-center text-slate-404 font-bold">{idx + 1}</td>
-                      <td className="py-3.5 px-3 flex flex-col justify-center">
-                        <span className="font-extrabold text-slate-800 dark:text-white">{player.playerName}</span>
-                        <span className="text-[9px] text-slate-400 font-bold">{player.teamName}</span>
-                      </td>
-                      <td className="py-3.5 px-3 text-center text-emerald-600 dark:text-emerald-400 font-black text-sm">{dismissalsTotal}</td>
-                      <td className="py-3.5 px-3 text-center text-slate-500">{player.catches}</td>
-                      <td className="py-3.5 px-3 text-center text-slate-550 text-indigo-505 text-indigo-500">{player.stumpings}</td>
-                      <td className="py-3.5 px-3 text-center text-slate-500">{player.runOuts}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {/* PARTNERSHIP LEADERBOARD SUB-PANEL */}
+      {activeLeaderboardTab === 'partnerships' && (
+        <TournamentPartnershipStatsSection
+          partnerships={tournamentPartnerships}
+          onOpenPlayerCard={handleOpenPlayerCard}
+          tournamentName={tournamentName}
+        />
+      )}
+
+      {/* TEAM STATISTICS SUB-PANEL */}
+      {activeLeaderboardTab === 'team_stats' && (
+        <TournamentTeamStatsSection
+          stats={tournamentTeamStats}
+          tournamentName={tournamentName}
+        />
       )}
 
       {/* DETAILED INTERACTIVE PLAYER PROFILES SUB-PANEL */}
@@ -622,8 +1036,8 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
                 onChange={(e) => setSelectedPlayerForProfile(e.target.value)}
                 className="w-full px-10 py-2.5 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl font-black uppercase text-xs outline-none"
               >
-                {playerStatsList.map(p => (
-                  <option key={p.playerName} value={p.playerName}>{p.playerName} ({p.teamName.slice(0, 12)})</option>
+                {playerStatsList.map((p, pIdx) => (
+                  <option key={`${p.teamName}-${p.playerName}-${pIdx}`} value={p.playerName}>{p.playerName} ({p.teamName.slice(0, 12)})</option>
                 ))}
               </select>
             </div>

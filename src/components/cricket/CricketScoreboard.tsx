@@ -83,6 +83,10 @@ import {
   createRunChaseEquationCommentary,
   createMatchWinningCommentary,
   createMatchStartCommentary,
+  createTournamentSponsorsMatchStartCommentary,
+  createOverSponsorCommentary,
+  createInningsBreakSponsorCommentary,
+  createMatchCompleteSponsorCommentary,
   isCrucialMatchMoment,
   getOrdinalWordEn,
   getOrdinalWordHi,
@@ -99,6 +103,14 @@ import { CareerPlayerCardModal, PlayerCareerStats } from './CareerPlayerCardModa
 import { LiveTournamentLeaderboardWidget } from './LiveTournamentLeaderboardWidget';
 import { SponsorBannerManagementModal } from './SponsorBannerManagementModal';
 import { PrizeManagementModal } from './PrizeManagementModal';
+import { 
+  getTournamentPrizes, 
+  getTournamentPrizesByTournamentId, 
+  saveTournamentPrizes, 
+  getValidActivePrizes,
+  formatAllPrizesSponsorTicker,
+  formatPrizeSponsorText
+} from '../../utils/cricketPrizeStorage';
 
 // Types & Interfaces
 export interface Batsman {
@@ -285,6 +297,7 @@ export interface MatchState {
   playerPhotos?: Record<string, string>;
   tournamentId?: string | null;
   tournamentMatchId?: string | null;
+  tournamentPrizes?: any[];
   createdBy?: string;
   managerId?: string;
   managerName?: string;
@@ -475,30 +488,47 @@ const computeLeaguePointsTableInternal = (teams: any[], matches: any[], defaultO
     };
   });
 
-  const convertOversToDecimal = (oversStr: string): number => {
+  const convertOversToDecimal = (oversStr: any): number => {
     if (!oversStr) return 0;
     const parts = oversStr.toString().split('.');
     if (parts.length === 2) {
       const overs = parseInt(parts[0]) || 0;
       const balls = parseInt(parts[1]) || 0;
-      return overs + (balls / 6);
+      return overs + (Math.min(balls, 5) / 6);
     }
     return parseFloat(oversStr) || 0;
   };
 
+  const isKnockoutStage = (stage?: string) => {
+    if (!stage) return false;
+    const s = stage.toLowerCase().trim();
+    return s.includes('semi') || s.includes('quarter') || s.includes('eliminat') || s.includes('playoff') || s.includes('knockout') || s === 'final' || s === 'finals' || s.endsWith(' final');
+  };
+
+  const isMatchFinished = (m: any) => {
+    if (m.status === 'completed') return true;
+    if (m.winnerId && m.winnerId !== 'scheduled' && m.winnerId !== '') return true;
+    if (m.winner && m.winner !== 'scheduled' && m.winner !== '') return true;
+    if (m.winReason && !m.winReason.toLowerCase().includes('scheduled')) return true;
+    const rA = parseInt((m.scoreA || '').split('/')[0]) || 0;
+    const rB = parseInt((m.scoreB || '').split('/')[0]) || 0;
+    if (rA > 0 && rB > 0) return true;
+    return false;
+  };
+
   (matches || []).forEach(m => {
-    if (m.status !== 'completed' || m.stage !== 'League') return;
+    if (!isMatchFinished(m) || isKnockoutStage(m.stage)) return;
     
-    const tA = table[m.teamAId];
-    const tB = table[m.teamBId];
+    const tA = table[m.teamAId] || Object.values(table).find(t => t.name.toLowerCase().trim() === (m.teamAName || '').toLowerCase().trim());
+    const tB = table[m.teamBId] || Object.values(table).find(t => t.name.toLowerCase().trim() === (m.teamBName || '').toLowerCase().trim());
 
     if (!tA || !tB) return;
 
     tA.played += 1;
     tB.played += 1;
 
-    const runsA = parseInt(m.scoreA.split('/')[0]) || 0;
-    const runsB = parseInt(m.scoreB.split('/')[0]) || 0;
+    const runsA = parseInt((m.scoreA || '0').split('/')[0]) || 0;
+    const runsB = parseInt((m.scoreB || '0').split('/')[0]) || 0;
     const oversA_dec = convertOversToDecimal(m.oversA) || defaultOvers;
     const oversB_dec = convertOversToDecimal(m.oversB) || defaultOvers;
 
@@ -512,11 +542,34 @@ const computeLeaguePointsTableInternal = (teams: any[], matches: any[], defaultO
     tB.oversFaced += oversB_dec;
     tB.oversBowled += oversA_dec;
 
-    if (m.winnerId === m.teamAId) {
+    const winnerIdent = (m.winner || '').toLowerCase().trim();
+    const winnerIdVal = m.winnerId || '';
+    const normAName = (m.teamAName || tA.name || '').toLowerCase().trim();
+    const normBName = (m.teamBName || tB.name || '').toLowerCase().trim();
+
+    const isWinnerA = (
+      winnerIdVal === tA.id || 
+      winnerIdVal === m.teamAId ||
+      winnerIdent === tA.name.toLowerCase().trim() ||
+      winnerIdent === normAName ||
+      (m.winReason && (m.winReason.toLowerCase().includes(tA.name.toLowerCase().trim()) || m.winReason.toLowerCase().includes(normAName)) && !m.winReason.toLowerCase().includes(tB.name.toLowerCase().trim())) ||
+      (!winnerIdVal && !winnerIdent && runsA > runsB)
+    );
+
+    const isWinnerB = !isWinnerA && (
+      winnerIdVal === tB.id || 
+      winnerIdVal === m.teamBId ||
+      winnerIdent === tB.name.toLowerCase().trim() ||
+      winnerIdent === normBName ||
+      (m.winReason && (m.winReason.toLowerCase().includes(tB.name.toLowerCase().trim()) || m.winReason.toLowerCase().includes(normBName)) && !m.winReason.toLowerCase().includes(tA.name.toLowerCase().trim())) ||
+      (!winnerIdVal && !winnerIdent && runsB > runsA)
+    );
+
+    if (isWinnerA) {
       tA.won += 1;
       tA.points += 2;
       tB.lost += 1;
-    } else if (m.winnerId === m.teamBId) {
+    } else if (isWinnerB) {
       tB.won += 1;
       tB.points += 2;
       tA.lost += 1;
@@ -541,82 +594,123 @@ const computeLeaguePointsTableInternal = (teams: any[], matches: any[], defaultO
 };
 
 const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, matchState: MatchState) => {
+  if (!tournamentId && !matchState.tournamentName) return;
   try {
-    const tournamentDocRef = doc(db, 'cricket_tournaments', tournamentId);
-    const docSnap = await getDoc(tournamentDocRef);
-    if (docSnap.exists()) {
-      const tournament = docSnap.data();
+    let tournament: any = null;
+    let localList: any[] = [];
+
+    // 1. Immediately read authoritative local storage cache first for instant responsiveness
+    if (typeof window !== 'undefined') {
+      try {
+        const localRaw = localStorage.getItem('gully_tournaments_v1');
+        if (localRaw) {
+          localList = JSON.parse(localRaw);
+          if (Array.isArray(localList)) {
+            tournament = localList.find((t: any) => 
+              (tournamentId && t.id === tournamentId) || 
+              (matchState.tournamentName && t.name?.toLowerCase().trim() === matchState.tournamentName?.toLowerCase().trim())
+            );
+          }
+        }
+      } catch (locErr) {
+        console.warn("Error reading local tournament:", locErr);
+      }
+    }
+
+    const effectiveTourId = tournament?.id || tournamentId;
+    const tournamentDocRef = effectiveTourId ? doc(db, 'cricket_tournaments', effectiveTourId) : null;
+    
+    // 2. Fetch remote document if available to merge
+    if (tournamentDocRef) {
+      try {
+        const docSnap = await getDoc(tournamentDocRef);
+        if (docSnap.exists()) {
+          const remoteData = { ...docSnap.data(), id: effectiveTourId };
+          if (!tournament) {
+            tournament = remoteData;
+          } else {
+            // Merge remote with local, keeping local matches if they have more recent updates
+            tournament = { ...remoteData, ...tournament, id: effectiveTourId };
+          }
+        }
+      } catch (fetchErr) {
+        console.warn("Could not fetch remote tournament document, using local cache:", fetchErr);
+      }
+    }
+
+    if (tournament) {
       const isCompleted = matchState.status === 'completed';
       const winnerTeam = matchState.winner || null;
+      const targetMatchId = matchId || matchState.tournamentMatchId;
 
       const updatedMatches = (tournament.matches || []).map((m: any) => {
-        if (m.id === matchId) {
-          const currentInnings = matchState.currentInningsNum === 1 ? matchState.innings1 : (matchState.innings2 || matchState.innings1);
-          let score = "0/0";
-          let overs = "0";
-          let runs = 0;
-          let wickets = 0;
-          let ballCount = 0;
-          if (currentInnings) {
-            runs = currentInnings.runs;
-            wickets = currentInnings.wickets;
-            ballCount = currentInnings.ballsBowled;
-            score = `${runs}/${wickets}`;
-            const ov = Math.floor(ballCount / 6);
-            const rem = ballCount % 6;
-            overs = `${ov}.${rem}`;
-          }
-          
+        const isTargetMatch = (targetMatchId && (m.id === targetMatchId || m.id === matchState.tournamentMatchId)) || 
+          (m.teamAName?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim() && 
+           m.teamBName?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim()) ||
+          (m.teamAName?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim() && 
+           m.teamBName?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim());
+           
+        if (isTargetMatch) {
           let scoreA = m.scoreA || "0/0";
           let scoreB = m.scoreB || "0/0";
           let oversA = m.oversA || "0";
           let oversB = m.oversB || "0";
-          
-          if (currentInnings) {
-            if (currentInnings.battingTeam.toLowerCase().trim() === m.teamAName.toLowerCase().trim()) {
-              scoreA = score;
-              oversA = overs;
+
+          // Calculate current scores accurately according to batting team
+          const normTeamA = (m.teamAName || '').toLowerCase().trim();
+          const normTeamB = (m.teamBName || '').toLowerCase().trim();
+
+          const assignInningsScore = (inn: any) => {
+            if (!inn) return;
+            const batTeam = (inn.battingTeam || '').toLowerCase().trim();
+            const sc = `${inn.runs || 0}/${inn.wickets || 0}`;
+            const balls = inn.ballsBowled || 0;
+            const ov = `${Math.floor(balls / 6)}.${balls % 6}`;
+
+            if (batTeam === normTeamA || (normTeamA && batTeam.includes(normTeamA))) {
+              scoreA = sc;
+              oversA = ov;
+            } else if (batTeam === normTeamB || (normTeamB && batTeam.includes(normTeamB))) {
+              scoreB = sc;
+              oversB = ov;
             } else {
-              scoreB = score;
-              oversB = overs;
+              // Match state team check
+              const isStateTeamA = (matchState.teamA || '').toLowerCase().trim() === normTeamA;
+              if (batTeam === (matchState.teamA || '').toLowerCase().trim()) {
+                if (isStateTeamA) { scoreA = sc; oversA = ov; } else { scoreB = sc; oversB = ov; }
+              } else {
+                if (isStateTeamA) { scoreB = sc; oversB = ov; } else { scoreA = sc; oversA = ov; }
+              }
             }
+          };
+
+          if (matchState.innings1) assignInningsScore(matchState.innings1);
+          if (matchState.innings2) assignInningsScore(matchState.innings2);
+
+          // If current live innings is ongoing and not yet recorded above
+          const currentInnings = matchState.currentInningsNum === 1 ? matchState.innings1 : (matchState.innings2 || matchState.innings1);
+          if (!isCompleted && currentInnings) {
+            assignInningsScore(currentInnings);
           }
 
-          if (matchState.innings1) {
-            const isTeamA = matchState.innings1.battingTeam.toLowerCase().trim() === m.teamAName.toLowerCase().trim();
-            const scoreVal = `${matchState.innings1.runs}/${matchState.innings1.wickets}`;
-            const balls1 = matchState.innings1.ballsBowled;
-            const oversVal = `${Math.floor(balls1 / 6)}.${balls1 % 6}`;
-            if (isTeamA) {
-              scoreA = scoreVal;
-              oversA = oversVal;
-            } else {
-              scoreB = scoreVal;
-              oversB = oversVal;
-            }
-          }
-          if (matchState.innings2) {
-            const isTeamA = matchState.innings2.battingTeam.toLowerCase().trim() === m.teamAName.toLowerCase().trim();
-            const scoreVal = `${matchState.innings2.runs}/${matchState.innings2.wickets}`;
-            const balls2 = matchState.innings2.ballsBowled;
-            const oversVal = `${Math.floor(balls2 / 6)}.${balls2 % 6}`;
-            if (isTeamA) {
-              scoreA = scoreVal;
-              oversA = oversVal;
-            } else {
-              scoreB = scoreVal;
-              oversB = oversVal;
-            }
-          }
-
-          let winnerId = null;
+          let winnerId = m.winnerId || null;
+          let winnerName = winnerTeam || m.winner;
           if (winnerTeam) {
-            if (winnerTeam.toLowerCase().trim() === m.teamAName.toLowerCase().trim()) {
+            const normWinner = winnerTeam.toLowerCase().trim();
+            if (normWinner === normTeamA || normWinner.includes(normTeamA) || normWinner === (matchState.teamA || '').toLowerCase().trim()) {
               winnerId = m.teamAId;
-            } else if (winnerTeam.toLowerCase().trim() === m.teamBName.toLowerCase().trim()) {
+              winnerName = m.teamAName;
+            } else if (normWinner === normTeamB || normWinner.includes(normTeamB) || normWinner === (matchState.teamB || '').toLowerCase().trim()) {
               winnerId = m.teamBId;
+              winnerName = m.teamBName;
+            } else if (normWinner === 'tie' || normWinner === 'draw') {
+              winnerId = null;
+              winnerName = 'Tie';
             }
           }
+
+          const effectiveWinReason = matchState.winReason || (winnerName && winnerName !== 'Tie' ? `${winnerName} won the match` : (isCompleted ? "Match Completed" : (m.winReason || "")));
+          const potm = isCompleted ? (computePotmName(matchState) || matchState.manOfTheMatch || m.manOfTheMatch || "") : (m.manOfTheMatch || "");
 
           return {
             ...m,
@@ -626,9 +720,10 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
             oversA,
             oversB,
             winnerId,
-            winner: winnerTeam,
-            winReason: matchState.winReason || (isCompleted ? "Match Completed" : ""),
-            manOfTheMatch: isCompleted ? (computePotmName(matchState) || m.manOfTheMatch || "") : (m.manOfTheMatch || "")
+            winner: winnerName,
+            winReason: effectiveWinReason,
+            manOfTheMatch: potm,
+            updatedAt: Date.now()
           };
         }
         return m;
@@ -637,9 +732,13 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
       // Automatically advance knockout brackets or trigger league completions if this match is completed
       let nextMatches = [...updatedMatches];
       let tournamentCompleted = false;
-      let mainWinner: string | null = null;
+      let mainWinner: string | null = tournament.winnerTeamName || null;
 
-      const completedMatchInTour = nextMatches.find(m => m.id === matchId);
+      const completedMatchInTour = nextMatches.find(m => (targetMatchId && (m.id === targetMatchId || m.id === matchState.tournamentMatchId)) || 
+        (m.teamAName?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim() && 
+         m.teamBName?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim()) ||
+        (m.teamAName?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim() && 
+         m.teamBName?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim()));
 
       if (completedMatchInTour && completedMatchInTour.status === 'completed') {
         if (tournament.type === 'knockout') {
@@ -741,12 +840,67 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
         }
       }
 
-      if (!isFirestoreQuotaExhausted()) {
-        await safeSetDoc(tournamentDocRef, {
-          matches: nextMatches,
-          status: tournamentCompleted ? 'completed' : tournament.status,
-          winnerTeamName: tournamentCompleted ? mainWinner : tournament.winnerTeamName
-        }, { merge: true });
+      const updatedTournamentData = {
+        ...tournament,
+        matches: nextMatches,
+        status: tournamentCompleted ? 'completed' : tournament.status,
+        winnerTeamName: tournamentCompleted ? mainWinner : tournament.winnerTeamName,
+        updatedAt: Date.now()
+      };
+
+      // 1. Immediately persist to localStorage synchronously
+      if (typeof window !== 'undefined') {
+        try {
+          const localRaw = localStorage.getItem('gully_tournaments_v1');
+          const currentList = localRaw ? JSON.parse(localRaw) : [];
+          const idx = currentList.findIndex((lt: any) => lt.id === tournament.id || lt.id === effectiveTourId);
+          if (idx >= 0) {
+            currentList[idx] = updatedTournamentData;
+          } else {
+            currentList.push(updatedTournamentData);
+          }
+          localStorage.setItem('gully_tournaments_v1', JSON.stringify(currentList));
+
+          // Also persist synthesized completed match into cricket_matches_local_registry so it is instantly available everywhere (Homepage, Completed Matches, Scoreboard)
+          if (isCompleted && completedMatchInTour) {
+            try {
+              const regRaw = localStorage.getItem('cricket_matches_local_registry');
+              const regList = regRaw ? JSON.parse(regRaw) : [];
+              const synthId = matchState.id || `tour_${tournament.id}_${completedMatchInTour.id}`;
+              const synthMatch: MatchState = {
+                ...matchState,
+                id: synthId,
+                tournamentId: tournament.id,
+                tournamentMatchId: completedMatchInTour.id,
+                tournamentName: tournament.name,
+                status: 'completed',
+                winner: completedMatchInTour.winner,
+                winReason: completedMatchInTour.winReason,
+                manOfTheMatch: completedMatchInTour.manOfTheMatch,
+                isTournamentMatch: true,
+                updatedAt: Date.now()
+              };
+              const regIdx = regList.findIndex((x: any) => x.id === synthId || (x.tournamentId === tournament.id && x.tournamentMatchId === completedMatchInTour.id));
+              if (regIdx >= 0) {
+                regList[regIdx] = { ...regList[regIdx], ...synthMatch };
+              } else {
+                regList.unshift(synthMatch);
+              }
+              localStorage.setItem('cricket_matches_local_registry', JSON.stringify(regList));
+            } catch (_) {}
+          }
+
+          window.dispatchEvent(new CustomEvent('gully_tournaments_updated', { detail: { tournamentId: tournament.id, matchId: targetMatchId, matchState } }));
+          window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
+          window.dispatchEvent(new Event('storage'));
+        } catch (locSaveErr) {
+          console.warn("Failed saving updated tournament to local storage:", locSaveErr);
+        }
+      }
+
+      // 2. Persist to Firestore asynchronously
+      if (tournamentDocRef && !isFirestoreQuotaExhausted()) {
+        await safeSetDoc(tournamentDocRef, updatedTournamentData, { merge: true });
       }
     }
   } catch (err) {
@@ -887,6 +1041,13 @@ export const CricketScoreboard: React.FC = () => {
   const [selectedTeamARoster, setSelectedTeamARoster] = useState<string[]>([]);
   const [selectedTeamBRoster, setSelectedTeamBRoster] = useState<string[]>([]);
   const [approvedPlayers, setApprovedPlayers] = useState<any[]>([]);
+
+  // Active squad selection & dropdown state for scoreboard management
+  const [activeScoreboardTeamId, setActiveScoreboardTeamId] = useState<string>('');
+  const [selectedQuickBatter, setSelectedQuickBatter] = useState<string>('');
+  const [isManualBatterInput, setIsManualBatterInput] = useState<boolean>(false);
+  const [selectedQuickBowler, setSelectedQuickBowler] = useState<string>('');
+  const [isManualBowlerInput, setIsManualBowlerInput] = useState<boolean>(false);
 
   // Compute player matches played and averages from completed match history database
   const playerStatsMap = useMemo(() => {
@@ -3091,6 +3252,23 @@ export const CricketScoreboard: React.FC = () => {
       bowler1Name
     );
 
+    const resolvedTourPrizes = (() => {
+      const tid = match?.tournamentId;
+      if (tid) {
+        const tPrizes = getTournamentPrizesByTournamentId(tid);
+        if (tPrizes.length > 0) return tPrizes;
+      }
+      return match?.tournamentPrizes || undefined;
+    })();
+
+    const validStartTourPrizes = getValidActivePrizes(resolvedTourPrizes || []);
+    const sponsorStartComm = validStartTourPrizes.length > 0
+      ? createTournamentSponsorsMatchStartCommentary(
+          validStartTourPrizes,
+          tournamentName || match?.tournamentName
+        )
+      : null;
+
     const initialInnings: Innings = {
       battingTeam: batFirstTeam,
       bowlingTeam: bowlFirstTeam,
@@ -3109,7 +3287,7 @@ export const CricketScoreboard: React.FC = () => {
       nonStrikerIndex: 1,
       currentBowlerIndex: 0,
       fallOfWickets: [],
-      commentaryList: [startMatchComm],
+      commentaryList: sponsorStartComm ? [sponsorStartComm, startMatchComm] : [startMatchComm],
       history: [
         { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
       ]
@@ -3136,13 +3314,14 @@ export const CricketScoreboard: React.FC = () => {
       playerPhotos: match?.playerPhotos || {},
       tournamentId: match?.tournamentId || null,
       tournamentMatchId: match?.tournamentMatchId || null,
-      tournamentName: tournamentName || null,
+      tournamentPrizes: resolvedTourPrizes,
+      tournamentName: tournamentName || match?.tournamentName || null,
       tournamentLogo: tournamentLogo || match?.tournamentLogo || undefined,
       youtubeChannelLogo: youtubeChannelLogo || match?.youtubeChannelLogo || undefined,
       showYoutubeChannelLogo: !!(youtubeChannelLogo || match?.youtubeChannelLogo),
       youtubeChannelName: youtubeChannelName || match?.youtubeChannelName || undefined,
-      seriesName: seriesName || 'Bilateral Series',
-      groundName: groundName || 'Gully Ground',
+      seriesName: seriesName || match?.seriesName || 'Bilateral Series',
+      groundName: groundName || match?.groundName || 'Gully Ground',
       umpire1Name: umpire1Name || match?.umpire1Name || undefined,
       umpire1Photo: umpire1Photo || match?.umpire1Photo || undefined,
       umpire2Name: umpire2Name || match?.umpire2Name || undefined,
@@ -3169,6 +3348,22 @@ export const CricketScoreboard: React.FC = () => {
     try {
       localStorage.setItem('cricket_active_match', JSON.stringify(newMatch));
     } catch (e) {}
+
+    if (newMatch.tournamentPrizes && newMatch.tournamentPrizes.length > 0) {
+      try {
+        saveTournamentPrizes(newMatch.tournamentPrizes, newMatch.id);
+        saveTournamentPrizes(newMatch.tournamentPrizes);
+      } catch (_) {}
+    }
+
+    if (validStartTourPrizes.length > 0) {
+      try {
+        const startTicker = formatAllPrizesSponsorTicker(validStartTourPrizes);
+        if (startTicker) {
+          updateOverlayProp({ sponsorText: startTicker, showSponsorBadge: true });
+        }
+      } catch (_) {}
+    }
 
     // Trigger AI Opening Commentary with Tournament and Ground Name
     if (aiCommentaryEnabled && !isSpectator) {
@@ -3259,6 +3454,196 @@ export const CricketScoreboard: React.FC = () => {
 
   const currentInnings = match.currentInningsNum === 1 ? match.innings1 : match.innings2;
 
+  const cleanPlayerName = (name: string): string => {
+    if (!name) return '';
+    return name.replace(/\s*\((C|VC|WK|C\/WK|WK\/C)\)\s*$/i, '').trim();
+  };
+
+  // Resolve all squad players for the currently batting team (from captain forms, presets & rosters)
+  const activeBattingSquadPlayers = useMemo(() => {
+    const currentBattingName = (currentInnings?.battingTeam || match?.teamA || '').toLowerCase().trim();
+    
+    // Check if user explicitly selected a captain team in the scoreboard dropdown
+    let targetTeam = savedTeams.find(t => t.id === activeScoreboardTeamId);
+    
+    // Otherwise automatically match batting team against savedTeams
+    if (!targetTeam && currentBattingName) {
+      targetTeam = savedTeams.find(t => 
+        t.name?.toLowerCase().trim() === currentBattingName ||
+        (t as any).shortName?.toLowerCase().trim() === currentBattingName ||
+        t.id === currentBattingName
+      );
+    }
+
+    const playerMap = new Map<string, {
+      name: string;
+      displayName: string;
+      role?: string;
+      isCaptain?: boolean;
+      isViceCaptain?: boolean;
+      isWicketkeeper?: boolean;
+    }>();
+
+    // 1. If target team has squadDetails (rich captain submission)
+    if (targetTeam?.squadDetails && Array.isArray(targetTeam.squadDetails)) {
+      for (const p of targetTeam.squadDetails) {
+        if (!p || !p.name) continue;
+        const clean = cleanPlayerName(p.name);
+        const badges: string[] = [];
+        if (p.isCaptain) badges.push('C');
+        if (p.isViceCaptain) badges.push('VC');
+        if (p.isWicketkeeper) badges.push('WK');
+        const roleLabel = p.role ? ` • ${p.role}` : '';
+        const badgeLabel = badges.length > 0 ? ` (${badges.join('/')})` : '';
+        playerMap.set(clean.toLowerCase(), {
+          name: clean,
+          displayName: `${clean}${badgeLabel}${roleLabel}`,
+          role: p.role,
+          isCaptain: p.isCaptain,
+          isViceCaptain: p.isViceCaptain,
+          isWicketkeeper: p.isWicketkeeper
+        });
+      }
+    }
+
+    // 2. If target team has players array
+    if (targetTeam?.players && Array.isArray(targetTeam.players)) {
+      for (const rawName of targetTeam.players) {
+        if (!rawName) continue;
+        const clean = cleanPlayerName(rawName);
+        if (!playerMap.has(clean.toLowerCase())) {
+          playerMap.set(clean.toLowerCase(), {
+            name: clean,
+            displayName: rawName,
+            isCaptain: rawName.includes('(C)'),
+            isViceCaptain: rawName.includes('(VC)'),
+            isWicketkeeper: rawName.includes('(WK)')
+          });
+        }
+      }
+    }
+
+    // 3. Fallback / merge with selectedTeamARoster or selectedTeamBRoster
+    const currentRoster = currentBattingName === match.teamA?.toLowerCase().trim()
+      ? selectedTeamARoster
+      : selectedTeamBRoster;
+    if (Array.isArray(currentRoster)) {
+      for (const rawName of currentRoster) {
+        if (!rawName) continue;
+        const clean = cleanPlayerName(rawName);
+        if (!playerMap.has(clean.toLowerCase())) {
+          playerMap.set(clean.toLowerCase(), {
+            name: clean,
+            displayName: rawName,
+            isCaptain: rawName.includes('(C)'),
+            isViceCaptain: rawName.includes('(VC)'),
+            isWicketkeeper: rawName.includes('(WK)')
+          });
+        }
+      }
+    }
+
+    // 4. Also check match.teamASquad / match.teamBSquad
+    const matchSquad = currentBattingName === match.teamA?.toLowerCase().trim()
+      ? match.teamASquad
+      : match.teamBSquad;
+    if (Array.isArray(matchSquad)) {
+      for (const rawName of matchSquad) {
+        if (!rawName) continue;
+        const clean = cleanPlayerName(rawName);
+        if (!playerMap.has(clean.toLowerCase())) {
+          playerMap.set(clean.toLowerCase(), {
+            name: clean,
+            displayName: rawName
+          });
+        }
+      }
+    }
+
+    return Array.from(playerMap.values());
+  }, [currentInnings?.battingTeam, match.teamA, match.teamB, match.teamASquad, match.teamBSquad, selectedTeamARoster, selectedTeamBRoster, savedTeams, activeScoreboardTeamId]);
+
+  // Unbatted squad players available to come in as new batsman
+  const unbattedSquadPlayers = useMemo(() => {
+    if (!currentInnings) return activeBattingSquadPlayers;
+    const existingBatterNames = (currentInnings.batsmen || []).map(b => cleanPlayerName(b.name).toLowerCase().trim());
+    return activeBattingSquadPlayers.filter(p => !existingBatterNames.includes(p.name.toLowerCase().trim()));
+  }, [activeBattingSquadPlayers, currentInnings?.batsmen]);
+
+  // Resolve all squad players for the currently bowling team
+  const activeBowlingSquadPlayers = useMemo(() => {
+    const currentBowlingName = (currentInnings?.bowlingTeam || match?.teamB || '').toLowerCase().trim();
+    
+    let targetTeam = savedTeams.find(t => 
+      t.name?.toLowerCase().trim() === currentBowlingName ||
+      (t as any).shortName?.toLowerCase().trim() === currentBowlingName ||
+      t.id === currentBowlingName
+    );
+
+    const playerMap = new Map<string, {
+      name: string;
+      displayName: string;
+      role?: string;
+    }>();
+
+    if (targetTeam?.squadDetails && Array.isArray(targetTeam.squadDetails)) {
+      for (const p of targetTeam.squadDetails) {
+        if (!p || !p.name) continue;
+        const clean = cleanPlayerName(p.name);
+        playerMap.set(clean.toLowerCase(), {
+          name: clean,
+          displayName: `${clean}${p.role ? ` • ${p.role}` : ''}`,
+          role: p.role
+        });
+      }
+    }
+
+    if (targetTeam?.players && Array.isArray(targetTeam.players)) {
+      for (const rawName of targetTeam.players) {
+        if (!rawName) continue;
+        const clean = cleanPlayerName(rawName);
+        if (!playerMap.has(clean.toLowerCase())) {
+          playerMap.set(clean.toLowerCase(), {
+            name: clean,
+            displayName: rawName
+          });
+        }
+      }
+    }
+
+    const bowlingRoster = currentBowlingName === match.teamA?.toLowerCase().trim()
+      ? selectedTeamARoster
+      : selectedTeamBRoster;
+    if (Array.isArray(bowlingRoster)) {
+      for (const rawName of bowlingRoster) {
+        if (!rawName) continue;
+        const clean = cleanPlayerName(rawName);
+        if (!playerMap.has(clean.toLowerCase())) {
+          playerMap.set(clean.toLowerCase(), {
+            name: clean,
+            displayName: rawName
+          });
+        }
+      }
+    }
+
+    return Array.from(playerMap.values());
+  }, [currentInnings?.bowlingTeam, match.teamA, match.teamB, selectedTeamARoster, selectedTeamBRoster, savedTeams]);
+
+  // Find active scoreboard team object
+  const activeScoreboardTeam = useMemo(() => {
+    if (activeScoreboardTeamId) {
+      return savedTeams.find(t => t.id === activeScoreboardTeamId) || null;
+    }
+    const currentBattingName = (currentInnings?.battingTeam || match?.teamA || '').toLowerCase().trim();
+    if (!currentBattingName) return null;
+    return savedTeams.find(t =>
+      t.name?.toLowerCase().trim() === currentBattingName ||
+      (t as any).shortName?.toLowerCase().trim() === currentBattingName ||
+      t.id === currentBattingName
+    ) || null;
+  }, [activeScoreboardTeamId, savedTeams, currentInnings?.battingTeam, match?.teamA]);
+
   const [wicketTriggerAlert, setWicketTriggerAlert] = useState<boolean>(false);
 
   useEffect(() => {
@@ -3270,6 +3655,30 @@ export const CricketScoreboard: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [currentInnings?.wickets]);
+
+  // Auto-configure tournament prizes in scoreboard whenever a tournament match is loaded or live
+  useEffect(() => {
+    if (!match?.tournamentId) return;
+
+    const tourPrizes = getTournamentPrizesByTournamentId(match.tournamentId);
+    const validTourPrizes = getValidActivePrizes(tourPrizes);
+    if (validTourPrizes.length === 0) return;
+
+    const currentMatchPrizes = getTournamentPrizes(match.id);
+    const validCurrent = getValidActivePrizes(currentMatchPrizes);
+
+    // If current match has no prizes configured or has fewer active prizes than tournament settings
+    if (validCurrent.length === 0) {
+      saveTournamentPrizes(tourPrizes, match.id);
+      saveTournamentPrizes(tourPrizes);
+      if (!match.tournamentPrizes || match.tournamentPrizes.length === 0) {
+        syncMatch((prev) => ({
+          ...prev,
+          tournamentPrizes: tourPrizes,
+        }));
+      }
+    }
+  }, [match?.id, match?.tournamentId]);
 
   const isOverCompletedNeedsBowler = useMemo(() => {
     if (!currentInnings || match.status !== 'live') return false;
@@ -3979,9 +4388,7 @@ export const CricketScoreboard: React.FC = () => {
               runs: striker.runs,
               balls: striker.balls
             }
-          },
-          customBanner: 'six',
-          customBannerText: '6 Runs! Out of the park.'
+          }
         };
       } else {
         outcomeDescription = getSlickDescription('runs', ballRuns, striker.name, bowler.name);
@@ -4062,9 +4469,7 @@ export const CricketScoreboard: React.FC = () => {
               runs: striker.runs,
               balls: striker.balls
             }
-          },
-          customBanner: 'six',
-          customBannerText: '6 Runs! Out of the park.'
+          }
         };
       } else {
         // Auto-trigger animated fullscreen free hit siren alert overlay
@@ -4366,11 +4771,35 @@ export const CricketScoreboard: React.FC = () => {
         nextBowlerCandidate,
         formatOvers(inn.ballsBowled)
       );
+
+      // Automated Tournament Sponsor Details after completing every over
+      // Condition: if score manager not added prize details then don't add anything
+      const overPrizes = getValidActivePrizes(
+        nextMatchState.tournamentPrizes ||
+        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
+        getTournamentPrizes(nextMatchState.id)
+      );
+
+      let overSponsorComm: any = null;
+      if (overPrizes.length > 0) {
+        const rotatingPrize = overPrizes[(completedOverNo - 1) % overPrizes.length];
+        overSponsorComm = createOverSponsorCommentary(
+          completedOverNo,
+          rotatingPrize,
+          formatOvers(inn.ballsBowled)
+        );
+        try {
+          const sponsorTxt = formatPrizeSponsorText(rotatingPrize);
+          updateOverlayProp({ sponsorText: `🤝 Over ${completedOverNo} Sponsor: ${sponsorTxt}` });
+        } catch (_) {}
+      }
+
+      const commsToPrepend = overSponsorComm ? [overFinishComm, overSponsorComm] : [overFinishComm];
       const activeInningsKey = nextMatchState.currentInningsNum === 1 ? 'innings1' : 'innings2';
       if (nextMatchState[activeInningsKey]) {
         nextMatchState[activeInningsKey] = {
           ...nextMatchState[activeInningsKey]!,
-          commentaryList: [overFinishComm, ...(nextMatchState[activeInningsKey]!.commentaryList || [])]
+          commentaryList: [...commsToPrepend, ...(nextMatchState[activeInningsKey]!.commentaryList || [])]
         };
       }
     }
@@ -4441,7 +4870,7 @@ export const CricketScoreboard: React.FC = () => {
       setWicketType('Bowled');
       setWicketFielderName('');
       setWicketAdditionalDetails('');
-      setNewBatsmanName('');
+      setNewBatsmanName(unbattedSquadPlayers[0]?.name || '');
       setWicketValidationErr('');
     }
     setShowWicketModal(true);
@@ -4458,7 +4887,7 @@ export const CricketScoreboard: React.FC = () => {
       setWicketType('Retired Hurt');
       setWicketFielderName('');
       setWicketAdditionalDetails('Retired Hurt (Injured)');
-      setNewBatsmanName('');
+      setNewBatsmanName(unbattedSquadPlayers[0]?.name || '');
       setWicketValidationErr('');
     }
     setShowWicketModal(true);
@@ -4936,11 +5365,35 @@ export const CricketScoreboard: React.FC = () => {
         nextBowlerCandidate,
         formatOvers(inn.ballsBowled)
       );
+
+      // Automated Tournament Sponsor Details after completing every over
+      // Condition: if score manager not added prize details then don't add anything
+      const overPrizes = getValidActivePrizes(
+        nextMatchState.tournamentPrizes ||
+        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
+        getTournamentPrizes(nextMatchState.id)
+      );
+
+      let overSponsorComm: any = null;
+      if (overPrizes.length > 0) {
+        const rotatingPrize = overPrizes[(completedOverNo - 1) % overPrizes.length];
+        overSponsorComm = createOverSponsorCommentary(
+          completedOverNo,
+          rotatingPrize,
+          formatOvers(inn.ballsBowled)
+        );
+        try {
+          const sponsorTxt = formatPrizeSponsorText(rotatingPrize);
+          updateOverlayProp({ sponsorText: `🤝 Over ${completedOverNo} Sponsor: ${sponsorTxt}` });
+        } catch (_) {}
+      }
+
+      const commsToPrepend = overSponsorComm ? [overFinishComm, overSponsorComm] : [overFinishComm];
       const activeInningsKey = nextMatchState.currentInningsNum === 1 ? 'innings1' : 'innings2';
       if (nextMatchState[activeInningsKey]) {
         nextMatchState[activeInningsKey] = {
           ...nextMatchState[activeInningsKey]!,
-          commentaryList: [overFinishComm, ...(nextMatchState[activeInningsKey]!.commentaryList || [])]
+          commentaryList: [...commsToPrepend, ...(nextMatchState[activeInningsKey]!.commentaryList || [])]
         };
       }
     }
@@ -5125,7 +5578,21 @@ export const CricketScoreboard: React.FC = () => {
           modifiedState.oversLimit
         );
 
+        // Automated Tournament Sponsor Details during inning break
+        // Condition: if score manager not added prize details then don't add anything
+        const innBreakPrizes = getValidActivePrizes(
+          modifiedState.tournamentPrizes ||
+          (modifiedState.tournamentId ? getTournamentPrizesByTournamentId(modifiedState.tournamentId) : null) ||
+          getTournamentPrizes(modifiedState.id)
+        );
+        const innBreakSponsorComm = createInningsBreakSponsorCommentary(
+          innBreakPrizes,
+          formatOvers(inn1.ballsBowled),
+          modifiedState.tournamentName
+        );
+
         inn1.commentaryList = [
+          ...(innBreakSponsorComm ? [innBreakSponsorComm] : []),
           chaseEquationComm,
           innSummaryComm,
           ...(inn1.commentaryList || [])
@@ -5173,6 +5640,7 @@ export const CricketScoreboard: React.FC = () => {
                 : `Innings 2 Started! ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs in ${modifiedState.oversLimit} overs.`, 
               type: 'milestone' 
             },
+            ...(innBreakSponsorComm ? [innBreakSponsorComm] : []),
             chaseEquationComm,
             innSummaryComm
           ],
@@ -5243,8 +5711,27 @@ export const CricketScoreboard: React.FC = () => {
 
         // Requirement 1: after match winning add match result in ai commentary and also add the player of the match name in the ai commentary.also add their match summary
         const matchWinComm = createMatchWinningCommentary(modifiedState, potm);
+
+        // Automated Tournament Sponsor Details after match complete
+        // Condition: if score manager not added prize details then don't add anything
+        const matchFinishPrizes = getValidActivePrizes(
+          modifiedState.tournamentPrizes ||
+          (modifiedState.tournamentId ? getTournamentPrizesByTournamentId(modifiedState.tournamentId) : null) ||
+          getTournamentPrizes(modifiedState.id)
+        );
+        const matchCompleteSponsorComm = createMatchCompleteSponsorCommentary(
+          matchFinishPrizes,
+          formatOvers(inn2.ballsBowled),
+          modifiedState.winner,
+          modifiedState.tournamentName
+        );
+
+        const matchCommsToPrepend = matchCompleteSponsorComm
+          ? [matchWinComm, matchCompleteSponsorComm]
+          : [matchWinComm];
+
         inn2.commentaryList = [
-          matchWinComm,
+          ...matchCommsToPrepend,
           ...(inn2.commentaryList || [])
         ];
         modifiedState.innings2 = inn2;
@@ -5494,7 +5981,21 @@ export const CricketScoreboard: React.FC = () => {
         nextMatchState.oversLimit
       );
 
+      // Automated Tournament Sponsor Details during inning break declaration
+      // Condition: if score manager not added prize details then don't add anything
+      const declInnBreakPrizes = getValidActivePrizes(
+        nextMatchState.tournamentPrizes ||
+        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
+        getTournamentPrizes(nextMatchState.id)
+      );
+      const declInnBreakSponsorComm = createInningsBreakSponsorCommentary(
+        declInnBreakPrizes,
+        formatOvers(inn1.ballsBowled),
+        nextMatchState.tournamentName
+      );
+
       inn1.commentaryList = [
+        ...(declInnBreakSponsorComm ? [declInnBreakSponsorComm] : []),
         chaseEquationComm,
         innSummaryComm,
         ...(inn1.commentaryList || [])
@@ -5521,6 +6022,7 @@ export const CricketScoreboard: React.FC = () => {
         fallOfWickets: [],
         commentaryList: [
           { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs.`, type: 'milestone' },
+          ...(declInnBreakSponsorComm ? [declInnBreakSponsorComm] : []),
           chaseEquationComm,
           innSummaryComm
         ],
@@ -5569,7 +6071,26 @@ export const CricketScoreboard: React.FC = () => {
         };
       }
       const matchWinComm = createMatchWinningCommentary(nextMatchState, potm);
-      inn2.commentaryList = [matchWinComm, ...(inn2.commentaryList || [])];
+
+      // Automated Tournament Sponsor Details after match complete (declared)
+      // Condition: if score manager not added prize details then don't add anything
+      const declMatchFinishPrizes = getValidActivePrizes(
+        nextMatchState.tournamentPrizes ||
+        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
+        getTournamentPrizes(nextMatchState.id)
+      );
+      const declMatchCompleteSponsorComm = createMatchCompleteSponsorCommentary(
+        declMatchFinishPrizes,
+        formatOvers(inn2.ballsBowled),
+        nextMatchState.winner,
+        nextMatchState.tournamentName
+      );
+
+      const declMatchCommsToPrepend = declMatchCompleteSponsorComm
+        ? [matchWinComm, declMatchCompleteSponsorComm]
+        : [matchWinComm];
+
+      inn2.commentaryList = [...declMatchCommsToPrepend, ...(inn2.commentaryList || [])];
       nextMatchState.innings2 = inn2;
 
       saveMatchToHistory(nextMatchState);
@@ -5581,6 +6102,28 @@ export const CricketScoreboard: React.FC = () => {
     syncMatch(completedMatch);
     showNotification('Match concluded and saved to History records.', 'success');
 
+    // Immediately synchronize to tournament fixture and standings
+    let tourIdToSync = completedMatch.tournamentId;
+    const matchIdToSync = completedMatch.tournamentMatchId || completedMatch.id;
+    if (!tourIdToSync && completedMatch.tournamentName && typeof window !== 'undefined') {
+      try {
+        const rawTours = localStorage.getItem('gully_tournaments_v1');
+        if (rawTours) {
+          const tList = JSON.parse(rawTours);
+          if (Array.isArray(tList)) {
+            const found = tList.find((t: any) => 
+              t.name?.toLowerCase().trim() === completedMatch.tournamentName?.toLowerCase().trim()
+            );
+            if (found) tourIdToSync = found.id;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (tourIdToSync || completedMatch.tournamentName) {
+      syncLiveScoreToTournament(tourIdToSync || '', matchIdToSync, completedMatch);
+    }
+
     if (tournamentCallbackRef.current && completedMatch.status === 'completed') {
       const runsA = completedMatch.innings1?.runs || 0;
       const wicketsA = completedMatch.innings1?.wickets || 0;
@@ -5589,14 +6132,18 @@ export const CricketScoreboard: React.FC = () => {
       const winner = completedMatch.winner || "Tie";
       const winReason = completedMatch.winReason || "Tie Match";
 
-      tournamentCallbackRef.current({
-        runsA,
-        wicketsA,
-        runsB,
-        wicketsB,
-        winner,
-        winReason
-      });
+      try {
+        tournamentCallbackRef.current({
+          runsA,
+          wicketsA,
+          runsB,
+          wicketsB,
+          winner,
+          winReason
+        });
+      } catch (cbErr) {
+        console.warn("Tournament callback execution notice:", cbErr);
+      }
       tournamentCallbackRef.current = null;
     }
   };
@@ -6210,13 +6757,13 @@ export const CricketScoreboard: React.FC = () => {
       playerPhotos: match?.playerPhotos || {},
       tournamentId: match?.tournamentId || null,
       tournamentMatchId: match?.tournamentMatchId || null,
-      tournamentName: tournamentName || null,
+      tournamentName: tournamentName || match?.tournamentName || null,
       tournamentLogo: tournamentLogo || match?.tournamentLogo || undefined,
       youtubeChannelLogo: youtubeChannelLogo || match?.youtubeChannelLogo || undefined,
       showYoutubeChannelLogo: !!(youtubeChannelLogo || match?.youtubeChannelLogo),
       youtubeChannelName: youtubeChannelName || match?.youtubeChannelName || undefined,
-      seriesName: seriesName || 'Bilateral Series',
-      groundName: groundName || 'Gully Ground',
+      seriesName: seriesName || match?.seriesName || 'Bilateral Series',
+      groundName: groundName || match?.groundName || 'Gully Ground',
       umpire1Name: umpire1Name || match?.umpire1Name || undefined,
       umpire1Photo: umpire1Photo || match?.umpire1Photo || undefined,
       umpire2Name: umpire2Name || match?.umpire2Name || undefined,
@@ -6948,6 +7495,62 @@ export const CricketScoreboard: React.FC = () => {
         
         nextY = (doc as any).lastAutoTable.finalY + 15;
       }
+
+      // Tournament Sponsors & Given Prize Money Honors Section in PDF Report
+      // Requirement: "also in match scoreboard pdf add this all deatils if score manager not added prize details then dont add anythink."
+      const tourPrizesRaw = match.tournamentPrizes || 
+        (match.tournamentId ? getTournamentPrizesByTournamentId(match.tournamentId) : null) || 
+        getTournamentPrizes(match.id);
+      
+      const validTourPrizesForPdf = getValidActivePrizes(tourPrizesRaw).filter(
+        p => (p.personName && p.personName.trim().length > 0) || (p.amount && p.amount.trim().length > 0)
+      );
+
+      if (validTourPrizesForPdf.length > 0) {
+        if (nextY > 200) {
+          doc.addPage();
+          nextY = 20;
+        }
+
+        doc.setFontSize(13);
+        doc.setFont('Helvetica', 'bold');
+        doc.setTextColor(180, 83, 9); // Warm amber
+        doc.text('Tournament Sponsors & Given Prize Money Honors', 14, nextY);
+
+        doc.setFontSize(8.5);
+        doc.setFont('Helvetica', 'normal');
+        doc.setTextColor(75, 85, 99);
+        const tourTitle = match.tournamentName || match.seriesName || 'Tournament';
+        doc.text(
+          `Official patron contributions, prize allocations, and sponsor honors for ${tourTitle}:`,
+          14,
+          nextY + 5
+        );
+
+        const prizeTableRows = validTourPrizesForPdf.map((prize, idx) => {
+          const amtStr = prize.amount?.trim() 
+            ? `${prize.currency || '₹'}${prize.amount.trim()}` 
+            : 'Trophy / Special Honor';
+          return [
+            (idx + 1).toString(),
+            prize.title || 'Tournament Award',
+            prize.personName?.trim() || 'Tournament Committee',
+            prize.personDesignation?.trim() || '-',
+            amtStr
+          ];
+        });
+
+        autoTable(doc, {
+          startY: nextY + 8,
+          head: [['#', 'Award / Given Prize', 'Sponsor Name', 'Position / Designation', 'Given Prize Money']],
+          body: prizeTableRows,
+          theme: 'striped',
+          headStyles: { fillColor: [217, 119, 6] },
+          styles: { fontSize: 8.5 }
+        });
+
+        nextY = (doc as any).lastAutoTable.finalY + 15;
+      }
       
       // Add Commentary Log Section
       if (nextY > 200) {
@@ -7293,6 +7896,9 @@ export const CricketScoreboard: React.FC = () => {
           isOpen={showPrizeModal}
           onClose={() => setShowPrizeModal(false)}
           matchId={match.id}
+          tournamentId={match.tournamentId || undefined}
+          tournamentName={match.tournamentName || undefined}
+          initialPrizes={match.tournamentPrizes || (match.tournamentId ? getTournamentPrizesByTournamentId(match.tournamentId) : undefined)}
           isPresentationBoardLive={['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic)}
           onTriggerPresentationBoard={() => {
             const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
@@ -7446,6 +8052,23 @@ export const CricketScoreboard: React.FC = () => {
               <>
                 {/* Offline-First Background Sync Status Badge */}
                 <OfflineSyncStatusBadge className="shrink-0" />
+
+                {/* Captain Teams & Squads Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowTeamModal(true)}
+                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white font-extrabold border border-emerald-500/30 rounded-lg sm:rounded-xl text-[10px] uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-all shrink-0"
+                  title="View Captain Squads & Teams List (Auto-populated in Batting Dropdowns)"
+                >
+                  <Users size={12} className="text-emerald-400" />
+                  <span className="hidden sm:inline">Captain Teams</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 font-mono text-[9px] font-black">
+                    {savedTeams.length}
+                  </span>
+                  {savedTeams.some(t => t.status === 'squad_submitted' || (t.players && t.players.length > 0)) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  )}
+                </button>
 
                 {/* Live Tournament Orange & Purple Cap Leaderboard */}
                 <button
@@ -10607,23 +11230,32 @@ export const CricketScoreboard: React.FC = () => {
                             <span className="text-[7.5px] font-black text-rose-400 uppercase tracking-widest block border-b border-white/5 pb-1">Team Members Profile Photos</span>
                             
                             {(() => {
-                              // Get unique names of players currently in this match
-                              const matchPlayersSet = new Set<string>();
+                              // Get unique names of players currently in this match (case-insensitive deduplication)
+                              const uniquePlayersMap = new Map<string, string>();
+                              const addPlayerUnique = (rawName?: string) => {
+                                if (!rawName) return;
+                                const trimmed = rawName.trim();
+                                if (!trimmed) return;
+                                const key = trimmed.toLowerCase();
+                                if (!uniquePlayersMap.has(key)) {
+                                  uniquePlayersMap.set(key, trimmed);
+                                }
+                              };
                               
                               if (match.innings1) {
-                                (match.innings1.batsmen || []).forEach(b => { if (b.name) matchPlayersSet.add(b.name); });
-                                (match.innings1.bowlers || []).forEach(b => { if (b.name) matchPlayersSet.add(b.name); });
+                                (match.innings1.batsmen || []).forEach(b => { if (b.name) addPlayerUnique(b.name); });
+                                (match.innings1.bowlers || []).forEach(b => { if (b.name) addPlayerUnique(b.name); });
                               }
                               if (match.innings2) {
-                                (match.innings2.batsmen || []).forEach(b => { if (b.name) matchPlayersSet.add(b.name); });
-                                (match.innings2.bowlers || []).forEach(b => { if (b.name) matchPlayersSet.add(b.name); });
+                                (match.innings2.batsmen || []).forEach(b => { if (b.name) addPlayerUnique(b.name); });
+                                (match.innings2.bowlers || []).forEach(b => { if (b.name) addPlayerUnique(b.name); });
                               }
                               
                               // Also include quick selection rosters for Team A and B
-                              selectedTeamARoster.forEach(name => { if (name) matchPlayersSet.add(name); });
-                              selectedTeamBRoster.forEach(name => { if (name) matchPlayersSet.add(name); });
+                              selectedTeamARoster.forEach(name => { if (name) addPlayerUnique(name); });
+                              selectedTeamBRoster.forEach(name => { if (name) addPlayerUnique(name); });
 
-                              const playerNamesList = Array.from(matchPlayersSet).filter(Boolean);
+                              const playerNamesList = Array.from(uniquePlayersMap.values());
 
                               if (playerNamesList.length === 0) {
                                 return (
@@ -10635,7 +11267,7 @@ export const CricketScoreboard: React.FC = () => {
 
                               return (
                                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                                  {playerNamesList.map((playerName) => {
+                                  {playerNamesList.map((playerName, pIdx) => {
                                     const lookupKey = playerName.toLowerCase().trim();
                                     const photoBase64 = match.playerPhotos?.[lookupKey];
                                     
@@ -10647,7 +11279,7 @@ export const CricketScoreboard: React.FC = () => {
                                                     (match.innings2?.bowlingTeam === match.teamA && match.innings2?.bowlers.some(b => b.name.toLowerCase().trim() === lookupKey));
 
                                     return (
-                                      <div key={playerName} className="flex items-center justify-between p-1.5 bg-slate-900/30 rounded-lg border border-white/[0.01]">
+                                      <div key={`player-photo-row-${lookupKey}-${pIdx}`} className="flex items-center justify-between p-1.5 bg-slate-900/30 rounded-lg border border-white/[0.01]">
                                         <div className="flex items-center gap-2 overflow-hidden mr-2">
                                           {photoBase64 ? (
                                             <div className="relative w-7 h-7 rounded-full overflow-hidden bg-slate-800 border border-white/10 shrink-0">
@@ -11685,57 +12317,221 @@ export const CricketScoreboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Quick adds card */}
-            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-2xl shrink-0 space-y-1.5 shadow-md">
-              <span className="text-[8px] font-black text-slate-450 uppercase tracking-widest block leading-none font-sans">QUICK ROSTER ADDITIONS</span>
-              
-              <div className="grid grid-cols-2 gap-1.5">
-                {/* Inline add batsman */}
-                <div className="flex bg-slate-950 p-1 rounded-xl items-center">
-                  <input
-                    type="text"
-                    id="cockpit-add-st-input"
-                    placeholder="New batter..."
-                    className="bg-transparent border-none text-[10px] font-bold text-slate-200 outline-none w-full px-1.5 leading-none"
-                  />
-                  <button
-                    onClick={() => {
-                      const input = document.getElementById('cockpit-add-st-input') as HTMLInputElement;
-                      if (input && input.value.trim()) {
-                        handleAddNewBatsman(input.value.trim());
-                        input.value = '';
-                      } else {
-                        showNotification('Name cannot be empty', 'alert');
+            {/* Quick adds card with Captain Squads & Dropdown Selector */}
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-2xl shrink-0 space-y-2 shadow-md">
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block leading-none font-sans">
+                  QUICK ROSTER ADDITIONS
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowTeamModal(true)}
+                  className="text-[8px] text-emerald-400 hover:text-emerald-300 font-black uppercase tracking-wider bg-transparent border-none cursor-pointer flex items-center gap-1"
+                  title="View Captain Squads & Team Rosters"
+                >
+                  <Users size={10} />
+                  <span>Captain Teams ({savedTeams.length})</span>
+                </button>
+              </div>
+
+              {/* Batting Squad Context Selector */}
+              {savedTeams.length > 0 && (
+                <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800/80">
+                  <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-wider shrink-0">
+                    Batting Squad:
+                  </span>
+                  <select
+                    value={activeScoreboardTeamId || (activeScoreboardTeam?.id || '')}
+                    onChange={(e) => {
+                      const selId = e.target.value;
+                      setActiveScoreboardTeamId(selId);
+                      const sel = savedTeams.find(t => t.id === selId);
+                      if (sel && sel.players) {
+                        if (currentInnings?.battingTeam === match.teamA) {
+                          setSelectedTeamARoster(sel.players);
+                        } else if (currentInnings?.battingTeam === match.teamB) {
+                          setSelectedTeamBRoster(sel.players);
+                        }
+                        showNotification(`Linked "${sel.name}" squad for batting!`, 'success');
                       }
                     }}
-                    className="h-7 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[9px] rounded-lg border-none cursor-pointer uppercase flex items-center shrink-0"
+                    className="bg-slate-900 border border-slate-700 text-[9px] font-bold text-emerald-400 rounded-lg px-1.5 py-1 outline-none w-full truncate cursor-pointer"
                   >
-                    Add
-                  </button>
+                    <option value="">
+                      Auto: {currentInnings?.battingTeam || 'Current Batting Team'} ({unbattedSquadPlayers.length} unbatted)
+                    </option>
+                    {savedTeams.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.players?.length || t.squadDetails?.length || 0} players{t.captainName ? ` • Capt: ${t.captainName}` : ''})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                {/* Batsman Selection Dropdown & Manual Fallback */}
+                <div className="bg-slate-950 p-1.5 rounded-xl border border-slate-850 space-y-1">
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-wider leading-none">
+                      + Batsman to Scoreboard
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsManualBatterInput(prev => !prev)}
+                      className="text-[7px] text-slate-400 hover:text-slate-200 uppercase font-mono bg-transparent border-none cursor-pointer"
+                    >
+                      {isManualBatterInput ? '▾ Use Dropdown' : '✏️ Manual'}
+                    </button>
+                  </div>
+
+                  {!isManualBatterInput ? (
+                    <div className="flex items-center gap-1">
+                      <select
+                        id="cockpit-add-st-select"
+                        value={selectedQuickBatter}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '__custom__') {
+                            setIsManualBatterInput(true);
+                            setSelectedQuickBatter('');
+                          } else if (val) {
+                            handleAddNewBatsman(val);
+                            setSelectedQuickBatter('');
+                          }
+                        }}
+                        className="bg-slate-900 border border-emerald-500/30 text-[9.5px] font-bold text-slate-200 outline-none w-full px-2 py-1.5 rounded-lg cursor-pointer truncate"
+                      >
+                        <option value="">
+                          {unbattedSquadPlayers.length > 0
+                            ? `+ Select Batsman (${unbattedSquadPlayers.length} in Squad)...`
+                            : '+ Select Batsman...'}
+                        </option>
+                        {unbattedSquadPlayers.map((p, idx) => (
+                          <option key={idx} value={p.name} className="bg-slate-900 text-white font-bold">
+                            🏏 {p.displayName || p.name}
+                          </option>
+                        ))}
+                        <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
+                          ✏️ Enter custom name manually...
+                        </option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        id="cockpit-add-st-input"
+                        placeholder="New batter..."
+                        className="bg-slate-900 border border-slate-700 text-[10px] font-bold text-slate-200 outline-none w-full px-2 py-1 rounded-lg"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const input = e.currentTarget;
+                            if (input.value.trim()) {
+                              handleAddNewBatsman(input.value.trim());
+                              input.value = '';
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const input = document.getElementById('cockpit-add-st-input') as HTMLInputElement;
+                          if (input && input.value.trim()) {
+                            handleAddNewBatsman(input.value.trim());
+                            input.value = '';
+                          } else {
+                            showNotification('Name cannot be empty', 'alert');
+                          }
+                        }}
+                        className="h-7 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[9px] rounded-lg border-none cursor-pointer uppercase flex items-center shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {/* Inline add bowler */}
-                <div className="flex bg-slate-950 p-1 rounded-xl items-center">
-                  <input
-                    type="text"
-                    id="cockpit-add-bw-input"
-                    placeholder="New bowler..."
-                    className="bg-transparent border-none text-[10px] font-bold text-slate-200 outline-none w-full px-1.5 leading-none"
-                  />
-                  <button
-                    onClick={() => {
-                      const input = document.getElementById('cockpit-add-bw-input') as HTMLInputElement;
-                      if (input && input.value.trim()) {
-                        handleAddNewBowler(input.value.trim());
-                        input.value = '';
-                      } else {
-                        showNotification('Name cannot be empty', 'alert');
-                      }
-                    }}
-                    className="h-7 px-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-lg border-none cursor-pointer uppercase flex items-center shrink-0"
-                  >
-                    Add
-                  </button>
+                {/* Bowler Selection Dropdown & Manual Fallback */}
+                <div className="bg-slate-950 p-1.5 rounded-xl border border-slate-850 space-y-1">
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[7.5px] font-black text-indigo-400 uppercase tracking-wider leading-none">
+                      + Bowler to Scoreboard
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsManualBowlerInput(prev => !prev)}
+                      className="text-[7px] text-slate-400 hover:text-slate-200 uppercase font-mono bg-transparent border-none cursor-pointer"
+                    >
+                      {isManualBowlerInput ? '▾ Use Dropdown' : '✏️ Manual'}
+                    </button>
+                  </div>
+
+                  {!isManualBowlerInput ? (
+                    <div className="flex items-center gap-1">
+                      <select
+                        id="cockpit-add-bw-select"
+                        value={selectedQuickBowler}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '__custom__') {
+                            setIsManualBowlerInput(true);
+                            setSelectedQuickBowler('');
+                          } else if (val) {
+                            handleAddNewBowler(val);
+                            setSelectedQuickBowler('');
+                          }
+                        }}
+                        className="bg-slate-900 border border-indigo-500/30 text-[9.5px] font-bold text-slate-200 outline-none w-full px-2 py-1.5 rounded-lg cursor-pointer truncate"
+                      >
+                        <option value="">
+                          {activeBowlingSquadPlayers.length > 0
+                            ? `+ Select Bowler (${activeBowlingSquadPlayers.length} in Squad)...`
+                            : '+ Select Bowler...'}
+                        </option>
+                        {activeBowlingSquadPlayers.map((p, idx) => (
+                          <option key={idx} value={p.name} className="bg-slate-900 text-white font-bold">
+                            🥎 {p.displayName || p.name}
+                          </option>
+                        ))}
+                        <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
+                          ✏️ Enter custom name manually...
+                        </option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        id="cockpit-add-bw-input"
+                        placeholder="New bowler..."
+                        className="bg-slate-900 border border-slate-700 text-[10px] font-bold text-slate-200 outline-none w-full px-2 py-1 rounded-lg"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const input = e.currentTarget;
+                            if (input.value.trim()) {
+                              handleAddNewBowler(input.value.trim());
+                              input.value = '';
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const input = document.getElementById('cockpit-add-bw-input') as HTMLInputElement;
+                          if (input && input.value.trim()) {
+                            handleAddNewBowler(input.value.trim());
+                            input.value = '';
+                          } else {
+                            showNotification('Name cannot be empty', 'alert');
+                          }
+                        }}
+                        className="h-7 px-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-lg border-none cursor-pointer uppercase flex items-center shrink-0"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -12286,46 +13082,95 @@ export const CricketScoreboard: React.FC = () => {
                     />
                   </div>
 
-                  <div>
-                    <label className="text-[8px] font-black text-slate-450 uppercase tracking-widest block mb-1 leading-none">Incoming Cricketer Name</label>
-                    <input
-                      type="text"
-                      value={newBatsmanName}
-                      onChange={(e) => setNewBatsmanName(e.target.value)}
-                      placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-white"
-                    />
-                    {(() => {
-                      if (!currentInnings) return null;
-                      const teamRoster = currentInnings.battingTeam === match.teamA ? selectedTeamARoster : selectedTeamBRoster;
-                      if (!teamRoster || teamRoster.length === 0) return null;
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-[8.5px] font-black text-emerald-400 uppercase tracking-widest leading-none flex items-center gap-1">
+                          <span>🏏</span>
+                          <span>Incoming Batsman (Captain Squad Dropdown)</span>
+                        </label>
+                        {unbattedSquadPlayers.length > 0 && (
+                          <span className="text-[7.5px] font-mono text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded font-black">
+                            {unbattedSquadPlayers.length} unbatted ready
+                          </span>
+                        )}
+                      </div>
 
-                      const alreadyBatted = currentInnings.batsmen.map(b => b.name.toLowerCase());
-                      const remaining = teamRoster.filter(player => !alreadyBatted.includes(player.toLowerCase()));
+                      {/* Dropdown Menu to select batsman name with no manual entry required */}
+                      <select
+                        value={newBatsmanName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '__custom__') {
+                            setNewBatsmanName('');
+                          } else {
+                            setNewBatsmanName(val);
+                          }
+                        }}
+                        className="w-full bg-slate-950 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-xl p-2.5 text-xs font-bold outline-none text-white cursor-pointer shadow-sm transition-all"
+                      >
+                        <option value="" className="bg-slate-900 text-slate-400">
+                          {unbattedSquadPlayers.length > 0
+                            ? `-- Select Batsman from Squad (${unbattedSquadPlayers.length} Available) --`
+                            : `-- Select Incoming Batsman --`}
+                        </option>
+                        {unbattedSquadPlayers.map((player, idx) => (
+                          <option key={idx} value={player.name} className="bg-slate-900 text-white font-bold py-1">
+                            👤 {player.displayName || player.name}
+                          </option>
+                        ))}
+                        <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
+                          ✏️ Enter Custom / Unlisted Name...
+                        </option>
+                      </select>
+                    </div>
 
-                      if (remaining.length === 0) return null;
-                      return (
-                        <div className="flex flex-wrap gap-1.5 mt-1.5 items-center">
-                          <span className="text-[8px] text-slate-500 font-extrabold uppercase py-0.5 select-none font-sans">Squad Roster:</span>
-                          {remaining.slice(0, 8).map((player, idx) => {
-                            const stats = playerStatsMap[player.toLowerCase().trim()];
-                            const matchesPlayed = stats ? stats.matches : 0;
-                            const avgScore = stats && stats.matches > 0 ? stats.avg : 0;
-                            return (
-                              <button
-                                key={`${player}-${idx}`}
-                                type="button"
-                                onClick={() => setNewBatsmanName(player)}
-                                className="px-1.5 py-0.5 bg-slate-800 hover:bg-emerald-600 hover:text-slate-950 text-slate-300 rounded text-[7.5px] uppercase font-black tracking-wider border-none cursor-pointer transition-all active:scale-95"
-                                title={`${player} - Matches Played: ${matchesPlayed}, Average Score: ${matchesPlayed > 0 ? avgScore : 'N/A'}`}
-                              >
-                                + {player} ({matchesPlayed}m, Avg {matchesPlayed > 0 ? avgScore : '--'})
-                              </button>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
+                    {/* Quick 1-tap buttons for fast touch selection */}
+                    {unbattedSquadPlayers.length > 0 && (
+                      <div className="flex flex-wrap gap-1 items-center">
+                        <span className="text-[7.5px] text-slate-500 font-extrabold uppercase py-0.5 select-none font-sans">Quick 1-Tap:</span>
+                        {unbattedSquadPlayers.slice(0, 6).map((player, idx) => {
+                          const stats = playerStatsMap[player.name.toLowerCase().trim()];
+                          const matchesPlayed = stats ? stats.matches : 0;
+                          const avgScore = stats && stats.matches > 0 ? stats.avg : 0;
+                          const isSelected = newBatsmanName.toLowerCase().trim() === player.name.toLowerCase().trim();
+                          return (
+                            <button
+                              key={`${player.name}-${idx}`}
+                              type="button"
+                              onClick={() => setNewBatsmanName(player.name)}
+                              className={`px-2 py-0.5 rounded text-[8px] uppercase font-black tracking-wider border-none cursor-pointer transition-all active:scale-95 ${
+                                isSelected
+                                  ? 'bg-emerald-500 text-slate-950 font-black shadow-sm'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                              }`}
+                              title={`${player.name} - Matches: ${matchesPlayed}, Avg: ${matchesPlayed > 0 ? avgScore : 'N/A'}`}
+                            >
+                              + {player.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Name Confirmation & Manual Edit Field */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="text-[7.5px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                          Selected Batsman Name (Or Type Custom)
+                        </label>
+                        {newBatsmanName && (
+                          <span className="text-[7px] text-emerald-400 font-mono">Ready ✓</span>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={newBatsmanName}
+                        onChange={(e) => setNewBatsmanName(e.target.value)}
+                        placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
+                        className="w-full bg-slate-950/80 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-slate-200 focus:border-slate-600"
+                      />
+                    </div>
                   </div>
 
                   <div className="pt-1 flex gap-2">
@@ -13241,15 +14086,124 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           <CricketTournamentTab 
-            onStartLiveScore={(tA, tB, overs, customRules, tournamentId, matchId, onSave) => {
+            onStartLiveScore={(tAOrConfig, tB, overs, customRules, tournamentId, matchId, onSave) => {
+              let tA = '';
+              let teamBName = '';
+              let ovLimit = 10;
+              let tRules: string | undefined = undefined;
+              let tourId = '';
+              let mId = '';
+              let saveCb: any = onSave;
+              let tourName = 'Tournament Championship';
+              let tourLogo = '';
+              let ground = 'Shivaji Maharaj Ground (Turf)';
+              let u1Name = 'Umesh Shastri';
+              let u1Photo = '';
+              let u2Name = 'Nitin Gadkari';
+              let u2Photo = '';
+              let scName = 'Ravi Shastri Jnr';
+              let scPhoto = '';
+              let commName = 'Harsha Bhogle (Live)';
+              let commPhoto = '';
+              let ytLogo = '';
+              let ytName = '';
+              let tALogo = '';
+              let tBLogo = '';
+              let tASquad: string[] = [];
+              let tBSquad: string[] = [];
+              let pPhotos: Record<string, string> = {};
+              let tourPrizes: any[] = [];
+              let mBanner = '';
+
+              if (typeof tAOrConfig === 'object' && tAOrConfig !== null) {
+                const c = tAOrConfig as any;
+                tA = c.teamA || '';
+                teamBName = c.teamB || '';
+                ovLimit = c.overs || 10;
+                tRules = c.customRules;
+                tourId = c.tournamentId || '';
+                mId = c.matchId || '';
+                saveCb = c.onSave;
+                tourName = c.tournamentName || 'Tournament Championship';
+                tourLogo = c.tournamentLogo || '';
+                ground = c.groundName || c.venue || 'Shivaji Maharaj Ground (Turf)';
+                u1Name = c.umpire1Name || '';
+                u1Photo = c.umpire1Photo || '';
+                u2Name = c.umpire2Name || '';
+                u2Photo = c.umpire2Photo || '';
+                scName = c.scoreboardManagerName || '';
+                scPhoto = c.scoreboardManagerPhoto || '';
+                commName = c.commentatorName || '';
+                commPhoto = c.commentatorPhoto || '';
+                ytLogo = c.youtubeChannelLogo || '';
+                ytName = c.youtubeChannelName || '';
+                tALogo = c.teamALogo || '';
+                tBLogo = c.teamBLogo || '';
+                tASquad = c.teamASquad || [];
+                tBSquad = c.teamBSquad || [];
+                pPhotos = c.playerPhotos || {};
+                tourPrizes = c.prizes || [];
+                mBanner = c.matchBannerUrl || c.bannerUrl || '';
+              } else {
+                tA = (tAOrConfig as string) || '';
+                teamBName = tB || '';
+                ovLimit = overs || 10;
+                tRules = customRules;
+                tourId = tournamentId || '';
+                mId = matchId || '';
+                saveCb = onSave;
+                try {
+                  tourLogo = localStorage.getItem('cricket_tournament_logo') || '';
+                  ytLogo = localStorage.getItem('cricket_youtube_channel_logo') || '';
+                  ytName = localStorage.getItem('cricket_youtube_channel_name') || '';
+                } catch (_) {}
+              }
+
+              if ((!tourPrizes || tourPrizes.length === 0) && tourId) {
+                tourPrizes = getTournamentPrizesByTournamentId(tourId);
+              }
+
+              // Update Match Setup Form states
               setTeamA(tA);
-              setTeamB(tB);
-              setOversLimit(overs);
-              setMatch({
+              setTeamB(teamBName);
+              setOversLimit(ovLimit);
+              setTournamentName(tourName);
+              setTournamentLogo(tourLogo);
+              setGroundName(ground);
+              setSeriesName(tourName);
+              setUmpire1Name(u1Name);
+              setUmpire1Photo(u1Photo);
+              setUmpire2Name(u2Name);
+              setUmpire2Photo(u2Photo);
+              setScoreboardManagerName(scName);
+              setScoreboardManagerPhoto(scPhoto);
+              setCommentatorName(commName);
+              setCommentatorPhoto(commPhoto);
+              setYoutubeChannelLogo(ytLogo);
+              setYoutubeChannelName(ytName);
+              setMatchBannerUrl(mBanner);
+              if (tALogo) setTeamALogoUrl(tALogo);
+              if (tBLogo) setTeamBLogoUrl(tBLogo);
+              if (tASquad.length > 0) setSelectedTeamARoster(tASquad);
+              if (tBSquad.length > 0) setSelectedTeamBRoster(tBSquad);
+              if (Object.keys(pPhotos).length > 0) setPlayerPhotos(prev => ({ ...prev, ...pPhotos }));
+
+              // Persist logos/names if provided
+              if (tourLogo) {
+                try { localStorage.setItem('cricket_tournament_logo', tourLogo); } catch (_) {}
+              }
+              if (ytLogo) {
+                try { localStorage.setItem('cricket_youtube_channel_logo', ytLogo); } catch (_) {}
+              }
+              if (ytName) {
+                try { localStorage.setItem('cricket_youtube_channel_name', ytName); } catch (_) {}
+              }
+
+              const newLiveMatch: MatchState = {
                 id: `live_${Date.now()}`,
                 teamA: tA,
-                teamB: tB,
-                oversLimit: overs,
+                teamB: teamBName,
+                oversLimit: ovLimit,
                 tossWinner: tA,
                 tossChoice: 'bat',
                 currentInningsNum: 1,
@@ -13258,16 +14212,48 @@ export const CricketScoreboard: React.FC = () => {
                 status: 'setup',
                 date: new Date().toISOString().split('T')[0],
                 freeHitNext: false,
-                teamALogo: '',
-                teamBLogo: '',
-                playerPhotos: {},
-                tournamentId: tournamentId,
-                tournamentMatchId: matchId,
+                teamALogo: tALogo,
+                teamBLogo: tBLogo,
+                matchBannerUrl: mBanner || undefined,
+                teamASquad: tASquad,
+                teamBSquad: tBSquad,
+                playerPhotos: pPhotos,
+                tournamentId: tourId,
+                tournamentMatchId: mId,
+                tournamentName: tourName,
+                tournamentLogo: tourLogo || undefined,
+                tournamentPrizes: tourPrizes.length > 0 ? tourPrizes : undefined,
+                groundName: ground,
+                seriesName: tourName,
+                umpire1Name: u1Name || undefined,
+                umpire1Photo: u1Photo || undefined,
+                umpire2Name: u2Name || undefined,
+                umpire2Photo: u2Photo || undefined,
+                scoreboardManagerName: scName || currentManagerName || undefined,
+                scoreboardManagerPhoto: scPhoto || undefined,
+                commentatorName: commName || undefined,
+                commentatorPhoto: commPhoto || undefined,
+                youtubeChannelLogo: ytLogo || undefined,
+                showYoutubeChannelLogo: !!ytLogo,
+                youtubeChannelName: ytName || undefined,
                 createdBy: user?.email || user?.uid || 'anonymous'
-              });
-              tournamentCallbackRef.current = onSave;
+              };
+
+              setMatch(newLiveMatch);
+              try {
+                localStorage.setItem('cricket_active_match', JSON.stringify(newLiveMatch));
+              } catch (_) {}
+
+              if (tourPrizes && tourPrizes.length > 0) {
+                try {
+                  saveTournamentPrizes(tourPrizes, newLiveMatch.id);
+                  saveTournamentPrizes(tourPrizes);
+                } catch (_) {}
+              }
+
+              tournamentCallbackRef.current = saveCb;
               setActiveSection('scorer');
-              showNotification(`Configured tournament live match: ${tA} vs ${tB}! Configure Toss to start!`, 'success');
+              showNotification(`Configured tournament live match: ${tA} vs ${teamBName}! ${mBanner ? 'Match banner, ' : ''}Prize money, sponsors, tournament logo, venue & officials automatically configured in scoreboard!`, 'success');
             }}
           />
         </main>
@@ -14701,7 +15687,7 @@ export const CricketScoreboard: React.FC = () => {
                             </thead>
                             <tbody>
                               {topBatsmenChartData.map((player, idx) => (
-                                <tr key={player.name} className="border-b border-slate-100 dark:border-slate-800/40 hover:bg-slate-50/50 dark:hover:bg-slate-950/20 font-medium font-sans">
+                                <tr key={`${player.name}-${idx}`} className="border-b border-slate-100 dark:border-slate-800/40 hover:bg-slate-50/50 dark:hover:bg-slate-950/20 font-medium font-sans">
                                   <td className="p-3 font-mono font-bold text-center w-12">
                                     <span className={`inline-flex items-center justify-center h-5 w-5 rounded-md text-[10px] font-black ${
                                       idx === 0 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400' :
@@ -17595,8 +18581,18 @@ export const CricketScoreboard: React.FC = () => {
                   };
 
                   const lastDelivery = currentInnings?.commentaryList?.[0];
-                  const lastDeliveryFourCount = (lastDelivery?.type === 'boundary' && (lastDelivery.description?.toLowerCase().includes('four') || lastDelivery.description?.toLowerCase().includes('4 runs'))) ? 1 : 0;
-                  const lastDeliverySixCount = (lastDelivery?.type === 'boundary' && (lastDelivery.description?.toLowerCase().includes('six') || lastDelivery.description?.toLowerCase().includes('6 runs'))) ? 1 : 0;
+                  const lastDeliverySixCount = (lastDelivery?.type === 'boundary' && (
+                    lastDelivery.ballScore === '6' || 
+                    (lastDelivery as any).runsOffBat === 6 || 
+                    lastDelivery.description?.toLowerCase().includes('six') || 
+                    lastDelivery.description?.toLowerCase().includes('6 runs') || 
+                    lastDelivery.description?.toLowerCase().includes('maximum') || 
+                    lastDelivery.description?.toLowerCase().includes('षटकार') || 
+                    lastDelivery.description?.toLowerCase().includes('छक्का') || 
+                    lastDelivery.description?.toLowerCase().includes('६') || 
+                    /\b6\b/.test(lastDelivery.description || '')
+                  )) ? 1 : 0;
+                  const lastDeliveryFourCount = (!lastDeliverySixCount && lastDelivery?.type === 'boundary') ? 1 : 0;
 
                   return (
                     <motion.div
@@ -19637,74 +20633,217 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* ADD PLAYER CREATION QUICK ROSTER OPERATIONS */}
-                      <div className="p-2 bg-slate-900 border border-white/5 rounded-xl space-y-1.5 font-bold">
-                        <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest block leading-none font-sans">Scorer Quick Roster Tool</span>
-                        
-                        {/* Dynamic Batsman Roster Adder */}
-                        <div className="flex gap-1.5 font-bold">
-                          <input
-                            type="text"
-                            placeholder="Add new batsman to team..."
-                            id="cockpit-new-batsman-input"
-                            className="bg-slate-950 border border-white/5 rounded-lg px-2 text-[10px] text-white font-bold outline-none flex-1 min-w-0"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const input = e.currentTarget;
-                                if (input.value.trim()) {
-                                  handleAddNewBatsman(input.value.trim());
-                                  input.value = '';
-                                }
-                              }
-                            }}
-                          />
+                      {/* ADD PLAYER CREATION QUICK ROSTER OPERATIONS WITH CAPTAIN SQUAD SUPPORT */}
+                      <div className="p-2.5 bg-slate-900 border border-white/5 rounded-xl space-y-2 font-bold">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest block leading-none font-sans">
+                            Scorer Quick Roster Tool
+                          </span>
                           <button
-                            onClick={() => {
-                              const input = document.getElementById('cockpit-new-batsman-input') as HTMLInputElement;
-                              if (input && input.value.trim()) {
-                                handleAddNewBatsman(input.value.trim());
-                                input.value = '';
-                              } else {
-                                showNotification('Batsman name cannot be empty!', 'alert');
-                              }
-                            }}
-                            className="bg-slate-800 hover:bg-emerald-600 text-white hover:text-slate-950 border-none rounded-lg px-2.5 py-1 text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
+                            type="button"
+                            onClick={() => setShowTeamModal(true)}
+                            className="text-[7.5px] text-emerald-400 hover:text-emerald-300 font-black uppercase tracking-wider bg-transparent border-none cursor-pointer flex items-center gap-1"
                           >
-                            + Bat
+                            <Users size={9} />
+                            <span>Teams ({savedTeams.length})</span>
                           </button>
                         </div>
 
-                        {/* Dynamic Bowler Roster Adder */}
-                        <div className="flex gap-1.5 font-bold">
-                          <input
-                            type="text"
-                            placeholder="Add bowler & start spell..."
-                            id="cockpit-new-bowler-input"
-                            className="bg-slate-955 border border-white/5 rounded-lg px-2 text-[10px] text-white font-bold outline-none flex-1 min-w-0"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const input = e.currentTarget;
-                                if (input.value.trim()) {
-                                  handleAddNewBowler(input.value.trim());
-                                  input.value = '';
+                        {/* Mobile Batting Squad Selector */}
+                        {savedTeams.length > 0 && (
+                          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                            <span className="text-[7px] font-black text-slate-400 uppercase tracking-wider shrink-0">
+                              Squad:
+                            </span>
+                            <select
+                              value={activeScoreboardTeamId || (activeScoreboardTeam?.id || '')}
+                              onChange={(e) => {
+                                const selId = e.target.value;
+                                setActiveScoreboardTeamId(selId);
+                                const sel = savedTeams.find(t => t.id === selId);
+                                if (sel && sel.players) {
+                                  if (currentInnings?.battingTeam === match.teamA) {
+                                    setSelectedTeamARoster(sel.players);
+                                  } else if (currentInnings?.battingTeam === match.teamB) {
+                                    setSelectedTeamBRoster(sel.players);
+                                  }
+                                  showNotification(`Linked "${sel.name}" squad for batting!`, 'success');
                                 }
-                              }
-                            }}
-                          />
-                          <button
-                            onClick={() => {
-                              const input = document.getElementById('cockpit-new-bowler-input') as HTMLInputElement;
-                              if (input && input.value.trim()) {
-                                handleAddNewBowler(input.value.trim());
-                                input.value = '';
-                              } else {
-                                showNotification('Bowler name cannot be empty!', 'alert');
-                              }
-                            }}
-                            className="bg-slate-800 hover:bg-emerald-600 text-white hover:text-slate-950 border-none rounded-lg px-2.5 py-1 text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
-                          >
-                            + Bowl
-                          </button>
+                              }}
+                              className="bg-slate-900 border-none text-[8.5px] font-bold text-emerald-400 rounded px-1 py-0.5 outline-none w-full truncate cursor-pointer"
+                            >
+                              <option value="">
+                                Auto: {currentInnings?.battingTeam || 'Batting Team'} ({unbattedSquadPlayers.length} unbatted)
+                              </option>
+                              {savedTeams.map(t => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name} ({t.players?.length || t.squadDetails?.length || 0} players)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        
+                        {/* Dynamic Batsman Roster Adder with Dropdown Menu */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[7.5px] text-emerald-400 font-extrabold uppercase">
+                              + Batsman to Scoreboard:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsManualBatterInput(prev => !prev)}
+                              className="text-[7px] text-slate-400 hover:text-slate-200 uppercase font-mono bg-transparent border-none cursor-pointer"
+                            >
+                              {isManualBatterInput ? '▾ Use Dropdown' : '✏️ Manual'}
+                            </button>
+                          </div>
+
+                          {!isManualBatterInput ? (
+                            <div className="flex gap-1.5 font-bold">
+                              <select
+                                value={selectedQuickBatter}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__custom__') {
+                                    setIsManualBatterInput(true);
+                                    setSelectedQuickBatter('');
+                                  } else if (val) {
+                                    handleAddNewBatsman(val);
+                                    setSelectedQuickBatter('');
+                                  }
+                                }}
+                                className="bg-slate-950 border border-emerald-500/40 rounded-lg px-2 py-1.5 text-[9.5px] text-white font-bold outline-none flex-1 min-w-0 cursor-pointer truncate"
+                              >
+                                <option value="">
+                                  {unbattedSquadPlayers.length > 0
+                                    ? `+ Select Batsman from Squad (${unbattedSquadPlayers.length} ready)...`
+                                    : '+ Select Batsman from Squad...'}
+                                </option>
+                                {unbattedSquadPlayers.map((p, idx) => (
+                                  <option key={idx} value={p.name} className="bg-slate-900 text-white font-bold">
+                                    🏏 {p.displayName || p.name}
+                                  </option>
+                                ))}
+                                <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
+                                  ✏️ Enter name manually...
+                                </option>
+                              </select>
+                            </div>
+                          ) : (
+                            <div className="flex gap-1.5 font-bold">
+                              <input
+                                type="text"
+                                placeholder="Add new batsman to team..."
+                                id="cockpit-new-batsman-input"
+                                className="bg-slate-950 border border-white/5 rounded-lg px-2 text-[10px] text-white font-bold outline-none flex-1 min-w-0"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const input = e.currentTarget;
+                                    if (input.value.trim()) {
+                                      handleAddNewBatsman(input.value.trim());
+                                      input.value = '';
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  const input = document.getElementById('cockpit-new-batsman-input') as HTMLInputElement;
+                                  if (input && input.value.trim()) {
+                                    handleAddNewBatsman(input.value.trim());
+                                    input.value = '';
+                                  } else {
+                                    showNotification('Batsman name cannot be empty!', 'alert');
+                                  }
+                                }}
+                                className="bg-slate-800 hover:bg-emerald-600 text-white hover:text-slate-950 border-none rounded-lg px-2.5 py-1 text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
+                              >
+                                + Bat
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Dynamic Bowler Roster Adder with Dropdown Menu */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[7.5px] text-indigo-400 font-extrabold uppercase">
+                              + Bowler to Scoreboard:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsManualBowlerInput(prev => !prev)}
+                              className="text-[7px] text-slate-400 hover:text-slate-200 uppercase font-mono bg-transparent border-none cursor-pointer"
+                            >
+                              {isManualBowlerInput ? '▾ Use Dropdown' : '✏️ Manual'}
+                            </button>
+                          </div>
+
+                          {!isManualBowlerInput ? (
+                            <div className="flex gap-1.5 font-bold">
+                              <select
+                                value={selectedQuickBowler}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__custom__') {
+                                    setIsManualBowlerInput(true);
+                                    setSelectedQuickBowler('');
+                                  } else if (val) {
+                                    handleAddNewBowler(val);
+                                    setSelectedQuickBowler('');
+                                  }
+                                }}
+                                className="bg-slate-950 border border-indigo-500/40 rounded-lg px-2 py-1.5 text-[9.5px] text-white font-bold outline-none flex-1 min-w-0 cursor-pointer truncate"
+                              >
+                                <option value="">
+                                  {activeBowlingSquadPlayers.length > 0
+                                    ? `+ Select Bowler from Squad (${activeBowlingSquadPlayers.length} ready)...`
+                                    : '+ Select Bowler from Squad...'}
+                                </option>
+                                {activeBowlingSquadPlayers.map((p, idx) => (
+                                  <option key={idx} value={p.name} className="bg-slate-900 text-white font-bold">
+                                    🥎 {p.displayName || p.name}
+                                  </option>
+                                ))}
+                                <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
+                                  ✏️ Enter name manually...
+                                </option>
+                              </select>
+                            </div>
+                          ) : (
+                            <div className="flex gap-1.5 font-bold">
+                              <input
+                                type="text"
+                                placeholder="Add bowler & start spell..."
+                                id="cockpit-new-bowler-input"
+                                className="bg-slate-955 border border-white/5 rounded-lg px-2 text-[10px] text-white font-bold outline-none flex-1 min-w-0"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const input = e.currentTarget;
+                                    if (input.value.trim()) {
+                                      handleAddNewBowler(input.value.trim());
+                                      input.value = '';
+                                    }
+                                  }
+                                }}
+                              />
+                              <button
+                                onClick={() => {
+                                  const input = document.getElementById('cockpit-new-bowler-input') as HTMLInputElement;
+                                  if (input && input.value.trim()) {
+                                    handleAddNewBowler(input.value.trim());
+                                    input.value = '';
+                                  } else {
+                                    showNotification('Bowler name cannot be empty!', 'alert');
+                                  }
+                                }}
+                                className="bg-slate-800 hover:bg-emerald-600 text-white hover:text-slate-950 border-none rounded-lg px-2.5 py-1 text-[9px] font-black uppercase tracking-wider cursor-pointer transition-colors"
+                              >
+                                + Bowl
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         {/* Dynamic News Bulletin Adder */}
@@ -20390,47 +21529,94 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 )}
 
-                {/* Input Name field for incoming Batsman */}
-                <div>
-                  <label className="text-[9px] font-black text-slate-450 uppercase tracking-widest block mb-2 leading-none">Incoming Cricketer Name</label>
-                  <input
-                    type="text"
-                    value={newBatsmanName}
-                    onChange={(e) => setNewBatsmanName(e.target.value)}
-                    placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-800 rounded-xl p-3.5 text-xs font-bold outline-none text-slate-800 dark:text-white"
-                  />
-                  {(() => {
-                    if (!currentInnings) return null;
-                    const teamRoster = currentInnings.battingTeam === match.teamA ? selectedTeamARoster : selectedTeamBRoster;
-                    if (!teamRoster || teamRoster.length === 0) return null;
+                {/* Dropdown Menu & Input for incoming Batsman */}
+                <div className="space-y-2">
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-[9px] font-black text-emerald-400 uppercase tracking-widest leading-none flex items-center gap-1">
+                        <span>🏏</span>
+                        <span>Incoming Batsman (Captain Squad Dropdown)</span>
+                      </label>
+                      {unbattedSquadPlayers.length > 0 && (
+                        <span className="text-[7.5px] font-mono text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded font-black">
+                          {unbattedSquadPlayers.length} in Squad
+                        </span>
+                      )}
+                    </div>
 
-                    const alreadyBatted = currentInnings.batsmen.map(b => b.name.toLowerCase());
-                    const remaining = teamRoster.filter(player => !alreadyBatted.includes(player.toLowerCase()));
+                    {/* Dropdown Menu to select batsman name with no manual entry required */}
+                    <select
+                      value={newBatsmanName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__custom__') {
+                          setNewBatsmanName('');
+                        } else {
+                          setNewBatsmanName(val);
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-xl p-3 text-xs font-bold outline-none text-white cursor-pointer shadow-sm transition-all"
+                    >
+                      <option value="" className="bg-slate-900 text-slate-400">
+                        {unbattedSquadPlayers.length > 0
+                          ? `-- Select Batsman from Squad (${unbattedSquadPlayers.length} Available) --`
+                          : `-- Select Incoming Batsman --`}
+                      </option>
+                      {unbattedSquadPlayers.map((player, idx) => (
+                        <option key={idx} value={player.name} className="bg-slate-900 text-white font-bold py-1">
+                          👤 {player.displayName || player.name}
+                        </option>
+                      ))}
+                      <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
+                        ✏️ Enter Custom / Unlisted Name...
+                      </option>
+                    </select>
+                  </div>
 
-                    if (remaining.length === 0) return null;
-                    return (
-                      <div className="flex flex-wrap gap-1.5 mt-2 items-center">
-                        <span className="text-[9px] text-slate-400 font-extrabold uppercase py-1 select-none font-sans">Squad Roster:</span>
-                        {remaining.slice(0, 8).map((player, idx) => {
-                          const stats = playerStatsMap[player.toLowerCase().trim()];
-                          const matchesPlayed = stats ? stats.matches : 0;
-                          const avgScore = stats && stats.matches > 0 ? stats.avg : 0;
-                          return (
-                            <button
-                              key={`${player}-${idx}`}
-                              type="button"
-                              onClick={() => setNewBatsmanName(player)}
-                              className="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500/15 text-slate-650 dark:text-slate-300 hover:text-emerald-500 rounded-md text-[9px] uppercase font-black tracking-widest border-none cursor-pointer transition-all active:scale-95"
-                              title={`${player} - Matches Played: ${matchesPlayed}, Average Score: ${matchesPlayed > 0 ? avgScore : 'N/A'}`}
-                            >
-                              + {player} ({matchesPlayed}m, Avg {matchesPlayed > 0 ? avgScore : '--'})
-                            </button>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
+                  {/* Quick 1-tap buttons for fast mobile touch selection */}
+                  {unbattedSquadPlayers.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      <span className="text-[8px] text-slate-400 font-extrabold uppercase py-0.5 select-none font-sans">
+                        Quick 1-Tap:
+                      </span>
+                      {unbattedSquadPlayers.slice(0, 6).map((player, idx) => {
+                        const isSelected = newBatsmanName.toLowerCase().trim() === player.name.toLowerCase().trim();
+                        return (
+                          <button
+                            key={`${player.name}-${idx}`}
+                            type="button"
+                            onClick={() => setNewBatsmanName(player.name)}
+                            className={`px-2 py-1 rounded-md text-[8.5px] uppercase font-black tracking-wider border-none cursor-pointer transition-all active:scale-95 ${
+                              isSelected
+                                ? 'bg-emerald-500 text-slate-950 font-black shadow-sm'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                            }`}
+                          >
+                            + {player.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Name Confirmation & Manual Edit */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[8px] font-bold text-slate-400 uppercase tracking-wider leading-none">
+                        Selected Name (Or Type Custom)
+                      </label>
+                      {newBatsmanName && (
+                        <span className="text-[7.5px] text-emerald-400 font-mono font-bold">Ready ✓</span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={newBatsmanName}
+                      onChange={(e) => setNewBatsmanName(e.target.value)}
+                      placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs font-bold outline-none text-slate-200 focus:border-slate-600"
+                    />
+                  </div>
                 </div>
 
                 <div className="pt-4 flex gap-4">
@@ -20810,7 +21996,26 @@ export const CricketScoreboard: React.FC = () => {
 
                               {/* Action Buttons Row */}
                               <div className="flex flex-wrap items-center justify-between gap-1.5 pt-2 border-t border-slate-150 dark:border-slate-800">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveScoreboardTeamId(t.id);
+                                      if (t.players && t.players.length > 0) {
+                                        if (currentInnings?.battingTeam === match.teamA) {
+                                          setSelectedTeamARoster(t.players);
+                                        } else {
+                                          setSelectedTeamBRoster(t.players);
+                                        }
+                                      }
+                                      showNotification(`🏏 Set "${t.name}" as active batting squad in scoreboard!`, 'success');
+                                      setShowTeamModal(false);
+                                    }}
+                                    className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-transform active:scale-95 shadow-sm"
+                                    title="Link this squad directly to the live batsman dropdown"
+                                  >
+                                    🏏 Batting Squad
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -21771,200 +22976,57 @@ export const CricketScoreboard: React.FC = () => {
                     </button>
                   </div>
                   {/* Auto-Generated Official Match Certificates Section */}
-                  {certificateData && (
-                    <div className="bg-slate-950/90 border border-amber-500/40 rounded-3xl p-4 sm:p-5 text-left space-y-3.5 shadow-xl">
-                      <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[8.5px] font-black uppercase tracking-wider">
-                              ● Auto-Generated
-                            </span>
-                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 flex items-center gap-1">
-                              <Award size={13} className="text-amber-400" />
-                              Official Award Certificates
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-slate-400 mt-1 font-sans">
-                            Player of the Match, Best Batsman, Best Bowler, and Fighter of the Match certificates are generated automatically and ready for instant download.
-                          </p>
-                        </div>
-                      </div>
+                  {certificateData && (() => {
+                    const modalWinnerTeam = (certificateData.winner && certificateData.winner !== 'Tie' && certificateData.winner !== 'Completed')
+                      ? certificateData.winner.trim()
+                      : certificateData.teamA;
+                    const modalRunnerUpTeam = modalWinnerTeam.toLowerCase() === certificateData.teamA.toLowerCase()
+                      ? certificateData.teamB
+                      : certificateData.teamA;
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                        {/* 1. Player of the Match */}
-                        <div className="bg-slate-900 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                    return (
+                      <div className="bg-slate-950/90 border border-amber-500/40 rounded-3xl p-4 sm:p-5 text-left space-y-3.5 shadow-xl">
+                        <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
                           <div>
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                                <Trophy size={10} /> Player of Match
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-[8.5px] font-black uppercase tracking-wider">
+                                ● Auto-Generated
                               </span>
-                              <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[7.5px] font-mono font-bold">
-                                {certificateData.playerOfTheMatch.points} pts
+                              <span className="text-[10px] font-black uppercase tracking-widest text-amber-300 flex items-center gap-1">
+                                <Award size={13} className="text-amber-400" />
+                                Official Award Certificates
                               </span>
                             </div>
-                            <h5 className="text-xs font-black text-white mt-1 truncate">
-                              {certificateData.playerOfTheMatch.name}
-                            </h5>
-                            <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
-                              {certificateData.playerOfTheMatch.runs} runs{certificateData.playerOfTheMatch.wickets > 0 ? ` • ${certificateData.playerOfTheMatch.wickets}w` : ''}
+                            <p className="text-[10px] text-slate-400 mt-1 font-sans">
+                              Player of the Match, Best Batsman, Best Bowler, Winning Team (Winning Certification), and Losing Team (Participant Certification) certificates are generated automatically and ready for instant download.
                             </p>
                           </div>
-                          <div className="space-y-1">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadAwardCertificate('potm')}
-                              className="w-full py-1 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
-                            >
-                              <Award size={10} />
-                              <span>View Certificate</span>
-                            </button>
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAwardCertificate('potm', 'png')}
-                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Download POTM PNG"
-                              >
-                                <Download size={8} />
-                                <span>PNG</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAwardCertificate('potm', 'pdf')}
-                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Download POTM PDF"
-                              >
-                                <FileText size={8} />
-                                <span>PDF</span>
-                              </button>
-                            </div>
-                          </div>
                         </div>
 
-                        {/* 2. Best Batsman */}
-                        <div className="bg-slate-900 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
-                          <div>
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
-                                <Flame size={10} /> Best Batsman
-                              </span>
-                              <span className="px-1.5 py-0.5 bg-orange-500/20 text-orange-300 rounded text-[7.5px] font-mono font-bold">
-                                Top Runs
-                              </span>
-                            </div>
-                            <h5 className="text-xs font-black text-white mt-1 truncate">
-                              {certificateData.bestBatsman?.name || 'Top Batsman'}
-                            </h5>
-                            <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
-                              {certificateData.bestBatsman?.runs || 0} runs ({certificateData.bestBatsman?.balls || 0}b)
-                            </p>
-                          </div>
-                          <div className="space-y-1">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadAwardCertificate('best_batter')}
-                              className="w-full py-1 px-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
-                            >
-                              <Award size={10} />
-                              <span>View Certificate</span>
-                            </button>
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAwardCertificate('best_batter', 'png')}
-                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Download Best Batsman PNG"
-                              >
-                                <Download size={8} />
-                                <span>PNG</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAwardCertificate('best_batter', 'pdf')}
-                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Download Best Batsman PDF"
-                              >
-                                <FileText size={8} />
-                                <span>PDF</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 3. Best Bowler */}
-                        <div className="bg-slate-900 border border-cyan-500/30 hover:border-cyan-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
-                          <div>
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="text-[8px] font-black uppercase tracking-wider text-cyan-400 flex items-center gap-1">
-                                <Medal size={10} /> Best Bowler
-                              </span>
-                              <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 rounded text-[7.5px] font-mono font-bold">
-                                Top Wkts
-                              </span>
-                            </div>
-                            <h5 className="text-xs font-black text-white mt-1 truncate">
-                              {certificateData.bestBowler?.name || 'Top Bowler'}
-                            </h5>
-                            <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
-                              {certificateData.bestBowler?.wickets || 0} wkts ({certificateData.bestBowler?.runsConceded || 0}r)
-                            </p>
-                          </div>
-                          <div className="space-y-1">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadAwardCertificate('best_bowler')}
-                              className="w-full py-1 px-2 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
-                            >
-                              <Award size={10} />
-                              <span>View Certificate</span>
-                            </button>
-                            <div className="grid grid-cols-2 gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAwardCertificate('best_bowler', 'png')}
-                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Download Best Bowler PNG"
-                              >
-                                <Download size={8} />
-                                <span>PNG</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadAwardCertificate('best_bowler', 'pdf')}
-                                className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                title="Download Best Bowler PDF"
-                              >
-                                <FileText size={8} />
-                                <span>PDF</span>
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 4. Fighter of the Match (Runner-up Standout) */}
-                        {certificateData.fighterOfTheMatch && (
-                          <div className="bg-slate-900 border border-rose-500/40 hover:border-rose-400/70 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
+                          {/* 1. Player of the Match */}
+                          <div className="bg-slate-900 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
                             <div>
                               <div className="flex items-center justify-between gap-1">
-                                <span className="text-[8px] font-black uppercase tracking-wider text-rose-400 flex items-center gap-1">
-                                  <Zap size={10} className="text-amber-300" /> Fighter of Match
+                                <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                                  <Trophy size={10} /> Player of Match
                                 </span>
-                                <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded text-[7.5px] font-mono font-bold">
-                                  {certificateData.fighterOfTheMatch.points} pts
+                                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[7.5px] font-mono font-bold">
+                                  {certificateData.playerOfTheMatch.points} pts
                                 </span>
                               </div>
                               <h5 className="text-xs font-black text-white mt-1 truncate">
-                                {certificateData.fighterOfTheMatch.name}
+                                {certificateData.playerOfTheMatch.name}
                               </h5>
                               <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
-                                {certificateData.fighterOfTheMatch.runs} runs{certificateData.fighterOfTheMatch.wickets > 0 ? ` • ${certificateData.fighterOfTheMatch.wickets}w` : ''}
+                                {certificateData.playerOfTheMatch.runs} runs{certificateData.playerOfTheMatch.wickets > 0 ? ` • ${certificateData.playerOfTheMatch.wickets}w` : ''}
                               </p>
                             </div>
                             <div className="space-y-1">
                               <button
                                 type="button"
-                                onClick={() => handleDownloadAwardCertificate('fighter')}
-                                className="w-full py-1 px-2 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                                onClick={() => handleDownloadAwardCertificate('potm')}
+                                className="w-full py-1 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
                               >
                                 <Award size={10} />
                                 <span>View Certificate</span>
@@ -21972,18 +23034,18 @@ export const CricketScoreboard: React.FC = () => {
                               <div className="grid grid-cols-2 gap-1">
                                 <button
                                   type="button"
-                                  onClick={() => handleDownloadAwardCertificate('fighter', 'png')}
+                                  onClick={() => handleDownloadAwardCertificate('potm', 'png')}
                                   className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                  title="Download Fighter of Match PNG"
+                                  title="Download POTM PNG"
                                 >
                                   <Download size={8} />
                                   <span>PNG</span>
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleDownloadAwardCertificate('fighter', 'pdf')}
+                                  onClick={() => handleDownloadAwardCertificate('potm', 'pdf')}
                                   className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
-                                  title="Download Fighter of Match PDF"
+                                  title="Download POTM PDF"
                                 >
                                   <FileText size={8} />
                                   <span>PDF</span>
@@ -21991,10 +23053,262 @@ export const CricketScoreboard: React.FC = () => {
                               </div>
                             </div>
                           </div>
-                        )}
+
+                          {/* 2. Best Batsman */}
+                          <div className="bg-slate-900 border border-amber-500/30 hover:border-amber-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                                  <Flame size={10} /> Best Batsman
+                                </span>
+                                <span className="px-1.5 py-0.5 bg-orange-500/20 text-orange-300 rounded text-[7.5px] font-mono font-bold">
+                                  Top Runs
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-black text-white mt-1 truncate">
+                                {certificateData.bestBatsman?.name || 'Top Batsman'}
+                              </h5>
+                              <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                                {certificateData.bestBatsman?.runs || 0} runs ({certificateData.bestBatsman?.balls || 0}b)
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('best_batter')}
+                                className="w-full py-1 px-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                              >
+                                <Award size={10} />
+                                <span>View Certificate</span>
+                              </button>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('best_batter', 'png')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Best Batsman PNG"
+                                >
+                                  <Download size={8} />
+                                  <span>PNG</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('best_batter', 'pdf')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Best Batsman PDF"
+                                >
+                                  <FileText size={8} />
+                                  <span>PDF</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. Best Bowler */}
+                          <div className="bg-slate-900 border border-cyan-500/30 hover:border-cyan-400/60 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-cyan-400 flex items-center gap-1">
+                                  <Medal size={10} /> Best Bowler
+                                </span>
+                                <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 rounded text-[7.5px] font-mono font-bold">
+                                  Top Wkts
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-black text-white mt-1 truncate">
+                                {certificateData.bestBowler?.name || 'Top Bowler'}
+                              </h5>
+                              <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                                {certificateData.bestBowler?.wickets || 0} wkts ({certificateData.bestBowler?.runsConceded || 0}r)
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('best_bowler')}
+                                className="w-full py-1 px-2 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                              >
+                                <Award size={10} />
+                                <span>View Certificate</span>
+                              </button>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('best_bowler', 'png')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Best Bowler PNG"
+                                >
+                                  <Download size={8} />
+                                  <span>PNG</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('best_bowler', 'pdf')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Best Bowler PDF"
+                                >
+                                  <FileText size={8} />
+                                  <span>PDF</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 4. Winning Team (Winning Certification) */}
+                          <div className="bg-slate-900 border border-amber-500/50 hover:border-amber-400/80 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-amber-300 flex items-center gap-1">
+                                  <Trophy size={10} className="text-amber-400" /> Winning Team
+                                </span>
+                                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[7px] font-bold uppercase">
+                                  Winning Cert
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-black text-white mt-1 truncate">
+                                {modalWinnerTeam}
+                              </h5>
+                              <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                                Match Champions • Full Squad
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('champion_squad')}
+                                className="w-full py-1 px-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                              >
+                                <Award size={10} />
+                                <span>Winning Certificate</span>
+                              </button>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('champion_squad', 'png')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Winning Certificate PNG"
+                                >
+                                  <Download size={8} />
+                                  <span>PNG</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('champion_squad', 'pdf')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Winning Certificate PDF"
+                                >
+                                  <FileText size={8} />
+                                  <span>PDF</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 5. Losing Team (Participant Certification) */}
+                          <div className="bg-slate-900 border border-teal-500/40 hover:border-teal-400/70 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                            <div>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-teal-300 flex items-center gap-1">
+                                  <Medal size={10} className="text-teal-400" /> Losing Team
+                                </span>
+                                <span className="px-1.5 py-0.5 bg-teal-500/20 text-teal-300 border border-teal-500/40 rounded text-[7px] font-bold uppercase">
+                                  Participant
+                                </span>
+                              </div>
+                              <h5 className="text-xs font-black text-white mt-1 truncate">
+                                {modalRunnerUpTeam}
+                              </h5>
+                              <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                                Participant Honors • Full Squad
+                              </p>
+                            </div>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadAwardCertificate('participation')}
+                                className="w-full py-1 px-2 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                              >
+                                <Award size={10} />
+                                <span>Participant Certificate</span>
+                              </button>
+                              <div className="grid grid-cols-2 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('participation', 'png')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Participant Certificate PNG"
+                                >
+                                  <Download size={8} />
+                                  <span>PNG</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('participation', 'pdf')}
+                                  className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                  title="Download Participant Certificate PDF"
+                                >
+                                  <FileText size={8} />
+                                  <span>PDF</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 6. Fighter of the Match (Runner-up Standout, if present) */}
+                          {certificateData.fighterOfTheMatch && (
+                            <div className="bg-slate-900 border border-rose-500/40 hover:border-rose-400/70 rounded-2xl p-3 flex flex-col justify-between gap-2.5 shadow-sm">
+                              <div>
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[8px] font-black uppercase tracking-wider text-rose-400 flex items-center gap-1">
+                                    <Zap size={10} className="text-amber-300" /> Fighter of Match
+                                  </span>
+                                  <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded text-[7.5px] font-mono font-bold">
+                                    {certificateData.fighterOfTheMatch.points} pts
+                                  </span>
+                                </div>
+                                <h5 className="text-xs font-black text-white mt-1 truncate">
+                                  {certificateData.fighterOfTheMatch.name}
+                                </h5>
+                                <p className="text-[9.5px] text-slate-300 font-mono mt-0.5 truncate">
+                                  {certificateData.fighterOfTheMatch.runs} runs{certificateData.fighterOfTheMatch.wickets > 0 ? ` • ${certificateData.fighterOfTheMatch.wickets}w` : ''}
+                                </p>
+                              </div>
+                              <div className="space-y-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAwardCertificate('fighter')}
+                                  className="w-full py-1 px-2 bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                                >
+                                  <Award size={10} />
+                                  <span>View Certificate</span>
+                                </button>
+                                <div className="grid grid-cols-2 gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadAwardCertificate('fighter', 'png')}
+                                    className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                    title="Download Fighter of Match PNG"
+                                  >
+                                    <Download size={8} />
+                                    <span>PNG</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadAwardCertificate('fighter', 'pdf')}
+                                    className="py-1 px-1 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-[8px] font-bold transition-all flex items-center justify-center gap-0.5 cursor-pointer"
+                                    title="Download Fighter of Match PDF"
+                                  >
+                                    <FileText size={8} />
+                                    <span>PDF</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* 1-Click All-Squad PDF for Tournament Conclusion */}
                   <div className="p-3 bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-slate-900 border border-emerald-500/40 rounded-2xl shadow-lg">
@@ -22011,20 +23325,29 @@ export const CricketScoreboard: React.FC = () => {
                             </span>
                           </h4>
                           <p className="text-[10px] text-slate-400 font-medium">
-                            Generate multi-page certified PDF for full squad at tournament conclusion
+                            Generate multi-page certified PDF for full squad (Winning Team or Participant Team)
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() => handleDownloadAwardCertificate('champion_squad', 'squad_pdf')}
-                        className="py-2 px-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer border-none shadow-md flex items-center justify-center gap-1.5"
+                        className="py-2 px-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer border-none shadow-md flex items-center justify-center gap-1.5"
                       >
-                        <FileText size={12} />
-                        <span>Download Squad PDF</span>
+                        <Trophy size={12} />
+                        <span>Winning Squad PDF</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAwardCertificate('participation', 'squad_pdf')}
+                        className="py-2 px-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer border-none shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <Medal size={12} />
+                        <span>Participant Squad PDF</span>
                       </button>
 
                       <button

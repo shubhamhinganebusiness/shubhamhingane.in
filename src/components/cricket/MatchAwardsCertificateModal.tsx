@@ -75,6 +75,8 @@ export interface MatchCertificateData {
   federationName?: string;
   serialNumber?: string;
   squadPlayers?: SquadPlayerCertificateItem[];
+  isFinalMatch?: boolean;
+  matchStage?: string;
 }
 
 export interface CertificateTheme {
@@ -742,6 +744,7 @@ export interface CanvasRenderOptions {
   themeId?: CertificateThemeId;
   verificationUrl?: string;
   serialNumber?: string;
+  isFinalMatch?: boolean;
   awardConfig: {
     en: string;
     mr: string;
@@ -761,6 +764,8 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
     awardConfig,
     selectedAward
   } = opts;
+
+  const isFinalMatch = opts.isFinalMatch ?? (data.isFinalMatch || false);
 
   const serialNumber = opts.serialNumber || data.serialNumber || generateCertificateSerial(
     data.matchId,
@@ -950,11 +955,15 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   if (selectedAward === 'fighter') {
     prefixText = 'adjudged for valorous fighting determination as ';
   } else if (selectedAward === 'champion_squad') {
-    prefixText = 'conferred in high sporting honor as an official member of ';
+    prefixText = isFinalMatch
+      ? 'conferred in high sporting honor and awarded as tournament champion trophy winner '
+      : 'conferred for triumphant match victory as winning squad member in ';
   } else if (selectedAward === 'runner_up_squad') {
-    prefixText = 'conferred for valiant sportsmanship as an official member of ';
+    prefixText = isFinalMatch
+      ? 'conferred for valiant sportsmanship as tournament finalist squad member in '
+      : 'presented in official match appreciation for commendable participation in ';
   } else if (selectedAward === 'participation') {
-    prefixText = 'presented in official match appreciation for representing ';
+    prefixText = 'presented in official match appreciation and awarded for commendable participation in ';
   }
   const awardNameText = awardConfig.en;
   const prefixW = ctx.measureText(prefixText).width;
@@ -980,10 +989,12 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   ctx.textAlign = 'center';
   ctx.font = '500 15px system-ui, sans-serif';
   ctx.fillStyle = theme.mutedText;
-  const clashStr = `In the official championship fixture contested between ${data.teamA || 'Team A'} and ${data.teamB || 'Team B'}${
-    data.winner ? ` • Triumphantly Won by ${data.winner}` : ''
+  const clashStr = `In the official ${isFinalMatch ? 'championship grand final' : 'match fixture'} contested between ${data.teamA || 'Team A'} and ${data.teamB || 'Team B'}${
+    data.winner ? ` • Won by ${data.winner}` : ''
   }`;
   ctx.fillText(clashStr, width / 2, 470);
+
+  const isTeamCardRecipient = recipient.name.includes('(MATCH WINNERS)') || recipient.name.includes('(PARTICIPANT TEAM)');
 
   // 6. 3 High-Impact Stats Cards
   const cardW = 280;
@@ -993,7 +1004,7 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   const startCardsX = (width - totalCardsW) / 2;
   const cardsY = 525;
 
-  // Card 1: Runs Scored
+  // Card 1: Runs Scored / Match Status
   const c1X = startCardsX;
   ctx.fillStyle = theme.cardBg;
   ctx.strokeStyle = theme.cardBorder;
@@ -1002,20 +1013,28 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '900 13px system-ui, sans-serif';
-  ctx.fillText('RUNS SCORED', c1X + cardW / 2, cardsY + 36);
+  ctx.fillText(isTeamCardRecipient ? 'MATCH STATUS' : 'RUNS SCORED', c1X + cardW / 2, cardsY + 36);
 
   ctx.fillStyle = theme.isLight ? '#047857' : '#10b981';
-  ctx.font = '900 48px monospace, system-ui';
-  ctx.fillText(String(recipient.runs ?? 0), c1X + cardW / 2, cardsY + 86);
+  ctx.font = isTeamCardRecipient ? '900 36px system-ui, sans-serif' : '900 48px monospace, system-ui';
+  ctx.fillText(
+    isTeamCardRecipient
+      ? (selectedAward === 'champion_squad' ? 'WINNER' : 'PARTICIPANT')
+      : String(recipient.runs ?? 0),
+    c1X + cardW / 2,
+    cardsY + 86
+  );
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '600 12px monospace, system-ui';
-  const c1Sub = recipient.balls
-    ? `${recipient.balls}b (${recipient.fours || 0}x4, ${recipient.sixes || 0}x6)`
-    : (recipient.runs > 0 ? `${recipient.runs} runs scored` : 'Key Squad Member');
+  const c1Sub = isTeamCardRecipient
+    ? (selectedAward === 'champion_squad' ? 'Official Match Champions' : 'Honored Match Contender')
+    : (recipient.balls
+        ? `${recipient.balls}b (${recipient.fours || 0}x4, ${recipient.sixes || 0}x6)`
+        : (recipient.runs > 0 ? `${recipient.runs} runs scored` : 'Key Squad Member'));
   ctx.fillText(c1Sub, c1X + cardW / 2, cardsY + 128);
 
-  // Card 2: Wickets Taken
+  // Card 2: Wickets Taken / Team Squad
   const c2X = startCardsX + cardW + cardGap;
   ctx.fillStyle = theme.cardBg;
   ctx.strokeStyle = theme.cardBorder;
@@ -1023,21 +1042,26 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '900 13px system-ui, sans-serif';
-  ctx.fillText('WICKETS TAKEN', c2X + cardW / 2, cardsY + 36);
+  ctx.fillText(isTeamCardRecipient ? 'TEAM SQUAD' : 'WICKETS TAKEN', c2X + cardW / 2, cardsY + 36);
 
   ctx.fillStyle = theme.isLight ? '#0284c7' : '#06b6d4';
-  ctx.font = '900 48px monospace, system-ui';
-  ctx.fillText(String(recipient.wickets ?? 0), c2X + cardW / 2, cardsY + 86);
+  ctx.font = isTeamCardRecipient ? '900 36px system-ui, sans-serif' : '900 48px monospace, system-ui';
+  ctx.fillText(
+    isTeamCardRecipient ? '11 PLAYERS' : String(recipient.wickets ?? 0),
+    c2X + cardW / 2,
+    cardsY + 86
+  );
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '600 12px monospace, system-ui';
-  const c2Sub =
-    recipient.runsConceded !== undefined && recipient.runsConceded > 0
-      ? `${recipient.runsConceded} runs conceded`
-      : (recipient.wickets > 0 ? `${recipient.wickets} wickets taken` : 'Fielding & Tactical Unit');
+  const c2Sub = isTeamCardRecipient
+    ? 'Official Certified Roster'
+    : (recipient.runsConceded !== undefined && recipient.runsConceded > 0
+        ? `${recipient.runsConceded} runs conceded`
+        : (recipient.wickets > 0 ? `${recipient.wickets} wickets taken` : 'Fielding & Tactical Unit'));
   ctx.fillText(c2Sub, c2X + cardW / 2, cardsY + 128);
 
-  // Card 3: MVP Rating
+  // Card 3: MVP Rating / Official Acclaim
   const c3X = startCardsX + (cardW + cardGap) * 2;
   ctx.fillStyle = theme.cardBg;
   ctx.strokeStyle = theme.cardBorder;
@@ -1045,17 +1069,27 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '900 13px system-ui, sans-serif';
-  ctx.fillText('MVP RATING', c3X + cardW / 2, cardsY + 36);
+  ctx.fillText(isTeamCardRecipient ? 'OFFICIAL ACCLAIM' : 'MVP RATING', c3X + cardW / 2, cardsY + 36);
 
   ctx.fillStyle = theme.accentColor;
-  ctx.font = '900 44px monospace, system-ui';
-  ctx.fillText(`${recipient.points ?? 0} pts`, c3X + cardW / 2, cardsY + 86);
+  ctx.font = isTeamCardRecipient ? '900 32px system-ui, sans-serif' : '900 44px monospace, system-ui';
+  ctx.fillText(
+    isTeamCardRecipient
+      ? (selectedAward === 'champion_squad' ? (isFinalMatch ? 'GOLD TROPHY' : 'WINNER') : (isFinalMatch ? 'SILVER MEDAL' : 'PARTICIPANT'))
+      : `${recipient.points ?? 0} pts`,
+    c3X + cardW / 2,
+    cardsY + 86
+  );
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '800 12px system-ui, sans-serif';
-  const c3Sub = (selectedAward === 'champion_squad' || selectedAward === 'runner_up_squad' || selectedAward === 'participation')
-    ? 'CHAMPIONSHIP SQUAD'
-    : 'GAME DECIDER';
+  const c3Sub = isTeamCardRecipient
+    ? (selectedAward === 'champion_squad' ? (isFinalMatch ? 'CHAMPIONS TROPHY' : 'MATCH WINNERS') : (isFinalMatch ? 'FINALIST RUNNER-UP' : 'PARTICIPANTS'))
+    : ((selectedAward === 'champion_squad' || selectedAward === 'runner_up_squad' || selectedAward === 'participation')
+        ? (isFinalMatch
+            ? (selectedAward === 'champion_squad' ? 'CHAMPIONSHIP SQUAD' : 'FINALIST SQUAD')
+            : (selectedAward === 'champion_squad' ? 'WINNING SQUAD' : 'PARTICIPANT SQUAD'))
+        : 'GAME DECIDER');
   ctx.fillText(c3Sub, c3X + cardW / 2, cardsY + 128);
 
   // 7. Footer Divider & 4-Quadrant Verification Bar
@@ -1203,6 +1237,7 @@ export interface GenerateAllSquadPdfOptions {
   sponsorName?: string;
   federationName?: string;
   themeId?: CertificateThemeId;
+  isFinalMatch?: boolean;
   onProgress?: (current: number, total: number, currentPlayer: string) => void;
 }
 
@@ -1224,6 +1259,7 @@ export async function generateAllSquadMultiPagePDF(
     sponsorName = data.sponsorName || 'Gully Scoreboard',
     federationName = data.federationName || 'Gully Cricket Organizing Council',
     themeId = 'classic_ivory',
+    isFinalMatch = opts.isFinalMatch ?? (data.isFinalMatch || false),
     onProgress
   } = opts;
 
@@ -1239,19 +1275,19 @@ export async function generateAllSquadMultiPagePDF(
 
   const awardConfigMap: Record<string, { en: string; mr: string; badge: string }> = {
     champion_squad: {
-      en: 'CHAMPIONSHIP SQUAD WINNER',
-      mr: 'विजेता संघ मानकरी (Champions Squad)',
-      badge: 'CHAMPIONS TROPHY WINNER'
+      en: isFinalMatch ? 'TOURNAMENT CHAMPION TROPHY WINNER' : 'MATCH WINNER CERTIFICATE',
+      mr: isFinalMatch ? 'महाअंतिम विजेता - चॅम्पियन्स ट्रॉफी विजेता' : 'सामना विजेता गौरव प्रमाणपत्र (Winning Team Certificate)',
+      badge: isFinalMatch ? 'CHAMPION TROPHY WINNER' : 'MATCH WINNER'
     },
     runner_up_squad: {
-      en: 'RUNNER-UP SQUAD CITATION',
-      mr: 'उपविजेता संघ गौरव (Runner-up Squad)',
-      badge: 'RUNNER-UP FINALIST'
+      en: isFinalMatch ? 'TOURNAMENT RUNNER-UP FINALIST CERTIFICATION' : 'PARTICIPANT CERTIFICATION',
+      mr: isFinalMatch ? 'महाअंतिम उपविजेता गौरव प्रमाणपत्र (Runner-Up Finalist)' : 'सहभाग गौरव प्रमाणपत्र (Participant Certification)',
+      badge: isFinalMatch ? 'RUNNER-UP FINALIST' : 'PARTICIPANT'
     },
     participation: {
-      en: 'TOURNAMENT PARTICIPATION HONORS',
-      mr: 'सहभाग गौरव प्रमाणपत्र (Official Participation)',
-      badge: 'OFFICIAL SQUAD ACCLAIM'
+      en: isFinalMatch ? 'TOURNAMENT FINAL PARTICIPANT CERTIFICATION' : 'PARTICIPANT CERTIFICATION',
+      mr: 'सहभाग गौरव प्रमाणपत्र (Participant Certification)',
+      badge: 'PARTICIPANT'
     },
     potm: { en: 'PLAYER OF THE MATCH', mr: 'सामनावीर मानकरी', badge: '' },
     best_batter: { en: 'BEST BATSMAN OF THE MATCH', mr: 'उत्कृष्ट फलंदाज', badge: 'POWER STRIKER' },
@@ -1315,6 +1351,7 @@ export async function generateAllSquadMultiPagePDF(
       themeId,
       verificationUrl: playerVerificationUrl,
       serialNumber: playerSerial,
+      isFinalMatch,
       awardConfig: currentAwardConfig
     });
 
@@ -1330,7 +1367,7 @@ export async function generateAllSquadMultiPagePDF(
   }
 
   const safeTeam = (teamName || 'Squad').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const filename = `GullyScore_${awardType === 'champion_squad' ? 'Champions' : 'Squad'}_${safeTeam}_All_${players.length}_Players.pdf`;
+  const filename = `GullyScore_${isFinalMatch ? (awardType === 'champion_squad' ? 'Champions_Trophy_Winner' : 'Finalist_RunnerUp') : (awardType === 'champion_squad' ? 'Match_Winners' : 'Participants')}_${safeTeam}_All_${players.length}_Players.pdf`;
 
   pdf.save(filename);
   return { pdf, filename, count: players.length };
@@ -1353,14 +1390,12 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   autoDownloadFormat = null,
   initialView = 'individual'
 }) => {
-  const isInitialSquad = ['champion_squad', 'runner_up_squad', 'participation'].includes(initialAward) || initialView === 'squad_batch';
+  const isInitialSquad = autoDownloadFormat === 'squad_pdf' || initialView === 'squad_batch';
   const [activeTab, setActiveTab] = useState<'individual' | 'squad_batch'>(
     isInitialSquad ? 'squad_batch' : (initialView || 'individual')
   );
 
-  const [selectedAward, setSelectedAward] = useState<AwardType>(
-    ['champion_squad', 'runner_up_squad', 'participation'].includes(initialAward) ? 'potm' : initialAward
-  );
+  const [selectedAward, setSelectedAward] = useState<AwardType>(initialAward || 'potm');
   const [selectedTheme, setSelectedTheme] = useState<CertificateThemeId>('classic_ivory');
 
   // Non-editable certification authority & founder credentials:
@@ -1397,7 +1432,9 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   }, [winnerTeamName, data.teamA, data.teamB]);
 
   // Squad Batch Mode State
-  const [selectedTeamFilter, setSelectedTeamFilter] = useState<'winner' | 'runner_up' | 'all'>('winner');
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<'winner' | 'runner_up' | 'all'>(
+    (initialAward === 'participation' || initialAward === 'runner_up_squad') ? 'runner_up' : 'winner'
+  );
   const [selectedSquadAwardType, setSelectedSquadAwardType] = useState<AwardType>(
     initialAward === 'runner_up_squad' ? 'runner_up_squad' : (initialAward === 'participation' ? 'participation' : 'champion_squad')
   );
@@ -1546,9 +1583,53 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     }
   }, [initialAward, isOpen]);
 
+  const [isFinalMatch, setIsFinalMatch] = useState<boolean>(() => {
+    if (typeof data.isFinalMatch === 'boolean') return data.isFinalMatch;
+    const stageText = String(data.matchStage || '').toLowerCase().trim();
+    const isSemiOrQuarter = stageText.includes('semi') || stageText.includes('quarter') || stageText.includes('eliminat') || stageText.includes('qualifier') || stageText.includes('playoff');
+    if (!isSemiOrQuarter && (stageText === 'final' || stageText === 'finals' || stageText === 'grand final' || stageText.endsWith(' final'))) {
+      return true;
+    }
+    const winReason = String(data.winReason || '').toLowerCase();
+    if (!isSemiOrQuarter && (winReason.includes('grand final') || winReason.includes('championship final') || winReason.includes('tournament champion'))) {
+      return true;
+    }
+    return false;
+  });
+
+  // Keep isFinalMatch in sync if prop changes
+  useEffect(() => {
+    if (typeof data.isFinalMatch === 'boolean') {
+      setIsFinalMatch(data.isFinalMatch);
+    }
+  }, [data.isFinalMatch]);
+
   const certificateRef = useRef<HTMLDivElement>(null);
 
-  // Active recipient based on selected award and active tab
+  // Filter individual squad rosters for Winning team and Runner-up/Participant team
+  const winningSquadPlayers = useMemo(() => {
+    const list = rawSquadPlayers.filter(p => 
+      p.isWinner || p.team.trim().toLowerCase() === winnerTeamName.toLowerCase()
+    );
+    if (list.length > 0) return list;
+    return editableSquadList.filter(p => p.isWinner || p.team.trim().toLowerCase() === winnerTeamName.toLowerCase());
+  }, [rawSquadPlayers, editableSquadList, winnerTeamName]);
+
+  const runnerUpSquadPlayers = useMemo(() => {
+    const list = rawSquadPlayers.filter(p => 
+      !p.isWinner || p.team.trim().toLowerCase() === runnerUpTeamName.toLowerCase()
+    );
+    if (list.length > 0) return list;
+    return editableSquadList.filter(p => !p.isWinner || p.team.trim().toLowerCase() === runnerUpTeamName.toLowerCase());
+  }, [rawSquadPlayers, editableSquadList, runnerUpTeamName]);
+
+  const [selectedWinningPlayerIdx, setSelectedWinningPlayerIdx] = useState<number>(0);
+  const [selectedRunnerUpPlayerIdx, setSelectedRunnerUpPlayerIdx] = useState<number>(0);
+
+  const currentWinningPlayer = winningSquadPlayers[selectedWinningPlayerIdx] || winningSquadPlayers[0];
+  const currentRunnerUpPlayer = runnerUpSquadPlayers[selectedRunnerUpPlayerIdx] || runnerUpSquadPlayers[0];
+
+  // Active recipient based on selected award and active tab - ALWAYS uses specific individual player names!
   const standoutRecipient: AwardPlayer = 
     selectedAward === 'fighter' && data.fighterOfTheMatch
       ? data.fighterOfTheMatch
@@ -1556,6 +1637,28 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       ? data.bestBatsman
       : selectedAward === 'best_bowler' && data.bestBowler
       ? data.bestBowler
+      : selectedAward === 'champion_squad'
+      ? (currentWinningPlayer ? {
+          name: currentWinningPlayer.name + (currentWinningPlayer.isCaptain ? ' (C)' : ''),
+          runs: currentWinningPlayer.runs || 0,
+          balls: currentWinningPlayer.balls,
+          fours: currentWinningPlayer.fours,
+          sixes: currentWinningPlayer.sixes,
+          wickets: currentWinningPlayer.wickets || 0,
+          runsConceded: currentWinningPlayer.runsConceded,
+          points: currentWinningPlayer.points || 25
+        } : data.playerOfTheMatch)
+      : selectedAward === 'participation' || selectedAward === 'runner_up_squad'
+      ? (currentRunnerUpPlayer ? {
+          name: currentRunnerUpPlayer.name + (currentRunnerUpPlayer.isCaptain ? ' (C)' : ''),
+          runs: currentRunnerUpPlayer.runs || 0,
+          balls: currentRunnerUpPlayer.balls,
+          fours: currentRunnerUpPlayer.fours,
+          sixes: currentRunnerUpPlayer.sixes,
+          wickets: currentRunnerUpPlayer.wickets || 0,
+          runsConceded: currentRunnerUpPlayer.runsConceded,
+          points: currentRunnerUpPlayer.points || 25
+        } : (data.fighterOfTheMatch || data.playerOfTheMatch))
       : data.playerOfTheMatch;
 
   const activeSquadPlayer = editableSquadList[selectedSquadPlayerIndex] || editableSquadList[0];
@@ -1608,25 +1711,25 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       color: 'from-rose-400 via-pink-400 to-amber-400'
     },
     champion_squad: {
-      en: 'CHAMPIONSHIP SQUAD WINNER',
-      mr: 'विजेता संघ मानकरी (Champions Squad)',
-      badge: 'CHAMPIONS TROPHY WINNER',
+      en: isFinalMatch ? 'TOURNAMENT CHAMPION TROPHY WINNER' : 'MATCH WINNER CERTIFICATE',
+      mr: isFinalMatch ? 'महाअंतिम विजेता - चॅम्पियन्स ट्रॉफी विजेता' : 'सामना विजेता गौरव प्रमाणपत्र (Winning Team Certificate)',
+      badge: isFinalMatch ? 'CHAMPION TROPHY WINNER' : 'MATCH WINNER',
       icon: Trophy,
       color: 'from-amber-400 via-yellow-400 to-amber-500'
     },
     runner_up_squad: {
-      en: 'RUNNER-UP SQUAD CITATION',
-      mr: 'उपविजेता संघ गौरव (Runner-up Squad)',
-      badge: 'RUNNER-UP FINALIST',
+      en: isFinalMatch ? 'TOURNAMENT RUNNER-UP FINALIST CERTIFICATION' : 'PARTICIPANT CERTIFICATION',
+      mr: isFinalMatch ? 'महाअंतिम उपविजेता गौरव प्रमाणपत्र (Runner-Up Finalist)' : 'सहभाग गौरव प्रमाणपत्र (Participant Certification)',
+      badge: isFinalMatch ? 'RUNNER-UP FINALIST' : 'PARTICIPANT',
       icon: ShieldCheck,
       color: 'from-blue-400 via-indigo-400 to-purple-400'
     },
     participation: {
-      en: 'TOURNAMENT PARTICIPATION HONORS',
-      mr: 'सहभाग गौरव प्रमाणपत्र (Official Participation)',
-      badge: 'OFFICIAL SQUAD ACCLAIM',
+      en: isFinalMatch ? 'TOURNAMENT FINAL PARTICIPANT CERTIFICATION' : 'MATCH PARTICIPANT CERTIFICATION',
+      mr: 'सहभाग गौरव प्रमाणपत्र (Participant Certification)',
+      badge: isFinalMatch ? 'FINALIST PARTICIPANT' : 'PARTICIPANT',
       icon: Medal,
-      color: 'from-emerald-400 via-teal-400 to-cyan-400'
+      color: 'from-teal-400 via-emerald-400 to-cyan-400'
     }
   };
 
@@ -1681,6 +1784,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         federationName: certProviderTeam,
         themeId: selectedTheme,
         verificationUrl,
+        isFinalMatch,
         awardConfig: effectiveAwardConfig
       });
 
@@ -1725,6 +1829,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         federationName: certProviderTeam,
         themeId: selectedTheme,
         verificationUrl,
+        isFinalMatch,
         awardConfig: effectiveAwardConfig
       });
 
@@ -1770,6 +1875,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         sponsorName: certProviderTitle,
         federationName: certProviderTeam,
         themeId: selectedTheme,
+        isFinalMatch,
         onProgress: (current, total, currentPlayer) => {
           setBatchProgress({
             isGenerating: true,
@@ -1850,6 +1956,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
           themeId: selectedTheme,
           verificationUrl: vUrl,
           serialNumber: serial,
+          isFinalMatch,
           awardConfig: awardTitleMap[selectedSquadAwardType]
         });
 
@@ -1947,8 +2054,38 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
             </div>
           </div>
 
-          {/* Primary View Switcher: Standout Awards vs 1-Click All-Squad Batch */}
-          <div className="flex items-center gap-1.5">
+          {/* Match Stage & View Switcher */}
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {/* Match Stage Selector: Knockout / Match vs Grand Final */}
+            <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsFinalMatch(false)}
+                className={`px-2 py-1 rounded-lg text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                  !isFinalMatch
+                    ? 'bg-slate-800 text-amber-300 shadow-sm border border-amber-500/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Knockout / Standard Match: Winning team = Match Winner, Losing team = Participant"
+              >
+                <span>⚔️ Knockout / Match</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsFinalMatch(true)}
+                className={`px-2 py-1 rounded-lg text-[9.5px] sm:text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                  isFinalMatch
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Tournament Grand Final: Winning team = Champion Trophy Winner, Losing team = Runner-Up Finalist"
+              >
+                <span>🏆 Grand Final</span>
+              </button>
+            </div>
+
+            {/* Primary View Switcher: Standout Awards vs 1-Click All-Squad Batch */}
             <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800">
               <button
                 type="button"
@@ -2053,7 +2190,101 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                   <span>Fighter of Match</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedAward('champion_squad');
+                  setSelectedTeamFilter('winner');
+                  setSelectedSquadAwardType('champion_squad');
+                }}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  selectedAward === 'champion_squad'
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 shadow-md font-black'
+                    : 'text-amber-400/90 hover:text-amber-300'
+                }`}
+                title={isFinalMatch ? "Championship Winning Team - Champion Trophy Winner" : "Match Winning Team - Winner Certification"}
+              >
+                <Trophy size={12} className={selectedAward === 'champion_squad' ? 'text-slate-950' : 'text-amber-400'} />
+                <span>{isFinalMatch ? 'Champion Winner' : 'Winning Team'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedAward('participation');
+                  setSelectedTeamFilter('runner_up');
+                  setSelectedSquadAwardType('participation');
+                }}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  selectedAward === 'participation' || selectedAward === 'runner_up_squad'
+                    ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-md font-black'
+                    : 'text-teal-400/90 hover:text-teal-300'
+                }`}
+                title={isFinalMatch ? "Finalist Team - Runner-Up Finalist Certification" : "Losing Team - Participant Certification"}
+              >
+                <Medal size={12} className={selectedAward === 'participation' || selectedAward === 'runner_up_squad' ? 'text-slate-950' : 'text-teal-400'} />
+                <span>{isFinalMatch ? 'Runner-Up Finalist' : 'Participant Team'}</span>
+              </button>
             </div>
+
+            {/* Individual Squad Player Selection Strip for Winning Team */}
+            {selectedAward === 'champion_squad' && winningSquadPlayers.length > 0 && (
+              <div className="mt-1 pt-1 border-t border-amber-500/20 flex items-center gap-1.5 overflow-x-auto w-full px-1 max-w-full">
+                <span className="text-[10px] font-black text-amber-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                  <Users size={11} />
+                  <span>{isFinalMatch ? 'Champion Player:' : 'Winning Player:'}</span>
+                </span>
+                {winningSquadPlayers.map((player, idx) => {
+                  const isSelected = selectedWinningPlayerIdx === idx;
+                  return (
+                    <button
+                      key={player.id || idx}
+                      type="button"
+                      onClick={() => setSelectedWinningPlayerIdx(idx)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold shrink-0 transition-all flex items-center gap-1 cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+                          : 'bg-slate-950 border border-slate-800 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <span className="opacity-70 font-mono text-[9px]">{idx + 1}.</span>
+                      <span className="truncate max-w-[105px]">{player.name}</span>
+                      {player.isCaptain && <span title="Captain">👑</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Individual Squad Player Selection Strip for Participant / Runner-Up Team */}
+            {(selectedAward === 'participation' || selectedAward === 'runner_up_squad') && runnerUpSquadPlayers.length > 0 && (
+              <div className="mt-1 pt-1 border-t border-teal-500/20 flex items-center gap-1.5 overflow-x-auto w-full px-1 max-w-full">
+                <span className="text-[10px] font-black text-teal-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                  <Users size={11} />
+                  <span>{isFinalMatch ? 'Runner-Up Player:' : 'Participant Player:'}</span>
+                </span>
+                {runnerUpSquadPlayers.map((player, idx) => {
+                  const isSelected = selectedRunnerUpPlayerIdx === idx;
+                  return (
+                    <button
+                      key={player.id || idx}
+                      type="button"
+                      onClick={() => setSelectedRunnerUpPlayerIdx(idx)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold shrink-0 transition-all flex items-center gap-1 cursor-pointer ${
+                        isSelected
+                          ? 'bg-teal-500 text-slate-950 font-black shadow-sm'
+                          : 'bg-slate-950 border border-slate-800 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <span className="opacity-70 font-mono text-[9px]">{idx + 1}.</span>
+                      <span className="truncate max-w-[105px]">{player.name}</span>
+                      {player.isCaptain && <span title="Captain">👑</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : (
           /* Squad Batch Generation Sub-Header Bar */
@@ -2072,7 +2303,9 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                   }`}
                 >
                   <span>👑</span>
-                  <span className="truncate max-w-[110px]">{winnerTeamName} (Champions)</span>
+                  <span className="truncate max-w-[120px]">
+                    {winnerTeamName} ({isFinalMatch ? 'Champions' : 'Winners'})
+                  </span>
                 </button>
 
                 <button
@@ -2085,7 +2318,9 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                   }`}
                 >
                   <span>🥈</span>
-                  <span className="truncate max-w-[110px]">{runnerUpTeamName} (Finalists)</span>
+                  <span className="truncate max-w-[120px]">
+                    {runnerUpTeamName} ({isFinalMatch ? 'Finalists' : 'Participants'})
+                  </span>
                 </button>
 
                 <button
@@ -2114,19 +2349,21 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Champions
+                  {isFinalMatch ? 'Champions' : 'Winner'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedSquadAwardType('runner_up_squad')}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    selectedSquadAwardType === 'runner_up_squad'
-                      ? 'bg-blue-600 text-white font-black'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Runner-Up
-                </button>
+                {isFinalMatch && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSquadAwardType('runner_up_squad')}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      selectedSquadAwardType === 'runner_up_squad'
+                        ? 'bg-blue-600 text-white font-black'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Runner-Up
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setSelectedSquadAwardType('participation')}
@@ -2369,11 +2606,13 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                 {effectiveAward === 'fighter'
                   ? 'adjudged for valorous fighting determination as '
                   : effectiveAward === 'champion_squad'
-                  ? 'honored as esteemed squad member & champions victor '
-                  : effectiveAward === 'runner_up_squad'
-                  ? 'honored as esteemed finalist playing squad member '
-                  : effectiveAward === 'participation'
-                  ? 'honored for commendable spirit and sportsmanship in tournament '
+                  ? (isFinalMatch
+                      ? 'honored as esteemed championship squad member & champion trophy winner in '
+                      : 'honored as victorious playing squad member for winning the match in ')
+                  : (effectiveAward === 'runner_up_squad' || effectiveAward === 'participation')
+                  ? (isFinalMatch
+                      ? 'honored as esteemed finalist playing squad member in '
+                      : 'presented for commendable participation and sportsmanship in ')
                   : 'adjudged for exceptional match-winning performance as '}
                 <span
                   className="underline underline-offset-2"
@@ -2385,65 +2624,121 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
 
               {/* Match Details & Context */}
               <p className="text-[7.5px] sm:text-[9.5px] truncate" style={{ color: activeTheme.mutedText }}>
-                In the official championship fixture contested between <strong style={{ color: activeTheme.headingText }}>{data.teamA}</strong> and{' '}
+                In the official {isFinalMatch ? 'championship grand final' : 'match fixture'} contested between <strong style={{ color: activeTheme.headingText }}>{data.teamA}</strong> and{' '}
                 <strong style={{ color: activeTheme.headingText }}>{data.teamB}</strong>
-                {data.winner && ` • Triumphantly Won by ${data.winner}`}
+                {data.winner && ` • Won by ${data.winner}`}
               </p>
 
               {/* Stats Highlight Bar */}
-              <div className="max-w-xs sm:max-w-md mx-auto grid grid-cols-3 gap-1 sm:gap-2 pt-0.5">
-                <div
-                  className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
-                  style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
-                >
-                  <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
-                    Runs Scored
-                  </span>
-                  <strong className={`text-xs sm:text-base font-mono font-black block ${activeTheme.isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
-                    {effectiveRecipient.runs ?? 0}
-                  </strong>
-                  {effectiveRecipient.balls ? (
-                    <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
-                      {effectiveRecipient.balls}b ({effectiveRecipient.fours || 0}x4, {effectiveRecipient.sixes || 0}x6)
-                    </span>
-                  ) : null}
-                </div>
+              {(() => {
+                const isTeamPreview = effectiveRecipient.name.includes('(MATCH WINNERS)') || effectiveRecipient.name.includes('(PARTICIPANT TEAM)');
+                if (isTeamPreview) {
+                  return (
+                    <div className="max-w-xs sm:max-w-md mx-auto grid grid-cols-3 gap-1 sm:gap-2 pt-0.5">
+                      <div
+                        className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
+                        style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
+                      >
+                        <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
+                          Match Status
+                        </span>
+                        <strong className={`text-xs sm:text-base font-black uppercase block ${activeTheme.isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                          {effectiveAward === 'champion_squad' ? 'WINNER' : 'PARTICIPANT'}
+                        </strong>
+                        <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
+                          {effectiveAward === 'champion_squad' ? 'Champions' : 'Contender'}
+                        </span>
+                      </div>
 
-                <div
-                  className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
-                  style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
-                >
-                  <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
-                    Wickets Taken
-                  </span>
-                  <strong className={`text-xs sm:text-base font-mono font-black block ${activeTheme.isLight ? 'text-sky-700' : 'text-cyan-400'}`}>
-                    {effectiveRecipient.wickets ?? 0}
-                  </strong>
-                  {effectiveRecipient.runsConceded !== undefined ? (
-                    <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
-                      {effectiveRecipient.runsConceded} runs conc.
-                    </span>
-                  ) : null}
-                </div>
+                      <div
+                        className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
+                        style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
+                      >
+                        <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
+                          Team Squad
+                        </span>
+                        <strong className={`text-xs sm:text-base font-black uppercase block ${activeTheme.isLight ? 'text-sky-700' : 'text-cyan-400'}`}>
+                          11 PLAYERS
+                        </strong>
+                        <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
+                          Certified Roster
+                        </span>
+                      </div>
 
-                <div
-                  className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
-                  style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
-                >
-                  <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
-                    MVP Rating
-                  </span>
-                  <strong className="text-xs sm:text-base font-mono font-black block" style={{ color: activeTheme.accentColor }}>
-                    {effectiveRecipient.points || 25}{' '}
-                    <span className="text-[7.5px] sm:text-[8.5px] font-sans font-normal" style={{ color: activeTheme.subAccentColor }}>
-                      pts
-                    </span>
-                  </strong>
-                  <span className="text-[6px] sm:text-[7.5px] font-bold uppercase block" style={{ color: activeTheme.mutedText }}>
-                    Squad Contributor
-                  </span>
-                </div>
-              </div>
+                      <div
+                        className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
+                        style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
+                      >
+                        <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
+                          Official Acclaim
+                        </span>
+                        <strong className="text-xs sm:text-base font-black uppercase block" style={{ color: activeTheme.accentColor }}>
+                          {effectiveAward === 'champion_squad' ? 'GOLD' : 'MERIT'}
+                        </strong>
+                        <span className="text-[6px] sm:text-[7.5px] font-bold uppercase block truncate" style={{ color: activeTheme.mutedText }}>
+                          {effectiveAward === 'champion_squad' ? 'Winning Cert' : 'Participant'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="max-w-xs sm:max-w-md mx-auto grid grid-cols-3 gap-1 sm:gap-2 pt-0.5">
+                    <div
+                      className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
+                      style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
+                    >
+                      <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
+                        Runs Scored
+                      </span>
+                      <strong className={`text-xs sm:text-base font-mono font-black block ${activeTheme.isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                        {effectiveRecipient.runs ?? 0}
+                      </strong>
+                      {effectiveRecipient.balls ? (
+                        <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
+                          {effectiveRecipient.balls}b ({effectiveRecipient.fours || 0}x4, {effectiveRecipient.sixes || 0}x6)
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div
+                      className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
+                      style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
+                    >
+                      <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
+                        Wickets Taken
+                      </span>
+                      <strong className={`text-xs sm:text-base font-mono font-black block ${activeTheme.isLight ? 'text-sky-700' : 'text-cyan-400'}`}>
+                        {effectiveRecipient.wickets ?? 0}
+                      </strong>
+                      {effectiveRecipient.runsConceded !== undefined ? (
+                        <span className="text-[6px] sm:text-[7.5px] font-mono block truncate" style={{ color: activeTheme.mutedText }}>
+                          {effectiveRecipient.runsConceded} runs conc.
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div
+                      className="rounded-lg sm:rounded-xl p-1 sm:p-1.5 text-center border"
+                      style={{ backgroundColor: activeTheme.cardBg, borderColor: activeTheme.cardBorder }}
+                    >
+                      <span className="text-[6.5px] sm:text-[8px] uppercase font-black tracking-wider block" style={{ color: activeTheme.mutedText }}>
+                        MVP Rating
+                      </span>
+                      <strong className="text-xs sm:text-base font-mono font-black block" style={{ color: activeTheme.accentColor }}>
+                        {effectiveRecipient.points || 25}{' '}
+                        <span className="text-[7.5px] sm:text-[8.5px] font-sans font-normal" style={{ color: activeTheme.subAccentColor }}>
+                          pts
+                        </span>
+                      </strong>
+                      <span className="text-[6px] sm:text-[7.5px] font-bold uppercase block" style={{ color: activeTheme.mutedText }}>
+                        Squad Contributor
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Certificate Footer: 4 Distinct Verifiable Sections */}

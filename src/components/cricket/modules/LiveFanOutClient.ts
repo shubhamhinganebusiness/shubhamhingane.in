@@ -212,10 +212,11 @@ class LiveFanOutClient {
         }
         return data;
       }
+      return this.cachedMatchSummaries.get(matchId) || null;
     } catch (err) {
       console.warn('[LiveFanOutClient] Edge match summary fetch note:', err);
+      return this.cachedMatchSummaries.get(matchId) || null;
     }
-    return null;
   }
 
   private startFeedPolling() {

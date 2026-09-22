@@ -12,7 +12,9 @@ import {
   SAMPLE_DEMO_PRIZES,
   getTournamentPrizes, 
   saveTournamentPrizes, 
-  getValidActivePrizes 
+  getValidActivePrizes,
+  getTournamentPrizesByTournamentId,
+  saveTournamentPrizesForTournament
 } from '../../utils/cricketPrizeStorage';
 import { 
   useCommentaryLanguage, 
@@ -24,6 +26,10 @@ interface PrizeManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
   matchId?: string;
+  tournamentId?: string;
+  tournamentName?: string;
+  initialPrizes?: TournamentPrize[];
+  onSave?: (prizes: TournamentPrize[]) => void;
   onSaved?: (prizes: TournamentPrize[]) => void;
   onTriggerPresentationBoard?: () => void;
   isPresentationBoardLive?: boolean;
@@ -67,6 +73,10 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
   isOpen,
   onClose,
   matchId,
+  tournamentId,
+  tournamentName,
+  initialPrizes,
+  onSave,
   onSaved,
   onTriggerPresentationBoard,
   isPresentationBoardLive = false,
@@ -83,7 +93,12 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
 
   const handleTriggerGrandBoard = async () => {
     // 1. First save all current prize settings to storage so broadcast picks it up immediately
-    await saveTournamentPrizes(prizes, matchId);
+    if (tournamentId) {
+      await saveTournamentPrizesForTournament(tournamentId, prizes);
+    } else {
+      await saveTournamentPrizes(prizes, matchId);
+    }
+    onSave?.(prizes);
     onSaved?.(prizes);
 
     // 2. Trigger presentation board on broadcast
@@ -132,12 +147,18 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      const stored = getTournamentPrizes(matchId);
-      setPrizes(stored);
+      if (initialPrizes && initialPrizes.length > 0) {
+        setPrizes(initialPrizes);
+      } else if (tournamentId) {
+        setPrizes(getTournamentPrizesByTournamentId(tournamentId));
+      } else {
+        const stored = getTournamentPrizes(matchId);
+        setPrizes(stored);
+      }
       setSavedSuccess(false);
       setSaveNotification(null);
     }
-  }, [isOpen, matchId]);
+  }, [isOpen, matchId, tournamentId, initialPrizes]);
 
   // Handle field update for any prize
   const updatePrizeField = (id: string, field: keyof TournamentPrize, value: any) => {
@@ -192,7 +213,13 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
 
   // Save prize details with comprehensive notification
   const handleSave = async () => {
-    await saveTournamentPrizes(prizes, matchId);
+    if (tournamentId) {
+      await saveTournamentPrizesForTournament(tournamentId, prizes);
+    } else {
+      await saveTournamentPrizes(prizes, matchId);
+    }
+    onSave?.(prizes);
+    onSaved?.(prizes);
     const active = getValidActivePrizes(prizes);
     const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -383,14 +410,22 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-black uppercase tracking-tight text-white flex items-center gap-1.5 truncate">
-                  Tournament Prize Money Manager
+                  {tournamentName ? `${tournamentName} — Prize Money Manager` : 'Tournament Prize Money Manager'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono text-[9px] font-black uppercase tracking-wider border border-amber-400/30">
                   1st • 2nd • 3rd • 4th • Custom
                 </span>
+                {(tournamentName || tournamentId) && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[9px] font-black uppercase tracking-wider border border-emerald-500/30">
+                    ⚡ Auto-Sync Scoreboard
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-slate-400 truncate">
-                Configure tournament 1st, 2nd, 3rd, 4th prize, individual awards & custom prizes with sponsor photos.
+                {tournamentName 
+                  ? `Configures tournament prize money & sponsors permanently for ${tournamentName}. Auto-loads on live scoreboard.`
+                  : 'Configure tournament 1st, 2nd, 3rd, 4th prize, individual awards & custom prizes with sponsor photos.'
+                }
               </p>
             </div>
           </div>
@@ -450,6 +485,22 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Tournament Auto-Configuration Badge & Live Info Banner */}
+        {(tournamentName || tournamentId) && (
+          <div className="bg-gradient-to-r from-emerald-950/80 via-slate-900/90 to-emerald-950/80 border-b border-emerald-500/30 px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 text-[11px] text-emerald-200">
+            <div className="flex items-center gap-2 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+              <span>
+                <strong className="text-emerald-300 uppercase tracking-wide font-black">Scoreboard Auto-Configured:</strong> When any match of{' '}
+                <strong className="text-white font-bold underline decoration-emerald-400">{tournamentName || 'this tournament'}</strong> goes LIVE, this prize money data will automatically configure into the scoreboard. You don't need to add data for every match!
+              </span>
+            </div>
+            <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[9px] font-black uppercase tracking-wider shrink-0 border border-emerald-500/30">
+              ⚡ LIVE AUTO-SYNC ON
+            </span>
+          </div>
+        )}
 
         {/* Action Controls & Filter Bar */}
         <div className="px-4 sm:px-6 py-2.5 bg-slate-950/60 border-b border-white/10 flex flex-wrap items-center justify-between gap-2.5 text-xs">
@@ -781,6 +832,110 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
 
         {/* Main Content Area: Prize Cards */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+          {/* Tournament Sponsors & Given Prize List Section */}
+          <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/70 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 shadow-lg space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center justify-center shrink-0">
+                  <Trophy size={14} />
+                </div>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-black uppercase tracking-tight text-white flex items-center gap-1.5">
+                    <span>Tournament Sponsors & Prize List</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[9px] font-black border border-amber-500/30">
+                      {validPrizes.length} Active
+                    </span>
+                  </h4>
+                  <p className="text-[10px] text-slate-400">
+                    Official list of honors, prize money allocations, and sponsor recognitions
+                  </p>
+                </div>
+              </div>
+
+              {validPrizes.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 rounded-lg font-black flex items-center gap-1">
+                    <span className="text-slate-400 uppercase text-[8.5px]">Total Purse:</span>
+                    <span>{validPrizes[0]?.currency || '₹'}</span>
+                    <span>
+                      {validPrizes
+                        .reduce((sum, p) => sum + (Number(p.amount?.replace(/[^0-9.-]+/g, '')) || 0), 0)
+                        .toLocaleString('en-IN')}
+                    </span>
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {validPrizes.length > 0 ? (
+              <div className="space-y-2">
+                {/* Horizontal Scrolling Sponsor & Prize Strip */}
+                <div className="overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-amber-500/30 py-1 flex items-center gap-2">
+                  {validPrizes.map((p, idx) => {
+                    const amt = p.amount?.trim() ? `${p.currency || '₹'}${p.amount.trim()}` : '';
+                    const desig = p.personDesignation?.trim() ? ` (${p.personDesignation.trim()})` : '';
+                    return (
+                      <div
+                        key={p.id || idx}
+                        className="inline-flex items-center gap-1.5 bg-slate-950/80 border border-white/10 hover:border-amber-400/40 rounded-xl px-2.5 py-1.5 text-xs shrink-0 transition-colors"
+                      >
+                        <span className="text-amber-400 font-black uppercase text-[9.5px]">{p.title}:</span>
+                        {amt && (
+                          <span className="font-mono font-black text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30 text-[10px]">
+                            {amt}
+                          </span>
+                        )}
+                        {p.personName?.trim() && (
+                          <span className="text-slate-200 font-medium text-[10.5px]">
+                            Given by <strong className="text-white font-bold">{p.personName.trim()}</strong>
+                            <span className="text-slate-400 text-[9.5px]">{desig}</span>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Scannable Grid List */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                  {validPrizes.map((p, idx) => {
+                    const amt = p.amount?.trim() ? `${p.currency || '₹'}${p.amount.trim()}` : 'Trophy';
+                    return (
+                      <div
+                        key={p.id || idx}
+                        className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-amber-400 block truncate">
+                            {p.title}
+                          </span>
+                          <span className="text-[11px] font-bold text-white block truncate">
+                            {p.personName?.trim() ? p.personName.trim() : 'Tournament Committee'}
+                          </span>
+                          {p.personDesignation?.trim() && (
+                            <span className="text-[9px] text-slate-400 block truncate">
+                              {p.personDesignation.trim()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <span className="font-mono font-black text-emerald-400 text-xs bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 block">
+                            {amt}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-950/50 border border-dashed border-amber-500/20 rounded-xl p-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                <Trophy size={14} className="text-amber-500/60 shrink-0" />
+                <span>No sponsors or prize amounts configured yet. Fill out the cards below to populate the sponsor and prize list.</span>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredPrizes.map((prize, idx) => {
               const isConfigured = Boolean(prize.personName?.trim() || prize.amount?.trim());
@@ -861,13 +1016,13 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
                     {/* Award Title */}
                     <div>
                       <label className="text-[9.5px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                        Award Title / Trophy Name
+                        Award Title / Given Prize (e.g. 1st Prize / Champion)
                       </label>
                       <input
                         type="text"
                         value={prize.title}
                         onChange={(e) => updatePrizeField(prize.id, 'title', e.target.value)}
-                        placeholder="e.g. Tournament 2nd Prize / Runner-Up"
+                        placeholder="e.g. Tournament 1st Prize / Champion"
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none focus:border-amber-500"
                       />
                     </div>
@@ -889,13 +1044,13 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
 
                       <div>
                         <label className="text-[9.5px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-                          Designation / Firm Name (Optional)
+                          His Position / Designation / Firm Name
                         </label>
                         <input
                           type="text"
                           value={prize.personDesignation || ''}
                           onChange={(e) => updatePrizeField(prize.id, 'personDesignation', e.target.value)}
-                          placeholder="e.g. Sarpanch / Business Partner"
+                          placeholder="e.g. Sarpanch / President / Business Partner"
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none focus:border-amber-500"
                         />
                       </div>

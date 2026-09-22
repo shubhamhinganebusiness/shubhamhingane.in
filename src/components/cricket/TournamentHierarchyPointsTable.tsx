@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, HelpCircle, CheckCircle2, ChevronDown, ChevronUp, 
-  Info, TrendingUp, ShieldAlert, Award, ArrowUpRight, Flame, BarChart3
+  Info, TrendingUp, ShieldAlert, Award, ArrowUpRight, Flame, BarChart3,
+  Calculator
 } from 'lucide-react';
 import { 
   calculateTournamentStandings, 
@@ -10,6 +11,7 @@ import {
   DEFAULT_POINTS_RULES, 
   formatDecimalToOversDisplay 
 } from './modules/TournamentPointsCalculator';
+import { TournamentPlayoffScenarioModal } from './TournamentPlayoffScenarioModal';
 
 interface TournamentHierarchyPointsTableProps {
   tournament: {
@@ -37,29 +39,73 @@ interface TournamentHierarchyPointsTableProps {
   };
   qualifyingThreshold?: number; // e.g., top 4 teams qualify
   onSelectTeam?: (teamId: string) => void;
+  onOpenScorecard?: (match: any) => void;
 }
 
 export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsTableProps> = ({
   tournament,
   qualifyingThreshold = 4,
-  onSelectTeam
+  onSelectTeam,
+  onOpenScorecard
 }) => {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [showFormulaModal, setShowFormulaModal] = useState(false);
+  const [showPlayoffsModal, setShowPlayoffsModal] = useState(false);
   const [filterQuery, setFilterQuery] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const defaultOvers = tournament.customOvers || (tournament.format === 'T20' ? 20 : tournament.format === 'ODI' ? 50 : 10);
+  // Cross-component and cross-tab real-time sync listener
+  React.useEffect(() => {
+    const handleUpdate = () => {
+      setRefreshKey(prev => prev + 1);
+    };
+    window.addEventListener('gully_tournaments_updated', handleUpdate);
+    window.addEventListener('cricket_matches_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('gully_tournaments_updated', handleUpdate);
+      window.removeEventListener('cricket_matches_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
+  // Pick up the latest state of the tournament directly from localStorage if updated
+  const currentTournament = React.useMemo(() => {
+    if (typeof window !== 'undefined' && tournament?.id) {
+      try {
+        const saved = localStorage.getItem('gully_tournaments_v1');
+        if (saved) {
+          const list = JSON.parse(saved);
+          if (Array.isArray(list)) {
+            const found = list.find((t: any) => t.id === tournament.id);
+            if (found) return found;
+          }
+        }
+      } catch (_) {}
+    }
+    return tournament;
+  }, [tournament, refreshKey]);
+
+  const defaultOvers = currentTournament.customOvers || (currentTournament.format === 'T20' ? 20 : currentTournament.format === 'ODI' ? 50 : 10);
+  const tourPointsConfig = (currentTournament as any).pointsConfig;
 
   const standings: StandingsTeamStats[] = calculateTournamentStandings(
-    tournament.teams || [],
-    (tournament.matches || []).map(m => ({
+    currentTournament.teams || [],
+    (currentTournament.matches || []).map(m => ({
       ...m,
       oversA: m.oversA || defaultOvers,
-      oversB: m.oversB || defaultOvers
+      oversB: m.oversB || defaultOvers,
+      winner: (m as any).winner,
+      winReason: m.winReason,
+      stage: m.stage
     })),
     {
       standardOversQuota: defaultOvers,
-      qualifyingSpots: qualifyingThreshold
+      qualifyingSpots: qualifyingThreshold,
+      pointsForWin: tourPointsConfig?.winPoints ?? 2,
+      pointsForTie: tourPointsConfig?.tiePoints ?? 1,
+      pointsForNoResult: tourPointsConfig?.tiePoints ?? 1,
+      pointsForLoss: tourPointsConfig?.lossPoints ?? 0,
     }
   );
 
@@ -72,9 +118,12 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
 
   // Filter completed matches for selected team to show head-to-head or form
   const selectedTeamMatches = selectedTeamStats 
-    ? (tournament.matches || []).filter(m => 
-        m.status === 'completed' && 
-        (m.teamAId === selectedTeamStats.id || m.teamBId === selectedTeamStats.id)
+    ? (currentTournament.matches || []).filter(m => 
+        (m.status === 'completed' || !!m.winnerId || !!(m as any).winner) && 
+        (m.teamAId === selectedTeamStats.id || 
+         m.teamBId === selectedTeamStats.id ||
+         m.teamAName?.toLowerCase().trim() === selectedTeamStats.name.toLowerCase().trim() ||
+         m.teamBName?.toLowerCase().trim() === selectedTeamStats.name.toLowerCase().trim())
       )
     : [];
 
@@ -101,7 +150,17 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2.5 shrink-0 select-none">
+        <div className="flex items-center gap-2.5 shrink-0 select-none flex-wrap">
+          <button
+            type="button"
+            onClick={() => setShowPlayoffsModal(true)}
+            className="px-3.5 py-2 bg-sky-500/15 hover:bg-sky-500/25 text-sky-600 dark:text-sky-400 text-xs font-bold rounded-xl border border-sky-500/30 cursor-pointer transition-colors flex items-center gap-1.5 shadow-sm"
+            title="Cricbuzz Path to Playoffs & NRR Simulator"
+          >
+            <Calculator size={14} className="text-sky-500" />
+            <span>Path to Playoffs</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowFormulaModal(true)}
@@ -276,20 +335,37 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
                             {(!team.formGuide || team.formGuide.length === 0) ? (
                               <span className="text-[9px] text-slate-400 font-mono">-</span>
                             ) : (
-                              team.formGuide.map((res, rIdx) => (
-                                <span
-                                  key={rIdx}
-                                  className={`w-4 h-4 rounded-full text-[8.5px] font-black flex items-center justify-center text-white ${
-                                    res === 'W' ? 'bg-emerald-500' :
-                                    res === 'L' ? 'bg-rose-500' :
-                                    res === 'T' ? 'bg-amber-500' :
-                                    'bg-slate-400'
-                                  }`}
-                                  title={`Match: ${res === 'W' ? 'Win' : res === 'L' ? 'Loss' : res === 'T' ? 'Tie' : 'No Result'}`}
-                                >
-                                  {res}
-                                </span>
-                              ))
+                              team.formGuide.map((res, rIdx) => {
+                                const historyItem = team.matchHistory && team.matchHistory[rIdx];
+                                const matchObj = historyItem ? tournament.matches?.find(m => m.id === historyItem.matchId) : null;
+                                const tooltip = historyItem 
+                                  ? `${res === 'W' ? 'Won vs' : res === 'L' ? 'Lost to' : res === 'T' ? 'Tied with' : 'No result vs'} ${historyItem.opponentName} (${historyItem.scoreSummary}) • Click to view scorecard`
+                                  : `Match: ${res === 'W' ? 'Win' : res === 'L' ? 'Loss' : res === 'T' ? 'Tie' : 'No Result'}`;
+
+                                return (
+                                  <button
+                                    key={rIdx}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (matchObj && onOpenScorecard) {
+                                        onOpenScorecard(matchObj);
+                                      }
+                                    }}
+                                    className={`w-4 h-4 rounded-full text-[8.5px] font-black flex items-center justify-center text-white transition-transform hover:scale-125 border-none ${
+                                      matchObj && onOpenScorecard ? 'cursor-pointer hover:ring-2 hover:ring-white/70 shadow-xs' : 'cursor-default'
+                                    } ${
+                                      res === 'W' ? 'bg-emerald-500 hover:bg-emerald-400' :
+                                      res === 'L' ? 'bg-rose-500 hover:bg-rose-400' :
+                                      res === 'T' ? 'bg-amber-500 hover:bg-amber-400' :
+                                      'bg-slate-400'
+                                    }`}
+                                    title={tooltip}
+                                  >
+                                    {res}
+                                  </button>
+                                );
+                              })
                             )}
                           </div>
                         </td>
@@ -487,6 +563,14 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
           </div>
         )}
       </AnimatePresence>
+
+      {/* Path to Playoffs Scenario Modal */}
+      <TournamentPlayoffScenarioModal
+        isOpen={showPlayoffsModal}
+        onClose={() => setShowPlayoffsModal(false)}
+        tournament={tournament}
+        qualifyingSpots={qualifyingThreshold}
+      />
     </div>
   );
 };

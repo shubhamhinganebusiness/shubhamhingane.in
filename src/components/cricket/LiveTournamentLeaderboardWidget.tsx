@@ -358,7 +358,7 @@ export const LiveTournamentLeaderboardWidget: React.FC<LiveTournamentLeaderboard
                 const isFirst = idx === 0;
                 return (
                   <tr
-                    key={player.name}
+                    key={`${player.team || 'team'}-${player.name}-${idx}`}
                     onClick={() => onSelectPlayer && onSelectPlayer(player)}
                     className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 cursor-pointer transition-colors group"
                   >

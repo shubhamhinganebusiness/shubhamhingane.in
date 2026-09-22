@@ -1350,7 +1350,12 @@ export const CricketOverlay: React.FC = () => {
           wktsSum++;
           bLabels.push('W');
         } else if (c?.type === 'boundary') {
-          const is6 = desc.includes('six') || desc.includes('6 runs');
+          const directScore = String((c as any).ballScore || '').trim();
+          const runsOffBat = Number((c as any).runsOffBat);
+          const runs = Number((c as any).runs);
+          const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
+            desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
+            desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
           runsSum += is6 ? 6 : 4;
           bLabels.push(is6 ? '6' : '4');
         } else {
@@ -1507,7 +1512,13 @@ export const CricketOverlay: React.FC = () => {
     ppBalls.forEach(c => {
       const desc = c.description.toLowerCase();
       if (c.type === 'boundary') {
-        ppRuns += desc.includes('six') || desc.includes('6 runs') ? 6 : 4;
+        const directScore = String((c as any).ballScore || '').trim();
+        const runsOffBat = Number((c as any).runsOffBat);
+        const runs = Number((c as any).runs);
+        const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
+          desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+        ppRuns += is6 ? 6 : 4;
       } else {
         const matchDigits = desc.match(/\d+/);
         ppRuns += matchDigits ? parseInt(matchDigits[0]) : 0;
@@ -1524,7 +1535,13 @@ export const CricketOverlay: React.FC = () => {
     deathBalls.forEach(c => {
       const desc = c.description.toLowerCase();
       if (c.type === 'boundary') {
-        deathRuns += desc.includes('six') || desc.includes('6 runs') ? 6 : 4;
+        const directScore = String((c as any).ballScore || '').trim();
+        const runsOffBat = Number((c as any).runsOffBat);
+        const runs = Number((c as any).runs);
+        const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
+          desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+        deathRuns += is6 ? 6 : 4;
       } else {
         const matchDigits = desc.match(/\d+/);
         deathRuns += matchDigits ? parseInt(matchDigits[0]) : 0;
@@ -1544,7 +1561,13 @@ export const CricketOverlay: React.FC = () => {
       if (c.type === 'wicket') last5Wickets += 1;
       const desc = (c.description || '').toLowerCase();
       if (c.type === 'boundary') {
-        last5Runs += desc.includes('six') || desc.includes('6 runs') ? 6 : 4;
+        const directScore = String((c as any).ballScore || '').trim();
+        const runsOffBat = Number((c as any).runsOffBat);
+        const runs = Number((c as any).runs);
+        const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
+          desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+        last5Runs += is6 ? 6 : 4;
       } else {
         const matchDigits = desc.match(/\d+/);
         last5Runs += matchDigits ? parseInt(matchDigits[0], 10) : 0;
@@ -1760,7 +1783,15 @@ export const CricketOverlay: React.FC = () => {
       label = 'W';
       style = 'bg-rose-600 border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.6)] animate-pulse-fast';
     } else if (b.type === 'boundary') {
-      const isSix = desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ');
+      const directScore = String((b as any).ballScore || '').trim();
+      const runsOffBat = Number((b as any).runsOffBat);
+      const runs = Number((b as any).runs);
+      const isSix =
+        directScore === '6' || directScore === '6s' || directScore.toUpperCase() === 'SIX' ||
+        runsOffBat === 6 || runs === 6 ||
+        desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
+        desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') ||
+        /\b6\b/.test(desc);
       if (isSix) {
         label = '6';
         style = 'bg-gradient-to-r from-amber-500 to-yellow-400 border-amber-500 font-extrabold text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-bounce-custom';
@@ -1881,9 +1912,15 @@ export const CricketOverlay: React.FC = () => {
       }
 
       if (resolvedRuns === null) {
-        if (desc.includes('six') || desc.includes(' 6 ') || desc.includes('6 runs')) {
+        if (
+          desc.includes('six') || desc.includes(' 6 ') || desc.includes('6 runs') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc)
+        ) {
           resolvedRuns = 6;
-        } else if (desc.includes('four') || desc.includes(' 4 ') || desc.includes('4 runs') || desc.includes('boundary')) {
+        } else if (
+          desc.includes('four') || desc.includes(' 4 ') || desc.includes('4 runs') || desc.includes('boundary') ||
+          desc.includes('चौकार') || desc.includes('चौका') || desc.includes('४') || /\b4\b/.test(desc)
+        ) {
           resolvedRuns = 4;
         } else if (desc.includes('three') || desc.includes('triple') || desc.includes('3 runs') || desc.includes('3 run') || desc.includes('for three') || desc.includes('runs 3')) {
           resolvedRuns = 3;
@@ -2610,121 +2647,8 @@ export const CricketOverlay: React.FC = () => {
       </AnimatePresence>
 
       {/* =========================================================================
-          1B. CORNER BANNER PROJECTION OVERLAY (CORNER PROJECTION)
+          1B. CORNER BANNER PROJECTION OVERLAY (REMOVED PER USER REQUEST)
           ========================================================================= */}
-      <AnimatePresence>
-        {activeConfig.customBanner && activeConfig.customBanner !== 'none' && !localBannerDismissed && (
-          <div className="absolute top-16 right-16 z-55 pointer-events-auto" id="corner-banner-projection">
-            <motion.div
-              initial={{ x: 100, opacity: 0, scale: 0.9 }}
-              animate={{ x: 0, opacity: 1, scale: 1 }}
-              exit={{ x: 80, opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 20 }}
-              className={`min-w-[320px] max-w-[480px] p-5 rounded-2xl flex items-center gap-4 border shadow-2xl relative overflow-hidden backdrop-blur-md
-                ${activeConfig.customBanner === 'out' ? 'bg-red-950/90 border-red-500/50 text-white shadow-red-500/10' :
-                  activeConfig.customBanner === 'four' ? 'bg-emerald-950/90 border-emerald-500/50 text-white shadow-emerald-500/10' :
-                  activeConfig.customBanner === 'six' ? 'bg-amber-950/90 border-amber-500/50 text-white shadow-amber-500/10' :
-                  activeConfig.customBanner === 'fifty' ? 'bg-orange-950/90 border-orange-500/50 text-white shadow-orange-500/10' :
-                  activeConfig.customBanner === 'hundred' ? 'bg-indigo-950/90 border-indigo-500/50 text-white shadow-indigo-500/10' :
-                  activeConfig.customBanner === 'drinks' ? 'bg-sky-950/90 border-sky-500/50 text-white shadow-sky-500/10' :
-                  activeConfig.customBanner === 'rain' ? 'bg-slate-900/90 border-slate-500/50 text-white shadow-slate-500/10' :
-                  activeConfig.customBanner === 'free_hit' ? 'bg-rose-950/90 border-rose-500/50 text-white shadow-rose-500/10' :
-                  'bg-slate-950/90 border-teal-500/50 text-white shadow-teal-555/10'
-                }`}
-            >
-              {/* Dynamic decorative light streak */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full animate-[shimmer_2s_infinite] pointer-events-none" style={{ animationDuration: '2.5s' }} />
-
-              {/* Decorative side accent strip */}
-              <div className={`absolute left-0 inset-y-0 w-2.5 
-                ${activeConfig.customBanner === 'out' ? 'bg-red-500' :
-                  activeConfig.customBanner === 'four' ? 'bg-emerald-500' :
-                  activeConfig.customBanner === 'six' ? 'bg-amber-500' :
-                  activeConfig.customBanner === 'fifty' ? 'bg-orange-500' :
-                  activeConfig.customBanner === 'hundred' ? 'bg-indigo-500 animate-pulse' :
-                  activeConfig.customBanner === 'drinks' ? 'bg-sky-500' :
-                  activeConfig.customBanner === 'rain' ? 'bg-slate-500' :
-                  activeConfig.customBanner === 'free_hit' ? 'bg-rose-500 animate-pulse' :
-                  'bg-teal-500'
-                }`} 
-              />
-
-              {/* Visual Icon */}
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-mono font-black text-lg shadow-md shrink-0 ml-1.5
-                ${activeConfig.customBanner === 'out' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                  activeConfig.customBanner === 'four' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                  activeConfig.customBanner === 'six' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                  activeConfig.customBanner === 'fifty' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
-                  activeConfig.customBanner === 'hundred' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' :
-                  activeConfig.customBanner === 'drinks' ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30' :
-                  activeConfig.customBanner === 'rain' ? 'bg-slate-500/20 text-slate-400 border border-slate-500/30' :
-                  activeConfig.customBanner === 'free_hit' ? 'bg-rose-500/20 text-rose-455 border border-rose-500/30 animate-pulse' :
-                  'bg-teal-500/20 text-teal-400 border border-teal-500/30'
-                }`}
-              >
-                {activeConfig.customBanner === 'out' && <Skull size={22} className="text-red-450 animate-bounce" />}
-                {activeConfig.customBanner === 'four' && <span className="tracking-tighter">4s</span>}
-                {activeConfig.customBanner === 'six' && <span className="tracking-tighter animate-pulse">6s</span>}
-                {activeConfig.customBanner === 'fifty' && <Trophy size={20} className="text-orange-400" />}
-                {activeConfig.customBanner === 'hundred' && <Award size={20} className="text-yellow-455" />}
-                {activeConfig.customBanner === 'drinks' && <Star size={20} className="text-sky-400 animate-spin" style={{ animationDuration: '6s' }} />}
-                {activeConfig.customBanner === 'rain' && <span className="text-slate-400">🌧</span>}
-                {activeConfig.customBanner === 'free_hit' && <Star size={20} className="text-rose-455" />}
-                {!['out','four','six','fifty','hundred','drinks','rain','free_hit'].includes(activeConfig.customBanner) && <Award size={20} />}
-              </div>
-
-              {/* Text Information */}
-              <div className="flex flex-col text-left gap-0.5 flex-1 min-w-0">
-                <span className={`text-[9px] font-black tracking-widest uppercase block 
-                  ${activeConfig.customBanner === 'out' ? 'text-red-400' :
-                    activeConfig.customBanner === 'four' ? 'text-emerald-400' :
-                    activeConfig.customBanner === 'six' ? 'text-amber-400' :
-                    activeConfig.customBanner === 'fifty' ? 'text-orange-400' :
-                    activeConfig.customBanner === 'hundred' ? 'text-indigo-400' :
-                    activeConfig.customBanner === 'drinks' ? 'text-sky-400' :
-                    activeConfig.customBanner === 'rain' ? 'text-slate-400' :
-                    activeConfig.customBanner === 'free_hit' ? 'text-rose-400' :
-                    'text-teal-400'
-                  }`}
-                >
-                  {activeConfig.customBanner === 'out' ? 'WICKET FALL' :
-                   activeConfig.customBanner === 'four' ? 'BOUNDARY FOUR' :
-                   activeConfig.customBanner === 'six' ? 'MAXIMUM SIX' :
-                   activeConfig.customBanner === 'fifty' ? 'MILESTONE FIFTY' :
-                   activeConfig.customBanner === 'hundred' ? 'MAJESTIC CENTURY' :
-                   activeConfig.customBanner === 'drinks' ? 'DRINKS INTERVAL' :
-                   activeConfig.customBanner === 'rain' ? 'WEATHER DELAY' :
-                   activeConfig.customBanner === 'free_hit' ? 'FREE HIT' :
-                   'BROADCAST BANNER'}
-                </span>
-                <h4 className="text-base font-black text-white leading-tight uppercase truncate">
-                  {activeConfig.customBannerText || (
-                    activeConfig.customBanner === 'out' ? 'Wicket Dismissal' :
-                    activeConfig.customBanner === 'four' ? '4 Runs! Classy Placement.' :
-                    activeConfig.customBanner === 'six' ? '6 Runs! Out of the park.' :
-                    activeConfig.customBanner === 'fifty' ? 'Crucial Half-Century Completed' :
-                    activeConfig.customBanner === 'hundred' ? 'Spectacular 100 Runs Reached!' :
-                    activeConfig.customBanner === 'drinks' ? 'Players Taking Hydration' :
-                    activeConfig.customBanner === 'rain' ? 'Covers are on the Field' :
-                    activeConfig.customBanner === 'free_hit' ? 'No-Ball Penalty Free Hit' :
-                    'Graphic Overlay Active'
-                  )}
-                </h4>
-              </div>
-
-              {/* Close Button */}
-              <button
-                type="button"
-                onClick={() => setLocalBannerDismissed(true)}
-                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/25 flex items-center justify-center text-white/70 hover:text-white transition-all cursor-pointer shrink-0 ml-2"
-                title="Dismiss Banner"
-              >
-                <X size={14} />
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* =========================================================================
           2. INDEPENDENT OVERLAYS: OUTS AND FREE HITS
@@ -2885,12 +2809,22 @@ export const CricketOverlay: React.FC = () => {
                 thisOverBalls={(currentOverBalls || []).map(b => {
                   const d = getPillDetails(b);
                   let type: 'dot' | 'run' | 'four' | 'six' | 'wicket' | 'extra' = 'dot';
+                  const directScore = String((b as any).ballScore || '').trim();
+                  const runsOffBat = Number((b as any).runsOffBat);
+                  const runs = Number((b as any).runs);
+                  const isSix =
+                    d.label === '6' || directScore === '6' || runsOffBat === 6 || runs === 6 ||
+                    (b.type === 'boundary' && (directScore === '6' || runsOffBat === 6 || /six|6 runs|maximum|षटकार|छक्का|६|\b6\b/i.test(b.description || '')));
+                  const isFour =
+                    !isSix && (d.label === '4' || directScore === '4' || runsOffBat === 4 || runs === 4 ||
+                    (b.type === 'boundary' && !isSix));
+
                   if (b.type === 'wicket' || d.label === 'W' || /^W$/i.test(d.label)) {
                     type = 'wicket';
-                  } else if (d.label === '4') {
-                    type = 'four';
-                  } else if (d.label === '6') {
+                  } else if (isSix) {
                     type = 'six';
+                  } else if (isFour) {
+                    type = 'four';
                   } else if (
                     b.type === 'extra' ||
                     /wd|nb|lb|b|ex/i.test(d.label) ||
@@ -2900,7 +2834,7 @@ export const CricketOverlay: React.FC = () => {
                   } else if (['1', '2', '3', '5'].includes(d.label) || parseInt(d.label, 10) > 0) {
                     type = 'run';
                   }
-                  return { label: d.label, type };
+                  return { label: isSix ? '6' : isFour ? '4' : d.label, type };
                 })}
                 bowlingTeamName={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? (match?.teamB || 'TEAM B') : (match?.teamA || 'TEAM A')}
                 bowlingTeamSubtext="BOWLING"

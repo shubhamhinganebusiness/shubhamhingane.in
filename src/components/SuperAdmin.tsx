@@ -1310,7 +1310,7 @@ export const SuperAdmin: React.FC = () => {
                       type="button"
                       className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'slider' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
                     >
-                      Spectator 16:9 Slider
+                      📢 Live Match & Ads Slider
                     </button>
                     <button
                       onClick={() => setCricketSubTab('themestudio')}

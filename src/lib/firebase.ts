@@ -39,10 +39,22 @@ if (typeof window !== 'undefined') {
     if (
       raw.includes('GrpcConnection RPC') ||
       raw.includes('RST_STREAM') ||
-      (raw.includes('@firebase/firestore') && raw.includes('Code: 13'))
+      raw.includes('RESOURCE_EXHAUSTED') ||
+      raw.includes('resource-exhausted') ||
+      raw.includes('Quota exceeded') ||
+      raw.includes('Disconnecting idle stream') ||
+      (raw.includes('@firebase/firestore') && (raw.includes('Code: 13') || raw.includes('Code: 8') || raw.includes('Code: 1')))
     ) {
-      // Suppress transient WebChannel HTTP/2 transport reconnection logs from bubbling to error monitors
-      console.info('[Firestore WebChannel Reconnect]', ...args);
+      if (
+        raw.includes('RESOURCE_EXHAUSTED') ||
+        raw.includes('resource-exhausted') ||
+        raw.includes('Quota exceeded') ||
+        raw.includes('Code: 8')
+      ) {
+        try { recordFirestoreQuotaExhaustion(5); } catch {}
+      }
+      // Suppress transient WebChannel HTTP/2 transport reconnection logs and quota status from bubbling to error monitors
+      console.info('[Firestore Stream Status]', ...args);
       return;
     }
     origConsoleError.apply(console, args);
@@ -51,9 +63,22 @@ if (typeof window !== 'undefined') {
   window.addEventListener('error', (event) => {
     const msg = event?.message || event?.error?.message || '';
     if (
-      (typeof msg === 'string' && msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) ||
-      (typeof msg === 'string' && (msg.includes('GrpcConnection') || msg.includes('RST_STREAM')))
+      typeof msg === 'string' &&
+      (msg.includes('FIRESTORE') ||
+       msg.includes('GrpcConnection') ||
+       msg.includes('RST_STREAM') ||
+       msg.includes('RESOURCE_EXHAUSTED') ||
+       msg.includes('resource-exhausted') ||
+       msg.includes('Quota exceeded') ||
+       msg.includes('Disconnecting idle stream'))
     ) {
+      if (
+        msg.includes('RESOURCE_EXHAUSTED') ||
+        msg.includes('resource-exhausted') ||
+        msg.includes('Quota exceeded')
+      ) {
+        try { recordFirestoreQuotaExhaustion(5); } catch {}
+      }
       console.warn('[Firestore SDK Guard] Intercepted internal assertion/transport error:', msg);
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -64,9 +89,22 @@ if (typeof window !== 'undefined') {
     const reason = event?.reason;
     const msg = reason instanceof Error ? reason.message : String(reason || '');
     if (
-      (typeof msg === 'string' && msg.includes('FIRESTORE') && msg.includes('INTERNAL ASSERTION FAILED')) ||
-      (typeof msg === 'string' && (msg.includes('GrpcConnection') || msg.includes('RST_STREAM')))
+      typeof msg === 'string' &&
+      (msg.includes('FIRESTORE') ||
+       msg.includes('GrpcConnection') ||
+       msg.includes('RST_STREAM') ||
+       msg.includes('RESOURCE_EXHAUSTED') ||
+       msg.includes('resource-exhausted') ||
+       msg.includes('Quota exceeded') ||
+       msg.includes('Disconnecting idle stream'))
     ) {
+      if (
+        msg.includes('RESOURCE_EXHAUSTED') ||
+        msg.includes('resource-exhausted') ||
+        msg.includes('Quota exceeded')
+      ) {
+        try { recordFirestoreQuotaExhaustion(5); } catch {}
+      }
       console.warn('[Firestore SDK Guard] Intercepted internal assertion/transport rejection:', msg);
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -275,9 +313,16 @@ export function subscribeToCricketMatchesCollection(
   onNext: (snapshot: any) => void,
   onError?: (error: any) => void
 ): () => void {
+  if (isFirestoreQuotaExhausted()) {
+    if (onError) onError(new Error('Firestore quota paused'));
+    return () => {};
+  }
   try {
     const q = collection(db, 'cricket_matches');
     return onSnapshot(q, onNext, (err) => {
+      if (isQuotaError(err)) {
+        recordFirestoreQuotaExhaustion(5);
+      }
       console.warn('[Firestore] cricket_matches listener note:', err?.message || err);
       if (onError) onError(err);
     });
@@ -297,9 +342,16 @@ export function subscribeToCricketMatchDoc(
   onError?: (error: any) => void
 ): () => void {
   if (!matchId) return () => {};
+  if (isFirestoreQuotaExhausted()) {
+    if (onError) onError(new Error('Firestore quota paused'));
+    return () => {};
+  }
   try {
     const docRef = doc(db, 'cricket_matches', matchId);
     return onSnapshot(docRef, onNext, (err) => {
+      if (isQuotaError(err)) {
+        recordFirestoreQuotaExhaustion(5);
+      }
       console.warn(`[Firestore] cricket_matches/${matchId} listener note:`, err?.message || err);
       if (onError) onError(err);
     });

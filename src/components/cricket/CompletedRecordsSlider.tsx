@@ -59,6 +59,9 @@ const getMatchPotm = (mItem: any) => {
   if (mItem.playerOfTheMatch && mItem.playerOfTheMatch.name) {
     return mItem.playerOfTheMatch;
   }
+  if (mItem.manOfTheMatch && typeof mItem.manOfTheMatch === 'string' && mItem.manOfTheMatch.trim() && mItem.manOfTheMatch !== 'N/A') {
+    return { name: mItem.manOfTheMatch.trim(), runs: 0, balls: 0, wickets: 0, runsConceded: 0, points: 50 };
+  }
   const statsMap: { [key: string]: { name: string; runs: number; balls: number; wickets: number; runsConceded: number } } = {};
   const getOrCreatePlayer = (name: string) => {
     const key = name.trim().toLowerCase();

@@ -266,6 +266,8 @@ export const KNOWN_DELETED_OR_AI_MATCH_IDS = [
 export function isMatchDeleted(id: string): boolean {
   if (typeof window === 'undefined' || !id) return false;
   const trimmedId = String(id).trim();
+  // Tournament synthesized matches should never be treated as deleted
+  if (trimmedId.startsWith('tour_')) return false;
   if (KNOWN_DELETED_OR_AI_MATCH_IDS.includes(trimmedId)) return true;
   const lowerId = trimmedId.toLowerCase();
   if (
@@ -301,6 +303,11 @@ export function isDemoOrAIMatch(m: any): boolean {
   if (!m) return true;
   const id = String(m.id || '').trim();
   if (!id) return true;
+
+  // Tournament matches are never AI or demo matches
+  if (m.tournamentId || (m as any).isTournamentMatch || id.startsWith('tour_') || id.includes('_match_')) {
+    return false;
+  }
 
   // Known AI / bot / demo / deleted match IDs
   if (KNOWN_DELETED_OR_AI_MATCH_IDS.includes(id)) return true;
@@ -681,6 +688,10 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
 
           // If validRemoteIds was passed (from a successful Firestore snapshot):
           if (validRemoteIds !== undefined) {
+            // Never prune or mark deleted if it is an official tournament match
+            if (item.tournamentId || (item as any).isTournamentMatch || String(item.id).startsWith('tour_')) {
+              return true;
+            }
             if (!validRemoteIds.has(item.id)) {
               // Check if it is a brand-new purely offline local draft (< 60s old and never synced)
               const ageMs = Date.now() - (item.updatedAt || item.createdAt || 0);

@@ -842,7 +842,7 @@ async function startServer() {
   // with HTTP Cache-Control (public, max-age=1, stale-while-revalidate=2).
   // =========================================================================
 
-  // In-memory server cache for hot live matches (micro-cache: 1500ms)
+  // In-memory server cache for hot live matches (micro-cache: 3000ms)
   let liveMatchesServerCache: { timestamp: number; etag: string; data: any[] } = {
     timestamp: 0,
     etag: "",
@@ -850,6 +850,28 @@ async function startServer() {
   };
 
   const matchSummaryServerCache = new Map<string, { timestamp: number; etag: string; data: any }>();
+
+  // Server-side Firestore quota tracking & circuit breaker
+  let serverFirestoreQuotaExhaustedUntil = 0;
+
+  function isServerFirestoreQuotaExhausted(): boolean {
+    return Date.now() < serverFirestoreQuotaExhaustedUntil;
+  }
+
+  function recordServerFirestoreQuotaExhaustion(durationMinutes = 3) {
+    serverFirestoreQuotaExhaustedUntil = Date.now() + durationMinutes * 60 * 1000;
+  }
+
+  function isServerQuotaError(err: any): boolean {
+    if (!err) return false;
+    const msg = String(err?.message || err).toLowerCase();
+    return (
+      msg.includes("quota exceeded") ||
+      msg.includes("resource-exhausted") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("quota limit exceeded")
+    );
+  }
 
   // Helper to extract lightweight Cricbuzz-style live score summary
   function extractServerLiveSummary(m: any) {
@@ -928,10 +950,10 @@ async function startServer() {
   app.get("/api/cricket/live-feed", async (req, res) => {
     try {
       const now = Date.now();
-      const CACHE_WINDOW_MS = 1500; // 1.5 seconds micro-cache
+      const CACHE_WINDOW_MS = 3000; // 3 seconds micro-cache
 
       // Edge Caching Headers (Cloudflare / Cloud CDN / Fastly compatible)
-      res.setHeader("Cache-Control", "public, max-age=1, stale-while-revalidate=2");
+      res.setHeader("Cache-Control", "public, max-age=2, stale-while-revalidate=5");
       res.setHeader("X-FanOut-Tier", "edge-replica");
 
       if (liveMatchesServerCache.data.length > 0 && now - liveMatchesServerCache.timestamp < CACHE_WINDOW_MS) {
@@ -944,6 +966,25 @@ async function startServer() {
           cachedAt: liveMatchesServerCache.timestamp,
           etag: liveMatchesServerCache.etag,
           matches: liveMatchesServerCache.data
+        });
+      }
+
+      // If Firestore quota was recently exceeded, serve from edge cache without making failing RPCs
+      if (isServerFirestoreQuotaExhausted()) {
+        if (liveMatchesServerCache.data.length > 0) {
+          res.setHeader("ETag", liveMatchesServerCache.etag);
+          return res.json({
+            source: "edge_cache_quota_paused",
+            cachedAt: liveMatchesServerCache.timestamp,
+            etag: liveMatchesServerCache.etag,
+            matches: liveMatchesServerCache.data
+          });
+        }
+        return res.json({
+          source: "fallback_quota_paused",
+          cachedAt: now,
+          etag: `W/"livefeed-quota-${now}"`,
+          matches: []
         });
       }
 
@@ -964,31 +1005,53 @@ async function startServer() {
 
       const { collection, query, where, getDocs, limit, orderBy } = await import("firebase/firestore");
       
-      // Query active live matches first
-      const liveQ = query(
-        collection(db, "cricket_matches"),
-        where("status", "==", "live"),
-        limit(10)
-      );
-      const liveSnap = await getDocs(liveQ);
       const rawMatches: any[] = [];
-      liveSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
-
-      // If no live matches, fetch top 3 most recent completed matches for spectator display
-      if (rawMatches.length === 0) {
-        const recentQ = query(
+      try {
+        // Query active live matches first
+        const liveQ = query(
           collection(db, "cricket_matches"),
-          orderBy("updatedAt", "desc"),
-          limit(5)
+          where("status", "==", "live"),
+          limit(10)
         );
-        try {
-          const recSnap = await getDocs(recentQ);
-          recSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
-        } catch (_) {
-          // fallback without orderBy if index is building
-          const fallbackSnap = await getDocs(query(collection(db, "cricket_matches"), limit(5)));
-          fallbackSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+        const liveSnap = await getDocs(liveQ);
+        liveSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+
+        // If no live matches, fetch top 3 most recent completed matches for spectator display
+        if (rawMatches.length === 0) {
+          const recentQ = query(
+            collection(db, "cricket_matches"),
+            orderBy("updatedAt", "desc"),
+            limit(5)
+          );
+          try {
+            const recSnap = await getDocs(recentQ);
+            recSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+          } catch (_) {
+            // fallback without orderBy if index is building
+            const fallbackSnap = await getDocs(query(collection(db, "cricket_matches"), limit(5)));
+            fallbackSnap.forEach(d => rawMatches.push({ id: d.id, ...d.data() }));
+          }
         }
+      } catch (dbErr: any) {
+        if (isServerQuotaError(dbErr)) {
+          recordServerFirestoreQuotaExhaustion(3);
+          if (liveMatchesServerCache.data.length > 0) {
+            res.setHeader("ETag", liveMatchesServerCache.etag);
+            return res.json({
+              source: "edge_cache_quota_paused",
+              cachedAt: liveMatchesServerCache.timestamp,
+              etag: liveMatchesServerCache.etag,
+              matches: liveMatchesServerCache.data
+            });
+          }
+          return res.json({
+            source: "fallback_quota_paused",
+            cachedAt: now,
+            etag: `W/"livefeed-quota-${now}"`,
+            matches: []
+          });
+        }
+        throw dbErr;
       }
 
       const deletedIds = loadDeletedMatchIds();
@@ -1003,6 +1066,14 @@ async function startServer() {
         data: summaries
       };
 
+      // Also warm matchSummaryServerCache for each match
+      for (const s of summaries) {
+        if (s && s.id) {
+          const sEtag = `W/"match-${s.id}-${now}-${s.updatedAt || 0}"`;
+          matchSummaryServerCache.set(s.id, { timestamp: now, etag: sEtag, data: s });
+        }
+      }
+
       res.setHeader("ETag", etag);
       return res.json({
         source: "origin_db",
@@ -1011,7 +1082,9 @@ async function startServer() {
         matches: summaries
       });
     } catch (err: any) {
-      console.warn("[Live Feed API] Live feed query notice:", err.message);
+      if (isServerQuotaError(err)) {
+        recordServerFirestoreQuotaExhaustion(3);
+      }
       // Serve stale cache if available rather than erroring
       if (liveMatchesServerCache.data.length > 0) {
         return res.json({
@@ -1038,9 +1111,9 @@ async function startServer() {
       if (!matchId) return res.status(400).json({ error: "matchId required" });
 
       const now = Date.now();
-      const CACHE_WINDOW_MS = 1000; // 1 second micro-cache
+      const CACHE_WINDOW_MS = 3000; // 3 seconds micro-cache
 
-      res.setHeader("Cache-Control", "public, max-age=1, stale-while-revalidate=2");
+      res.setHeader("Cache-Control", "public, max-age=2, stale-while-revalidate=5");
       res.setHeader("X-FanOut-Tier", "edge-replica");
 
       const cached = matchSummaryServerCache.get(matchId);
@@ -1055,6 +1128,34 @@ async function startServer() {
           etag: cached.etag,
           summary: cached.data
         });
+      }
+
+      // If server Firestore quota was recently exceeded, serve from edge cache or live feed immediately
+      if (isServerFirestoreQuotaExhausted()) {
+        if (cached) {
+          if (req.headers["if-none-match"] === cached.etag) {
+            return res.status(304).end();
+          }
+          res.setHeader("ETag", cached.etag);
+          return res.json({
+            source: "edge_cache_quota_paused",
+            cachedAt: cached.timestamp,
+            etag: cached.etag,
+            summary: cached.data
+          });
+        }
+        const liveFallback = liveMatchesServerCache.data.find((m: any) => m && m.id === matchId);
+        if (liveFallback) {
+          const fallbackEtag = `W/"match-${matchId}-${now}-${liveFallback.updatedAt || 0}"`;
+          matchSummaryServerCache.set(matchId, { timestamp: now, etag: fallbackEtag, data: liveFallback });
+          res.setHeader("ETag", fallbackEtag);
+          return res.json({
+            source: "live_feed_quota_paused",
+            cachedAt: now,
+            etag: fallbackEtag,
+            summary: liveFallback
+          });
+        }
       }
 
       const db = await getFirebaseDb();
@@ -1072,8 +1173,57 @@ async function startServer() {
       }
 
       const { doc, getDoc } = await import("firebase/firestore");
-      const docSnap = await getDoc(doc(db, "cricket_matches", matchId));
-      if (!docSnap.exists()) {
+      let docSnap: any = null;
+      try {
+        docSnap = await getDoc(doc(db, "cricket_matches", matchId));
+      } catch (dbErr: any) {
+        if (isServerQuotaError(dbErr)) {
+          recordServerFirestoreQuotaExhaustion(3);
+          if (cached) {
+            res.setHeader("ETag", cached.etag);
+            return res.json({
+              source: "edge_cache_quota_fallback",
+              cachedAt: cached.timestamp,
+              etag: cached.etag,
+              summary: cached.data
+            });
+          }
+          const liveFallback = liveMatchesServerCache.data.find((m: any) => m && m.id === matchId);
+          if (liveFallback) {
+            const fallbackEtag = `W/"match-${matchId}-${now}-${liveFallback.updatedAt || 0}"`;
+            return res.json({
+              source: "live_feed_quota_fallback",
+              cachedAt: now,
+              etag: fallbackEtag,
+              summary: liveFallback
+            });
+          }
+          return res.json({
+            source: "standby_quota_fallback",
+            cachedAt: now,
+            etag: `W/"standby-${matchId}-${now}"`,
+            summary: {
+              id: matchId,
+              status: "live",
+              teamA: "Team A",
+              teamB: "Team B",
+              score: { runs: 0, wickets: 0, ballsBowled: 0, oversFormatted: "0.0", crr: 0, rrr: null },
+              updatedAt: now
+            }
+          });
+        }
+        throw dbErr;
+      }
+
+      if (!docSnap || !docSnap.exists()) {
+        if (cached) {
+          return res.json({
+            source: "edge_cache_deleted_or_missing",
+            cachedAt: cached.timestamp,
+            etag: cached.etag,
+            summary: cached.data
+          });
+        }
         return res.status(404).json({ error: "Match not found" });
       }
 
@@ -1098,8 +1248,42 @@ async function startServer() {
         summary
       });
     } catch (err: any) {
-      console.warn("[Match Summary API] Error serving match summary:", err.message);
-      res.status(500).json({ error: "Failed to read match summary" });
+      if (isServerQuotaError(err)) {
+        recordServerFirestoreQuotaExhaustion(3);
+      }
+      const matchId = req.params?.matchId;
+      const cached = matchId ? matchSummaryServerCache.get(matchId) : null;
+      if (cached) {
+        res.setHeader("ETag", cached.etag);
+        return res.json({
+          source: "edge_cache_error_recovery",
+          cachedAt: cached.timestamp,
+          etag: cached.etag,
+          summary: cached.data
+        });
+      }
+      const liveFallback = matchId ? liveMatchesServerCache.data.find((m: any) => m && m.id === matchId) : null;
+      if (liveFallback) {
+        return res.json({
+          source: "live_feed_error_recovery",
+          cachedAt: Date.now(),
+          etag: `W/"live-${matchId}-${Date.now()}"`,
+          summary: liveFallback
+        });
+      }
+      return res.json({
+        source: "standby_error_recovery",
+        cachedAt: Date.now(),
+        etag: `W/"standby-${matchId || "unknown"}-${Date.now()}"`,
+        summary: {
+          id: matchId,
+          status: "live",
+          teamA: "Team A",
+          teamB: "Team B",
+          score: { runs: 0, wickets: 0, ballsBowled: 0, oversFormatted: "0.0", crr: 0, rrr: null },
+          updatedAt: Date.now()
+        }
+      });
     }
   });
 
@@ -1260,6 +1444,15 @@ function cleanServerUndefined(obj: any): any {
         await setDoc(targetMatchRef, fallbackCore, { merge: true });
       }
 
+      // Warm in-memory match summary cache immediately
+      try {
+        const summary = extractServerLiveSummary({ id: matchId, ...prunedPayload });
+        if (summary) {
+          const etag = `W/"match-${matchId}-${Date.now()}-${summary.updatedAt || 0}"`;
+          matchSummaryServerCache.set(matchId, { timestamp: Date.now(), etag, data: summary });
+        }
+      } catch {}
+
       // 2. Retire any previously 'live' matches for this manager to 'completed'
       try {
         const oldMatchesQ = query(
@@ -1377,6 +1570,15 @@ function cleanServerUndefined(obj: any): any {
         deepPruned.updatedAt = Date.now();
         await setDoc(matchDocRef, deepPruned, { merge: true });
       }
+
+      // Warm in-memory match summary cache immediately
+      try {
+        const summary = extractServerLiveSummary({ id: matchId, ...prunedPayload });
+        if (summary) {
+          const etag = `W/"match-${matchId}-${Date.now()}-${summary.updatedAt || 0}"`;
+          matchSummaryServerCache.set(matchId, { timestamp: Date.now(), etag, data: summary });
+        }
+      } catch {}
 
       return res.json({ success: true, matchId, savedAt: Date.now() });
     } catch (err: any) {

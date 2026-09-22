@@ -26,6 +26,7 @@ export interface StandingsTeamStats {
   streak?: string[]; // e.g. ['W', 'W', 'L', 'W']
   qualificationStatus?: 'qualified' | 'eliminated' | 'contention' | 'champion' | 'runner_up';
   formGuide?: ('W' | 'L' | 'T' | 'NR')[];
+  matchHistory?: { matchId: string; result: 'W' | 'L' | 'T' | 'NR'; opponentName: string; scoreSummary: string }[];
 }
 
 export interface MatchScoreInput {
@@ -40,8 +41,9 @@ export interface MatchScoreInput {
   oversA: string | number; // e.g. "20" or "19.4" or 20
   oversB: string | number; // e.g. "20" or "20.0"
   winnerId: string | null;
+  winner?: string | null;
   winReason?: string;
-  stage?: string; // 'League', 'Quarter-Final', 'Semi-Final', 'Final'
+  stage?: string; // 'League', 'League Stage', 'Group Stage', 'Group A', 'Quarter-Final', 'Semi-Final', 'Final'
   allOutA?: boolean; // if team was bowled all out, full quota of overs is applied
   allOutB?: boolean;
 }
@@ -184,14 +186,56 @@ export function calculateTournamentStandings(
     };
   });
 
-  // Filter completed league matches
+  // Helper to determine if a stage is a knockout / playoff stage that should NOT be part of group/league standings
+  const isKnockoutStage = (stage?: string) => {
+    if (!stage) return false;
+    const s = stage.toLowerCase().trim();
+    return (
+      s.includes('semi-final') ||
+      s.includes('semifinal') ||
+      s.includes('semi final') ||
+      s.includes('quarter-final') ||
+      s.includes('quarterfinal') ||
+      s.includes('quarter final') ||
+      s.includes('eliminator') ||
+      s.includes('elimination bracket') ||
+      s.includes('qualifier 1') ||
+      s.includes('qualifier 2') ||
+      s.includes('playoff') ||
+      s.includes('knockout') ||
+      s === 'final' ||
+      s === 'finals' ||
+      s.endsWith(' final')
+    );
+  };
+
+  // Helper to determine if a match has finished
+  const isMatchFinished = (m: MatchScoreInput) => {
+    if (m.status === 'completed') return true;
+    if (m.winnerId && m.winnerId !== 'scheduled' && m.winnerId !== '') return true;
+    if (m.winner && m.winner !== 'scheduled' && m.winner !== '') return true;
+    if (m.winReason && !m.winReason.toLowerCase().includes('scheduled')) return true;
+    const sA = parseScoreDetails(m.scoreA);
+    const sB = parseScoreDetails(m.scoreB);
+    if (sA.runs > 0 && sB.runs > 0 && (sA.isAllOut || sB.isAllOut || m.oversA || m.oversB)) return true;
+    return false;
+  };
+
+  // Filter completed league/group stage matches (includes 'League', 'League Stage', 'Group Stage', 'Group A', 'Round 1', etc.)
   const completedLeagueMatches = matches.filter(
-    m => m.status === 'completed' && (!m.stage || m.stage.toLowerCase() === 'league')
+    m => isMatchFinished(m) && !isKnockoutStage(m.stage)
   );
 
   completedLeagueMatches.forEach(m => {
-    const tA = table[m.teamAId];
-    const tB = table[m.teamBId];
+    // Lookup teams by ID or by name (case-insensitive) for bulletproof matching
+    const tA = table[m.teamAId] || Object.values(table).find(t => 
+      t.name.toLowerCase().trim() === m.teamAName?.toLowerCase().trim() ||
+      (t.shortName && m.teamAName && t.shortName.toLowerCase().trim() === m.teamAName?.toLowerCase().trim())
+    );
+    const tB = table[m.teamBId] || Object.values(table).find(t => 
+      t.name.toLowerCase().trim() === m.teamBName?.toLowerCase().trim() ||
+      (t.shortName && m.teamBName && t.shortName.toLowerCase().trim() === m.teamBName?.toLowerCase().trim())
+    );
 
     if (!tA || !tB) return;
 
@@ -232,7 +276,43 @@ export function calculateTournamentStandings(
 
     // Win/Loss/Tie resolution
     const isNoResult = m.winReason?.toLowerCase().includes('no result') || m.winReason?.toLowerCase().includes('abandoned');
+    const isExplicitTie = m.winnerId === 'tie' || 
+      m.winner?.toLowerCase() === 'tie' || 
+      m.winReason?.toLowerCase().includes('tie') || 
+      (!m.winnerId && !m.winner && runsA === runsB && runsA > 0);
     
+    tA.matchHistory = tA.matchHistory || [];
+    tB.matchHistory = tB.matchHistory || [];
+
+    const winnerIdent = (m.winner || '').toLowerCase().trim();
+    const winnerIdVal = m.winnerId || '';
+    const normAName = (m.teamAName || tA.name || '').toLowerCase().trim();
+    const normBName = (m.teamBName || tB.name || '').toLowerCase().trim();
+
+    const isWinnerA = !isNoResult && !isExplicitTie && (
+      winnerIdVal === tA.id || 
+      winnerIdVal === m.teamAId ||
+      winnerIdent === tA.name.toLowerCase().trim() ||
+      winnerIdent === normAName ||
+      (m.winReason && (
+        m.winReason.toLowerCase().includes(tA.name.toLowerCase().trim()) || 
+        m.winReason.toLowerCase().includes(normAName)
+      ) && !m.winReason.toLowerCase().includes(tB.name.toLowerCase().trim()) && !m.winReason.toLowerCase().includes(normBName)) ||
+      (!winnerIdVal && !winnerIdent && runsA > runsB)
+    );
+
+    const isWinnerB = !isNoResult && !isExplicitTie && !isWinnerA && (
+      winnerIdVal === tB.id || 
+      winnerIdVal === m.teamBId ||
+      winnerIdent === tB.name.toLowerCase().trim() ||
+      winnerIdent === normBName ||
+      (m.winReason && (
+        m.winReason.toLowerCase().includes(tB.name.toLowerCase().trim()) || 
+        m.winReason.toLowerCase().includes(normBName)
+      ) && !m.winReason.toLowerCase().includes(tA.name.toLowerCase().trim()) && !m.winReason.toLowerCase().includes(normAName)) ||
+      (!winnerIdVal && !winnerIdent && runsB > runsA)
+    );
+
     if (isNoResult) {
       tA.noResult += 1;
       tB.noResult += 1;
@@ -242,7 +322,9 @@ export function calculateTournamentStandings(
       tB.streak?.push('NR');
       tA.formGuide?.push('NR');
       tB.formGuide?.push('NR');
-    } else if (m.winnerId === m.teamAId || (!m.winnerId && runsA > runsB)) {
+      tA.matchHistory.push({ matchId: m.id, result: 'NR', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
+      tB.matchHistory.push({ matchId: m.id, result: 'NR', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
+    } else if (isWinnerA) {
       tA.won += 1;
       tA.points += mergedRules.pointsForWin;
       tB.lost += 1;
@@ -251,7 +333,9 @@ export function calculateTournamentStandings(
       tB.streak?.push('L');
       tA.formGuide?.push('W');
       tB.formGuide?.push('L');
-    } else if (m.winnerId === m.teamBId || (!m.winnerId && runsB > runsA)) {
+      tA.matchHistory.push({ matchId: m.id, result: 'W', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
+      tB.matchHistory.push({ matchId: m.id, result: 'L', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
+    } else if (isWinnerB) {
       tB.won += 1;
       tB.points += mergedRules.pointsForWin;
       tA.lost += 1;
@@ -260,6 +344,8 @@ export function calculateTournamentStandings(
       tA.streak?.push('L');
       tB.formGuide?.push('W');
       tA.formGuide?.push('L');
+      tB.matchHistory.push({ matchId: m.id, result: 'W', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
+      tA.matchHistory.push({ matchId: m.id, result: 'L', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
     } else {
       // Tie
       tA.tied += 1;
@@ -270,6 +356,8 @@ export function calculateTournamentStandings(
       tB.streak?.push('T');
       tA.formGuide?.push('T');
       tB.formGuide?.push('T');
+      tA.matchHistory.push({ matchId: m.id, result: 'T', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
+      tB.matchHistory.push({ matchId: m.id, result: 'T', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
     }
   });
 

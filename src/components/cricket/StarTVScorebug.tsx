@@ -307,24 +307,67 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
     return thisOverBalls.map(item => {
       if (typeof item === 'string') {
         let type: StarTVBall['type'] = 'dot';
-        const lower = item.toLowerCase();
-        if (item === '4') type = 'four';
-        else if (item === '6') type = 'six';
-        else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(item) || lower === 'ex') type = 'extra';
-        else if (item === 'W' || /^w$/i.test(item) || /^w\+/i.test(item) || item.toUpperCase() === 'OUT') type = 'wicket';
-        else if (['1', '2', '3', '5'].includes(item) || parseInt(item, 10) > 0) type = 'run';
+        const lower = item.toLowerCase().trim();
+        if (
+          item === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
+          lower.includes('षटकार') || lower.includes('छक्का') || lower.includes('६')
+        ) {
+          type = 'six';
+          return { label: '6', type };
+        } else if (
+          item === '4' || lower === '4s' || lower === 'four' ||
+          lower.includes('चौकार') || lower.includes('चौका') || lower.includes('४')
+        ) {
+          type = 'four';
+          return { label: '4', type };
+        } else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(item) || lower === 'ex') {
+          type = 'extra';
+        } else if (item === 'W' || /^w$/i.test(item) || /^w\+/i.test(item) || item.toUpperCase() === 'OUT') {
+          type = 'wicket';
+        } else if (['1', '2', '3', '5'].includes(item) || parseInt(item, 10) > 0) {
+          type = 'run';
+        }
         return { label: item, type };
       }
-      const label = item.label || '';
+      let label = (item.label || '').trim();
       let type = item.type;
       const lower = label.toLowerCase();
-      if (!type) {
-        if (label === '4') type = 'four';
-        else if (label === '6') type = 'six';
-        else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(label) || lower === 'ex') type = 'extra';
-        else if (label === 'W' || /^w$/i.test(label) || /^w\+/i.test(label) || label.toUpperCase() === 'OUT') type = 'wicket';
-        else if (['1', '2', '3', '5'].includes(label) || parseInt(label, 10) > 0) type = 'run';
-        else type = 'dot';
+      const directScore = String((item as any).ballScore || '').trim();
+      const runsOffBat = Number((item as any).runsOffBat);
+      const runs = Number((item as any).runs);
+
+      // Definitively detect Sixes first
+      if (
+        label === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
+        directScore === '6' || runsOffBat === 6 || runs === 6 ||
+        lower.includes('षटकार') || lower.includes('छक्का') || lower.includes('६')
+      ) {
+        label = '6';
+        type = 'six';
+      }
+      // Definitively detect Fours (only if not a six)
+      else if (
+        label === '4' || lower === '4s' || lower === 'four' ||
+        directScore === '4' || runsOffBat === 4 || runs === 4 ||
+        lower.includes('चौकार') || lower.includes('चौका') || lower.includes('४')
+      ) {
+        label = '4';
+        type = 'four';
+      }
+      // Resolve Wickets
+      else if (label === 'W' || /^w$/i.test(label) || /^w\+/i.test(label) || label.toUpperCase() === 'OUT' || type === 'wicket') {
+        label = 'W';
+        type = 'wicket';
+      }
+      // Resolve other types if unset
+      else if (!type) {
+        if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(label) || lower === 'ex') {
+          type = 'extra';
+        } else if (['1', '2', '3', '5'].includes(label) || parseInt(label, 10) > 0) {
+          type = 'run';
+        } else {
+          type = 'dot';
+        }
       }
       return { ...item, type, label };
     });
@@ -476,7 +519,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
     return ballsInOver >= 6;
   }, [normalizedBalls.length]);
 
-  const showRecap = manualRecapToggle || isOverComplete;
+  const showRecap = manualRecapToggle;
 
   const overBreakSummary = useMemo(() => {
     let runsInOver = 0;
@@ -487,14 +530,21 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
 
     normalizedBalls.forEach(b => {
       const lbl = b.label.toLowerCase();
-      if (b.type === 'wicket' || lbl === 'w') {
+      const directScore = String((b as any).ballScore || '').trim();
+      const runsOffBat = Number((b as any).runsOffBat);
+
+      if (b.type === 'six' || lbl === '6' || directScore === '6' || runsOffBat === 6) {
+        sixes += 1;
+        runsInOver += 6;
+      } else if (b.type === 'four' || lbl === '4' || directScore === '4' || runsOffBat === 4) {
+        fours += 1;
+        runsInOver += 4;
+      } else if (b.type === 'wicket' || lbl === 'w') {
         wickets += 1;
-        // Clean wicket with 0 runs is a dot ball in bowling analysis
         dots += 1;
-      } else if (b.type === 'six' || lbl === '6') { sixes += 1; runsInOver += 6; }
-      else if (b.type === 'four' || lbl === '4') { fours += 1; runsInOver += 4; }
-      else if (b.type === 'dot' || lbl === '0' || lbl === '•' || lbl === 'dot') dots += 1;
-      else {
+      } else if (b.type === 'dot' || lbl === '0' || lbl === '•' || lbl === 'dot') {
+        dots += 1;
+      } else {
         const digits = lbl.match(/\d+/);
         if (digits) runsInOver += parseInt(digits[0], 10);
       }
@@ -1543,11 +1593,11 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                                 ? 'w-auto min-w-[28px] sm:min-w-[32px] px-1 h-7.5 sm:h-8.5 md:h-9 text-[9.5px] sm:text-[10.5px] tracking-tight'
                                 : 'w-7.5 h-7.5 sm:w-8.5 sm:h-8.5 md:w-9 md:h-9 text-xs sm:text-sm'
                             } ${
-                              ball.type === 'four'
-                                ? 'bg-sky-500 text-white border-sky-300 shadow-[0_0_10px_#0284c7]'
-                                : ball.type === 'six'
+                              ball.type === 'six' || ball.label === '6'
                                 ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_12px_#f59e0b]'
-                                : ball.type === 'wicket'
+                                : ball.type === 'four' || ball.label === '4'
+                                ? 'bg-sky-500 text-white border-sky-300 shadow-[0_0_10px_#0284c7]'
+                                : ball.type === 'wicket' || ball.label === 'W'
                                 ? 'bg-rose-600 text-white border-rose-300 shadow-[0_0_12px_#e11d48]'
                                 : ball.label.toLowerCase().includes('wd')
                                 ? 'bg-orange-500 text-white border-orange-300 shadow-sm'

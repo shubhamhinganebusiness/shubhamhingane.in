@@ -413,31 +413,6 @@ export function generateLocalizedCricketCommentary(
     return appendWinProb(text);
   }
 
-  if (val === 4 || type === 'boundary' && val !== 6) {
-    const raw = pickRandom(GULLY_COMMENTARY_POOLS.fours[targetLang]);
-    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
-  }
-
-  if (val === 6) {
-    const raw = pickRandom(GULLY_COMMENTARY_POOLS.sixes[targetLang]);
-    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
-  }
-
-  if (val === 1) {
-    const raw = pickRandom(GULLY_COMMENTARY_POOLS.singles[targetLang]);
-    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
-  }
-
-  if (val === 2) {
-    const raw = pickRandom(GULLY_COMMENTARY_POOLS.doubles[targetLang]);
-    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
-  }
-
-  if (val === 3) {
-    const raw = pickRandom(GULLY_COMMENTARY_POOLS.threes[targetLang]);
-    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
-  }
-
   if (type === 'extra' || options?.extraType) {
     const isLegBye = options?.extraType === 'legbye' || options?.extraType === 'lb' || (type === 'extra' && options?.extraType?.includes('leg'));
     if (isLegBye) {
@@ -520,6 +495,31 @@ export function generateLocalizedCricketCommentary(
       return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
     }
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.extras.wide[targetLang]);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+  }
+
+  if (val === 4 || type === 'boundary' && val !== 6) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.fours[targetLang]);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+  }
+
+  if (val === 6) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.sixes[targetLang]);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+  }
+
+  if (val === 1) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.singles[targetLang]);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+  }
+
+  if (val === 2) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.doubles[targetLang]);
+    return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
+  }
+
+  if (val === 3) {
+    const raw = pickRandom(GULLY_COMMENTARY_POOLS.threes[targetLang]);
     return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
 
@@ -1509,6 +1509,130 @@ export function createMatchStartCommentary(
     description: en,
     type: 'milestone',
     announcementType: 'match_start',
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates initial match start commentary announcing tournament prizes and major sponsors
+ */
+export function createTournamentSponsorsMatchStartCommentary(
+  prizes: any[],
+  tournamentName?: string | null
+): CommentaryWithTranslations {
+  const tHdr = tournamentName ? `🏆 [${tournamentName}] ` : '🏆 ';
+  const topPrizes = (prizes || []).slice(0, 3);
+  
+  const sponsorList = topPrizes
+    .map((p) => {
+      const sp = p.personName || p.sponsorName || '';
+      const des = p.personDesignation || p.sponsorDesignation || '';
+      const amt = p.amount ? ` (${p.currency || p.currencySymbol || '₹'}${p.amount})` : '';
+      return `${p.title}${amt}: ${sp}${des ? ` [${des}]` : ''}`;
+    })
+    .filter(Boolean)
+    .join(' | ');
+
+  const en = `${tHdr}🎁 TOURNAMENT PRIZES & SPONSORS: ${sponsorList || 'Grand cash prizes & prestigious trophies at stake!'} All best wishes to competing teams!`;
+  const hi = `${tHdr}🎁 टूर्नामेंट पुरस्कार व प्रायोजक: ${sponsorList || 'भव्य नकद पुरस्कार व प्रतिष्ठित ट्रॉफियां दांव पर!'} सभी टीमों को शुभकामनाएं!`;
+  const mr = `${tHdr}🎁 स्पर्धा पारितोषिके व प्रायोजक सौजन्य: ${sponsorList || 'भव्य रोख बक्षिसे व मानाचे चषक!'} सर्व खेळाडूंना हार्दिक शुभेच्छा!`;
+
+  return {
+    id: `comm-tourn-sponsors-${Date.now()}`,
+    overBall: '0.0',
+    description: en,
+    type: 'milestone',
+    announcementType: 'sponsor_announcement',
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates an over completion commentary record with rotating prize sponsor acknowledgement
+ */
+export function createOverSponsorCommentary(
+  overNo: number,
+  prize: any,
+  overBallStr: string
+): CommentaryWithTranslations {
+  const pTitle = prize?.title || 'Tournament Award';
+  const curr = prize?.currencySymbol || prize?.currency || '₹';
+  const pAmt = prize?.amount ? `${curr}${prize.amount}` : '';
+  const spName = prize?.personName || prize?.sponsorName || 'Tournament Patron';
+  const spDes = prize?.personDesignation || prize?.sponsorDesignation || '';
+  const spText = spDes ? `${spName} (${spDes})` : spName;
+
+  const en = `🤝 OVER ${overNo} SPONSORED: ${pTitle} ${pAmt ? `[Cash: ${pAmt}]` : ''} proudly sponsored by ${spText}.`;
+  const hi = `🤝 ओवर ${overNo} प्रायोजक: ${pTitle} ${pAmt ? `[नकद राशि: ${pAmt}]` : ''} - सौजन्य: ${spText}.`;
+  const mr = `🤝 षटक क्रमांक ${overNo} बक्षीस सौजन्य: ${pTitle} ${pAmt ? `[रोख: ${pAmt}]` : ''} - सौजन्य: ${spText}.`;
+
+  return {
+    id: `comm-over-sponsor-${overNo}-${Date.now()}`,
+    overBall: overBallStr,
+    description: en,
+    type: 'milestone',
+    announcementType: 'over_sponsor',
+    soundWave: false,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates an Innings Break commentary record acknowledging tournament sponsors & prizes
+ */
+export function createInningsBreakSponsorCommentary(
+  prizes: any[],
+  overBallStr: string,
+  tournamentName?: string | null
+): CommentaryWithTranslations {
+  const tHdr = tournamentName ? `🏆 [${tournamentName}] ` : '🏆 ';
+  const activeCount = prizes?.length || 0;
+  const samplePrize = prizes?.[0];
+  const pTitle = samplePrize?.title || 'Grand Champions Cup';
+  const spName = samplePrize?.personName || samplePrize?.sponsorName || 'Patrons';
+
+  const en = `${tHdr}☕ INNINGS BREAK SPONSOR SPECIAL: A big salute to our generous sponsors! Featured: ${pTitle} sponsored by ${spName}. Total ${activeCount} tournament awards to be presented!`;
+  const hi = `${tHdr}☕ इनिंग्स ब्रेक प्रायोजक विशेष: हमारे सभी दानवीर प्रायोजकों का हार्दिक आभार! मुख्य आकर्षण: ${pTitle} (प्रायोजक: ${spName}). कुल ${activeCount} भव्य पुरस्कार प्रदान किए जाएंगे!`;
+  const mr = `${tHdr}☕ डावातील मध्यंतर (Innings Break) विशेष: सर्व सन्माननीय बक्षीस दात्यांचे मनःपूर्वक आभार! मुख्य मानकरी: ${pTitle} (सौजन्य: ${spName}). एकूण ${activeCount} मानाची पारितोषिके प्रदान केली जातील!`;
+
+  return {
+    id: `comm-inn-break-sponsor-${Date.now()}`,
+    overBall: overBallStr,
+    description: en,
+    type: 'milestone',
+    announcementType: 'innings_break_sponsor',
+    soundWave: true,
+    translations: { en, hi, mr }
+  };
+}
+
+/**
+ * Generates Match Complete commentary acknowledging final winners, sponsors, and presentation
+ */
+export function createMatchCompleteSponsorCommentary(
+  prizes: any[],
+  overBallStr: string,
+  winner?: string | null,
+  tournamentName?: string | null
+): CommentaryWithTranslations {
+  const winTeam = winner && winner !== 'Tie' ? winner : 'The winners';
+  const tHdr = tournamentName ? `🏆 [${tournamentName}] ` : '🏆 ';
+  const topPrize = prizes?.[0];
+  const topPrizeTitle = topPrize?.title || '1st Prize / Champion Trophy';
+  const topSponsor = topPrize?.personName || topPrize?.sponsorName || 'Tournament Committee';
+
+  const en = `${tHdr}🎉 MATCH FINALE & AWARDS CEREMONY: Congratulations to ${winTeam}! The grand presentation ceremony is about to begin. ${topPrizeTitle} will be presented courtesy of ${topSponsor}.`;
+  const hi = `${tHdr}🎉 मैच समापन एवं पुरस्कार वितरण: ${winTeam} को हार्दिक बधाई! भव्य पुरस्कार वितरण समारोह शुरू होने जा रहा है. ${topPrizeTitle} - सौजन्य: ${topSponsor}.`;
+  const mr = `${tHdr}🎉 सामना समाप्ती व भव्य बक्षीस वितरण: ${winTeam} संघाचे अभिनंदन! भव्य बक्षीस वितरण सोहळा सुरू होत आहे. ${topPrizeTitle} - सौजन्य: ${topSponsor}.`;
+
+  return {
+    id: `comm-match-complete-sponsor-${Date.now()}`,
+    overBall: overBallStr,
+    description: en,
+    type: 'milestone',
+    announcementType: 'match_complete_sponsor',
     soundWave: true,
     translations: { en, hi, mr }
   };
