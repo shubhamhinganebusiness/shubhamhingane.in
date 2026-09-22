@@ -2011,6 +2011,9 @@ export const SpectatorScoreboardSection = ({
     const initialMatch = getLocalMatchById(targetMatchId) || (allMatches || []).find(m => m.id === targetMatchId) || getActiveMatch() || (!homepageMode ? getAnyActiveOrRecentMatch() : null);
     if (initialMatch && !isMatchDeleted(initialMatch.id) && initialMatch.status !== 'deleted' && !(initialMatch as any).isDeleted) {
       setSelectedMatch(initialMatch);
+      if (initialMatch.status === 'completed') {
+        setActiveTab('scorecard');
+      }
     }
 
     setConnectionStatus('reconnecting');
@@ -2039,6 +2042,9 @@ export const SpectatorScoreboardSection = ({
           }
         }
         setSelectedMatch(m);
+        if (m.status === 'completed') {
+          setActiveTab('scorecard');
+        }
       } else {
         // Document does not exist in Firestore snapshot (e.g. offline match or local storage match).
         // Check local storage or existing matches before clearing - DO NOT call markMatchDeleted!
@@ -2046,6 +2052,9 @@ export const SpectatorScoreboardSection = ({
         if (fallback && !isMatchDeleted(fallback.id) && fallback.status !== 'deleted' && !(fallback as any).isDeleted) {
           unmarkMatchDeleted(fallback.id);
           setSelectedMatch(fallback);
+          if (fallback.status === 'completed') {
+            setActiveTab('scorecard');
+          }
         }
       }
     }, (error) => {
@@ -2054,6 +2063,9 @@ export const SpectatorScoreboardSection = ({
       if (localFallback && !isMatchDeleted(localFallback.id) && !(localFallback as any).isDeleted && localFallback.status !== 'deleted') {
         unmarkMatchDeleted(localFallback.id);
         setSelectedMatch(localFallback);
+        if (localFallback.status === 'completed') {
+          setActiveTab('scorecard');
+        }
       }
     });
 
@@ -2143,7 +2155,7 @@ export const SpectatorScoreboardSection = ({
         }
 
         // Update active striker and bowler if present in edge payload
-        if (summary.striker && Array.isArray(currentInnings.batsmen) && currentInnings.batsmen.length > 0) {
+        if (summary.striker && currentInnings && Array.isArray(currentInnings.batsmen) && currentInnings.batsmen.length > 0) {
           const strikerIdx = currentInnings.strikerIndex ?? 0;
           if (currentInnings.batsmen[strikerIdx]) {
             currentInnings.batsmen[strikerIdx].runs = summary.striker.runs;
@@ -2152,7 +2164,7 @@ export const SpectatorScoreboardSection = ({
             currentInnings.batsmen[strikerIdx].sixes = summary.striker.sixes;
           }
         }
-        if (summary.currentBowler && Array.isArray(currentInnings.bowlers) && currentInnings.bowlers.length > 0) {
+        if (summary.currentBowler && currentInnings && Array.isArray(currentInnings.bowlers) && currentInnings.bowlers.length > 0) {
           const bowlerIdx = currentInnings.currentBowlerIndex ?? 0;
           if (currentInnings.bowlers[bowlerIdx]) {
             currentInnings.bowlers[bowlerIdx].runsConceded = summary.currentBowler.runsConceded;
@@ -2351,14 +2363,40 @@ export const SpectatorScoreboardSection = ({
 
   const currentInnings = useMemo(() => {
     if (!selectedMatch) return null;
-    return selectedMatch.currentInningsNum === 1 ? selectedMatch.innings1 : (selectedMatch.innings2 || selectedMatch.innings1);
+    let inn = selectedMatch.currentInningsNum === 1 
+      ? (selectedMatch.innings1 || selectedMatch.innings2) 
+      : (selectedMatch.innings2 || selectedMatch.innings1);
+    if (!inn) {
+      inn = selectedMatch.innings1 || selectedMatch.innings2 || null;
+    }
+    if (!inn) {
+      inn = {
+        battingTeam: selectedMatch.teamA || 'Team 1',
+        bowlingTeam: selectedMatch.teamB || 'Team 2',
+        runs: 0,
+        wickets: 0,
+        ballsBowled: 0,
+        batsmen: [],
+        bowlers: [],
+        strikerIndex: 0,
+        nonStrikerIndex: 1,
+        currentBowlerIndex: 0,
+        fallOfWickets: [],
+        commentaryList: [],
+        history: [],
+        recentBalls: []
+      } as any;
+    }
+    return inn;
   }, [selectedMatch]);
 
   const activeSpotlight = useMemo(() => {
     if (!currentInnings) return null;
-    const striker = currentInnings.batsmen?.[currentInnings.strikerIndex];
-    const nonStriker = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
-    const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings.bowlers?.find(b => b.isCurrent);
+    const strikerIdx = currentInnings.strikerIndex ?? 0;
+    const nonStrikerIdx = currentInnings.nonStrikerIndex ?? 1;
+    const striker = currentInnings.batsmen?.[strikerIdx] || null;
+    const nonStriker = currentInnings.batsmen?.[nonStrikerIdx] || null;
+    const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex ?? 0] || currentInnings.bowlers?.find(b => b.isCurrent) || null;
 
     const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
     const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
@@ -2696,6 +2734,9 @@ export const SpectatorScoreboardSection = ({
     const immediate = allMatches.find(m => m.id === id) || getLocalMatchById(id) || getAnyActiveOrRecentMatch();
     if (immediate) {
       setSelectedMatch(immediate);
+      if (immediate.status === 'completed') {
+        setActiveTab('scorecard');
+      }
     }
     const updated = new URLSearchParams(searchParams);
     updated.set('matchId', id);
@@ -3476,7 +3517,8 @@ export const SpectatorScoreboardSection = ({
                             let activeStrikerName = '';
                             let activeBowlerName = '';
                             if (currentInnings) {
-                              const activeBatsman = currentInnings.batsmen?.find((b, idx) => idx === currentInnings.strikerIndex);
+                              const strikerIdx = currentInnings.strikerIndex ?? 0;
+                              const activeBatsman = currentInnings.batsmen?.find((b, idx) => idx === strikerIdx);
                               if (activeBatsman) {
                                 activeStrikerName = `${activeBatsman.name} (${activeBatsman.runs}* off ${activeBatsman.balls})`;
                               } else {
@@ -3656,9 +3698,11 @@ export const SpectatorScoreboardSection = ({
                                   {/* Ongoing Striker / Bowler mini scoreboard row */}
                                   {(() => {
                                     if (!currentInnings) return null;
-                                    const striker = currentInnings.batsmen?.[currentInnings.strikerIndex];
-                                    const nonStriker = currentInnings.batsmen?.[currentInnings.nonStrikerIndex];
-                                    const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex] || currentInnings.bowlers?.find(b => b.isCurrent);
+                                    const strikerIdx = currentInnings.strikerIndex ?? 0;
+                                    const nonStrikerIdx = currentInnings.nonStrikerIndex ?? 1;
+                                    const striker = currentInnings.batsmen?.[strikerIdx] || null;
+                                    const nonStriker = currentInnings.batsmen?.[nonStrikerIdx] || null;
+                                    const bowler = currentInnings.bowlers?.[currentInnings.currentBowlerIndex ?? 0] || currentInnings.bowlers?.find(b => b.isCurrent) || null;
 
                                     const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
                                     const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
@@ -5319,8 +5363,8 @@ export const SpectatorScoreboardSection = ({
                         </div>
                         
                         <div className="space-y-4">
-                          {[currentInnings.strikerIndex, currentInnings.nonStrikerIndex].map((idx, index) => {
-                            const bat = currentInnings.batsmen[idx];
+                          {[(currentInnings?.strikerIndex ?? 0), (currentInnings?.nonStrikerIndex ?? 1)].map((idx, index) => {
+                            const bat = currentInnings?.batsmen?.[idx];
                             if (!bat) return (
                               <div key={index} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/40 border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
                                 Batsman position {index === 0 ? "Striker" : "Non-Striker"} not set
@@ -5431,14 +5475,17 @@ export const SpectatorScoreboardSection = ({
                         <div>
                           <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest block mb-3">Live Active Partnership</span>
                           {(() => {
-                            const fows = currentInnings.fallOfWickets || [];
+                            const fows = currentInnings?.fallOfWickets || [];
                             const lastFow = fows.length > 0 
                               ? fows[fows.length - 1].score 
                               : 0;
-                            const runs = Math.max(0, currentInnings.runs - lastFow);
+                            const curRuns = currentInnings?.runs || 0;
+                            const runs = Math.max(0, curRuns - lastFow);
                             
-                            const b1Balls = currentInnings.batsmen?.[currentInnings.strikerIndex]?.balls || 0;
-                            const b2Balls = currentInnings.batsmen?.[currentInnings.nonStrikerIndex]?.balls || 0;
+                            const sIdx = currentInnings?.strikerIndex ?? 0;
+                            const nsIdx = currentInnings?.nonStrikerIndex ?? 1;
+                            const b1Balls = currentInnings?.batsmen?.[sIdx]?.balls || 0;
+                            const b2Balls = currentInnings?.batsmen?.[nsIdx]?.balls || 0;
                             const balls = b1Balls + b2Balls;
                             const rate = balls > 0 ? ((runs / balls) * 6).toFixed(2) : '0.00';
                             
@@ -5457,7 +5504,7 @@ export const SpectatorScoreboardSection = ({
                           })()}
                         </div>
                         <div className="pt-3 border-t border-slate-50 dark:border-slate-800 text-[9px] font-black text-emerald-500 tracking-wide uppercase mt-4">
-                          Current Wicket Stand: #{(currentInnings.fallOfWickets?.length || 0) + 1}
+                          Current Wicket Stand: #{(currentInnings?.fallOfWickets?.length || 0) + 1}
                         </div>
                       </div>
 
@@ -5468,14 +5515,16 @@ export const SpectatorScoreboardSection = ({
                           {(() => {
                             // Compute boundary percentage of total runs
                             let boundaryRuns = 0;
-                            currentInnings.batsmen.forEach(b => {
+                            (currentInnings?.batsmen || []).forEach(b => {
                               boundaryRuns += (b.fours * 4) + (b.sixes * 6);
                             });
-                            const boundaryRatio = currentInnings.runs > 0 
-                              ? Math.min(100, Math.round((boundaryRuns / currentInnings.runs) * 100)) 
+                            const totalR = currentInnings?.runs || 0;
+                            const totalB = currentInnings?.ballsBowled || 0;
+                            const boundaryRatio = totalR > 0 
+                              ? Math.min(100, Math.round((boundaryRuns / totalR) * 100)) 
                               : 0;
-                            const strikeRateAvg = currentInnings.ballsBowled > 0 
-                              ? ((currentInnings.runs / currentInnings.ballsBowled) * 100).toFixed(0) 
+                            const strikeRateAvg = totalB > 0 
+                              ? ((totalR / totalB) * 100).toFixed(0) 
                               : '0';
 
                             return (
@@ -5515,8 +5564,10 @@ export const SpectatorScoreboardSection = ({
                           {selectedMatch.currentInningsNum === 2 && selectedMatch.targetRuns ? (
                             (() => {
                               const totalChaseBalls = selectedMatch.oversLimit * 6;
-                              const ballsRemaining = Math.max(0, totalChaseBalls - currentInnings.ballsBowled);
-                              const runsRequired = Math.max(0, selectedMatch.targetRuns - currentInnings.runs);
+                              const bBowled = currentInnings?.ballsBowled || 0;
+                              const cRuns = currentInnings?.runs || 0;
+                              const ballsRemaining = Math.max(0, totalChaseBalls - bBowled);
+                              const runsRequired = Math.max(0, selectedMatch.targetRuns - cRuns);
                               const rrr = ballsRemaining > 0 ? ((runsRequired / ballsRemaining) * 6).toFixed(2) : '0.00';
                               const rawProgress = totalChaseBalls > 0 ? ((totalChaseBalls - ballsRemaining) / totalChaseBalls) * 100 : 0;
 
@@ -5546,7 +5597,7 @@ export const SpectatorScoreboardSection = ({
                             <div className="space-y-2 text-slate-605">
                               <span className="text-sm font-black text-slate-800 dark:text-white block">Establishing 1st Innings Target</span>
                               <p className="text-[10px] font-bold text-slate-400 leading-normal">
-                                {currentInnings.battingTeam} is currently setting up the match target benchmark. {selectedMatch.oversLimit * 6} legal deliveries stand in target phase.
+                                {currentInnings?.battingTeam || selectedMatch.teamA} is currently setting up the match target benchmark. {selectedMatch.oversLimit * 6} legal deliveries stand in target phase.
                               </p>
                             </div>
                           )}
@@ -5603,23 +5654,23 @@ export const SpectatorScoreboardSection = ({
                             <div className="bg-emerald-500/10 dark:bg-emerald-500/5 rounded-2xl p-4 border border-emerald-500/10">
                               <span className="text-[8px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block mb-1">Defense Target Setup</span>
                               <p className="text-xs text-slate-655 dark:text-slate-350 font-bold leading-relaxed">
-                                {currentInnings.battingTeam} sets the target. Overs boundary limit stands at <span className="text-emerald-500 font-mono font-black">{selectedMatch.oversLimit}</span>.
+                                {currentInnings?.battingTeam || selectedMatch.teamA} sets the target. Overs boundary limit stands at <span className="text-emerald-500 font-mono font-black">{selectedMatch.oversLimit}</span>.
                               </p>
                             </div>
                           ) : selectedMatch.targetRuns ? (
                             <div className="bg-amber-500/10 dark:bg-amber-500/5 rounded-2xl p-4 border border-amber-500/10">
                               <span className="text-[8px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-widest block mb-1">The Run Chase Equation</span>
                               <p className="text-sm font-extrabold text-slate-800 dark:text-slate-250 animate-pulse">
-                                {currentInnings.battingTeam} needs <span className="text-amber-500 font-mono text-base">{Math.max(0, selectedMatch.targetRuns - currentInnings.runs)}</span> runs 
-                                from <span className="text-emerald-500 font-mono text-base">{(selectedMatch.oversLimit * 6) - currentInnings.ballsBowled}</span> deliveries.
+                                {currentInnings?.battingTeam || selectedMatch.teamB} needs <span className="text-amber-500 font-mono text-base">{Math.max(0, selectedMatch.targetRuns - (currentInnings?.runs || 0))}</span> runs 
+                                from <span className="text-emerald-500 font-mono text-base">{(selectedMatch.oversLimit * 6) - (currentInnings?.ballsBowled || 0)}</span> deliveries.
                               </p>
                               
                               <div className="mt-4 pt-3 border-t border-dashed border-slate-200 dark:border-slate-800 flex justify-between items-center text-[10px] font-bold">
                                 <span className="text-slate-400 uppercase">Required Run Rate (RRR):</span>
                                 <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">
                                   {(() => {
-                                    const ballsLeft = (selectedMatch.oversLimit * 6) - currentInnings.ballsBowled;
-                                    const runsToGet = selectedMatch.targetRuns - currentInnings.runs;
+                                    const ballsLeft = (selectedMatch.oversLimit * 6) - (currentInnings?.ballsBowled || 0);
+                                    const runsToGet = selectedMatch.targetRuns - (currentInnings?.runs || 0);
                                     if (ballsLeft <= 0) return '∞';
                                     return ((runsToGet / ballsLeft) * 6).toFixed(2);
                                   })()}
@@ -6059,7 +6110,7 @@ export const SpectatorScoreboardSection = ({
                           <span className="text-[9px] font-black uppercase text-emerald-500 tracking-widest block mb-0.5">Over-by-Over log statistics</span>
                           <h4 className="text-base font-black text-slate-850 dark:text-white">Overs Progression Details</h4>
                         </div>
-                        <span className="text-[9px] font-mono text-slate-400">Total {formatOvers(currentInnings.ballsBowled)} overs</span>
+                        <span className="text-[9px] font-mono text-slate-400">Total {formatOvers(currentInnings?.ballsBowled || 0)} overs</span>
                       </div>
 
                       {(() => {
@@ -6067,7 +6118,7 @@ export const SpectatorScoreboardSection = ({
                         const oversMap: { [key: number]: { overIndex: number; runs: number; wickets: number; extras: number; ballPills: any[]; bowlerName: string } } = {};
                         
                         // We slice.reverse to process chronological order if needed, but since we are mapping, direct analysis is fine
-                        currentInnings.commentaryList.forEach((comm) => {
+                        (currentInnings?.commentaryList || []).forEach((comm) => {
                           const parts = comm.overBall.split('.');
                           if (parts.length < 2) return;
                           const ovNum = parseInt(parts[0]);
@@ -6399,7 +6450,7 @@ export const SpectatorScoreboardSection = ({
                           // Compute boundaries totals
                           let fours = 0;
                           let sixes = 0;
-                          currentInnings.batsmen.forEach(b => {
+                          (currentInnings?.batsmen || []).forEach(b => {
                             fours += b.fours;
                             sixes += b.sixes;
                           });
@@ -6417,7 +6468,7 @@ export const SpectatorScoreboardSection = ({
                               <div className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-950 rounded-xl">
                                 <span>Established Run-rate Index:</span>
                                 <span className="font-mono font-black text-slate-800 dark:text-white text-sm bg-white dark:bg-slate-900 px-3 py-1 rounded border border-slate-100 dark:border-slate-800">
-                                  {calculateRunRate(currentInnings.runs, currentInnings.ballsBowled)}
+                                  {calculateRunRate(currentInnings?.runs || 0, currentInnings?.ballsBowled || 0)}
                                 </span>
                               </div>
                             </div>
@@ -6672,7 +6723,7 @@ export const SpectatorScoreboardSection = ({
                       {/* Feeds stream logs */}
                       <div className="max-h-96 overflow-y-auto space-y-3 pr-2 font-mono scrollbar-thin">
                         {(() => {
-                          const baseList = currentInnings.commentaryList || [];
+                          const baseList = currentInnings?.commentaryList || [];
                           let list = [...baseList];
                           
                           if (commentaryFilter === 'boundary') {
@@ -6886,13 +6937,14 @@ export const SpectatorScoreboardSection = ({
                                 let liveStatus = '⏳ Yet To Bat';
                                 let bgClass = 'bg-slate-50 dark:bg-slate-950 text-slate-500';
                                 
-                                const batEntry = inn?.batsmen.find(b => b.name === player);
-                                const bowlEntry = bowlInn?.bowlers.find(bw => bw.name === player);
+                                const batEntry = inn?.batsmen?.find(b => b.name === player);
+                                const bowlEntry = bowlInn?.bowlers?.find(bw => bw.name === player);
 
                                 if (batEntry) {
                                   if (!batEntry.isOut) {
                                     // check if crease active striker or nonstriker
-                                    const isCrease = inn?.batsmen[inn.strikerIndex]?.name === player || inn?.batsmen[inn.nonStrikerIndex]?.name === player;
+                                    const isCrease = (inn?.strikerIndex !== undefined && inn?.batsmen?.[inn.strikerIndex]?.name === player) || 
+                                                     (inn?.nonStrikerIndex !== undefined && inn?.batsmen?.[inn.nonStrikerIndex]?.name === player);
                                     if (isCrease) {
                                       liveStatus = '🏏 Active Batting';
                                       bgClass = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-extrabold';

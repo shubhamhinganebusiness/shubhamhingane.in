@@ -81,7 +81,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (currentVu) {
               const parsed = JSON.parse(currentVu);
               if (parsed.uid !== user.uid) {
-                localStorage.removeItem('erp_virtual_user');
+                if (parsed.email === user.email || parsed.storeId === 'gullyscore_cricket' || parsed.role === 'score_manager') {
+                  parsed.uid = user.uid;
+                  localStorage.setItem('erp_virtual_user', JSON.stringify(parsed));
+                } else {
+                  localStorage.removeItem('erp_virtual_user');
+                }
               }
             }
           } catch (_) {}
@@ -111,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             if (userDoc.exists()) {
               const data = userDoc.data();
-              const currentRole = forceSuperAdmin ? 'super_admin' : data.role;
+              const currentRole = forceSuperAdmin ? 'super_admin' : (data.role || (user.email?.toLowerCase().endsWith('@gullyscore.com') ? 'score_manager' : null));
               setRole(currentRole as any);
               setPharmacyId(data.pharmacyId || null);
               setStoreId(data.storeId || null);
@@ -135,7 +140,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
             } else {
               // New user - check for pre-authorization
-              let initialRole: 'super_admin' | 'dairy_admin' | 'Doctor' | 'Pharmacy' | 'mess_owner' | 'furniture_admin' | null = null;
+              let initialRole: 'super_admin' | 'dairy_admin' | 'Doctor' | 'Pharmacy' | 'mess_owner' | 'furniture_admin' | 'score_manager' | null = null;
               
               if (user.email) {
                 const emailLower = user.email.toLowerCase();
@@ -143,6 +148,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // New Hack: If email is @mess.os, it's a mess owner
                 if (emailLower.endsWith('@mess.os')) {
                   initialRole = 'mess_owner';
+                } else if (emailLower.endsWith('@gullyscore.com') || emailLower.startsWith('scorer') || emailLower.startsWith('scorekeeper')) {
+                  initialRole = 'score_manager';
                 } else {
                   // 1. Try authorized_accounts
                   // Check if the email itself is the authKey

@@ -90,6 +90,7 @@ interface Innings {
 }
 
 export type BroadcastTheme =
+  | 'star-tv-broadcast'
   | 'broadcast-pro'
   | 'ipl-style'
   | 'cricheroes-dark'
@@ -459,9 +460,9 @@ export const CricketOverlay: React.FC = () => {
   // Default broadcast overlay options if none synced
   const activeConfig = useMemo<Required<Omit<OverlayConfig, 'manualAlertTrigger'>> & { manualAlertTrigger?: OverlayConfig['manualAlertTrigger'] }>(() => {
     const fallback: Required<Omit<OverlayConfig, 'manualAlertTrigger'>> & { manualAlertTrigger?: OverlayConfig['manualAlertTrigger'] } = {
-      template: 'slanted-pro-design',
-      theme: 'broadcast-pro',
-      layout: 'slanted-pro-design',
+      template: 'star-tv-broadcast',
+      theme: 'star-tv-broadcast',
+      layout: 'star-tv-broadcast',
       bugPosition: 'bottom-full',
       showBallByBallDots: true,
       showStrikeRates: true,
@@ -502,18 +503,36 @@ export const CricketOverlay: React.FC = () => {
     };
 
     if (!match || !match.overlayConfig) return fallback;
-    return {
-      template: match.overlayConfig.template || fallback.template,
-      theme: match.overlayConfig.theme || (
-        ['broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern'].includes(match.overlayConfig.template as string)
-          ? match.overlayConfig.template
-          : fallback.theme
-      ),
-      layout: match.overlayConfig.layout || (
-        ['single-line', 'slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(match.overlayConfig.template as string)
-          ? match.overlayConfig.template
+
+    const rawTemplate = match.overlayConfig.template;
+    const rawLayout = match.overlayConfig.layout;
+    const rawTheme = match.overlayConfig.theme;
+
+    const isStarTv =
+      rawLayout === 'star-tv-broadcast' || rawLayout === 'star-tv-pro' || rawLayout === 'star-tv' || rawLayout === 'star' ||
+      rawTemplate === 'star-tv-broadcast' || rawTemplate === 'star-tv-pro' || rawTemplate === 'star-tv' || rawTemplate === 'star' ||
+      rawTheme === 'star-tv-broadcast' || rawTheme === 'star-tv-pro';
+
+    const resolvedLayout = isStarTv
+      ? 'star-tv-broadcast'
+      : (rawLayout || (
+        ['star-tv-broadcast', 'single-line', 'slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(rawTemplate as string)
+          ? rawTemplate
           : fallback.layout
-      ),
+      ));
+
+    const resolvedTheme = isStarTv
+      ? 'star-tv-broadcast'
+      : (rawTheme || (
+        ['star-tv-broadcast', 'broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern', 'studio-custom'].includes(rawTemplate as string)
+          ? rawTemplate
+          : fallback.theme
+      ));
+
+    return {
+      template: rawTemplate || fallback.template,
+      theme: resolvedTheme,
+      layout: resolvedLayout,
       bugPosition: match.overlayConfig.bugPosition || fallback.bugPosition,
       showBallByBallDots: match.overlayConfig.showBallByBallDots !== false,
       showStrikeRates: match.overlayConfig.showStrikeRates !== false,
@@ -1957,28 +1976,41 @@ export const CricketOverlay: React.FC = () => {
   };
 
   // Active Broadcast Theme & Layout Resolution
-  const activeTheme = (
-    searchParams.get('theme') ||
-    activeConfig.theme ||
-    (
-      ['broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern', 'studio-custom'].includes(activeConfig.template)
-        ? activeConfig.template
-        : 'broadcast-pro'
-    )
-  ) as BroadcastTheme;
+  const paramTheme = searchParams.get('theme');
+  const paramLayout = searchParams.get('layout');
 
-  const isStudioCustom = activeTheme === 'studio-custom';
+  const isStarRequested =
+    paramLayout === 'star-tv-broadcast' || paramLayout === 'star-tv-pro' || paramLayout === 'star-tv' || paramLayout === 'star' ||
+    paramTheme === 'star-tv-broadcast' || paramTheme === 'star-tv-pro' || paramTheme === 'star-tv' || paramTheme === 'star' ||
+    activeConfig.layout === 'star-tv-broadcast' || activeConfig.layout === 'star-tv-pro' || activeConfig.layout === 'star-tv' || activeConfig.layout === 'star' ||
+    activeConfig.theme === 'star-tv-broadcast' || activeConfig.theme === 'star-tv-pro' || activeConfig.theme === 'star-tv' || activeConfig.theme === 'star' ||
+    activeConfig.template === 'star-tv-broadcast' || activeConfig.template === 'star-tv-pro' || activeConfig.template === 'star-tv' || activeConfig.template === 'star';
 
+  // Explicit user-selected layout MUST ALWAYS take priority over globalStudioTheme!
   const activeLayout = (
-    searchParams.get('layout') ||
-    (isStudioCustom && globalStudioTheme?.layout ? globalStudioTheme.layout : null) ||
+    (paramLayout && paramLayout !== 'default' ? paramLayout : null) ||
+    (isStarRequested ? 'star-tv-broadcast' : null) ||
     activeConfig.layout ||
     (
       ['star-tv-broadcast', 'single-line', 'slanted-pro-design', 'score-bug-1900-200', 'ribbon-full', 'docked-corner', 'mobile-vertical', 'minimal-pill'].includes(activeConfig.template)
         ? activeConfig.template
-        : (globalStudioTheme?.layout || 'star-tv-broadcast')
-    )
+        : null
+    ) ||
+    (globalStudioTheme?.layout || 'star-tv-broadcast')
   ) as BroadcastLayout;
+
+  const isStudioCustom = (paramTheme === 'studio-custom' || activeConfig.theme === 'studio-custom') && !isStarRequested;
+
+  const activeTheme = (
+    (paramTheme && paramTheme !== 'default' ? paramTheme : null) ||
+    (isStarRequested || activeLayout === 'star-tv-broadcast' ? 'star-tv-broadcast' : null) ||
+    activeConfig.theme ||
+    (
+      ['star-tv-broadcast', 'broadcast-pro', 'ipl-style', 'cricheroes-dark', 'neon-sport', 'clean-white', 'retro-gold', 'carbon-modern', 'studio-custom'].includes(activeConfig.template)
+        ? activeConfig.template
+        : (activeLayout === 'star-tv-broadcast' ? 'star-tv-broadcast' : 'broadcast-pro')
+    )
+  ) as BroadcastTheme;
 
   // Dynamic center-screen positioning stacked cleanly ABOVE (or below) the scorebug:
   // Horizontally centered (left-1/2 -translate-x-1/2) with proper clearance so it NEVER hides or overlaps the main scorebug

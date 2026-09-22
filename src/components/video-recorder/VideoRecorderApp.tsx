@@ -847,9 +847,8 @@ export function VideoRecorderApp() {
     return { x, y };
   };
 
-  // Auto-launch Camera stream on mount
+  // Clean up streams and timers on unmount (do not auto-request camera on mount)
   useEffect(() => {
-    startCameraStream('user');
     return () => {
       stopActiveStreams();
       stopLiveWebRTCStream();

@@ -41,15 +41,31 @@ export function isStarTVThemeActive(
 ): boolean {
   if (!activeConfig && !activeLayout && !globalStudioTheme) return false;
 
+  const isStarValue = (val?: any): boolean => {
+    if (!val || typeof val !== 'string') return false;
+    const clean = val.trim().toLowerCase();
+    return (
+      clean === 'star-tv-broadcast' ||
+      clean === 'star-tv-pro' ||
+      clean === 'star-tv' ||
+      clean === 'star_tv' ||
+      clean === 'star' ||
+      clean.includes('star-tv') ||
+      clean.includes('startv')
+    );
+  };
+
   const currentLayout = activeLayout || activeConfig?.layout || activeConfig?.template;
   const currentTheme = activeConfig?.theme || activeConfig?.template;
-  const studioPreset = globalStudioTheme?.presetBase || globalStudioTheme?.layout;
+  const studioPreset = globalStudioTheme?.presetBase || globalStudioTheme?.layout || globalStudioTheme?.theme;
 
   return (
-    currentLayout === 'star-tv-broadcast' ||
-    currentTheme === 'star-tv-broadcast' ||
-    studioPreset === 'star-tv-broadcast' ||
-    activeConfig?.template === 'star-tv-broadcast' ||
+    isStarValue(currentLayout) ||
+    isStarValue(currentTheme) ||
+    isStarValue(studioPreset) ||
+    isStarValue(activeConfig?.template) ||
+    isStarValue(activeConfig?.layout) ||
+    isStarValue(activeConfig?.theme) ||
     Boolean(activeConfig?.harmonizeStarTV)
   );
 }

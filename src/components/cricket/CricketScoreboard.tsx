@@ -913,12 +913,14 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
 };
 
 // Helper to generate unauthenticated public overlay URLs (replaces pre-production ais-dev- subdomain with ais-pre- for OBS Studio)
-const getPublicOverlayUrl = (matchId: string, preview = false) => {
+const getPublicOverlayUrl = (matchId: string, preview = false, layout?: string, theme?: string) => {
   let origin = window.location.origin;
   if (origin.includes('ais-dev-')) {
     origin = origin.replace('ais-dev-', 'ais-pre-');
   }
-  return `${origin}/#/live/cricket-overlay?matchId=${encodeURIComponent(matchId)}${preview ? '&preview=true' : ''}`;
+  const layoutParam = layout ? `&layout=${encodeURIComponent(layout)}` : '';
+  const themeParam = theme ? `&theme=${encodeURIComponent(theme)}` : '';
+  return `${origin}/#/live/cricket-overlay?matchId=${encodeURIComponent(matchId)}${layoutParam}${themeParam}${preview ? '&preview=true' : ''}`;
 };
 
 // Helper to generate a single, permanent OBS overlay link per score manager that NEVER changes between matches
@@ -2842,9 +2844,9 @@ export const CricketScoreboard: React.FC = () => {
   };
 
   const activeOverlayConfig = match.overlayConfig || {
-    template: 'broadcast-pro',
-    theme: 'broadcast-pro',
-    layout: 'ribbon-full',
+    template: 'star-tv-broadcast',
+    theme: 'star-tv-broadcast',
+    layout: 'star-tv-broadcast',
     bugPosition: 'bottom-full',
     showBallByBallDots: true,
     showStrikeRates: true,
@@ -3452,7 +3454,7 @@ export const CricketScoreboard: React.FC = () => {
     }
   };
 
-  const currentInnings = match.currentInningsNum === 1 ? match.innings1 : match.innings2;
+  const currentInnings = (match.currentInningsNum === 1 ? match.innings1 : (match.innings2 || match.innings1)) || match.innings1;
 
   const cleanPlayerName = (name: string): string => {
     if (!name) return '';
@@ -8729,9 +8731,9 @@ export const CricketScoreboard: React.FC = () => {
                 ];
 
                 const activeOverlayConfig = match.overlayConfig || {
-                  template: 'broadcast-pro',
-                  theme: 'broadcast-pro',
-                  layout: 'ribbon-full',
+                  template: 'star-tv-broadcast',
+                  theme: 'star-tv-broadcast',
+                  layout: 'star-tv-broadcast',
                   bugPosition: 'bottom-full',
                   showBallByBallDots: true,
                   showStrikeRates: true,
@@ -10875,10 +10877,11 @@ export const CricketScoreboard: React.FC = () => {
                           <div>
                             <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
                               <span>🎨 Broadcast TV Color Theme</span>
-                              <span className="text-amber-400 font-mono text-[7px]">7 STYLES</span>
+                              <span className="text-amber-400 font-mono text-[7px]">8 STYLES</span>
                             </span>
                             <div className="grid grid-cols-2 gap-1.5">
                               {[
+                                { id: 'star-tv-broadcast', label: '⭐ Star TV Pro', desc: 'Royal Blue, Crimson & Gold' },
                                 { id: 'broadcast-pro', label: '📺 Broadcast Pro', desc: 'ESPN Navy & Amber' },
                                 { id: 'ipl-style', label: '🏏 IPL 2025 Purple/Gold', desc: 'Premium Royal League' },
                                 { id: 'cricheroes-dark', label: '⚡ CricHeroes Elite', desc: 'Cyan Tech Dark' },
@@ -10891,7 +10894,11 @@ export const CricketScoreboard: React.FC = () => {
                                 return (
                                   <button
                                     key={t.id}
-                                    onClick={() => updateOverlayProp({ theme: t.id as any, template: t.id as any })}
+                                    onClick={() => updateOverlayProp({ 
+                                      theme: t.id as any, 
+                                      template: t.id as any,
+                                      ...(t.id === 'star-tv-broadcast' ? { layout: 'star-tv-broadcast' as any } : {})
+                                    })}
                                     className={`p-2 text-left rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
                                       isCurrent
                                         ? 'bg-rose-500/15 border-rose-500/40 text-white shadow-md'
@@ -10927,7 +10934,11 @@ export const CricketScoreboard: React.FC = () => {
                                 return (
                                   <button
                                     key={l.id}
-                                    onClick={() => updateOverlayProp({ layout: l.id as any, template: l.id as any })}
+                                    onClick={() => updateOverlayProp({ 
+                                      layout: l.id as any, 
+                                      template: l.id as any,
+                                      ...(l.id === 'star-tv-broadcast' ? { theme: 'star-tv-broadcast' as any } : {})
+                                    })}
                                     className={`p-2 text-left rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
                                       isCurrent
                                         ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-md font-bold'
@@ -12593,7 +12604,7 @@ export const CricketScoreboard: React.FC = () => {
                 <a
                   href={
                     livePreviewTab === 'overlay'
-                      ? `${window.location.origin}${window.location.pathname}#/live/cricket-overlay?matchId=${match.id}`
+                      ? `${window.location.origin}${window.location.pathname}#/live/cricket-overlay?matchId=${match.id}&layout=${encodeURIComponent(activeOverlayConfig.layout || 'star-tv-broadcast')}&theme=${encodeURIComponent(activeOverlayConfig.theme || activeOverlayConfig.layout || 'star-tv-broadcast')}`
                       : `${window.location.origin}${window.location.pathname}#/live/cricket-details?matchId=${match.id}`
                   }
                   target="_blank"
@@ -12623,7 +12634,7 @@ export const CricketScoreboard: React.FC = () => {
               <iframe
                 src={
                   livePreviewTab === 'overlay'
-                    ? `${window.location.origin}${window.location.pathname}#/live/cricket-overlay?matchId=${match.id}&preview=true`
+                    ? `${window.location.origin}${window.location.pathname}#/live/cricket-overlay?matchId=${match.id}&preview=true&layout=${encodeURIComponent(activeOverlayConfig.layout || 'star-tv-broadcast')}&theme=${encodeURIComponent(activeOverlayConfig.theme || activeOverlayConfig.layout || 'star-tv-broadcast')}`
                     : `${window.location.origin}${window.location.pathname}#/live/cricket-details?matchId=${match.id}&preview=true`
                 }
                 title="Live Scoreboard Preview Screen"
@@ -18800,10 +18811,11 @@ export const CricketScoreboard: React.FC = () => {
 
                               <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 block mb-1.5 flex items-center justify-between">
                                 <span>1A. Color Theme</span>
-                                <span className="text-amber-400 font-mono text-[8px]">8 PRESETS</span>
+                                <span className="text-amber-400 font-mono text-[8px]">9 PRESETS</span>
                               </span>
                               <div className="grid grid-cols-2 gap-1.5">
                                 {[
+                                  { id: 'star-tv-broadcast', label: '⭐ Star TV Pro', desc: 'Official TV Blue & Gold' },
                                   { id: 'studio-custom', label: '🎨 Studio Theme', desc: studioTheme?.name || 'Superadmin' },
                                   { id: 'broadcast-pro', label: 'Broadcast Pro', desc: 'ESPN Navy' },
                                   { id: 'ipl-style', label: 'IPL Gold/Purple', desc: 'Royal League' },
@@ -18823,6 +18835,7 @@ export const CricketScoreboard: React.FC = () => {
                                           ...activeOverlayConfig, 
                                           theme: t.id as any, 
                                           template: t.id as any,
+                                          ...(t.id === 'star-tv-broadcast' ? { layout: 'star-tv-broadcast' as any } : {}),
                                           ...(t.id === 'studio-custom' && studioTheme ? {
                                             studioTheme: studioTheme,
                                             layout: studioTheme.layout || activeOverlayConfig.layout,
@@ -18874,7 +18887,12 @@ export const CricketScoreboard: React.FC = () => {
                                     <button
                                       key={l.id}
                                       onClick={() => {
-                                        const updated = { ...activeOverlayConfig, layout: l.id as any, template: l.id as any };
+                                        const updated = { 
+                                          ...activeOverlayConfig, 
+                                          layout: l.id as any, 
+                                          template: l.id as any,
+                                          ...(l.id === 'star-tv-broadcast' ? { theme: 'star-tv-broadcast' as any } : {})
+                                        };
                                         syncMatch(prev => ({ ...prev, overlayConfig: updated }));
                                       }}
                                       className={`p-2 text-left rounded-xl transition-all border outline-none cursor-pointer flex flex-col justify-between ${
@@ -19963,7 +19981,7 @@ export const CricketScoreboard: React.FC = () => {
                           <span className="text-slate-600 font-mono text-[10px] tracking-widest font-black uppercase font-mono">Live Video Source Playback Simulator</span>
                         </div>
                         <iframe
-                          src={`${window.location.origin}${window.location.pathname}#/live/cricket-overlay?matchId=${match.id}&preview=true`}
+                          src={`${window.location.origin}${window.location.pathname}#/live/cricket-overlay?matchId=${match.id}&preview=true&layout=${encodeURIComponent(activeOverlayConfig.layout || 'star-tv-broadcast')}&theme=${encodeURIComponent(activeOverlayConfig.theme || activeOverlayConfig.layout || 'star-tv-broadcast')}`}
                           title="Real-time Broadcast Overlay Live Feed"
                           className="absolute inset-0 w-full h-full border-none pointer-events-none select-none z-10"
                           sandbox="allow-scripts allow-same-origin"
