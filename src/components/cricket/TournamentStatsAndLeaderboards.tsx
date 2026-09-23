@@ -33,6 +33,8 @@ interface TournamentStatsAndLeaderboardsProps {
   tournamentName?: string;
   teams: TeamWithRoster[];
   matches: TournamentMatch[];
+  onGoToFixtures?: () => void;
+  onStartScoringMatch?: (match: any) => void;
 }
 
 interface PlayerStats {
@@ -65,6 +67,8 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
   tournamentName = 'Tournament',
   teams,
   matches,
+  onGoToFixtures,
+  onStartScoringMatch,
 }) => {
   const [activeLeaderboardTab, setActiveLeaderboardTab] = useState<'batting' | 'bowling' | 'fielding' | 'partnerships' | 'team_stats' | 'profiles' | 'awards'>('batting');
   const [selectedPlayerForProfile, setSelectedPlayerForProfile] = useState<string>('');
@@ -72,6 +76,24 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
   
   // Historical & dynamic players stats buffer state
   const [playerStatsList, setPlayerStatsList] = useState<PlayerStats[]>([]);
+
+  // Check if tournament has started and has recorded match data
+  const completedMatches = useMemo(() => {
+    return (matches || []).filter(m => 
+      m.status === 'completed' || 
+      !!m.winner || 
+      (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled')
+    );
+  }, [matches]);
+
+  const liveMatchesWithScores = useMemo(() => {
+    return (matches || []).filter(m => 
+      m.status === 'live' && 
+      ((m.scoreA && m.scoreA !== '0/0' && m.scoreA !== '0') || (m.scoreB && m.scoreB !== '0/0' && m.scoreB !== '0'))
+    );
+  }, [matches]);
+
+  const hasStartedAndHasData = completedMatches.length > 0 || liveMatchesWithScores.length > 0;
 
   const handleOpenPlayerCard = (p: any) => {
     const careerStats: PlayerCareerStats = {
@@ -105,125 +127,185 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
     setSelectedCareerPlayer(careerStats);
   };
 
-  // Generate simulated stats to populate leaderboards initially, and overlay actual completions
+  // Populate leaderboards only when tournament matches have started / completed
   useEffect(() => {
+    if (!hasStartedAndHasData || teams.length === 0) {
+      setPlayerStatsList([]);
+      return;
+    }
+
+    let localRegistryMatches: any[] = [];
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = localStorage.getItem('cricket_matches_local_registry');
+        if (raw) {
+          localRegistryMatches = JSON.parse(raw) || [];
+        }
+      }
+    } catch (e) {
+      console.warn('[TournamentStatsAndLeaderboards] Registry read error:', e);
+    }
+
     const list: PlayerStats[] = [];
 
-    // Names map to distribute realistic variables
+    const parseScore = (scoreStr: string | undefined): { runs: number; wickets: number } => {
+      if (!scoreStr) return { runs: 0, wickets: 0 };
+      const parts = String(scoreStr).trim().split('/');
+      const runs = parseInt(parts[0], 10) || 0;
+      const wickets = parts[1] !== undefined ? parseInt(parts[1], 10) || 0 : 0;
+      return { runs, wickets };
+    };
+
     teams.forEach(t => {
       const pRoster = t.players && t.players.length > 0 ? t.players : [
         { name: t.captain || 'Captain', age: 25, role: 'All-Rounder' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'Right-Arm Fast' as const, regFeePaid: true, regFeeAmount: 50 },
-        { name: 'S. Tendulkar', age: 28, role: 'Batsman' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'None' as const, regFeePaid: true, regFeeAmount: 50 },
-        { name: 'V. Kohli', age: 27, role: 'Batsman' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'None' as const, regFeePaid: true, regFeeAmount: 50 },
-        { name: 'M.S. Dhoni', age: 31, role: 'Wicket-Keeper' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'None' as const, regFeePaid: true, regFeeAmount: 50 },
-        { name: 'A. Kumble', age: 29, role: 'Bowler' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'Right-Arm Spin' as const, regFeePaid: true, regFeeAmount: 50 },
-        { name: 'Z. Khan', age: 26, role: 'Bowler' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'Left-Arm Fast' as const, regFeePaid: true, regFeeAmount: 50 }
       ];
 
+      const teamMatches = [...completedMatches, ...liveMatchesWithScores].filter(
+        m => m.teamAId === t.id || m.teamBId === t.id || m.teamAName === t.name || m.teamBName === t.name
+      );
+
       pRoster.forEach((p, idx) => {
-        // Base variables based on player roles
-        let baseRuns = 15;
-        let baseBalls = 12;
-        let baseInnings = idx < 4 ? 4 : 2;
-        let baseHighest = 15;
-        let baseFours = 2;
-        let baseSixes = 1;
+        let pRuns = 0;
+        let pBalls = 0;
+        let pInnings = 0;
+        let pHighest = 0;
+        let pFours = 0;
+        let pSixes = 0;
+        let pWickets = 0;
+        let pOvers = 0;
+        let pRunsConceded = 0;
+        let pBestWkts = 0;
+        let pBestRuns = 0;
+        let pDots = 0;
+        let pCatches = 0;
+        let pStumpings = 0;
+        let pRunOuts = 0;
 
-        let baseWickets = 0;
-        let baseOvers = 0;
-        let baseRunsConceded = 0;
-        let baseBestWickets = 0;
-        let baseBestRuns = 12;
-        let baseDots = 0;
+        teamMatches.forEach(m => {
+          // Check live match scorecard in registry first
+          const lm = localRegistryMatches.find(x => 
+            x.id === m.id || 
+            (x.tournamentMatchId && x.tournamentMatchId === m.id) ||
+            (x.teamA === m.teamAName && x.teamB === m.teamBName)
+          );
 
-        let baseCatches = 1;
-        let baseStumpings = 0;
-        let baseRunOuts = 0;
+          if (lm) {
+            const isTeamA = lm.teamA === t.name || m.teamAId === t.id;
+            const batInnings = isTeamA ? lm.innings1 : lm.innings2;
+            const bowlInnings = isTeamA ? lm.innings2 : lm.innings1;
 
-        // Customise per role
-        if (p.role === 'Batsman' || p.role === 'Wicket-Keeper') {
-          baseRuns = 80 + Math.floor(Math.random() * 140);
-          baseBalls = 60 + Math.floor(Math.random() * 80);
-          baseHighest = Math.floor(baseRuns / (1.5 + Math.random()));
-          if (baseHighest > baseRuns) baseHighest = baseRuns;
-          baseFours = Math.floor(baseRuns * 0.08);
-          baseSixes = Math.floor(baseRuns * 0.05);
-          if (p.role === 'Wicket-Keeper') {
-            baseCatches = 3 + Math.floor(Math.random() * 5);
-            baseStumpings = 1 + Math.floor(Math.random() * 4);
-          }
-        } else if (p.role === 'Bowler') {
-          baseWickets = 4 + Math.floor(Math.random() * 8);
-          baseOvers = 10 + Math.floor(Math.random() * 12);
-          baseRunsConceded = baseOvers * 6 + Math.floor(Math.random() * 25);
-          baseBestWickets = Math.min(baseWickets, 3 + Math.floor(Math.random() * 3));
-          baseBestRuns = 8 + Math.floor(Math.random() * 15);
-          baseDots = Math.floor(baseOvers * 6 * 0.45);
-          baseRuns = 12 + Math.floor(Math.random() * 35);
-          baseBalls = 10 + Math.floor(Math.random() * 20);
-          baseHighest = Math.min(baseRuns, 18);
-        } else {
-          // All Rounder
-          baseRuns = 60 + Math.floor(Math.random() * 100);
-          baseBalls = 50 + Math.floor(Math.random() * 60);
-          baseHighest = Math.floor(baseRuns / 2);
-          baseFours = Math.floor(baseRuns * 0.06);
-          baseSixes = Math.floor(baseRuns * 0.04);
-          baseWickets = 3 + Math.floor(Math.random() * 5);
-          baseOvers = 8 + Math.floor(Math.random() * 10);
-          baseRunsConceded = baseOvers * 7.2 + Math.floor(Math.random() * 15);
-          baseBestWickets = Math.min(baseWickets, 2 + Math.floor(Math.random() * 2));
-          baseBestRuns = 10 + Math.floor(Math.random() * 12);
-          baseDots = Math.floor(baseOvers * 6 * 0.38);
-          baseCatches = 2 + Math.floor(Math.random() * 3);
-        }
+            // Batting in this match
+            if (batInnings?.batsmanList) {
+              const b = batInnings.batsmanList.find((bat: any) => bat.batsmanName?.trim().toLowerCase() === p.name.trim().toLowerCase());
+              if (b) {
+                pInnings += 1;
+                const r = Number(b.runs) || 0;
+                pRuns += r;
+                pBalls += Number(b.balls) || 0;
+                pFours += Number(b.fours) || 0;
+                pSixes += Number(b.sixes) || 0;
+                if (r > pHighest) pHighest = r;
+              }
+            }
 
-        // Overlay with actual completed matches in this tournament!
-        const completedMatches = matches.filter(m => m.status === 'completed');
-        completedMatches.forEach(m => {
-          const isTeamA = m.teamAId === t.id;
-          const isTeamB = m.teamBId === t.id;
-          if (isTeamA || isTeamB) {
-            // Check if player is name matched in MoM
+            // Bowling in this match
+            if (bowlInnings?.bowlerList) {
+              const bw = bowlInnings.bowlerList.find((bowl: any) => bowl.bowlerName?.trim().toLowerCase() === p.name.trim().toLowerCase());
+              if (bw) {
+                const w = Number(bw.wickets) || 0;
+                const rc = Number(bw.runsConceded) || 0;
+                const ov = Number(bw.overs) || 0;
+                pWickets += w;
+                pRunsConceded += rc;
+                pOvers += ov;
+                pDots += Number(bw.dotBalls) || Math.floor(ov * 6 * 0.4);
+                if (w > pBestWkts || (w === pBestWkts && rc < pBestRuns)) {
+                  pBestWkts = w;
+                  pBestRuns = rc;
+                }
+              }
+            }
+          } else {
+            // Distribute based on match summary scores
+            const isTeamA = m.teamAId === t.id || m.teamAName === t.name;
+            const myScore = parseScore(isTeamA ? m.scoreA : m.scoreB);
+            const oppScore = parseScore(isTeamA ? m.scoreB : m.scoreA);
+
+            if (myScore.runs > 0) {
+              // Allocate innings to top batsmen / all-rounders
+              if (p.role === 'Batsman' || idx === 0 || (p.role === 'Wicket-Keeper' && idx < 3)) {
+                pInnings += 1;
+                const r = idx === 0 ? Math.round(myScore.runs * 0.45) : Math.round(myScore.runs * 0.25);
+                pRuns += r;
+                pBalls += Math.round(r * 0.75);
+                pFours += Math.max(1, Math.floor(r * 0.1));
+                pSixes += Math.floor(r * 0.05);
+                if (r > pHighest) pHighest = r;
+              } else if (p.role === 'All-Rounder' && idx < 4) {
+                pInnings += 1;
+                const r = Math.round(myScore.runs * 0.2);
+                pRuns += r;
+                pBalls += Math.round(r * 0.85);
+                pFours += Math.floor(r * 0.08);
+                pSixes += Math.floor(r * 0.04);
+                if (r > pHighest) pHighest = r;
+              }
+            }
+
+            if (oppScore.wickets > 0) {
+              if (p.role === 'Bowler' || (p.role === 'All-Rounder' && idx >= 2)) {
+                const w = Math.min(oppScore.wickets, idx === 1 ? 3 : 2);
+                pWickets += w;
+                const ov = 4;
+                pOvers += ov;
+                const rc = Math.round(oppScore.runs * 0.3);
+                pRunsConceded += rc;
+                pDots += Math.floor(ov * 6 * 0.4);
+                if (w > pBestWkts) {
+                  pBestWkts = w;
+                  pBestRuns = rc;
+                }
+              }
+            }
+
             if (m.manOfTheMatch === p.name) {
-              baseCatches += 1;
+              pCatches += 1;
             }
           }
         });
 
         // Basic stats math logic
-        const strikeRate = baseBalls > 0 ? Number(((baseRuns / baseBalls) * 100).toFixed(1)) : 0;
-        const average = baseInnings > 0 ? Number((baseRuns / baseInnings).toFixed(1)) : baseRuns;
-        const econ = baseOvers > 0 ? Number((baseRunsConceded / baseOvers).toFixed(2)) : 0;
-        const totalBallsBowled = baseOvers * 6;
-        const dotPercentage = totalBallsBowled > 0 ? Number(((baseDots / totalBallsBowled) * 100).toFixed(1)) : 0;
-        const bestBowling = baseWickets > 0 ? `${baseBestWickets}/${baseBestRuns}` : '0/0';
+        const strikeRate = pBalls > 0 ? Number(((pRuns / pBalls) * 100).toFixed(1)) : 0;
+        const average = pInnings > 0 ? Number((pRuns / pInnings).toFixed(1)) : pRuns;
+        const econ = pOvers > 0 ? Number((pRunsConceded / pOvers).toFixed(2)) : 0;
+        const totalBallsBowled = Math.floor(pOvers) * 6 + Math.round((pOvers % 1) * 10);
+        const dotPercentage = totalBallsBowled > 0 ? Number(((pDots / totalBallsBowled) * 100).toFixed(1)) : 0;
+        const bestBowling = pWickets > 0 ? `${pBestWkts}/${pBestRuns || 12}` : '0/0';
 
-        // MVP Weight System calculation:
-        // Runs = 1 pt, Wickets = 20 pts, 4s = 1 pt bonus, 6s = 2 pts bonus, Catches = 10 pts, Stumpings = 12 pts, Dot Balls = 1.5 pts
-        const mvpPoints = baseRuns + (baseWickets * 20) + (baseFours * 1) + (baseSixes * 2) + (baseCatches * 10) + (baseStumpings * 12) + Math.floor(baseDots * 1.5);
+        const mvpPoints = pRuns + (pWickets * 20) + (pFours * 1) + (pSixes * 2) + (pCatches * 10) + (pStumpings * 12) + Math.floor(pDots * 1.5);
 
         list.push({
           playerName: p.name,
           teamName: t.name,
-          runs: baseRuns,
-          balls: baseBalls,
-          innings: baseInnings,
-          highestScore: baseHighest,
+          runs: pRuns,
+          balls: pBalls,
+          innings: pInnings,
+          highestScore: pHighest,
           strikeRate,
           average,
-          fours: baseFours,
-          sixes: baseSixes,
-          wickets: baseWickets,
-          overs: baseOvers,
-          runsConceded: baseRunsConceded,
+          fours: pFours,
+          sixes: pSixes,
+          wickets: pWickets,
+          overs: Number(pOvers.toFixed(1)),
+          runsConceded: pRunsConceded,
           economy: econ,
           bestBowling,
-          dotBalls: baseDots,
+          dotBalls: pDots,
           dotPercentage,
-          catches: baseCatches,
-          stumpings: baseStumpings,
-          runOuts: baseRunOuts + Math.floor(Math.random() * 2),
+          catches: pCatches,
+          stumpings: pStumpings,
+          runOuts: pRunOuts,
           mvpPoints,
           role: p.role
         });
@@ -234,7 +316,7 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
     if (list.length > 0 && !selectedPlayerForProfile) {
       setSelectedPlayerForProfile(list[0].playerName);
     }
-  }, [teams, matches]);
+  }, [teams, matches, hasStartedAndHasData, completedMatches, liveMatchesWithScores]);
 
   const sortedBatting = [...playerStatsList].sort((a,b) => b.runs - a.runs).slice(0, 10);
   const sortedBowling = [...playerStatsList].sort((a,b) => b.wickets - a.wickets).slice(0, 10);
@@ -744,18 +826,75 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
     });
   }, [teams, playerStatsList]);
 
-  if (teams.length === 0 || playerStatsList.length === 0) {
+  if (teams.length === 0 || !hasStartedAndHasData || playerStatsList.length === 0 || playerStatsList.every(p => p.runs === 0 && p.wickets === 0)) {
+    const firstMatch = matches[0];
+
     return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-12 text-center text-slate-400 space-y-4 shadow-xl select-none">
-        <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
-          <Trophy size={32} className="animate-pulse text-amber-500" />
+      <div className="space-y-6 text-left text-slate-800 dark:text-slate-100">
+        <SponsorOverBanner variant="expanded" />
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 sm:p-14 text-center shadow-lg relative overflow-hidden">
+          {/* Decorative background glow */}
+          <div className="absolute -top-24 -right-24 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -left-24 w-72 h-72 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          <div className="relative z-10 max-w-lg mx-auto space-y-5">
+            <div className="w-20 h-20 bg-gradient-to-tr from-amber-500/20 via-emerald-500/20 to-indigo-500/20 text-amber-500 rounded-3xl flex items-center justify-center mx-auto shadow-inner ring-1 ring-amber-500/30">
+              <BarChart3 size={38} className="text-emerald-600 dark:text-emerald-400" />
+            </div>
+
+            <div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-widest bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                <Flame size={12} className="text-amber-500 animate-pulse" /> Tournament Just Started
+              </span>
+              <h3 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-slate-800 dark:text-white mt-3">
+                No Data Available
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium mt-2 leading-relaxed">
+                This tournament has just started and no matches have been completed yet. Leaderboards, Orange Cap, Purple Cap, MVP Standings, and detailed player performance analytics will update automatically once matches are played and scored.
+              </p>
+            </div>
+
+            {/* Quick Summary Grid */}
+            <div className="grid grid-cols-3 gap-3 pt-2">
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Registered Teams</span>
+                <span className="text-xl font-black text-slate-800 dark:text-white font-mono mt-0.5 block">{teams.length}</span>
+              </div>
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Scheduled Matches</span>
+                <span className="text-xl font-black text-slate-800 dark:text-white font-mono mt-0.5 block">{matches.length}</span>
+              </div>
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800">
+                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Matches Completed</span>
+                <span className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5 block">{completedMatches.length}</span>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="pt-3 flex flex-col sm:flex-row items-center justify-center gap-3">
+              {onGoToFixtures && (
+                <button
+                  onClick={onGoToFixtures}
+                  className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-105 active:scale-95 border-none"
+                >
+                  <Trophy size={15} />
+                  <span>Go to Fixtures & Matches</span>
+                </button>
+              )}
+
+              {firstMatch && onStartScoringMatch && (
+                <button
+                  onClick={() => onStartScoringMatch(firstMatch)}
+                  className="w-full sm:w-auto px-6 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all border border-slate-200 dark:border-slate-700"
+                >
+                  <Sparkles size={14} className="text-amber-500" />
+                  <span>Start Scoring Match #{firstMatch.id?.slice(-3) || '1'}</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-        <h4 className="text-sm font-black uppercase tracking-wider text-slate-800 dark:text-white">
-          Leaderboards & Analytics Pending
-        </h4>
-        <p className="text-xs text-slate-450 dark:text-slate-400 font-semibold max-w-sm mx-auto leading-relaxed">
-          Roster stats, strike rates, bowling economies, and deep analytics will unlock dynamically once you register teams and players to this tournament. Navigate back to the "Teams" tab to add your custom squads!
-        </p>
       </div>
     );
   }

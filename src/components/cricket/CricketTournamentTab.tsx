@@ -3856,6 +3856,8 @@ export const CricketTournamentTab: React.FC<{
                 })
               }))}
               matches={activeTournament.matches}
+              onGoToFixtures={() => setTourTab('matches')}
+              onStartScoringMatch={(m) => handleTriggerLiveScore(m)}
             />
           )}
 

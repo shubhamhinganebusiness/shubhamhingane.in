@@ -179,6 +179,25 @@ export const LiveTournamentLeaderboardWidget: React.FC<LiveTournamentLeaderboard
       : sortedEconomy
   ).filter(p => !searchTerm || p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.team.toLowerCase().includes(searchTerm.toLowerCase()));
 
+  if (statsList.length === 0 || statsList.every(p => (p.runs || 0) === 0 && (p.wickets || 0) === 0)) {
+    return (
+      <div className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 sm:p-10 text-center shadow-lg ${className}`}>
+        <div className="w-14 h-14 bg-amber-500/10 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <Trophy size={28} />
+        </div>
+        <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 inline-block mb-1.5">
+          Tournament Just Started
+        </span>
+        <h4 className="text-base sm:text-lg font-black text-slate-800 dark:text-white uppercase tracking-tight">
+          No Data Available
+        </h4>
+        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium max-w-sm mx-auto mt-1">
+          No tournament match statistics are recorded yet. Leaderboards and cap holders will update automatically once scoring begins.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className={`bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl overflow-hidden text-left ${className}`}>
       {/* Top Cap Spotlight Header */}
