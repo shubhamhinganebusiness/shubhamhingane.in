@@ -3,8 +3,20 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, Plus, Calendar, MapPin, Users, Edit, Trash2, Bot, HelpCircle, 
   Sparkles, Check, CheckCircle2, Play, ChevronRight, BarChart3, AlertCircle, Share2, Award, RefreshCw, Download, ArrowLeftRight,
-  Zap, Image as ImageIcon, Crown, Flame, ShieldCheck, DollarSign, QrCode, Filter, FileText
+  Zap, Image as ImageIcon, Crown, Flame, ShieldCheck, DollarSign, QrCode, Filter, FileText, X
 } from 'lucide-react';
+
+const GULLY_RULES_PRESETS = [
+  'Box Cricket (8 Overs, max 2 ov/bowler)',
+  'Underarm bowling only',
+  'Direct hit to wall boundary (4/6)',
+  'Direct hit to roof/net is OUT',
+  '1-Tip 1-Hand catch is OUT',
+  'Overthrow runs disallowed',
+  'Last man batting allowed',
+  'No LBW dismissal',
+  'Free Hit on No-Ball'
+];
 import { db, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc, updateDoc, collection, onSnapshot } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
@@ -382,8 +394,12 @@ export const CricketTournamentTab: React.FC<{
   const [showCreateMatchModal, setShowCreateMatchModal] = useState(false);
   const [showResetScheduleModal, setShowResetScheduleModal] = useState(false); // Reset schedule modal state
   const [teamToDelete, setTeamToDelete] = useState<{ id: string; name: string } | null>(null); // Custom confirmation state for team deletion
+  const [manualMatchTeamMode, setManualMatchTeamMode] = useState<'existing' | 'custom'>('existing');
   const [manualMatchTeamAId, setManualMatchTeamAId] = useState('');
   const [manualMatchTeamBId, setManualMatchTeamBId] = useState('');
+  const [manualCustomTeamAName, setManualCustomTeamAName] = useState('');
+  const [manualCustomTeamBName, setManualCustomTeamBName] = useState('');
+  const [manualMatchError, setManualMatchError] = useState<string | null>(null);
   const [manualMatchDate, setManualMatchDate] = useState(new Date().toISOString().split('T')[0]);
   const [manualMatchTime, setManualMatchTime] = useState('10:00 AM');
   const [manualMatchVenue, setManualMatchVenue] = useState('Shivaji Maharaj Ground (Turf)');
@@ -459,10 +475,19 @@ export const CricketTournamentTab: React.FC<{
           }
         });
 
-        // CRITICAL FIX: Merge individual matches so that completed status, winner, winReason, and scores from local are NEVER erased by older remote data
+        // CRITICAL FIX: Merge individual matches and teams so that locally scheduled matches, newly added teams, completed status, winner, winReason, and scores from local are NEVER erased by older remote data
         const mergedTournaments = filteredMerged.map((newT) => {
           const localT = prev.find(p => p.id === newT.id) || localList.find(l => l.id === newT.id);
           if (!localT) return newT;
+
+          // Merge teams: Keep all teams from newT, plus any teams added locally not yet in newT
+          const newTTeamIds = new Set((newT.teams || []).map(t => t.id));
+          const localOnlyTeams = (localT.teams || []).filter(ot => ot && !newTTeamIds.has(ot.id));
+          const mergedTeams = [...(newT.teams || []), ...localOnlyTeams];
+
+          // Merge matches: Keep all matches from newT, plus any matches scheduled locally not yet in newT
+          const newTMatchIds = new Set((newT.matches || []).map(m => m.id));
+          const localOnlyMatches = (localT.matches || []).filter(om => om && !newTMatchIds.has(om.id));
 
           const mergedMatches = (newT.matches || []).map((nm) => {
             const om = (localT.matches || []).find(m => m.id === nm.id);
@@ -476,6 +501,9 @@ export const CricketTournamentTab: React.FC<{
             }
             return {
               ...nm,
+              date: om.date || nm.date,
+              time: om.time || nm.time,
+              venue: om.venue || nm.venue,
               scoreA: nm.scoreA || om.scoreA,
               scoreB: nm.scoreB || om.scoreB,
               oversA: nm.oversA || om.oversA,
@@ -484,13 +512,15 @@ export const CricketTournamentTab: React.FC<{
               winnerId: nm.winnerId || om.winnerId,
               winReason: nm.winReason || om.winReason,
               manOfTheMatch: nm.manOfTheMatch || om.manOfTheMatch,
-              status: (nm.status === 'completed' || om.status === 'completed') ? 'completed' : nm.status
+              status: (nm.status === 'completed' || om.status === 'completed') ? 'completed' : (om.status === 'live' ? 'live' : nm.status),
+              matchBannerUrl: om.matchBannerUrl || nm.matchBannerUrl
             };
           });
 
           return {
             ...newT,
-            matches: mergedMatches,
+            teams: mergedTeams,
+            matches: [...mergedMatches, ...localOnlyMatches],
             status: (newT.status === 'completed' || localT.status === 'completed') ? 'completed' : newT.status,
             winnerTeamName: newT.winnerTeamName || localT.winnerTeamName,
             updatedAt: Math.max(newT.updatedAt || 0, localT.updatedAt || 0)
@@ -561,6 +591,20 @@ export const CricketTournamentTab: React.FC<{
       console.warn('LocalStorage active tournament id update/removal blocked:', e);
     }
   }, [activeTournamentId]);
+
+  // Global ESC key listener to safely dismiss open dialogs across all devices
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showCreateModal) setShowCreateModal(false);
+        if (showEditTourModal) setShowEditTourModal(false);
+        if (showAddTeamModal) setShowAddTeamModal(false);
+        if (showCreateMatchModal) setShowCreateMatchModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCreateModal, showEditTourModal, showAddTeamModal, showCreateMatchModal]);
 
   const activeTournament = tournaments.find(t => t.id === activeTournamentId);
 
@@ -1330,32 +1374,107 @@ export const CricketTournamentTab: React.FC<{
     triggerNotification("Match schedule & banner updated!");
   };
 
+  const openManualMatchModal = () => {
+    setManualMatchError(null);
+    const teams = activeTournament?.teams || [];
+    if (teams.length >= 2) {
+      setManualMatchTeamMode('existing');
+      setManualMatchTeamAId(teams[0].id);
+      setManualMatchTeamBId(teams[1].id);
+      setManualCustomTeamAName(teams[0].name);
+      setManualCustomTeamBName(teams[1].name);
+    } else if (teams.length === 1) {
+      setManualMatchTeamMode('custom');
+      setManualMatchTeamAId(teams[0].id);
+      setManualCustomTeamAName(teams[0].name);
+      setManualMatchTeamBId('');
+      setManualCustomTeamBName('Opponent XI');
+    } else {
+      setManualMatchTeamMode('custom');
+      setManualMatchTeamAId('');
+      setManualMatchTeamBId('');
+      setManualCustomTeamAName('Shivaji Warriors');
+      setManualCustomTeamBName('Maratha Challengers');
+    }
+    setManualMatchDate(new Date().toISOString().split('T')[0]);
+    setManualMatchTime('10:00 AM');
+    setManualMatchVenue(activeTournament?.groundName || activeTournament?.venue || 'Shivaji Maharaj Ground (Turf)');
+    setManualMatchStage('League');
+    setManualMatchBannerUrl('');
+    setShowCreateMatchModal(true);
+  };
+
   const handleCreateManualMatch = () => {
     if (!activeTournamentId || !activeTournament) return;
-    if (!manualMatchTeamAId || !manualMatchTeamBId) {
-      alert("Please select both teams!");
-      return;
-    }
-    if (manualMatchTeamAId === manualMatchTeamBId) {
-      alert("A team cannot play against itself!");
-      return;
-    }
+    setManualMatchError(null);
 
-    const teamAName = activeTournament.teams.find(t => t.id === manualMatchTeamAId)?.name || 'Team A';
-    const teamBName = activeTournament.teams.find(t => t.id === manualMatchTeamBId)?.name || 'Team B';
+    let finalTeamAId = manualMatchTeamAId;
+    let finalTeamBId = manualMatchTeamBId;
+    let teamAName = '';
+    let teamBName = '';
+
+    const existingTeams = [...(activeTournament.teams || [])];
+    const newTeamsToAdd: TournamentTeam[] = [];
+
+    if (manualMatchTeamMode === 'custom' || !finalTeamAId || !finalTeamBId || existingTeams.length < 2) {
+      const nameA = manualCustomTeamAName.trim() || 'Team A';
+      const nameB = manualCustomTeamBName.trim() || 'Team B';
+
+      if (nameA.toLowerCase() === nameB.toLowerCase()) {
+        setManualMatchError("A team cannot play against itself. Please specify two different team names.");
+        return;
+      }
+
+      // Check if Team A exists in roster or create new team
+      let matchedA = existingTeams.find(t => t.id === finalTeamAId || t.name.toLowerCase() === nameA.toLowerCase());
+      if (!matchedA) {
+        matchedA = {
+          id: `team_${Date.now()}_a_${Math.random().toString(36).substring(2, 6)}`,
+          name: nameA,
+          captain: `${nameA} Captain`,
+          players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
+          city: activeTournament.city || 'Local'
+        };
+        newTeamsToAdd.push(matchedA);
+      }
+      finalTeamAId = matchedA.id;
+      teamAName = matchedA.name;
+
+      // Check if Team B exists in roster or create new team
+      let matchedB = existingTeams.find(t => t.id === finalTeamBId || t.name.toLowerCase() === nameB.toLowerCase());
+      if (!matchedB) {
+        matchedB = {
+          id: `team_${Date.now()}_b_${Math.random().toString(36).substring(2, 6)}`,
+          name: nameB,
+          captain: `${nameB} Captain`,
+          players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
+          city: activeTournament.city || 'Local'
+        };
+        newTeamsToAdd.push(matchedB);
+      }
+      finalTeamBId = matchedB.id;
+      teamBName = matchedB.name;
+    } else {
+      if (finalTeamAId === finalTeamBId) {
+        setManualMatchError("A team cannot play against itself! Please select two different teams.");
+        return;
+      }
+      teamAName = existingTeams.find(t => t.id === finalTeamAId)?.name || 'Team A';
+      teamBName = existingTeams.find(t => t.id === finalTeamBId)?.name || 'Team B';
+    }
 
     const u1 = activeTournament.umpire1Name || "Umesh Shastri";
     const u2 = activeTournament.umpire2Name || "Nitin Gadkari";
     const sc = activeTournament.scoreboardManagerName || "Ravi Shastri Jnr";
 
     const newMatch: TournamentMatch = {
-      id: `match_${Date.now()}`,
-      teamAId: manualMatchTeamAId,
-      teamBId: manualMatchTeamBId,
+      id: `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      teamAId: finalTeamAId,
+      teamBId: finalTeamBId,
       teamAName,
       teamBName,
-      date: manualMatchDate,
-      time: manualMatchTime,
+      date: manualMatchDate || new Date().toISOString().split('T')[0],
+      time: manualMatchTime || '10:00 AM',
       venue: manualMatchVenue || activeTournament.groundName || activeTournament.venue || "Shivaji Maharaj Ground (Turf)",
       status: 'scheduled',
       scoreA: '',
@@ -1365,25 +1484,41 @@ export const CricketTournamentTab: React.FC<{
       winnerId: null,
       winReason: '',
       manOfTheMatch: '',
-      stage: manualMatchStage,
+      stage: manualMatchStage || 'League',
       umpire1: u1,
       umpire2: u2,
       scorer: sc,
       matchBannerUrl: manualMatchBannerUrl || undefined
     };
 
-    setTournaments(tournaments.map(t => {
-      if (t.id !== activeTournamentId) return t;
-      return {
-        ...t,
-        status: t.status === 'setup' ? 'active' : t.status,
-        matches: [...t.matches, newMatch]
-      };
-    }));
+    const updatedTeams = [...existingTeams, ...newTeamsToAdd];
+    const updatedMatches = [...(activeTournament.matches || []), newMatch];
+
+    const updatedTournament: Tournament = {
+      ...activeTournament,
+      teams: updatedTeams,
+      status: activeTournament.status === 'setup' ? 'active' : activeTournament.status,
+      matches: updatedMatches,
+      updatedAt: Date.now()
+    };
+
+    const nextTournaments = tournaments.map(t => t.id === activeTournamentId ? updatedTournament : t);
+    setTournaments(nextTournaments);
+
+    try {
+      localStorage.setItem('gully_tournaments_v1', JSON.stringify(nextTournaments));
+      setDoc(doc(db, 'cricket_tournaments', activeTournamentId), updatedTournament).catch(err => {
+        console.warn("Failed to backup tournament to Firestore:", err);
+      });
+      window.dispatchEvent(new Event('gully_tournaments_updated'));
+    } catch (e) {
+      console.warn("Save match error:", e);
+    }
 
     setShowCreateMatchModal(false);
     setManualMatchBannerUrl('');
-    triggerNotification(`Match scheduled: ${teamAName} vs ${teamBName}!${manualMatchBannerUrl ? ' Match banner automatically attached for scoreboard setup.' : ' You can click "Add Banner" to attach banner anytime.'}`);
+    setManualMatchError(null);
+    triggerNotification(`Match scheduled: ${teamAName} vs ${teamBName}!${manualMatchBannerUrl ? ' Match banner automatically attached.' : ''}`);
   };
 
   const handleEditTournament = () => {
@@ -2555,19 +2690,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => {
-                      if (!activeTournament.teams || activeTournament.teams.length < 2) {
-                        alert("Please register at least 2 teams before scheduling matches!");
-                        return;
-                      }
-                      setManualMatchTeamAId(activeTournament.teams[0].id);
-                      setManualMatchTeamBId(activeTournament.teams[1].id);
-                      setManualMatchDate(new Date().toISOString().split('T')[0]);
-                      setManualMatchTime('10:00 AM');
-                      setManualMatchVenue('Shivaji Maharaj Ground (Turf)');
-                      setManualMatchStage('League');
-                      setShowCreateMatchModal(true);
-                    }}
+                    onClick={openManualMatchModal}
                     className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-500 rounded-xl border border-emerald-500/20 font-black uppercase text-[10px] cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
                   >
                     <Plus size={12} /> Schedule Manually
@@ -2585,10 +2708,30 @@ export const CricketTournamentTab: React.FC<{
               </div>
 
               {(!activeTournament.matches || activeTournament.matches.length === 0) ? (
-                <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center text-slate-400 space-y-3">
-                  <Calendar size={32} className="mx-auto text-slate-300" />
-                  <p className="text-xs font-bold uppercase">No matches configured.</p>
-                  <p className="text-2xs font-medium text-slate-400">Add teams first, then generate the round-robin or knockout match schedule registry.</p>
+                <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-10 text-center text-slate-400 space-y-4">
+                  <Calendar size={36} className="mx-auto text-emerald-500/60" />
+                  <div>
+                    <p className="text-sm font-black uppercase text-slate-800 dark:text-white">No matches configured yet</p>
+                    <p className="text-xs font-medium text-slate-400 max-w-md mx-auto mt-1">
+                      Schedule your first match manually, or generate round-robin/knockout fixture pairings with a single tap.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                    <button
+                      onClick={openManualMatchModal}
+                      className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold uppercase text-xs cursor-pointer flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/20"
+                    >
+                      <Plus size={14} /> Schedule Manually
+                    </button>
+                    {(activeTournament.teams?.length || 0) >= 2 && (
+                      <button
+                        onClick={generateFixtures}
+                        className="px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold uppercase text-xs cursor-pointer flex items-center gap-1.5 transition-all shadow-md shadow-indigo-500/20"
+                      >
+                        <RefreshCw size={14} /> Auto-Generate Fixtures
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -3862,181 +4005,248 @@ export const CricketTournamentTab: React.FC<{
 
       {/* CREATE NEW TOURNAMENT MODAL */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Create Gully Tournament</h3>
-            
-            <div className="space-y-3 text-left">
-              <div>
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Championship Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Gully Premier League"
-                  value={newTourName}
-                  onChange={(e) => setNewTourName(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Format</label>
-                  <select
-                    value={newTourFormat}
-                    onChange={(e) => setNewTourFormat(e.target.value as any)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs uppercase outline-none"
-                  >
-                    <option value="T20">T20 (20 ov)</option>
-                    <option value="ODI">ODI (10 ov demo)</option>
-                    <option value="Test">Test (5 ov match)</option>
-                    <option value="Box Cricket">Box Cricket (8 ov)</option>
-                    <option value="Custom">Custom Overs Match</option>
-                  </select>
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 md:p-6 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCreateModal(false);
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-xl md:max-w-2xl lg:max-w-3xl w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sticky Header */}
+            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+                  <Trophy size={18} className="sm:size-5" />
                 </div>
-
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team Count Limit</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={newTourTeamCount}
-                    onChange={(e) => setNewTourTeamCount(Math.max(1, Number(e.target.value)))}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                    placeholder="e.g. 10 (Select 1 to many)"
-                  />
+                <div className="min-w-0 text-left">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate">
+                    Create Gully Tournament
+                  </h3>
+                  <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
+                    Setup rules, match format, officials, ground & points system
+                  </p>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-              {newTourFormat === 'Custom' && (
-                <div className="space-y-1 animate-fade-in text-left">
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">No. of Match Overs (Manual)</label>
+            {/* Scrollable Content Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5 custom-scrollbar text-left">
+              {/* Basic Championship Details */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div>
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Championship Name *</label>
                   <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={newTourCustomOvers}
-                    onChange={(e) => setNewTourCustomOvers(Math.max(1, Number(e.target.value)))}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                    placeholder="Enter manual overs count (e.g. 5, 12, 50)"
+                    type="text"
+                    placeholder="e.g. Gully Premier League (GPL 2026)"
+                    value={newTourName}
+                    onChange={(e) => setNewTourName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs sm:text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition"
                   />
                 </div>
-              )}
 
-              {/* Tournament logo upload input option during creation */}
-              <div className="space-y-1.5 animate-fade-in text-left">
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Tournament Shield/Logo</label>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-center overflow-hidden">
-                    {tournamentLogoStr ? (
-                      <img src={tournamentLogoStr} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <Trophy className="text-slate-300" size={20} />
-                    )}
-                  </div>
-                  <label className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-500 rounded-xl border border-emerald-500/20 font-black uppercase text-[10px] cursor-pointer">
-                    Browse Logo
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleImageUpload(file, (base64Str) => {
-                            setTournamentLogoStr(base64Str);
-                          });
-                        }
-                      }}
-                    />
-                  </label>
-                  {tournamentLogoStr && (
-                    <button
-                      type="button"
-                      onClick={() => setTournamentLogoStr('')}
-                      className="p-1 hover:bg-rose-50 text-rose-500 rounded border-none cursor-pointer"
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Format</label>
+                    <select
+                      value={newTourFormat}
+                      onChange={(e) => setNewTourFormat(e.target.value as any)}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs uppercase outline-none focus:border-emerald-500 cursor-pointer"
                     >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
+                      <option value="T20">T20 (20 ov)</option>
+                      <option value="ODI">ODI (10 ov demo)</option>
+                      <option value="Test">Test (5 ov match)</option>
+                      <option value="Box Cricket">Box Cricket (8 ov)</option>
+                      <option value="Custom">Custom Overs Match</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team Count Limit</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={newTourTeamCount}
+                      onChange={(e) => setNewTourTeamCount(Math.max(1, Number(e.target.value)))}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-emerald-500"
+                      placeholder="e.g. 8"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={newTourDate}
+                      onChange={(e) => setNewTourDate(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {newTourFormat === 'Custom' && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl animate-fade-in text-left">
+                    <label className="text-[10px] text-amber-600 dark:text-amber-400 font-extrabold uppercase tracking-widest block mb-1">
+                      No. of Match Overs (Custom Overs per Inning)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={newTourCustomOvers}
+                      onChange={(e) => setNewTourCustomOvers(Math.max(1, Number(e.target.value)))}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-amber-500"
+                      placeholder="Enter custom overs count (e.g. 6, 12, 15)"
+                    />
+                  </div>
+                )}
+
+                {/* Tournament Shield / Logo Upload */}
+                <div className="pt-1">
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1.5">
+                    Tournament Shield / Logo
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                      {tournamentLogoStr ? (
+                        <img src={tournamentLogoStr} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Trophy className="text-slate-300 dark:text-slate-600" size={20} />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl border border-emerald-500/20 font-black uppercase text-[10px] cursor-pointer inline-flex items-center gap-1.5 transition">
+                        <ImageIcon size={13} />
+                        Browse Logo
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleImageUpload(file, (base64Str) => {
+                                setTournamentLogoStr(base64Str);
+                              });
+                            }
+                          }}
+                        />
+                      </label>
+                      {tournamentLogoStr && (
+                        <button
+                          type="button"
+                          onClick={() => setTournamentLogoStr('')}
+                          className="px-2.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-500 rounded-xl border border-rose-500/20 font-bold text-[10px] uppercase cursor-pointer transition inline-flex items-center gap-1"
+                        >
+                          <Trash2 size={12} /> Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Tournament Custom Rules option during creation */}
-              <div className="space-y-1.5 text-left">
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Custom Rules (e.g. Box Cricket, special match constraints)</label>
+              {/* Tournament Type / Structure */}
+              <div>
+                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1.5">
+                  Tournament Structure
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'league', title: 'League', sub: 'Round Robin' },
+                    { id: 'knockout', title: 'Knockout', sub: 'Bracket' },
+                    { id: 'group-stage', title: 'Groups', sub: '+ Playoffs' },
+                    { id: 'double-elimination', title: 'Double Elim', sub: 'Upper/Lower' }
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => setNewTourType(st.id as any)}
+                      className={`p-2.5 rounded-xl border text-center cursor-pointer transition flex flex-col items-center justify-center gap-0.5 ${
+                        newTourType === st.id
+                          ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20'
+                          : 'bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-500/40'
+                      }`}
+                    >
+                      <span className="font-black text-xs uppercase tracking-wide leading-tight">{st.title}</span>
+                      <span className={`text-[9px] font-semibold ${newTourType === st.id ? 'text-emerald-100' : 'text-slate-400'}`}>
+                        {st.sub}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Rules & Quick Chips */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
+                    Special Ground & Box Cricket Rules
+                  </label>
+                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold uppercase">
+                    Tap chips to add
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {GULLY_RULES_PRESETS.map((preset) => {
+                    const isSelected = newTourCustomRules.includes(preset);
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setNewTourCustomRules((prev) => {
+                            if (!prev.trim()) return preset;
+                            if (prev.includes(preset)) {
+                              return prev
+                                .split('\n')
+                                .filter(line => !line.includes(preset))
+                                .join('\n')
+                                .trim();
+                            }
+                            return `${prev}\n• ${preset}`.trim();
+                          });
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition border ${
+                          isSelected
+                            ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-500/40'
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}{preset}
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <textarea
-                  placeholder="e.g., Underarm bowling only, direct hit required for boundaries, or net rule exclusions..."
+                  placeholder="e.g. Underarm bowling only, direct wall hit is boundary, one-tip one-hand catch out..."
                   rows={2}
                   value={newTourCustomRules}
                   onChange={(e) => setNewTourCustomRules(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-805 rounded-xl font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500 resize-none placeholder-slate-400"
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500 resize-none placeholder-slate-400"
                 />
               </div>
 
-              <div>
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Tournament Type/Structure</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setNewTourType('league')}
-                    className={`py-2 px-3 rounded-xl border font-black text-[10px] uppercase tracking-wide cursor-pointer text-center ${
-                      newTourType === 'league' 
-                        ? 'bg-emerald-500 text-white border-emerald-500' 
-                        : 'bg-transparent text-slate-400 border-slate-200 dark:border-slate-800'
-                    }`}
-                  >
-                    League (Round Robin)
-                  </button>
-                  <button
-                    onClick={() => setNewTourType('knockout')}
-                    className={`py-2 px-3 rounded-xl border font-black text-[10px] uppercase tracking-wide cursor-pointer text-center ${
-                      newTourType === 'knockout' 
-                        ? 'bg-emerald-500 text-white border-emerald-500' 
-                        : 'bg-transparent text-slate-400 border-slate-200 dark:border-slate-800'
-                    }`}
-                  >
-                    Knockout (Bracket)
-                  </button>
-                  <button
-                    onClick={() => setNewTourType('group-stage')}
-                    className={`py-2 px-3 rounded-xl border font-black text-[10px] uppercase tracking-wide cursor-pointer text-center ${
-                      newTourType === 'group-stage' 
-                        ? 'bg-indigo-500 text-white border-indigo-500' 
-                        : 'bg-transparent text-slate-400 border-slate-200 dark:border-slate-800'
-                    }`}
-                  >
-                    Group Stage + Playoff
-                  </button>
-                  <button
-                    onClick={() => setNewTourType('double-elimination')}
-                    className={`py-2 px-3 rounded-xl border font-black text-[10px] uppercase tracking-wide cursor-pointer text-center ${
-                      newTourType === 'double-elimination' 
-                        ? 'bg-indigo-500 text-white border-indigo-500' 
-                        : 'bg-transparent text-slate-400 border-slate-200 dark:border-slate-800'
-                    }`}
-                  >
-                    Double Elimination
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={newTourDate}
-                  onChange={(e) => setNewTourDate(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                />
-              </div>
-
-              {/* Ground Venue, Match Officials & Broadcast Crew (Auto-Configured for Live Score) */}
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-950/80 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+              {/* Ground Venue, Officials & Live Broadcast Crew */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="p-1 rounded-lg bg-emerald-500/10 text-emerald-500 font-extrabold text-xs">🏟️</span>
+                  <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 font-extrabold text-xs">🏟️</span>
                   <div>
-                    <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block tracking-wider">
-                      Ground Venue, Officials & Crew
+                    <span className="text-[11px] font-black uppercase text-slate-800 dark:text-slate-200 block tracking-wider">
+                      Ground Venue, Officials & Broadcast Crew
                     </span>
                     <span className="text-[9px] text-slate-400 font-medium block">
                       Auto-configured for every match — no need to re-enter manually!
@@ -4045,17 +4255,17 @@ export const CricketTournamentTab: React.FC<{
                 </div>
 
                 <div>
-                  <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Tournament Ground / Venue</label>
+                  <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Ground / Turf Venue Name</label>
                   <input
                     type="text"
                     value={newTourGroundVenue}
                     onChange={(e) => setNewTourGroundVenue(e.target.value)}
                     placeholder="e.g. Shivaji Maharaj Ground (Turf)"
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-emerald-500"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">On-Field Umpire 1</label>
                     <input
@@ -4078,7 +4288,7 @@ export const CricketTournamentTab: React.FC<{
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Official Scorer</label>
                     <input
@@ -4100,11 +4310,37 @@ export const CricketTournamentTab: React.FC<{
                     />
                   </div>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-slate-200/60 dark:border-slate-800/60">
+                  <div>
+                    <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Live YouTube Channel Name</label>
+                    <input
+                      type="text"
+                      value={newTourYoutubeChannelName}
+                      onChange={(e) => setNewTourYoutubeChannelName(e.target.value)}
+                      placeholder="e.g. Pune Cricket Live"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Channel Logo / Stream Badge</label>
+                    <input
+                      type="text"
+                      value={newTourYoutubeChannelLogo}
+                      onChange={(e) => setNewTourYoutubeChannelLogo(e.target.value)}
+                      placeholder="https://... logo URL"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Local Cricket Teams & 1-Click Setup option */}
-              <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent rounded-2xl border border-emerald-500/25 space-y-2 text-left">
-                <div className="flex items-center justify-between cursor-pointer" onClick={() => setCreateTourAutoLocalTeams(!createTourAutoLocalTeams)}>
+              <div 
+                className="p-3.5 sm:p-4 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent rounded-2xl border border-emerald-500/25 space-y-2 cursor-pointer transition hover:border-emerald-500/40"
+                onClick={() => setCreateTourAutoLocalTeams(!createTourAutoLocalTeams)}
+              >
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <span className="p-1.5 rounded-xl bg-emerald-500 text-white shadow-sm shrink-0">
                       <Zap size={14} className="fill-white" />
@@ -4123,6 +4359,7 @@ export const CricketTournamentTab: React.FC<{
                     checked={createTourAutoLocalTeams}
                     onChange={(e) => setCreateTourAutoLocalTeams(e.target.checked)}
                     className="w-4 h-4 accent-emerald-500 rounded cursor-pointer shrink-0"
+                    onClick={(e) => e.stopPropagation()}
                   />
                 </div>
                 {createTourAutoLocalTeams && (
@@ -4132,8 +4369,8 @@ export const CricketTournamentTab: React.FC<{
                 )}
               </div>
 
-              {/* Tournament Points Table Auto-Configuration (Requirement 5) */}
-              <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-200 dark:border-indigo-800/40 space-y-2.5 text-left">
+              {/* Tournament Points Table Auto-Configuration */}
+              <div className="p-3.5 sm:p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-200 dark:border-indigo-800/40 space-y-2.5">
                 <div className="flex items-center gap-2">
                   <span className="p-1 rounded-lg bg-indigo-500/10 text-indigo-500 font-extrabold text-xs">📊</span>
                   <div>
@@ -4146,7 +4383,7 @@ export const CricketTournamentTab: React.FC<{
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 pt-1">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                   <div>
                     <label className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Win Pts</label>
                     <input
@@ -4154,7 +4391,7 @@ export const CricketTournamentTab: React.FC<{
                       min="0"
                       value={newTourWinPoints}
                       onChange={(e) => setNewTourWinPoints(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
@@ -4164,7 +4401,7 @@ export const CricketTournamentTab: React.FC<{
                       min="0"
                       value={newTourTiePoints}
                       onChange={(e) => setNewTourTiePoints(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
@@ -4174,7 +4411,7 @@ export const CricketTournamentTab: React.FC<{
                       min="0"
                       value={newTourLossPoints}
                       onChange={(e) => setNewTourLossPoints(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
@@ -4184,26 +4421,42 @@ export const CricketTournamentTab: React.FC<{
                       min="1"
                       value={newTourQualSpots}
                       onChange={(e) => setNewTourQualSpots(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateTournament}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20"
-              >
-                Create
-              </button>
+            {/* Sticky Action Footer */}
+            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-3.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <div className="hidden sm:flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-semibold">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] uppercase">
+                  {newTourFormat} {newTourFormat === 'Custom' ? `(${newTourCustomOvers} Ov)` : ''}
+                </span>
+                <span>•</span>
+                <span>{newTourTeamCount} Teams</span>
+                <span>•</span>
+                <span className="capitalize">{newTourType.replace('-', ' ')}</span>
+              </div>
+
+              <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateTournament}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
+                >
+                  <Sparkles size={14} />
+                  <span>Create Tournament</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4211,11 +4464,36 @@ export const CricketTournamentTab: React.FC<{
 
       {/* ADD / EDIT SQUAD TEAM MODAL */}
       {showAddTeamModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">
-              {editTeamId ? 'Edit Gully Squad' : 'Add Gully Squad'}
-            </h3>
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowAddTeamModal(false);
+              setEditTeamId(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate m-0">
+                {editTeamId ? 'Edit Gully Squad' : 'Add Gully Squad'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddTeamModal(false);
+                  setEditTeamId(null);
+                }}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 custom-scrollbar text-left">
 
             {/* Quick 1-Click Setup banner */}
             <div className="p-3 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/25 flex items-center justify-between gap-2 text-left">
@@ -4428,19 +4706,21 @@ export const CricketTournamentTab: React.FC<{
               )}
             </div>
 
-            <div className="flex gap-2 pt-2">
+            </div>
+
+            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex gap-2 z-20 shrink-0">
               <button
                 onClick={() => {
                   setShowAddTeamModal(false);
                   setEditTeamId(null);
                 }}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSaveTeam}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20 transition"
               >
                 Save
               </button>
@@ -4451,11 +4731,30 @@ export const CricketTournamentTab: React.FC<{
 
       {/* UPDATE MATCH SCORECARD MODAL */}
       {updatingMatch && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Update Result Scorecard</h3>
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setUpdatingMatch(null);
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate m-0">
+                Update Result Scorecard
+              </h3>
+              <button
+                type="button"
+                onClick={() => setUpdatingMatch(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
+              >
+                <X size={18} />
+              </button>
+            </div>
             
-            <div className="space-y-3.5 text-left">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 custom-scrollbar text-left">
               <div className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-100 dark:border-slate-800 text-xs font-black uppercase text-center">
                 {updatingMatch.teamAName} VS {updatingMatch.teamBName}
               </div>
@@ -4547,16 +4846,16 @@ export const CricketTournamentTab: React.FC<{
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex gap-2 z-20 shrink-0">
               <button
                 onClick={() => setUpdatingMatch(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleUpdateResults}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20 transition"
               >
                 Confirm Score
               </button>
@@ -4567,25 +4866,42 @@ export const CricketTournamentTab: React.FC<{
 
       {/* SCHEDULE SETTINGS MODAL */}
       {editingScheduleMatch && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Alter Match Schedule</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  const m = editingScheduleMatch;
-                  setEditingScheduleMatch(null);
-                  setSelectedMatchForBanner(m);
-                }}
-                className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition"
-                title="Open visual Banner Studio"
-              >
-                <ImageIcon size={12} /> Studio
-              </button>
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingScheduleMatch(null);
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-md w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate m-0">Alter Match Schedule</h3>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const m = editingScheduleMatch;
+                    setEditingScheduleMatch(null);
+                    setSelectedMatchForBanner(m);
+                  }}
+                  className="px-2.5 py-1 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition"
+                  title="Open visual Banner Studio"
+                >
+                  <ImageIcon size={12} /> Studio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingScheduleMatch(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
-            <div className="space-y-3.5 text-left">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 custom-scrollbar text-left">
               <div>
                 <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Date</label>
                 <input
@@ -4677,16 +4993,16 @@ export const CricketTournamentTab: React.FC<{
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex gap-2 z-20 shrink-0">
               <button
                 onClick={() => setEditingScheduleMatch(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
               >
                 Cancel
               </button>
               <button
                 onClick={saveScheduleUpdate}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20 transition"
               >
                 Update Fixture
               </button>
@@ -4840,38 +5156,173 @@ export const CricketTournamentTab: React.FC<{
 
       {/* MANUAL MATCH SCHEDULING MODAL */}
       {showCreateMatchModal && activeTournament && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-fade-in text-left animate-in fade-in zoom-in-95 duration-150">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Manual Match Scheduler</h3>
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCreateMatchModal(false);
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto animate-fade-in text-left animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate m-0">
+                Manual Match Scheduler
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowCreateMatchModal(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-            <div className="space-y-3.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A</label>
-                  <select
-                    value={manualMatchTeamAId}
-                    onChange={(e) => setManualMatchTeamAId(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                  >
-                    {activeTournament.teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 custom-scrollbar">
+              {manualMatchError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-rose-500" />
+                  <span>{manualMatchError}</span>
                 </div>
+              )}
 
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B</label>
-                  <select
-                    value={manualMatchTeamBId}
-                    onChange={(e) => setManualMatchTeamBId(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+              {/* Fewer than 2 teams banner */}
+              {(!activeTournament.teams || activeTournament.teams.length < 2) && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2.5">
+                  <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-xs font-bold">
+                    <Sparkles size={15} className="shrink-0 text-amber-500" />
+                    <span>Quick-Start: Roster has {activeTournament.teams?.length || 0} teams</span>
+                  </div>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                    You can type two custom team names below (they'll be auto-saved to your roster), or instantly populate 2 local gully squads with 1-click:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const t1Name = PRESET_LOCAL_CRICKET_TEAMS[0]?.name || 'Shivaji Warriors';
+                      const t2Name = PRESET_LOCAL_CRICKET_TEAMS[1]?.name || 'Maratha Challengers';
+                      const team1: TournamentTeam = {
+                        id: `team_${Date.now()}_1`,
+                        name: t1Name,
+                        captain: PRESET_LOCAL_CRICKET_TEAMS[0]?.captain || 'Rohit',
+                        players: PRESET_LOCAL_CRICKET_TEAMS[0]?.players || ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'],
+                        city: activeTournament.city || 'Local'
+                      };
+                      const team2: TournamentTeam = {
+                        id: `team_${Date.now()}_2`,
+                        name: t2Name,
+                        captain: PRESET_LOCAL_CRICKET_TEAMS[1]?.captain || 'Virat',
+                        players: PRESET_LOCAL_CRICKET_TEAMS[1]?.players || ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'],
+                        city: activeTournament.city || 'Local'
+                      };
+                      const updatedTeams = [...(activeTournament.teams || []), team1, team2];
+                      const updatedTournament = { ...activeTournament, teams: updatedTeams };
+                      const nextTournaments = tournaments.map(t => t.id === activeTournamentId ? updatedTournament : t);
+                      setTournaments(nextTournaments);
+                      try {
+                        localStorage.setItem('gully_tournaments_v1', JSON.stringify(nextTournaments));
+                        setDoc(doc(db, 'cricket_tournaments', activeTournamentId), updatedTournament).catch(console.warn);
+                      } catch (_) {}
+                      setManualMatchTeamAId(team1.id);
+                      setManualMatchTeamBId(team2.id);
+                      setManualCustomTeamAName(team1.name);
+                      setManualCustomTeamBName(team2.name);
+                      setManualMatchTeamMode('existing');
+                      setManualMatchError(null);
+                      triggerNotification('2 Local Gully Teams added to tournament!');
+                    }}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 transition shadow-xs"
                   >
-                    {activeTournament.teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
+                    <Sparkles size={12} />
+                    <span>⚡ Add 2 Preset Teams to Roster</span>
+                  </button>
                 </div>
-              </div>
+              )}
+
+              {/* Opponent Selection Mode Toggle */}
+              {(activeTournament.teams && activeTournament.teams.length >= 2) && (
+                <div className="flex items-center justify-between pb-0.5">
+                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">Match Opponents</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualMatchError(null);
+                      setManualMatchTeamMode(prev => prev === 'existing' ? 'custom' : 'existing');
+                    }}
+                    className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer border-none bg-transparent"
+                  >
+                    {manualMatchTeamMode === 'existing' ? '+ Enter Custom Team Names' : '← Choose from Registered Roster'}
+                  </button>
+                </div>
+              )}
+
+              {/* TEAM SELECTION INPUTS */}
+              {manualMatchTeamMode === 'existing' && activeTournament.teams && activeTournament.teams.length >= 2 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A</label>
+                    <select
+                      value={manualMatchTeamAId}
+                      onChange={(e) => {
+                        setManualMatchTeamAId(e.target.value);
+                        setManualMatchError(null);
+                      }}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {activeTournament.teams.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B</label>
+                    <select
+                      value={manualMatchTeamBId}
+                      onChange={(e) => {
+                        setManualMatchTeamBId(e.target.value);
+                        setManualMatchError(null);
+                      }}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {activeTournament.teams.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A Name</label>
+                    <input
+                      type="text"
+                      value={manualCustomTeamAName}
+                      placeholder="e.g. Shivaji Warriors"
+                      onChange={(e) => {
+                        setManualCustomTeamAName(e.target.value);
+                        setManualMatchError(null);
+                      }}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B Name</label>
+                    <input
+                      type="text"
+                      value={manualCustomTeamBName}
+                      placeholder="e.g. Maratha Challengers"
+                      onChange={(e) => {
+                        setManualCustomTeamBName(e.target.value);
+                        setManualMatchError(null);
+                      }}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Stage/Tag</label>
@@ -5007,16 +5458,16 @@ export const CricketTournamentTab: React.FC<{
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex gap-2 z-20 shrink-0">
               <button
                 onClick={() => setShowCreateMatchModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateManualMatch}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20 transition"
               >
                 Schedule Match
               </button>
@@ -5027,132 +5478,245 @@ export const CricketTournamentTab: React.FC<{
 
       {/* EDIT TOURNAMENT MODAL */}
       {showEditTourModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-left animate-in fade-in zoom-in-95 duration-150">
-            <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight">Edit Tournament Settings</h3>
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 md:p-6 overflow-y-auto animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowEditTourModal(false);
+          }}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-xl md:max-w-2xl lg:max-w-3xl w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto text-left animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sticky Header */}
+            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-500/20">
+                  <Edit size={18} className="sm:size-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate">
+                    Edit Tournament Settings
+                  </h3>
+                  <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium truncate">
+                    Update championship rules, format, venue officials & points
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditTourModal(false)}
+                className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
+                title="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-            <div className="space-y-3">
+            {/* Scrollable Content Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5 custom-scrollbar text-left">
+              {/* Basic Championship Details */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+                <div>
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Championship Name *</label>
+                  <input
+                    type="text"
+                    value={editTourName}
+                    onChange={(e) => setEditTourName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs sm:text-sm text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Format</label>
+                    <select
+                      value={editTourFormat}
+                      onChange={(e) => setEditTourFormat(e.target.value as any)}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs uppercase outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="T20">T20 (20 ov)</option>
+                      <option value="ODI">ODI (10 ov demo)</option>
+                      <option value="Test">Test (5 ov match)</option>
+                      <option value="Box Cricket">Box Cricket (8 ov)</option>
+                      <option value="Custom">Custom Overs Match</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team Count Limit</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={editTourTeamCount}
+                      onChange={(e) => setEditTourTeamCount(Math.max(1, Number(e.target.value)))}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Commencement Date</label>
+                    <input
+                      type="date"
+                      value={editTourDate}
+                      onChange={(e) => setEditTourDate(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {editTourFormat === 'Custom' && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl animate-fade-in text-left">
+                    <label className="text-[10px] text-amber-600 dark:text-amber-400 font-extrabold uppercase tracking-widest block mb-1">
+                      No. of Match Overs (Custom Overs per Inning)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={editTourCustomOvers}
+                      onChange={(e) => setEditTourCustomOvers(Math.max(1, Number(e.target.value)))}
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-amber-500"
+                    />
+                  </div>
+                )}
+
+                {/* Tournament Shield / Logo Upload */}
+                <div className="pt-1">
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1.5">
+                    Update Shield / Logo
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                      {editTourLogo ? (
+                        <img src={editTourLogo} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Trophy className="text-slate-300 dark:text-slate-600" size={20} />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl border border-emerald-500/20 font-black uppercase text-[10px] cursor-pointer inline-flex items-center gap-1.5 transition">
+                        <ImageIcon size={13} />
+                        Browse Logo
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handleImageUpload(file, (base64Str) => {
+                                setEditTourLogo(base64Str);
+                              });
+                            }
+                          }}
+                        />
+                      </label>
+                      {editTourLogo && (
+                        <button
+                          type="button"
+                          onClick={() => setEditTourLogo('')}
+                          className="px-2.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-500 rounded-xl border border-rose-500/20 font-bold text-[10px] uppercase cursor-pointer transition inline-flex items-center gap-1"
+                        >
+                          <Trash2 size={12} /> Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tournament Type / Structure */}
               <div>
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Championship Name</label>
-                <input
-                  type="text"
-                  value={editTourName}
-                  onChange={(e) => setEditTourName(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1.5">
+                  Tournament Structure
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'league', title: 'League', sub: 'Round Robin' },
+                    { id: 'knockout', title: 'Knockout', sub: 'Bracket' },
+                    { id: 'group-stage', title: 'Groups', sub: '+ Playoffs' },
+                    { id: 'double-elimination', title: 'Double Elim', sub: 'Upper/Lower' }
+                  ].map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => setEditTourType(st.id as any)}
+                      className={`p-2.5 rounded-xl border text-center cursor-pointer transition flex flex-col items-center justify-center gap-0.5 ${
+                        editTourType === st.id
+                          ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20'
+                          : 'bg-slate-50 dark:bg-slate-950/60 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-500/40'
+                      }`}
+                    >
+                      <span className="font-black text-xs uppercase tracking-wide leading-tight">{st.title}</span>
+                      <span className={`text-[9px] font-semibold ${editTourType === st.id ? 'text-emerald-100' : 'text-slate-400'}`}>
+                        {st.sub}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Rules & Quick Chips */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">
+                    Special Ground & Box Cricket Rules
+                  </label>
+                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold uppercase">
+                    Tap chips to add
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {GULLY_RULES_PRESETS.map((preset) => {
+                    const isSelected = editTourCustomRules.includes(preset);
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setEditTourCustomRules((prev) => {
+                            if (!prev.trim()) return preset;
+                            if (prev.includes(preset)) {
+                              return prev
+                                .split('\n')
+                                .filter(line => !line.includes(preset))
+                                .join('\n')
+                                .trim();
+                            }
+                            return `${prev}\n• ${preset}`.trim();
+                          });
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition border ${
+                          isSelected
+                            ? 'bg-emerald-500 text-white border-emerald-500 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-emerald-500/40'
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : '+ '}{preset}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <textarea
+                  placeholder="e.g. Underarm bowling only, direct wall hit is boundary, one-tip one-hand catch out..."
+                  rows={2}
+                  value={editTourCustomRules}
+                  onChange={(e) => setEditTourCustomRules(e.target.value)}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500 resize-none placeholder-slate-400"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Format</label>
-                  <select
-                    value={editTourFormat}
-                    onChange={(e) => setEditTourFormat(e.target.value as any)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs uppercase outline-none"
-                  >
-                    <option value="T20">T20 (20 ov)</option>
-                    <option value="ODI">ODI (10 ov demo)</option>
-                    <option value="Test">Test (5 ov match)</option>
-                    <option value="Box Cricket">Box Cricket (8 ov)</option>
-                    <option value="Custom">Custom Overs Match</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team Count Limit</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={editTourTeamCount}
-                    onChange={(e) => setEditTourTeamCount(Math.max(1, Number(e.target.value)))}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                  />
-                </div>
-              </div>
-
-              {editTourFormat === 'Custom' && (
-                <div className="space-y-1">
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">No. of Match Overs (Manual)</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={editTourCustomOvers}
-                    onChange={(e) => setEditTourCustomOvers(Math.max(1, Number(e.target.value)))}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Tournament Type</label>
-                  <select
-                    value={editTourType}
-                    onChange={(e) => setEditTourType(e.target.value as any)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs uppercase outline-none"
-                  >
-                    <option value="league">League (Round Robin)</option>
-                    <option value="knockout">Knockout</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Commencement Date</label>
-                  <input
-                    type="date"
-                    value={editTourDate}
-                    onChange={(e) => setEditTourDate(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Tournament logo upload input option */}
-              <div className="space-y-1.5 pt-1.5">
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Update Shield/Logo</label>
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex items-center justify-center overflow-hidden">
-                    {editTourLogo ? (
-                      <img src={editTourLogo} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      <Trophy className="text-slate-300" size={20} />
-                    )}
-                  </div>
-                  <label className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-500 rounded-xl border border-emerald-500/20 font-black uppercase text-[10px] cursor-pointer">
-                    Browse Logo
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleImageUpload(file, (base64Str) => {
-                            setEditTourLogo(base64Str);
-                          });
-                        }
-                      }}
-                    />
-                  </label>
-                  {editTourLogo && (
-                    <button
-                      type="button"
-                      onClick={() => setEditTourLogo('')}
-                      className="p-1 hover:bg-rose-50 text-rose-500 rounded border-none cursor-pointer"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Ground Venue, Match Officials & Broadcast Crew (Auto-Configured for Live Score) */}
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-950/80 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5 text-left">
+              {/* Ground Venue, Officials & Broadcast Crew */}
+              <div className="p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-950/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                 <div className="flex items-center gap-2">
-                  <span className="p-1 rounded-lg bg-emerald-500/10 text-emerald-500 font-extrabold text-xs">🏟️</span>
+                  <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 font-extrabold text-xs">🏟️</span>
                   <div>
-                    <span className="text-[10px] font-black uppercase text-slate-800 dark:text-slate-200 block tracking-wider">
-                      Ground Venue, Officials & Crew
+                    <span className="text-[11px] font-black uppercase text-slate-800 dark:text-slate-200 block tracking-wider">
+                      Ground Venue, Officials & Broadcast Crew
                     </span>
                     <span className="text-[9px] text-slate-400 font-medium block">
                       Auto-configured for every match — no need to re-enter manually!
@@ -5161,17 +5725,17 @@ export const CricketTournamentTab: React.FC<{
                 </div>
 
                 <div>
-                  <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Tournament Ground / Venue</label>
+                  <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Ground / Turf Venue Name</label>
                   <input
                     type="text"
                     value={editTourGroundVenue}
                     onChange={(e) => setEditTourGroundVenue(e.target.value)}
                     placeholder="e.g. Shivaji Maharaj Ground (Turf)"
-                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:border-emerald-500"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">On-Field Umpire 1</label>
                     <input
@@ -5194,7 +5758,7 @@ export const CricketTournamentTab: React.FC<{
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Official Scorer</label>
                     <input
@@ -5216,22 +5780,33 @@ export const CricketTournamentTab: React.FC<{
                     />
                   </div>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-slate-200/60 dark:border-slate-800/60">
+                  <div>
+                    <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Live YouTube Channel Name</label>
+                    <input
+                      type="text"
+                      value={editTourYoutubeChannelName}
+                      onChange={(e) => setEditTourYoutubeChannelName(e.target.value)}
+                      placeholder="e.g. Pune Cricket Live"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Channel Logo / Stream Badge</label>
+                    <input
+                      type="text"
+                      value={editTourYoutubeChannelLogo}
+                      onChange={(e) => setEditTourYoutubeChannelLogo(e.target.value)}
+                      placeholder="https://... logo URL"
+                      className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    />
+                  </div>
+                </div>
               </div>
 
-              {/* Tournament Custom Rules option during editing */}
-              <div className="space-y-1.5 pt-1.5">
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Custom Rules (e.g. Box Cricket constraints)</label>
-                <textarea
-                  placeholder="e.g. Underarm bowling only, direct hits bounds, or custom over scores limit..."
-                  rows={2}
-                  value={editTourCustomRules}
-                  onChange={(e) => setEditTourCustomRules(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-805 rounded-xl font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500 resize-none placeholder-slate-400"
-                />
-              </div>
-
-              {/* Tournament Points Table Configuration (Requirement 5) */}
-              <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-200 dark:border-indigo-800/40 space-y-2.5 text-left">
+              {/* Tournament Points Table Configuration */}
+              <div className="p-3.5 sm:p-4 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-200 dark:border-indigo-800/40 space-y-2.5">
                 <div className="flex items-center gap-2">
                   <span className="p-1 rounded-lg bg-indigo-500/10 text-indigo-500 font-extrabold text-xs">📊</span>
                   <div>
@@ -5244,15 +5819,15 @@ export const CricketTournamentTab: React.FC<{
                   </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 pt-1">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                   <div>
                     <label className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Win Pts</label>
                     <input
                       type="number"
                       min="0"
                       value={editTourWinPoints}
-                      onChange={(e) => setEditTourWinPoints(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      onChange={(e) => setNewTourWinPoints(Number(e.target.value))}
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
@@ -5262,7 +5837,7 @@ export const CricketTournamentTab: React.FC<{
                       min="0"
                       value={editTourTiePoints}
                       onChange={(e) => setEditTourTiePoints(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
@@ -5272,7 +5847,7 @@ export const CricketTournamentTab: React.FC<{
                       min="0"
                       value={editTourLossPoints}
                       onChange={(e) => setEditTourLossPoints(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
@@ -5282,26 +5857,40 @@ export const CricketTournamentTab: React.FC<{
                       min="1"
                       value={editTourQualSpots}
                       onChange={(e) => setEditTourQualSpots(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-black text-xs text-center outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => setShowEditTourModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleEditTournament}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
-              >
-                Save Settings
-              </button>
+            {/* Sticky Action Footer */}
+            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-3 sm:py-3.5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+              <div className="hidden sm:flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-semibold">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] uppercase">
+                  {editTourFormat} {editTourFormat === 'Custom' ? `(${editTourCustomOvers} Ov)` : ''}
+                </span>
+                <span>•</span>
+                <span>{editTourTeamCount} Teams</span>
+              </div>
+
+              <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowEditTourModal(false)}
+                  className="flex-1 sm:flex-initial px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditTournament}
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
+                >
+                  <Check size={14} />
+                  <span>Save Settings</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
