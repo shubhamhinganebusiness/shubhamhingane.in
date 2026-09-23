@@ -21,6 +21,25 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public static getDerivedStateFromError(error: Error): State {
+    // If it's a dynamic module import failure (e.g. chunk reload during dev),
+    // attempt an automatic recovery reload
+    if (
+      typeof window !== 'undefined' &&
+      error?.message &&
+      (error.message.includes('dynamically imported module') ||
+       error.message.includes('Failed to fetch dynamically imported module') ||
+       error.message.includes('Importing a module script failed'))
+    ) {
+      try {
+        const storageKey = 'last_dynamic_import_retry_ts';
+        const lastRetry = parseInt(sessionStorage.getItem(storageKey) || '0', 10);
+        const now = Date.now();
+        if (now - lastRetry > 8000) {
+          sessionStorage.setItem(storageKey, String(now));
+          window.location.reload();
+        }
+      } catch (_) {}
+    }
     return { hasError: true, error };
   }
 

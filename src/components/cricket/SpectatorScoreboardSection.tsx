@@ -56,7 +56,6 @@ import {
 import { SpectatorImageSlider } from './SpectatorImageSlider';
 import { ActiveLiveMatchBannerSlider } from './ActiveLiveMatchBannerSlider';
 import { useSpectatorSliderImages } from './useSpectatorSliderImages';
-import { CompletedRecordsSlider } from './CompletedRecordsSlider';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
 import { useAuth } from '../AuthContext';
 
@@ -3895,98 +3894,26 @@ export const SpectatorScoreboardSection = ({
                   </div>
                 )}
 
-                {/* Completed history matches */}
-            <div className="space-y-3 pt-3 mt-4 sm:mt-6 border-t border-slate-200 dark:border-slate-800/60">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-2">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-2">
-                    <Trophy size={14} className="text-amber-500 animate-bounce" />
-                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-300">Completed Records ({completedMatches.length})</h3>
-                  </div>
-
-                  {/* View All Matches Button Redirecting to All Completed Match Record Page */}
-                  <Link
-                    to="/completed-matches"
-                    id="btn-spectator-view-all-completed-matches"
-                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[9px] font-black uppercase tracking-wider shadow-sm hover:shadow-emerald-500/30 transition-all cursor-pointer no-underline border border-emerald-400/30 font-mono"
-                    title="Open Dedicated All Completed Matches Page"
-                  >
-                    <span>View All Matches</span>
-                    <ArrowRight size={11} />
-                  </Link>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                  {/* Results Filter Buttons */}
-                  <div className="flex bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-805 text-[9px] font-black uppercase tracking-wider">
-                    <button
-                      type="button"
-                      onClick={() => setHistoryResultFilter('all')}
-                      className={`px-2.5 py-1 rounded transition-all border-none cursor-pointer text-[8.5px] font-bold ${
-                        historyResultFilter === 'all' ? 'bg-amber-600 text-white font-extrabold' : 'text-slate-400 bg-transparent hover:text-slate-200'
-                      }`}
-                    >
-                      All Results
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHistoryResultFilter('wins')}
-                      className={`px-2.5 py-1 rounded transition-all border-none cursor-pointer text-[8.5px] font-bold ${
-                        historyResultFilter === 'wins' ? 'bg-amber-600 text-white font-extrabold' : 'text-slate-400 bg-transparent hover:text-slate-200'
-                      }`}
-                    >
-                      Wins
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setHistoryResultFilter('ties')}
-                      className={`px-2.5 py-1 rounded transition-all border-none cursor-pointer text-[8.5px] font-bold ${
-                        historyResultFilter === 'ties' ? 'bg-amber-600 text-white font-extrabold' : 'text-slate-400 bg-transparent hover:text-slate-200'
-                      }`}
-                    >
-                      Ties
-                    </button>
-                  </div>
-
-                  {completedMatches.length > 0 && (
-                    <div className="relative w-full sm:w-56">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500">
-                        <Search size={13} />
+                {/* Completed Match Records Quick Navigation (Match cards moved to dedicated /completed-matches page) */}
+                {completedMatches.length > 0 && (
+                  <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/60 flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <Trophy size={14} className="text-amber-500" />
+                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                        {completedMatches.length} Completed Match Record{completedMatches.length > 1 ? 's' : ''} in Archives
                       </span>
-                      <input 
-                        type="text"
-                        value={completedSearchQuery}
-                        onChange={(e) => setCompletedSearchQuery(e.target.value)}
-                        placeholder="Search team name..."
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500 transition-all shadow-sm"
-                      />
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {completedMatches.length === 0 ? (
-                <div className="border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-10 text-center text-slate-400 dark:text-slate-600 font-medium w-full">
-                  No completed matches recorded in the database history yet.
-                </div>
-              ) : filteredCompletedMatches.length === 0 ? (
-                <div className="border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center text-slate-400 dark:text-slate-500 text-xs font-semibold leading-relaxed w-full">
-                  No matching completed matches found for the given filters.
-                </div>
-              ) : (
-                <CompletedRecordsSlider
-                  matches={filteredCompletedMatches}
-                  onSelectMatch={selectMatch}
-                  onExportPDF={handleExportMatchPDF}
-                  onDownloadAward={(m, award) => {
-                    setSelectedMatch(m);
-                    handleDownloadAwardCertificate(award || 'potm');
-                  }}
-                  isScoreManager={isScoreManager}
-                  homepageMode={homepageMode}
-                />
-              )}
-            </div>
+                    <Link
+                      to="/completed-matches"
+                      id="btn-spectator-view-all-completed-matches"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold shadow-sm hover:shadow-emerald-500/25 transition-all cursor-pointer no-underline border border-emerald-400/30 font-mono"
+                      title="Open Dedicated All Completed Matches Page"
+                    >
+                      <span>View All Completed Matches</span>
+                      <ArrowRight size={12} />
+                    </Link>
+                  </div>
+                )}
             </>
             ) : (
               /* ===================== TOURNAMENTS ARENA TAB VIEW ===================== */
