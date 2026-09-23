@@ -34,6 +34,9 @@ interface CompletedRecordsSliderProps {
   onDownloadAward?: (match: MatchState, award?: 'potm' | 'best_batter' | 'best_bowler') => void;
   isScoreManager?: boolean;
   homepageMode?: boolean;
+  onToggleHide?: (matchId: string, currentHidden: boolean) => void;
+  onToggleBlock?: (matchId: string, currentBlocked: boolean) => void;
+  onDeleteMatch?: (matchId: string) => void;
 }
 
 export interface SponsorAdSlide {
@@ -355,7 +358,7 @@ export const MatchCardBannerSlider: React.FC<{
 };
 
 // Sub-component for individual completed match card in the slider
-// Designed with a responsive 2-column horizontal split on laptops/desktops to fit perfectly on screen without vertical scrolling
+// Styled similarly to the active/live match card for visual consistency across Spectator & Tournament arenas
 export const CompletedMatchCard: React.FC<{
   match: MatchState;
   index: number;
@@ -368,6 +371,7 @@ export const CompletedMatchCard: React.FC<{
   onToggleHide?: (matchId: string, currentHidden: boolean) => void;
   onToggleBlock?: (matchId: string, currentBlocked: boolean) => void;
   onDeleteMatch?: (matchId: string) => void;
+  layoutMode?: 'slider' | 'grid';
 }> = ({ 
   match: m, 
   index, 
@@ -379,31 +383,65 @@ export const CompletedMatchCard: React.FC<{
   isAdmin = false,
   onToggleHide,
   onToggleBlock,
-  onDeleteMatch
+  onDeleteMatch,
+  layoutMode = 'slider'
 }) => {
   const [deleteConfirm, setDeleteConfirm] = useState<boolean>(false);
   const inn1 = m.mainMatchState?.innings1 || m.innings1;
   const inn2 = m.mainMatchState?.innings2 || m.innings2;
 
-  const team1 = inn1?.battingTeam || m.teamA || 'Team 1';
-  const team2 = inn2?.battingTeam || m.teamB || 'Team 2';
+  // Resolve Team A and Team B scores
+  const isTeamABatted1 = Boolean(inn1?.battingTeam && inn1.battingTeam.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim());
+  const isTeamABatted2 = Boolean(inn2?.battingTeam && inn2.battingTeam.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim());
 
-  const team1Runs = inn1?.runs ?? 0;
-  const team1Wickets = inn1?.wickets ?? 0;
-  const team1Balls = inn1?.ballsBowled ?? 0;
-  const team1Overs = `${Math.floor(team1Balls / 6)}.${team1Balls % 6}`;
+  let teamAScoreStr = '';
+  let teamAOversStr = '';
+  if (isTeamABatted1 && inn1) {
+    teamAScoreStr = `${inn1.runs}/${inn1.wickets}`;
+    teamAOversStr = `${Math.floor((inn1.ballsBowled || 0) / 6)}.${(inn1.ballsBowled || 0) % 6}`;
+  } else if (isTeamABatted2 && inn2) {
+    teamAScoreStr = `${inn2.runs}/${inn2.wickets}`;
+    teamAOversStr = `${Math.floor((inn2.ballsBowled || 0) / 6)}.${(inn2.ballsBowled || 0) % 6}`;
+  } else if (m.scoreA) {
+    teamAScoreStr = m.scoreA;
+    teamAOversStr = m.oversA || '';
+  } else if (inn1) {
+    teamAScoreStr = `${inn1.runs}/${inn1.wickets}`;
+    teamAOversStr = `${Math.floor((inn1.ballsBowled || 0) / 6)}.${(inn1.ballsBowled || 0) % 6}`;
+  }
 
-  const team2Runs = inn2?.runs ?? 0;
-  const team2Wickets = inn2?.wickets ?? 0;
-  const team2Balls = inn2?.ballsBowled ?? 0;
-  const team2Overs = `${Math.floor(team2Balls / 6)}.${team2Balls % 6}`;
+  const isTeamBBatted1 = Boolean(inn1?.battingTeam && inn1.battingTeam.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim());
+  const isTeamBBatted2 = Boolean(inn2?.battingTeam && inn2.battingTeam.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim());
 
-  const isTie = m.winner === 'Tie' || m.winReason?.toLowerCase().includes('tie') || m.isSuperOver || m.mainMatchState || (m.superOverNumber && m.superOverNumber > 0);
-  const isTeam1Winner = !isTie && m.winner && (m.winner.toLowerCase().trim() === team1.toLowerCase().trim() || m.winner.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim());
-  const isTeam2Winner = !isTie && m.winner && (m.winner.toLowerCase().trim() === team2.toLowerCase().trim() || m.winner.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim());
+  let teamBScoreStr = '';
+  let teamBOversStr = '';
+  if (isTeamBBatted1 && inn1) {
+    teamBScoreStr = `${inn1.runs}/${inn1.wickets}`;
+    teamBOversStr = `${Math.floor((inn1.ballsBowled || 0) / 6)}.${(inn1.ballsBowled || 0) % 6}`;
+  } else if (isTeamBBatted2 && inn2) {
+    teamBScoreStr = `${inn2.runs}/${inn2.wickets}`;
+    teamBOversStr = `${Math.floor((inn2.ballsBowled || 0) / 6)}.${(inn2.ballsBowled || 0) % 6}`;
+  } else if (m.scoreB) {
+    teamBScoreStr = m.scoreB;
+    teamBOversStr = m.oversB || '';
+  } else if (inn2) {
+    teamBScoreStr = `${inn2.runs}/${inn2.wickets}`;
+    teamBOversStr = `${Math.floor((inn2.ballsBowled || 0) / 6)}.${(inn2.ballsBowled || 0) % 6}`;
+  }
 
-  const winningTeam = isTeam1Winner ? team1 : isTeam2Winner ? team2 : (m.winner || team1);
-  const winnerText = isTie ? 'Match Tied!' : `${m.winner || winningTeam} ${m.winReason || 'Won the Match'}`;
+  const isTie = m.winner === 'Tie' || m.winReason?.toLowerCase().includes('tie') || m.isSuperOver || (m.superOverNumber && m.superOverNumber > 0);
+  const isTeamAWinner = !isTie && m.winner && (
+    m.winner.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim() ||
+    (inn1 && isTeamABatted1 && m.winner.toLowerCase().trim() === (inn1.battingTeam || '').toLowerCase().trim()) ||
+    (inn2 && isTeamABatted2 && m.winner.toLowerCase().trim() === (inn2.battingTeam || '').toLowerCase().trim())
+  );
+  const isTeamBWinner = !isTie && m.winner && (
+    m.winner.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim() ||
+    (inn1 && isTeamBBatted1 && m.winner.toLowerCase().trim() === (inn1.battingTeam || '').toLowerCase().trim()) ||
+    (inn2 && isTeamBBatted2 && m.winner.toLowerCase().trim() === (inn2.battingTeam || '').toLowerCase().trim())
+  );
+
+  const winnerText = isTie ? 'Match Tied!' : `${m.winner || 'Winner'} ${m.winReason || 'Won the Match'}`;
 
   // Top match performers
   const potm = getMatchPotm(m);
@@ -432,50 +470,67 @@ export const CompletedMatchCard: React.FC<{
   inn2?.bowlers?.forEach(bw => checkBowler(bw, inn2?.bowlingTeam || m.teamA));
 
   // Calculated Match Stats
+  const team1Runs = inn1?.runs ?? 0;
+  const team2Runs = inn2?.runs ?? 0;
+  const team1Balls = inn1?.ballsBowled ?? 0;
+  const team2Balls = inn2?.ballsBowled ?? 0;
   const totalMatchRuns = team1Runs + team2Runs;
   const totalMatchBalls = team1Balls + team2Balls;
   const overallRunRate = totalMatchBalls > 0 ? ((totalMatchRuns / totalMatchBalls) * 6).toFixed(2) : '0.00';
 
   const fallbackImg = DEFAULT_STADIUM_IMAGES[index % DEFAULT_STADIUM_IMAGES.length];
 
+  const widthClasses = layoutMode === 'grid' 
+    ? 'w-full' 
+    : 'snap-start shrink-0 w-[calc(100vw-4.5rem)] max-w-[340px] sm:w-[370px] md:w-[390px]';
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96, y: 15 }}
       whileInView={{ opacity: 1, scale: 1, y: 0 }}
       viewport={{ once: true }}
-      transition={{ delay: Math.min(index * 0.06, 0.3), type: "spring", stiffness: 120 }}
+      transition={{ delay: Math.min(index * 0.05, 0.25), type: "spring", stiffness: 120 }}
       onClick={() => onSelectMatch(m.id)}
-      className="group/card flex-shrink-0 w-[300px] sm:w-[390px] md:w-[680px] lg:w-[750px] xl:w-[800px] bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 rounded-[1.75rem] md:rounded-[2.25rem] overflow-hidden border border-slate-800 hover:border-emerald-500/40 text-white shadow-xl shadow-emerald-950/20 hover:shadow-[0_15px_35px_rgba(0,0,0,0.65),0_0_20px_rgba(16,185,129,0.18)] transition-all duration-300 snap-center relative flex flex-col md:flex-row md:items-stretch cursor-pointer select-none ring-1 ring-white/5"
+      style={{ touchAction: 'pan-x pan-y' }}
+      className={`group/card ${widthClasses} bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 hover:border-emerald-500/35 rounded-2xl sm:rounded-[2rem] p-4 sm:p-5 md:p-6 shadow-lg hover:shadow-[0_20px_40px_rgba(0,0,0,0.55),0_0_20px_rgba(16,185,129,0.12)] hover:translate-y-[-3px] transition-all duration-300 cursor-pointer relative overflow-hidden text-white flex flex-col justify-between touch-auto select-none`}
     >
-      {/* Ambient Stadium Beams */}
-      <div className="absolute -top-12 -right-12 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-emerald-500/20 transition-colors duration-500" />
-      <div className="absolute -bottom-12 -left-12 w-36 h-36 bg-teal-500/10 rounded-full blur-2xl pointer-events-none group-hover:bg-teal-500/15 transition-colors duration-500" />
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 opacity-70 group-hover:opacity-100 transition-opacity" />
+      {/* Interactive Background Glow Accent (identical to active match card) */}
+      <div className="absolute top-0 right-0 w-36 h-36 bg-emerald-500/5 rounded-full blur-[40px] pointer-events-none group-hover:bg-emerald-500/10 transition-colors duration-300" />
+      <div className="absolute bottom-0 left-0 w-36 h-36 bg-amber-500/5 rounded-full blur-[50px] pointer-events-none transition-colors duration-300" />
 
-      {/* ================= LEFT COLUMN: MATCH BANNER & SPONSOR AD SLIDER (42% width on laptop) ================= */}
-      <div className="w-full md:w-[44%] lg:w-[42%] p-3.5 sm:p-4.5 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-800/80 bg-slate-950/40">
-        <div>
-          {/* Top Status & Category Badges Row */}
-          <div className="flex items-center justify-between gap-1.5 mb-2.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="px-2.5 py-0.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[8.5px] font-black uppercase tracking-wider rounded-full shadow-sm flex items-center gap-1 backdrop-blur-md">
-                <Trophy size={10} className="text-amber-400" />
-                {m.tournamentName || 'CRICKET'}
-              </span>
-              <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-300 font-mono text-[8.5px] font-black uppercase tracking-wider rounded-full shadow-sm backdrop-blur-md">
-                {isTie ? 'TIED' : 'CONCLUDED'}
-              </span>
+      {/* Top Accent bar */}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-500 opacity-60 group-hover:opacity-100 transition-opacity" />
+
+      <div>
+        {/* Header section with tournament name & concluded/tied badge */}
+        <div className="flex justify-between items-center mb-3 sm:mb-4">
+          <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest block truncate max-w-[130px] sm:max-w-[200px]" title={m.tournamentName ? `🏆 ${m.tournamentName} • ${m.date || 'Concluded'}` : (m.date || 'Concluded')}>
+            {m.tournamentName ? `🏆 ${m.tournamentName}` : (m.date || 'Concluded')}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <div className={`flex items-center gap-1.5 font-mono text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+              isTie 
+                ? 'bg-amber-500/15 border border-amber-500/30 text-amber-300' 
+                : 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+            }`}>
+              <Trophy size={9} className="text-amber-400" />
+              {isTie ? 'TIED' : 'CONCLUDED'}
             </div>
-
-            {m.date && (
-              <span className="px-2 py-0.5 bg-slate-900/90 backdrop-blur-md rounded-full text-[8.5px] font-mono font-bold text-slate-300 border border-white/10 shadow-sm flex items-center gap-1 shrink-0">
-                <Calendar size={9} className="text-amber-400" />
-                {m.date}
+            {isAdmin && (m.isHidden || (m as any).hideResultCard) && (
+              <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[7.5px] font-black uppercase">
+                Hidden
+              </span>
+            )}
+            {isAdmin && m.isBlocked && (
+              <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white border border-rose-500 text-[7.5px] font-black uppercase">
+                Blocked
               </span>
             )}
           </div>
+        </div>
 
-          {/* Interactive Banner & Super Admin Sponsor Advertisements Slider */}
+        {/* Interactive Match Banner & Super Admin Sponsor Advertisements Slider */}
+        <div className="mb-3.5">
           <MatchCardBannerSlider
             match={m}
             fallbackImg={fallbackImg}
@@ -485,270 +540,262 @@ export const CompletedMatchCard: React.FC<{
           />
         </div>
 
-        {/* Left Bottom Match Stats Summary Bar */}
-        <div className="flex items-center justify-between pt-2.5 mt-2 border-t border-white/[0.06] text-xs font-mono">
-          <div>
-            <p className="text-[8px] font-black uppercase tracking-widest text-emerald-400/90 leading-tight">Total Match Runs</p>
-            <p className="text-xs font-black text-white">{totalMatchRuns} <span className="text-[10px] text-slate-400 font-normal">({overallRunRate} rpo)</span></p>
+        {/* Team Battle Scoreboard Grid (Identical to Active Match Card) */}
+        <div className="flex items-center justify-between gap-2 sm:gap-3 mb-3.5 sm:mb-4 mt-1">
+          {/* Team A Details */}
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1">
+            <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white flex items-center justify-center font-black text-xs border border-indigo-400/20 shadow-md shadow-indigo-500/10 shrink-0 ${
+              isTeamAWinner ? 'ring-2 ring-emerald-400/80 shadow-emerald-500/20' : ''
+            }`}>
+              {(m.teamA || 'Team A').toUpperCase().substring(0, 2)}
+            </div>
+            <div className="min-w-0 leading-tight text-left">
+              <span className="text-xs sm:text-sm font-black tracking-tight text-white block truncate">{m.teamA || 'Team A'}</span>
+              <span className="text-[10px] sm:text-[11px] font-mono font-black text-amber-400 block truncate" title={teamAScoreStr ? `${m.teamA}: ${teamAScoreStr}` : "Yet to bat"}>
+                {teamAScoreStr ? `${teamAScoreStr} ${teamAOversStr ? `(${teamAOversStr} ov)` : ''}` : 'Yet to Bat'}
+              </span>
+              <span className={`text-[7.5px] sm:text-[8px] font-mono font-extrabold uppercase block mt-0.5 ${
+                isTeamAWinner ? 'text-emerald-400 font-black' : 'text-slate-500'
+              }`}>
+                {isTeamAWinner ? '🏆 WINNER' : isTie ? 'Tied' : 'Team A'}
+              </span>
+            </div>
           </div>
+
+          {/* Versus Badge */}
+          <span className="text-[8px] sm:text-[9px] font-mono font-black uppercase text-slate-400 border border-slate-850 bg-slate-950 px-1.5 sm:px-2 py-0.5 rounded-lg shrink-0">VS</span>
+
+          {/* Team B Details */}
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 justify-end text-right">
+            <div className="min-w-0 leading-tight text-right">
+              <span className="text-xs sm:text-sm font-black tracking-tight text-white block truncate">{m.teamB || 'Team B'}</span>
+              <span className="text-[10px] sm:text-[11px] font-mono font-black text-amber-400 block truncate justify-end" title={teamBScoreStr ? `${m.teamB}: ${teamBScoreStr}` : "Yet to bat"}>
+                {teamBScoreStr ? `${teamBScoreStr} ${teamBOversStr ? `(${teamBOversStr} ov)` : ''}` : 'Yet to Bat'}
+              </span>
+              <span className={`text-[7.5px] sm:text-[8px] font-mono font-extrabold uppercase block mt-0.5 ${
+                isTeamBWinner ? 'text-emerald-400 font-black' : 'text-slate-550'
+              }`}>
+                {isTeamBWinner ? '🏆 WINNER' : isTie ? 'Tied' : 'Team B'}
+              </span>
+            </div>
+            <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-br from-amber-600 to-amber-800 text-white flex items-center justify-center font-black text-xs border border-amber-400/20 shadow-md shadow-amber-500/10 shrink-0 ${
+              isTeamBWinner ? 'ring-2 ring-emerald-400/80 shadow-emerald-500/20' : ''
+            }`}>
+              {(m.teamB || 'Team B').toUpperCase().substring(0, 2)}
+            </div>
+          </div>
+        </div>
+
+        {/* Match Metadata & Venue Panel (Identical layout to Active Match Card) */}
+        <div className="mb-3 sm:mb-3.5 grid grid-cols-2 gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] p-2.5 sm:p-3 rounded-xl sm:rounded-[1.25rem] bg-slate-950/60 border border-white/5 text-left leading-tight text-slate-400 font-sans">
+          <div className="col-span-2 border-b border-white/[0.04] pb-1.5 mb-0.5 text-slate-300 flex items-center justify-between gap-1.5">
+            <span className="text-[9px] sm:text-[10px] truncate" title={m.tossWinner ? `Toss: ${m.tossWinner} won & opted to ${m.tossChoice === 'bat' ? 'bat' : 'bowl'}` : 'Official match recorded'}>
+              🪙 <strong>Toss:</strong> {m.tossWinner ? `${m.tossWinner} won & ${m.tossChoice === 'bat' ? 'bat' : 'bowl'}` : 'Concluded fixture'}
+            </span>
+          </div>
+          <div className="truncate">
+            🏆 <strong>Tour:</strong> {m.tournamentName || 'Friendly Cup'}
+          </div>
+          <div className="truncate">
+            🏏 <strong>Limit:</strong> {m.oversLimit || 10} Overs
+          </div>
+          <div className="col-span-2 truncate">
+            📍 <strong>Ground:</strong> {m.groundName || m.venue || m.ground || 'Gully Ground'}
+          </div>
+        </div>
+
+        {/* Completed Match Outcome & Performer Highlights Panel */}
+        <div className="px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-950/80 rounded-xl sm:rounded-2xl border border-white/5 space-y-2 sm:space-y-2.5 font-sans relative mb-3 sm:mb-4">
+          {/* Victory equation banner */}
+          <div className="flex items-center justify-between gap-1.5 border-b border-white/[0.04] pb-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Trophy size={12} className="text-amber-400 shrink-0" />
+              <span className="text-xs font-black text-emerald-400 tracking-tight truncate" title={winnerText}>
+                {winnerText}
+              </span>
+            </div>
+            {totalMatchRuns > 0 && (
+              <span className="text-[9px] font-mono text-slate-400 shrink-0 whitespace-nowrap">
+                {totalMatchRuns} runs ({overallRunRate} rpo)
+              </span>
+            )}
+          </div>
+
+          {/* Top Batsman & Bowler Pair (Styled like Active Match's Striker / Bowler row) */}
+          <div className="grid grid-cols-2 gap-2 text-left">
+            <div>
+              <span className="text-[7.5px] sm:text-[8px] uppercase tracking-wider text-slate-500 font-extrabold block mb-0.5">Top Batter</span>
+              {bestBatter ? (
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="text-xs font-black text-white truncate max-w-[65px] min-[360px]:max-w-[85px] sm:max-w-[100px]" title={bestBatter.name}>{bestBatter.name}</span>
+                  <span className="text-[11px] font-mono font-black text-emerald-400 ml-auto whitespace-nowrap shrink-0">
+                    {bestBatter.runs}<span className="text-[9px] text-slate-400 font-normal">({bestBatter.balls})</span>
+                  </span>
+                </div>
+              ) : (
+                <span className="text-xs text-slate-500 font-bold">-</span>
+              )}
+            </div>
+
+            <div className="border-l border-white/[0.04] pl-2">
+              <span className="text-[7.5px] sm:text-[8px] uppercase tracking-wider text-slate-500 font-extrabold block mb-0.5">Top Bowler</span>
+              {bestBowler ? (
+                <div className="flex items-center gap-1 min-w-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                  <span className="text-xs font-bold text-slate-300 truncate max-w-[65px] min-[360px]:max-w-[85px] sm:max-w-[100px]" title={bestBowler.name}>{bestBowler.name}</span>
+                  <span className="text-[11px] font-mono font-black text-amber-400 ml-auto whitespace-nowrap shrink-0">
+                    {bestBowler.wickets}/{bestBowler.runsConceded}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-xs text-slate-500 font-bold">-</span>
+              )}
+            </div>
+          </div>
+
+          {/* Player of the Match Pill (if available) */}
           {potm?.name && (
-            <div className="text-right">
-              <p className="text-[8px] font-black uppercase tracking-widest text-amber-400 leading-tight">Top Performer</p>
-              <p className="text-xs font-black text-amber-300 truncate max-w-[120px]">{potm.name}</p>
+            <div className="pt-1.5 border-t border-white/[0.04] flex items-center justify-between text-[8.5px] font-mono">
+              <span className="text-slate-400 flex items-center gap-1 font-bold">
+                <Award size={10} className="text-amber-400" />
+                POTM:
+              </span>
+              <span className="text-amber-300 font-black truncate max-w-[170px]" title={potm.name}>
+                {potm.name} {potm.runs ? `(${potm.runs}r)` : ''} {potm.wickets ? `(${potm.wickets}w)` : ''}
+              </span>
             </div>
           )}
         </div>
       </div>
 
-      {/* ================= RIGHT COLUMN: MATCH SCORES, RESULTS & ACTIONS (58% width on laptop) ================= */}
-      <div className="w-full md:w-[56%] lg:w-[58%] p-3.5 sm:p-4.5 flex flex-col justify-between">
-        <div>
-          {/* Header Title & Matchup Details */}
-          <div className="mb-2.5 flex items-start justify-between gap-2">
-            <div>
-              <h3 className="text-base sm:text-lg lg:text-xl font-black text-white tracking-tight group-hover/card:text-emerald-400 transition-colors leading-tight line-clamp-1">
-                {winnerText}
-              </h3>
-              <p className="text-slate-400 text-[11px] font-medium leading-normal line-clamp-1">
-                {m.teamA} vs {m.teamB} {m.tournamentName ? `• 🏆 ${m.tournamentName}` : ''} {m.groundName || m.venue ? `• 📍 ${m.groundName || m.venue}` : ''}
-              </p>
-            </div>
+      {/* Footer Action of Card with arrow sliding effect (Identical to Active Match Card) */}
+      <div className="pt-3 sm:pt-4 mt-1 border-t border-white/[0.04] flex justify-between items-center text-[10px] font-semibold text-emerald-400 group-hover:text-emerald-350 transition-colors bg-transparent">
+        <span className="flex items-center gap-1 font-black uppercase tracking-wider text-[8.5px] sm:text-[9px]">
+          Scorecard Details <ArrowRight size={10} className="group-hover:translate-x-1.5 transition-transform duration-300" />
+        </span>
 
-            {/* Admin Status Badges */}
-            {isAdmin && (
-              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider flex items-center gap-1 ${
-                  m.isHidden || (m as any).hideResultCard
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                }`}>
-                  {m.isHidden || (m as any).hideResultCard ? <EyeOff size={9} /> : <Eye size={9} />}
-                  <span>{m.isHidden || (m as any).hideResultCard ? 'Hidden' : 'Visible'}</span>
-                </span>
-                {m.isBlocked && (
-                  <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider flex items-center gap-1 bg-rose-600 text-white border border-rose-500 animate-pulse">
-                    <Ban size={9} />
-                    <span>Blocked</span>
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <button
+            type="button"
+            onClick={(e) => onShareWhatsApp(m, e)}
+            className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500 hover:text-white text-emerald-400 border border-emerald-500/30 rounded-md text-[8px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer"
+            title="Share match result on WhatsApp"
+          >
+            <Send size={9} />
+            <span className="hidden min-[380px]:inline">Share</span>
+          </button>
 
-          {/* Team Battle Scoreboard Grid (Live Match Styling) */}
-          <div className="flex items-center justify-between gap-2 mb-2.5 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 shadow-inner">
-            {/* Team 1 Details & Monogram */}
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <div className={`w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 to-indigo-800 text-white flex items-center justify-center font-black text-xs border border-indigo-400/20 shadow-sm shrink-0 ${
-                isTeam1Winner ? 'ring-2 ring-emerald-400/80 shadow-emerald-500/20' : ''
-              }`}>
-                {(team1 || 'T1').toUpperCase().substring(0, 2)}
-              </div>
-              <div className="min-w-0 leading-tight text-left">
-                <span className="text-xs font-black tracking-tight text-white block truncate">{team1}</span>
-                <span className="text-[11px] font-mono font-black text-emerald-400 block truncate">
-                  {team1Runs}/{team1Wickets}
-                  <span className="text-[9px] text-slate-400 font-normal ml-1">({team1Overs} ov)</span>
-                </span>
-                <span className="text-[7.5px] font-mono text-slate-400 font-bold uppercase block">
-                  {isTeam1Winner ? 'WINNER' : 'Innings 1'}
-                </span>
-              </div>
-            </div>
-
-            {/* VS Badge */}
-            <div className="shrink-0 flex flex-col items-center justify-center px-1">
-              <span className="text-[8px] font-mono font-black uppercase text-slate-400 border border-slate-800 bg-slate-950 px-1.5 py-0.5 rounded-md shrink-0">
-                VS
-              </span>
-              {isTie ? (
-                <span className="text-xs mt-0.5">🤝</span>
-              ) : (
-                <Trophy size={11} className="text-amber-400 mt-0.5" />
-              )}
-            </div>
-
-            {/* Team 2 Details & Monogram */}
-            <div className="flex items-center gap-2 min-w-0 flex-1 justify-end text-right">
-              <div className="min-w-0 leading-tight text-right">
-                <span className="text-xs font-black tracking-tight text-white block truncate">{team2}</span>
-                <span className="text-[11px] font-mono font-black text-amber-400 block truncate">
-                  {team2Runs}/{team2Wickets}
-                  <span className="text-[9px] text-slate-400 font-normal ml-1">({team2Overs} ov)</span>
-                </span>
-                <span className="text-[7.5px] font-mono text-slate-400 font-bold uppercase block">
-                  {isTeam2Winner ? 'WINNER' : 'Innings 2'}
-                </span>
-              </div>
-              <div className={`w-8 h-8 rounded-lg bg-gradient-to-br from-amber-600 to-amber-800 text-white flex items-center justify-center font-black text-xs border border-amber-400/20 shadow-sm shrink-0 ${
-                isTeam2Winner ? 'ring-2 ring-emerald-400/80 shadow-emerald-500/20' : ''
-              }`}>
-                {(team2 || 'T2').toUpperCase().substring(0, 2)}
-              </div>
-            </div>
-          </div>
-
-          {/* Highlights & Top Performance Chips */}
-          <div className="flex flex-wrap gap-1 mb-2">
-            {bestBatter && (
-              <span className="px-2 py-0.5 bg-slate-900/90 text-slate-300 border border-slate-800 rounded-md text-[8.5px] font-mono font-bold">
-                🏏 {bestBatter.name} ({bestBatter.runs}r)
-              </span>
-            )}
-            {bestBowler && (
-              <span className="px-2 py-0.5 bg-slate-900/90 text-slate-300 border border-slate-800 rounded-md text-[8.5px] font-mono font-bold">
-                🎯 {bestBowler.name} ({bestBowler.wickets}w)
-              </span>
-            )}
-            <span className="px-2 py-0.5 bg-slate-900/90 text-slate-400 border border-slate-800 rounded-md text-[8.5px] font-mono font-bold">
-              {m.oversLimit || 5} Overs Match
-            </span>
-          </div>
-        </div>
-
-        {/* Actions & Buttons Row */}
-        <div className="flex items-center justify-between pt-2.5 border-t border-white/[0.08] gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* WhatsApp Share Button */}
+          {onExportPDF && (
             <button
               type="button"
-              onClick={(e) => onShareWhatsApp(m, e)}
-              className="px-2.5 py-1.5 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500 hover:text-white border border-emerald-500/30 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1 cursor-pointer"
-              title="Share match summary on WhatsApp"
+              onClick={(e) => {
+                e.stopPropagation();
+                onExportPDF(m);
+              }}
+              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border-none shadow-[0_2px_4px_rgba(16,185,129,0.2)]"
+              title="Download Scoreboard PDF"
             >
-              <Send size={10} />
-              <span>WhatsApp</span>
+              <Download size={9} />
+              <span>Scoreboard</span>
             </button>
+          )}
 
-            {/* PDF Button */}
-            {onExportPDF && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onExportPDF(m);
-                }}
-                className="px-2.5 py-1.5 bg-slate-900 text-slate-300 hover:bg-emerald-600 hover:text-white border border-slate-800 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1 cursor-pointer"
-                title="Download Scorecard PDF"
-              >
-                <Download size={10} />
-                <span>PDF</span>
-              </button>
-            )}
+          {onDownloadAward && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownloadAward(m, 'potm');
+              }}
+              className="px-2 py-1 bg-amber-500/15 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/30 rounded-md text-[8px] font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer"
+              title="Download Match Awards"
+            >
+              <Award size={9} />
+              <span className="hidden min-[380px]:inline">Awards</span>
+            </button>
+          )}
 
-            {/* Awards Button */}
-            {onDownloadAward && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDownloadAward(m, 'potm');
-                }}
-                className="px-2.5 py-1.5 bg-amber-500/15 text-amber-300 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/30 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1 cursor-pointer"
-                title="Download Match Awards (POTM, Best Batsman, Best Bowler)"
-              >
-                <Award size={10} />
-                <span>Awards</span>
-              </button>
-            )}
+          {/* Admin Management Controls */}
+          {isAdmin && (
+            <div className="flex items-center gap-1">
+              {onToggleHide && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleHide(m.id, !!(m.isHidden || (m as any).hideResultCard));
+                  }}
+                  className={`p-1 rounded text-[8px] border cursor-pointer ${
+                    m.isHidden || (m as any).hideResultCard
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-900 text-slate-300 border-slate-800'
+                  }`}
+                  title={m.isHidden || (m as any).hideResultCard ? "Unhide match" : "Hide match"}
+                >
+                  {m.isHidden || (m as any).hideResultCard ? <EyeOff size={10} /> : <Eye size={10} />}
+                </button>
+              )}
 
-            {/* Admin Management Controls: Hide, Block, Delete */}
-            {isAdmin && (
-              <div className="flex items-center gap-1">
-                {onToggleHide && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleHide(m.id, !!(m.isHidden || (m as any).hideResultCard));
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[8px] font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border ${
-                      m.isHidden || (m as any).hideResultCard
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30'
-                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700/80'
-                    }`}
-                    title={m.isHidden || (m as any).hideResultCard ? "Match is hidden from spectators. Click to unhide." : "Click to hide match from spectators."}
-                  >
-                    {m.isHidden || (m as any).hideResultCard ? <EyeOff size={9} className="text-amber-400" /> : <Eye size={9} className="text-emerald-400" />}
-                    <span>{m.isHidden || (m as any).hideResultCard ? 'Hidden' : 'Hide'}</span>
-                  </button>
-                )}
+              {onToggleBlock && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleBlock(m.id, !!m.isBlocked);
+                  }}
+                  className={`p-1 rounded text-[8px] border cursor-pointer ${
+                    m.isBlocked
+                      ? 'bg-rose-600 text-white border-rose-500'
+                      : 'bg-slate-900 text-slate-300 border-slate-800'
+                  }`}
+                  title={m.isBlocked ? "Unblock match" : "Block match"}
+                >
+                  {m.isBlocked ? <Unlock size={10} /> : <Ban size={10} />}
+                </button>
+              )}
 
-                {onToggleBlock && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleBlock(m.id, !!m.isBlocked);
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all border ${
-                      m.isBlocked
-                        ? 'bg-rose-600 text-white border-rose-500 hover:bg-rose-700'
-                        : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700/80'
-                    }`}
-                    title={m.isBlocked ? "Match is blocked from spectators. Click to unblock." : "Click to block match from spectators."}
-                  >
-                    {m.isBlocked ? <Unlock size={9} /> : <Ban size={9} className="text-rose-400" />}
-                    <span>{m.isBlocked ? 'Blocked' : 'Block'}</span>
-                  </button>
-                )}
-
-                {onDeleteMatch && (
-                  deleteConfirm ? (
-                    <div className="flex items-center gap-1 p-0.5 bg-rose-950/95 border border-rose-600 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteMatch(m.id);
-                          setDeleteConfirm(false);
-                        }}
-                        className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[7.5px] font-black uppercase tracking-wider cursor-pointer border-none"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirm(false);
-                        }}
-                        className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[7.5px] font-bold uppercase tracking-wider cursor-pointer border-none"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
+              {onDeleteMatch && (
+                deleteConfirm ? (
+                  <div className="flex items-center gap-0.5 bg-rose-950 border border-rose-600 rounded p-0.5">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setDeleteConfirm(true);
+                        onDeleteMatch(m.id);
+                        setDeleteConfirm(false);
                       }}
-                      className="px-2 py-1 bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-400 border border-rose-500/30 rounded-lg text-[8px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition-all"
-                      title="Permanently delete this completed match record"
+                      className="px-1 py-0.5 bg-rose-600 text-white text-[7px] font-black rounded border-none cursor-pointer"
                     >
-                      <Trash2 size={9} />
-                      <span>Delete</span>
+                      Confirm
                     </button>
-                  )
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* View Scorecard Full Details */}
-          <button 
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelectMatch(m.id);
-            }}
-            className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 text-[9px] font-black uppercase tracking-widest hover:gap-1.5 transition-all cursor-pointer border-none bg-transparent font-mono shrink-0 ml-auto"
-          >
-            Full Scorecard
-            <ArrowRight size={12} />
-          </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteConfirm(false);
+                      }}
+                      className="px-1 py-0.5 bg-slate-800 text-slate-300 text-[7px] rounded border-none cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteConfirm(true);
+                    }}
+                    className="p-1 rounded text-[8px] bg-rose-500/15 text-rose-400 border border-rose-500/30 cursor-pointer hover:bg-rose-600 hover:text-white"
+                    title="Delete match"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                )
+              )}
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
@@ -759,7 +806,12 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
   matches,
   onSelectMatch,
   onExportPDF,
-  onDownloadAward
+  onDownloadAward,
+  isScoreManager = false,
+  homepageMode = false,
+  onToggleHide,
+  onToggleBlock,
+  onDeleteMatch
 }) => {
   const validMatches = (matches || []).filter(
     m => m && m.id && !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted'
@@ -808,7 +860,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
   const scroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
       const { scrollLeft, clientWidth } = scrollRef.current;
-      const scrollStep = clientWidth > 640 ? clientWidth * 0.75 : 340;
+      const scrollStep = clientWidth > 640 ? 380 : 320;
       const scrollTo = direction === 'left' ? scrollLeft - scrollStep : scrollLeft + scrollStep;
       scrollRef.current.scrollTo({ left: scrollTo, behavior: 'smooth' });
     }
@@ -991,12 +1043,12 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
         </>
       )}
 
-      {/* Enhanced Card Scrolling Slider Track with optimal padding */}
+      {/* Enhanced Card Scrolling Slider Track with optimal touch support and snap points */}
       <div 
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex overflow-x-auto gap-4 sm:gap-6 custom-scrollbar snap-x snap-mandatory scroll-smooth p-1 sm:p-2 no-scrollbar pb-3"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        className="flex gap-3.5 sm:gap-6 overflow-x-auto pb-3 sm:pb-4 pt-1 snap-x snap-mandatory scroll-smooth scrollbar-none touch-auto p-1 sm:p-2"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
       >
         {validMatches.map((match, idx) => (
           <CompletedMatchCard
@@ -1008,12 +1060,39 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
             onExportPDF={onExportPDF}
             onDownloadAward={onDownloadAward}
             onShareWhatsApp={handleShareWhatsApp}
+            isAdmin={isScoreManager}
+            onToggleHide={onToggleHide}
+            onToggleBlock={onToggleBlock}
+            onDeleteMatch={onDeleteMatch}
           />
         ))}
 
         {/* Final Spacer for scroll padding */}
         <div className="flex-shrink-0 w-2 md:w-6 h-1" />
       </div>
+
+      {/* Mobile Swipe & Quick Switch Helper (identical to active match slider) */}
+      {validMatches.length > 1 && (
+        <div className="flex sm:hidden items-center justify-between pt-1 px-1 text-[10px] font-bold text-slate-400">
+          <button
+            type="button"
+            onClick={() => scroll('left')}
+            className="flex items-center gap-1 text-emerald-400 font-black uppercase text-[9px] bg-slate-900/60 border border-white/10 px-2.5 py-1.5 rounded-lg cursor-pointer active:scale-95"
+          >
+            <ChevronLeft size={12} /> Prev Result
+          </button>
+          <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">
+            Swipe to explore ({validMatches.length})
+          </span>
+          <button
+            type="button"
+            onClick={() => scroll('right')}
+            className="flex items-center gap-1 text-emerald-400 font-black uppercase text-[9px] bg-slate-900/60 border border-white/10 px-2.5 py-1.5 rounded-lg cursor-pointer active:scale-95"
+          >
+            Next Result <ChevronRight size={12} />
+          </button>
+        </div>
+      )}
 
       {/* Result Slider Pagination Dots & Direct Selector */}
       {validMatches.length > 1 && (

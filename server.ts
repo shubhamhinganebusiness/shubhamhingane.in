@@ -272,21 +272,19 @@ async function generateContentWithFallback(
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Support dynamic Cloud Run PORT (e.g., 8080) with default 3000 for local dev
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // High-Traffic Security & Anti-DDoS Headers (Cricbuzz-grade standards)
+  // Security & Frame Headers (Configured to support Google AI Studio preview iframe & overlays)
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    // Allow overlay embedding while blocking clickjacking on sensitive forms
-    if (!req.path.startsWith("/obs-") && !req.path.startsWith("/embed-")) {
-      res.setHeader("X-Frame-Options", "SAMEORIGIN");
-    }
+    // Explicitly do not set X-Frame-Options: SAMEORIGIN so Google AI Studio iframe preview can render without white blank screen
     next();
   });
 
@@ -2933,13 +2931,13 @@ Adopting modular paradigms accelerates iteration velocity while keeping technica
   });
 
   // Determine production mode:
-  // True if NODE_ENV === "production", or if executing the compiled dist/server.cjs bundle,
-  // or if running in a container where dist/index.html is pre-built.
+  // In dev environment, tsx runs via "dev" script with NODE_ENV !== "production".
+  // In deployed Cloud Run environment, dist/index.html is pre-built via "npm run build" and started via "node server.ts".
+  const isDev = process.env.npm_lifecycle_event === "dev" || process.env.NODE_ENV === "development";
   const isProduction =
-    process.env.NODE_ENV === "production" ||
-    (typeof __filename !== "undefined" && __filename.includes("server.cjs")) ||
-    (Boolean(process.argv[1]) && process.argv[1].includes("server.cjs")) ||
-    (!process.argv[1]?.endsWith("server.ts") && fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
+    !isDev &&
+    (process.env.NODE_ENV === "production" ||
+      fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
 
   if (!isProduction) {
     console.log("Starting in DEVELOPMENT mode");

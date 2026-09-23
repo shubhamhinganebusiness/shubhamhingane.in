@@ -911,7 +911,7 @@ export const CompletedMatchesPage: React.FC = () => {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
               {filteredMatches.map((match, idx) => (
                 <div key={match.id || idx} className="h-full">
                   <CompletedMatchCard
@@ -922,6 +922,7 @@ export const CompletedMatchesPage: React.FC = () => {
                     onShareWhatsApp={handleShareWhatsApp}
                     onDownloadAward={(m, award) => handleOpenAwardsModal(m, award)}
                     isAdmin={false}
+                    layoutMode="grid"
                   />
                 </div>
               ))}

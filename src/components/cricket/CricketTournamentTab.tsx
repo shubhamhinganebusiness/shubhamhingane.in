@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Trophy, Plus, Calendar, MapPin, Users, Edit, Trash2, Bot, HelpCircle, 
   Sparkles, Check, CheckCircle2, Play, ChevronRight, BarChart3, AlertCircle, Share2, Award, RefreshCw, Download, ArrowLeftRight,
-  Zap, Image as ImageIcon, Crown, Flame, ShieldCheck, DollarSign, QrCode, Filter, FileText, X
+  Zap, Image as ImageIcon, Crown, Flame, ShieldCheck, DollarSign, QrCode, Filter, FileText, X, Upload
 } from 'lucide-react';
 
 const GULLY_RULES_PRESETS = [
@@ -608,6 +608,15 @@ export const CricketTournamentTab: React.FC<{
   }, [showCreateModal, showEditTourModal, showAddTeamModal, showCreateMatchModal]);
 
   const activeTournament = tournaments.find(t => t.id === activeTournamentId);
+
+  // Auto-sync activeTournamentId with available tournaments
+  useEffect(() => {
+    if (tournaments.length > 0) {
+      if (!activeTournamentId || !tournaments.some(t => t.id === activeTournamentId)) {
+        setActiveTournamentId(tournaments[0].id);
+      }
+    }
+  }, [tournaments, activeTournamentId]);
 
   // Notification notification system
   const triggerNotification = (msg: string) => {
@@ -1456,17 +1465,45 @@ export const CricketTournamentTab: React.FC<{
 
   const openManualMatchModal = () => {
     setManualMatchError(null);
-    const teams = activeTournament?.teams || [];
-    if (teams.length >= 2) {
+    const currentTour = activeTournament || tournaments.find(t => t.id === activeTournamentId) || (tournaments.length > 0 ? tournaments[0] : null);
+    if (currentTour && currentTour.id !== activeTournamentId) {
+      setActiveTournamentId(currentTour.id);
+    }
+
+    const rawTeams = currentTour?.teams || [];
+    const validTeams: TournamentTeam[] = (Array.isArray(rawTeams) ? rawTeams : [])
+      .filter(Boolean)
+      .map((t: any, idx: number) => {
+        if (typeof t === 'string') {
+          return {
+            id: `team_${idx}_${String(t).toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+            name: String(t).trim() || `Team ${idx + 1}`,
+            captain: `${String(t).trim() || `Team ${idx + 1}`} Captain`,
+            players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11']
+          };
+        }
+        const name = String(t?.name || t?.teamName || t?.title || `Team ${idx + 1}`).trim();
+        const id = t?.id ? String(t.id) : `team_${idx}_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+        return {
+          id,
+          name,
+          captain: t?.captain || `${name} Captain`,
+          players: Array.isArray(t?.players) && t.players.length > 0 ? t.players : ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
+          logo: t?.logo,
+          playerPhotos: t?.playerPhotos
+        };
+      });
+
+    if (validTeams.length >= 2) {
       setManualMatchTeamMode('existing');
-      setManualMatchTeamAId(teams[0].id);
-      setManualMatchTeamBId(teams[1].id);
-      setManualCustomTeamAName(teams[0].name);
-      setManualCustomTeamBName(teams[1].name);
-    } else if (teams.length === 1) {
+      setManualMatchTeamAId(validTeams[0].id);
+      setManualMatchTeamBId(validTeams[1].id);
+      setManualCustomTeamAName(validTeams[0].name || 'Team 1');
+      setManualCustomTeamBName(validTeams[1].name || 'Team 2');
+    } else if (validTeams.length === 1) {
       setManualMatchTeamMode('custom');
-      setManualMatchTeamAId(teams[0].id);
-      setManualCustomTeamAName(teams[0].name);
+      setManualMatchTeamAId(validTeams[0].id);
+      setManualCustomTeamAName(validTeams[0].name || 'Team 1');
       setManualMatchTeamBId('');
       setManualCustomTeamBName('Opponent XI');
     } else {
@@ -1478,14 +1515,19 @@ export const CricketTournamentTab: React.FC<{
     }
     setManualMatchDate(new Date().toISOString().split('T')[0]);
     setManualMatchTime('10:00 AM');
-    setManualMatchVenue(activeTournament?.groundName || activeTournament?.venue || 'Shivaji Maharaj Ground (Turf)');
+    setManualMatchVenue(currentTour?.groundName || currentTour?.venue || 'Shivaji Maharaj Ground (Turf)');
     setManualMatchStage('League');
     setManualMatchBannerUrl('');
     setShowCreateMatchModal(true);
   };
 
   const handleCreateManualMatch = () => {
-    if (!activeTournamentId || !activeTournament) return;
+    const currentTour = activeTournament || tournaments.find(t => t.id === activeTournamentId) || (tournaments.length > 0 ? tournaments[0] : null);
+    const tourId = activeTournamentId || currentTour?.id;
+    if (!tourId || !currentTour) {
+      setManualMatchError("No tournament selected. Please select or create a tournament first.");
+      return;
+    }
     setManualMatchError(null);
 
     let finalTeamAId = manualMatchTeamAId;
@@ -1493,12 +1535,35 @@ export const CricketTournamentTab: React.FC<{
     let teamAName = '';
     let teamBName = '';
 
-    const existingTeams = [...(activeTournament.teams || [])];
+    const rawTeams = currentTour.teams || [];
+    const existingTeams: TournamentTeam[] = (Array.isArray(rawTeams) ? rawTeams : [])
+      .filter(Boolean)
+      .map((t: any, idx: number) => {
+        if (typeof t === 'string') {
+          return {
+            id: `team_${idx}_${String(t).toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+            name: String(t).trim() || `Team ${idx + 1}`,
+            captain: `${String(t).trim() || `Team ${idx + 1}`} Captain`,
+            players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11']
+          };
+        }
+        const name = String(t?.name || t?.teamName || `Team ${idx + 1}`).trim();
+        const id = t?.id ? String(t.id) : `team_${idx}_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+        return {
+          id,
+          name,
+          captain: t?.captain || `${name} Captain`,
+          players: Array.isArray(t?.players) && t.players.length > 0 ? t.players : ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
+          logo: t?.logo,
+          playerPhotos: t?.playerPhotos
+        };
+      });
+
     const newTeamsToAdd: TournamentTeam[] = [];
 
     if (manualMatchTeamMode === 'custom' || !finalTeamAId || !finalTeamBId || existingTeams.length < 2) {
-      const nameA = manualCustomTeamAName.trim() || 'Team A';
-      const nameB = manualCustomTeamBName.trim() || 'Team B';
+      const nameA = (manualCustomTeamAName || '').trim() || 'Team A';
+      const nameB = (manualCustomTeamBName || '').trim() || 'Team B';
 
       if (nameA.toLowerCase() === nameB.toLowerCase()) {
         setManualMatchError("A team cannot play against itself. Please specify two different team names.");
@@ -1506,14 +1571,14 @@ export const CricketTournamentTab: React.FC<{
       }
 
       // Check if Team A exists in roster or create new team
-      let matchedA = existingTeams.find(t => t.id === finalTeamAId || t.name.toLowerCase() === nameA.toLowerCase());
+      let matchedA = existingTeams.find(t => t && (t.id === finalTeamAId || (t.name && t.name.toLowerCase() === nameA.toLowerCase())));
       if (!matchedA) {
         matchedA = {
           id: `team_${Date.now()}_a_${Math.random().toString(36).substring(2, 6)}`,
           name: nameA,
           captain: `${nameA} Captain`,
           players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
-          city: activeTournament.city || 'Local'
+          city: (currentTour as any).city || 'Local'
         };
         newTeamsToAdd.push(matchedA);
       }
@@ -1521,14 +1586,14 @@ export const CricketTournamentTab: React.FC<{
       teamAName = matchedA.name;
 
       // Check if Team B exists in roster or create new team
-      let matchedB = existingTeams.find(t => t.id === finalTeamBId || t.name.toLowerCase() === nameB.toLowerCase());
+      let matchedB = existingTeams.find(t => t && (t.id === finalTeamBId || (t.name && t.name.toLowerCase() === nameB.toLowerCase())));
       if (!matchedB) {
         matchedB = {
           id: `team_${Date.now()}_b_${Math.random().toString(36).substring(2, 6)}`,
           name: nameB,
           captain: `${nameB} Captain`,
           players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
-          city: activeTournament.city || 'Local'
+          city: (currentTour as any).city || 'Local'
         };
         newTeamsToAdd.push(matchedB);
       }
@@ -1539,13 +1604,13 @@ export const CricketTournamentTab: React.FC<{
         setManualMatchError("A team cannot play against itself! Please select two different teams.");
         return;
       }
-      teamAName = existingTeams.find(t => t.id === finalTeamAId)?.name || 'Team A';
-      teamBName = existingTeams.find(t => t.id === finalTeamBId)?.name || 'Team B';
+      teamAName = existingTeams.find(t => t && t.id === finalTeamAId)?.name || 'Team A';
+      teamBName = existingTeams.find(t => t && t.id === finalTeamBId)?.name || 'Team B';
     }
 
-    const u1 = activeTournament.umpire1Name || "Umesh Shastri";
-    const u2 = activeTournament.umpire2Name || "Nitin Gadkari";
-    const sc = activeTournament.scoreboardManagerName || "Ravi Shastri Jnr";
+    const u1 = currentTour.umpire1Name || "Umesh Shastri";
+    const u2 = currentTour.umpire2Name || "Nitin Gadkari";
+    const sc = currentTour.scoreboardManagerName || "Ravi Shastri Jnr";
 
     const newMatch: TournamentMatch = {
       id: `match_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1555,7 +1620,7 @@ export const CricketTournamentTab: React.FC<{
       teamBName,
       date: manualMatchDate || new Date().toISOString().split('T')[0],
       time: manualMatchTime || '10:00 AM',
-      venue: manualMatchVenue || activeTournament.groundName || activeTournament.venue || "Shivaji Maharaj Ground (Turf)",
+      venue: manualMatchVenue || currentTour.groundName || currentTour.venue || "Shivaji Maharaj Ground (Turf)",
       status: 'scheduled',
       scoreA: '',
       scoreB: '',
@@ -1568,26 +1633,26 @@ export const CricketTournamentTab: React.FC<{
       umpire1: u1,
       umpire2: u2,
       scorer: sc,
-      matchBannerUrl: manualMatchBannerUrl || undefined
+      matchBannerUrl: manualMatchBannerUrl || ''
     };
 
     const updatedTeams = [...existingTeams, ...newTeamsToAdd];
-    const updatedMatches = [...(activeTournament.matches || []), newMatch];
+    const updatedMatches = [...(currentTour.matches || []), newMatch];
 
     const updatedTournament: Tournament = {
-      ...activeTournament,
+      ...currentTour,
       teams: updatedTeams,
-      status: activeTournament.status === 'setup' ? 'active' : activeTournament.status,
+      status: currentTour.status === 'setup' ? 'active' : currentTour.status,
       matches: updatedMatches,
       updatedAt: Date.now()
     };
 
-    const nextTournaments = tournaments.map(t => t.id === activeTournamentId ? updatedTournament : t);
+    const nextTournaments = tournaments.map(t => t.id === tourId ? updatedTournament : t);
     setTournaments(nextTournaments);
 
     try {
       localStorage.setItem('gully_tournaments_v1', JSON.stringify(nextTournaments));
-      setDoc(doc(db, 'cricket_tournaments', activeTournamentId), updatedTournament).catch(err => {
+      setDoc(doc(db, 'cricket_tournaments', tourId), updatedTournament).catch(err => {
         console.warn("Failed to backup tournament to Firestore:", err);
       });
       window.dispatchEvent(new Event('gully_tournaments_updated'));
@@ -2769,7 +2834,7 @@ export const CricketTournamentTab: React.FC<{
                   <p className="text-2xs text-slate-400 font-bold uppercase mt-1">Schedule date/venues, track live progress, and update winner match cards.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {(activeTournament.teams?.length || 0) >= 2 && (
+                  {(activeTournament?.teams?.length || 0) >= 2 && (
                     <button
                       onClick={generateSchedule}
                       className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-500 rounded-xl border border-indigo-500/20 font-black uppercase text-[10px] cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
@@ -2786,7 +2851,7 @@ export const CricketTournamentTab: React.FC<{
                     <Plus size={12} /> Schedule Manually
                   </button>
 
-                  {(activeTournament.matches?.length || 0) > 0 && (
+                  {(activeTournament?.matches?.length || 0) > 0 && (
                     <button
                       onClick={() => setShowResetScheduleModal(true)}
                       className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-500 rounded-xl border border-rose-500/20 font-black uppercase text-[10px] cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
@@ -2797,7 +2862,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
               </div>
 
-              {(!activeTournament.matches || activeTournament.matches.length === 0) ? (
+              {(!activeTournament?.matches || activeTournament.matches.length === 0) ? (
                 <div className="bg-white dark:bg-slate-900 border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl p-10 text-center text-slate-400 space-y-4">
                   <Calendar size={36} className="mx-auto text-emerald-500/60" />
                   <div>
@@ -2813,7 +2878,7 @@ export const CricketTournamentTab: React.FC<{
                     >
                       <Plus size={14} /> Schedule Manually
                     </button>
-                    {(activeTournament.teams?.length || 0) >= 2 && (
+                    {(activeTournament?.teams?.length || 0) >= 2 && (
                       <button
                         onClick={generateSchedule}
                         className="px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold uppercase text-xs cursor-pointer flex items-center gap-1.5 transition-all shadow-md shadow-indigo-500/20"
@@ -2837,7 +2902,7 @@ export const CricketTournamentTab: React.FC<{
                             : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
                         }`}
                       >
-                        All ({activeTournament.matches?.length || 0})
+                        All ({activeTournament?.matches?.length || 0})
                       </button>
 
                       <button
@@ -5337,339 +5402,370 @@ export const CricketTournamentTab: React.FC<{
       )}
 
       {/* MANUAL MATCH SCHEDULING MODAL */}
-      {showCreateMatchModal && activeTournament && (
-        <div 
-          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowCreateMatchModal(false);
-          }}
-        >
+      {showCreateMatchModal && (() => {
+        const modalTournament = activeTournament || tournaments.find(t => t.id === activeTournamentId) || tournaments[0] || null;
+        const modalTeams: TournamentTeam[] = ((modalTournament?.teams || []) as any[])
+          .filter(Boolean)
+          .map((t: any, idx: number) => {
+            if (typeof t === 'string') {
+              return {
+                id: `team_${idx}_${String(t).toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+                name: String(t).trim() || `Team ${idx + 1}`,
+                captain: `${String(t).trim() || `Team ${idx + 1}`} Captain`,
+                players: ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11']
+              };
+            }
+            const name = String(t?.name || t?.teamName || t?.title || `Team ${idx + 1}`).trim();
+            const id = t?.id ? String(t.id) : `team_${idx}_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+            return {
+              id,
+              name,
+              captain: t?.captain || `${name} Captain`,
+              players: Array.isArray(t?.players) && t.players.length > 0 ? t.players : ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8', 'Player 9', 'Player 10', 'Player 11'],
+              logo: t?.logo,
+              playerPhotos: t?.playerPhotos
+            };
+          });
+
+        return (
           <div 
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto animate-fade-in text-left animate-in fade-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[200] flex items-center justify-center p-2.5 sm:p-4 overflow-y-auto"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowCreateMatchModal(false);
+            }}
           >
-            <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
-              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate m-0">
-                Manual Match Scheduler
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowCreateMatchModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 custom-scrollbar">
-              {manualMatchError && (
-                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2">
-                  <AlertCircle size={15} className="shrink-0 text-rose-500" />
-                  <span>{manualMatchError}</span>
-                </div>
-              )}
-
-              {/* Fewer than 2 teams banner */}
-              {(!activeTournament.teams || activeTournament.teams.length < 2) && (
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2.5">
-                  <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-xs font-bold">
-                    <Sparkles size={15} className="shrink-0 text-amber-500" />
-                    <span>Quick-Start: Roster has {activeTournament.teams?.length || 0} teams</span>
-                  </div>
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
-                    You can type two custom team names below (they'll be auto-saved to your roster), or instantly populate 2 local gully squads with 1-click:
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const t1Name = PRESET_LOCAL_CRICKET_TEAMS[0]?.name || 'Shivaji Warriors';
-                      const t2Name = PRESET_LOCAL_CRICKET_TEAMS[1]?.name || 'Maratha Challengers';
-                      const team1: TournamentTeam = {
-                        id: `team_${Date.now()}_1`,
-                        name: t1Name,
-                        captain: PRESET_LOCAL_CRICKET_TEAMS[0]?.captain || 'Rohit',
-                        players: PRESET_LOCAL_CRICKET_TEAMS[0]?.players || ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'],
-                        city: activeTournament.city || 'Local'
-                      };
-                      const team2: TournamentTeam = {
-                        id: `team_${Date.now()}_2`,
-                        name: t2Name,
-                        captain: PRESET_LOCAL_CRICKET_TEAMS[1]?.captain || 'Virat',
-                        players: PRESET_LOCAL_CRICKET_TEAMS[1]?.players || ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'],
-                        city: activeTournament.city || 'Local'
-                      };
-                      const updatedTeams = [...(activeTournament.teams || []), team1, team2];
-                      const updatedTournament = { ...activeTournament, teams: updatedTeams };
-                      const nextTournaments = tournaments.map(t => t.id === activeTournamentId ? updatedTournament : t);
-                      setTournaments(nextTournaments);
-                      try {
-                        localStorage.setItem('gully_tournaments_v1', JSON.stringify(nextTournaments));
-                        setDoc(doc(db, 'cricket_tournaments', activeTournamentId), updatedTournament).catch(console.warn);
-                      } catch (_) {}
-                      setManualMatchTeamAId(team1.id);
-                      setManualMatchTeamBId(team2.id);
-                      setManualCustomTeamAName(team1.name);
-                      setManualCustomTeamBName(team2.name);
-                      setManualMatchTeamMode('existing');
-                      setManualMatchError(null);
-                      triggerNotification('2 Local Gully Teams added to tournament!');
-                    }}
-                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 transition shadow-xs"
-                  >
-                    <Sparkles size={12} />
-                    <span>⚡ Add 2 Preset Teams to Roster</span>
-                  </button>
-                </div>
-              )}
-
-              {/* Opponent Selection Mode Toggle */}
-              {(activeTournament.teams && activeTournament.teams.length >= 2) && (
-                <div className="flex items-center justify-between pb-0.5">
-                  <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">Match Opponents</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setManualMatchError(null);
-                      setManualMatchTeamMode(prev => prev === 'existing' ? 'custom' : 'existing');
-                    }}
-                    className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer border-none bg-transparent"
-                  >
-                    {manualMatchTeamMode === 'existing' ? '+ Enter Custom Team Names' : '← Choose from Registered Roster'}
-                  </button>
-                </div>
-              )}
-
-              {/* TEAM SELECTION INPUTS */}
-              {manualMatchTeamMode === 'existing' && activeTournament.teams && activeTournament.teams.length >= 2 ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A</label>
-                    <select
-                      value={manualMatchTeamAId}
-                      onChange={(e) => {
-                        setManualMatchTeamAId(e.target.value);
-                        setManualMatchError(null);
-                      }}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      {activeTournament.teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B</label>
-                    <select
-                      value={manualMatchTeamBId}
-                      onChange={(e) => {
-                        setManualMatchTeamBId(e.target.value);
-                        setManualMatchError(null);
-                      }}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      {activeTournament.teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A Name</label>
-                    <input
-                      type="text"
-                      value={manualCustomTeamAName}
-                      placeholder="e.g. Shivaji Warriors"
-                      onChange={(e) => {
-                        setManualCustomTeamAName(e.target.value);
-                        setManualMatchError(null);
-                      }}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B Name</label>
-                    <input
-                      type="text"
-                      value={manualCustomTeamBName}
-                      placeholder="e.g. Maratha Challengers"
-                      onChange={(e) => {
-                        setManualCustomTeamBName(e.target.value);
-                        setManualMatchError(null);
-                      }}
-                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Stage/Tag</label>
-                <select
-                  value={manualMatchStage}
-                  onChange={(e) => setManualMatchStage(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+            <div 
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[92vh] sm:max-h-[88vh] flex flex-col shadow-2xl overflow-hidden my-auto animate-fade-in text-left animate-in fade-in zoom-in-95 duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white uppercase tracking-tight truncate m-0">
+                  Manual Match Scheduler
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateMatchModal(false)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer border-none shrink-0"
                 >
-                  <option value="League">League Stage Match</option>
-                  <option value="Quarter-Final">Quarter-Final</option>
-                  <option value="Semi-Final">Semi-Final</option>
-                  <option value="Final">Grand Final</option>
-                  <option value="Friendly">Friendly Match</option>
-                </select>
+                  <X size={18} />
+                </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Scheduled Date</label>
-                  <input
-                    type="date"
-                    value={manualMatchDate}
-                    onChange={(e) => setManualMatchDate(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                  />
-                </div>
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 custom-scrollbar">
+                {manualMatchError && (
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2">
+                    <AlertCircle size={15} className="shrink-0 text-rose-500" />
+                    <span>{manualMatchError}</span>
+                  </div>
+                )}
 
-                <div>
-                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Scheduled Time</label>
-                  <input
-                    type="text"
-                    value={manualMatchTime}
-                    placeholder="e.g. 10:00 AM"
-                    onChange={(e) => setManualMatchTime(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Venue Pitch / Ground Location</label>
-                <input
-                  type="text"
-                  value={manualMatchVenue}
-                  placeholder="e.g. Shivaji Maharaj Turf, Sector 5"
-                  onChange={(e) => setManualMatchVenue(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
-                />
-              </div>
-
-              {/* Match Banner Field for Manual Scheduler */}
-              <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] text-indigo-700 dark:text-indigo-300 font-black uppercase tracking-widest flex items-center gap-1.5">
-                    <ImageIcon size={11} className="text-indigo-500" />
-                    <span>Match Banner (Auto-Configures in Setup)</span>
-                  </label>
-                  {manualMatchBannerUrl && (
+                {/* Fewer than 2 teams banner */}
+                {modalTeams.length < 2 && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-2.5">
+                    <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-xs font-bold">
+                      <Sparkles size={15} className="shrink-0 text-amber-500" />
+                      <span>Quick-Start: Roster has {modalTeams.length} teams</span>
+                    </div>
+                    <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                      You can type two custom team names below (they'll be auto-saved to your roster), or instantly populate 2 local gully squads with 1-click:
+                    </p>
                     <button
                       type="button"
-                      onClick={() => setManualMatchBannerUrl('')}
-                      className="text-[9px] text-rose-500 font-black uppercase hover:underline cursor-pointer border-none bg-transparent"
+                      onClick={() => {
+                        const currentT = modalTournament;
+                        if (!currentT) return;
+                        const t1Name = PRESET_LOCAL_CRICKET_TEAMS[0]?.name || 'Shivaji Warriors';
+                        const t2Name = PRESET_LOCAL_CRICKET_TEAMS[1]?.name || 'Maratha Challengers';
+                        const team1: TournamentTeam = {
+                          id: `team_${Date.now()}_1`,
+                          name: t1Name,
+                          captain: PRESET_LOCAL_CRICKET_TEAMS[0]?.captain || 'Rohit',
+                          players: PRESET_LOCAL_CRICKET_TEAMS[0]?.players || ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'],
+                          city: (currentT as any)?.city || 'Local'
+                        };
+                        const team2: TournamentTeam = {
+                          id: `team_${Date.now()}_2`,
+                          name: t2Name,
+                          captain: PRESET_LOCAL_CRICKET_TEAMS[1]?.captain || 'Virat',
+                          players: PRESET_LOCAL_CRICKET_TEAMS[1]?.players || ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'],
+                          city: (currentT as any)?.city || 'Local'
+                        };
+                        const updatedTeams = [...(currentT.teams || []), team1, team2];
+                        const updatedTournament = { ...currentT, teams: updatedTeams };
+                        const targetId = currentT.id || activeTournamentId;
+                        const nextTournaments = tournaments.map(t => t.id === targetId ? updatedTournament : t);
+                        setTournaments(nextTournaments);
+                        try {
+                          localStorage.setItem('gully_tournaments_v1', JSON.stringify(nextTournaments));
+                          if (targetId) {
+                            setDoc(doc(db, 'cricket_tournaments', targetId), updatedTournament).catch(console.warn);
+                          }
+                        } catch (_) {}
+                        setManualMatchTeamAId(team1.id);
+                        setManualMatchTeamBId(team2.id);
+                        setManualCustomTeamAName(team1.name);
+                        setManualCustomTeamBName(team2.name);
+                        setManualMatchTeamMode('existing');
+                        setManualMatchError(null);
+                        triggerNotification('2 Local Gully Teams added to tournament!');
+                      }}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black rounded-lg text-[10px] uppercase tracking-wider cursor-pointer border-none flex items-center gap-1.5 transition shadow-xs"
                     >
-                      Clear
+                      <Sparkles size={12} />
+                      <span>⚡ Add 2 Preset Teams to Roster</span>
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
 
-                {manualMatchBannerUrl ? (
-                  <div className="relative group rounded-xl overflow-hidden border border-indigo-500/30">
-                    <img
-                      src={normalizeImageUrl(manualMatchBannerUrl)}
-                      alt="Banner Preview"
-                      className="w-full h-24 object-cover"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => handleSmartImageError(e, manualMatchBannerUrl)}
-                    />
-                    <div className="absolute bottom-1 right-1 bg-black/60 text-white px-2 py-0.5 rounded text-[8px] font-bold">
-                      Attached ✓
+                {/* Opponent Selection Mode Toggle */}
+                {modalTeams.length >= 2 && (
+                  <div className="flex items-center justify-between pb-0.5">
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest">Match Opponents</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualMatchError(null);
+                        setManualMatchTeamMode(prev => prev === 'existing' ? 'custom' : 'existing');
+                      }}
+                      className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer border-none bg-transparent"
+                    >
+                      {manualMatchTeamMode === 'existing' ? '+ Enter Custom Team Names' : '← Choose from Registered Roster'}
+                    </button>
+                  </div>
+                )}
+
+                {/* TEAM SELECTION INPUTS */}
+                {manualMatchTeamMode === 'existing' && modalTeams.length >= 2 ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A</label>
+                      <select
+                        value={manualMatchTeamAId || modalTeams[0]?.id || ''}
+                        onChange={(e) => {
+                          setManualMatchTeamAId(e.target.value);
+                          setManualMatchError(null);
+                        }}
+                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {modalTeams.map((t, idx) => (
+                          <option key={t.id || `team_a_${idx}`} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B</label>
+                      <select
+                        value={manualMatchTeamBId || modalTeams[1]?.id || modalTeams[0]?.id || ''}
+                        onChange={(e) => {
+                          setManualMatchTeamBId(e.target.value);
+                          setManualMatchError(null);
+                        }}
+                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        {modalTeams.map((t, idx) => (
+                          <option key={t.id || `team_b_${idx}`} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team A Name</label>
                       <input
-                        type="url"
-                        value={manualMatchBannerUrl}
-                        placeholder="Paste image or Google Drive link..."
-                        onChange={(e) => setManualMatchBannerUrl(normalizeImageUrl(e.target.value))}
-                        onPaste={(e) => {
-                          const text = e.clipboardData.getData('text');
-                          if (text) {
-                            e.preventDefault();
-                            setManualMatchBannerUrl(normalizeImageUrl(text.trim()));
-                          }
+                        type="text"
+                        value={manualCustomTeamAName || ''}
+                        placeholder="e.g. Shivaji Warriors"
+                        onChange={(e) => {
+                          setManualCustomTeamAName(e.target.value);
+                          setManualMatchError(null);
                         }}
-                        className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
                       />
-                      <label className="px-3 py-2 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1">
-                        <Upload size={12} />
-                        <span>Upload</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (evt) => {
-                                if (evt.target?.result) setManualMatchBannerUrl(evt.target.result as string);
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                      </label>
                     </div>
 
-                    <div className="flex gap-1.5 flex-wrap items-center pt-0.5">
-                      <span className="text-[9px] font-bold text-slate-400">Presets:</span>
-                      <button
-                        type="button"
-                        onClick={() => setManualMatchBannerUrl('https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=1280&q=80')}
-                        className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition"
-                      >
-                        Stadium
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setManualMatchBannerUrl('https://images.unsplash.com/photo-1531415074868-036b1c5f53ec?w=1280&q=80')}
-                        className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition"
-                      >
-                        Turf
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setManualMatchBannerUrl('https://images.unsplash.com/photo-1587280501635-68a0e82cd5ff?w=1280&q=80')}
-                        className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition"
-                      >
-                        Arena
-                      </button>
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Team B Name</label>
+                      <input
+                        type="text"
+                        value={manualCustomTeamBName || ''}
+                        placeholder="e.g. Maratha Challengers"
+                        onChange={(e) => {
+                          setManualCustomTeamBName(e.target.value);
+                          setManualMatchError(null);
+                        }}
+                        className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
                     </div>
                   </div>
                 )}
+
+                <div>
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Match Stage/Tag</label>
+                  <select
+                    value={manualMatchStage}
+                    onChange={(e) => setManualMatchStage(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                  >
+                    <option value="League">League Stage Match</option>
+                    <option value="Quarter-Final">Quarter-Final</option>
+                    <option value="Semi-Final">Semi-Final</option>
+                    <option value="Final">Grand Final</option>
+                    <option value="Friendly">Friendly Match</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Scheduled Date</label>
+                    <input
+                      type="date"
+                      value={manualMatchDate}
+                      onChange={(e) => setManualMatchDate(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Scheduled Time</label>
+                    <input
+                      type="text"
+                      value={manualMatchTime}
+                      placeholder="e.g. 10:00 AM"
+                      onChange={(e) => setManualMatchTime(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1">Venue Pitch / Ground Location</label>
+                  <input
+                    type="text"
+                    value={manualMatchVenue}
+                    placeholder="e.g. Shivaji Maharaj Turf, Sector 5"
+                    onChange={(e) => setManualMatchVenue(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                  />
+                </div>
+
+                {/* Match Banner Field for Manual Scheduler */}
+                <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-indigo-700 dark:text-indigo-300 font-black uppercase tracking-widest flex items-center gap-1.5">
+                      <ImageIcon size={11} className="text-indigo-500" />
+                      <span>Match Banner (Auto-Configures in Setup)</span>
+                    </label>
+                    {manualMatchBannerUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setManualMatchBannerUrl('')}
+                        className="text-[9px] text-rose-500 font-black uppercase hover:underline cursor-pointer border-none bg-transparent"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {manualMatchBannerUrl ? (
+                    <div className="relative group rounded-xl overflow-hidden border border-indigo-500/30">
+                      <img
+                        src={normalizeImageUrl(manualMatchBannerUrl)}
+                        alt="Banner Preview"
+                        className="w-full h-24 object-cover"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => handleSmartImageError(e, manualMatchBannerUrl)}
+                      />
+                      <div className="absolute bottom-1 right-1 bg-black/60 text-white px-2 py-0.5 rounded text-[8px] font-bold">
+                        Attached ✓
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={manualMatchBannerUrl}
+                          placeholder="Paste image or Google Drive link..."
+                          onChange={(e) => setManualMatchBannerUrl(normalizeImageUrl(e.target.value))}
+                          onPaste={(e) => {
+                            const text = e.clipboardData.getData('text');
+                            if (text) {
+                              e.preventDefault();
+                              setManualMatchBannerUrl(normalizeImageUrl(text.trim()));
+                            }
+                          }}
+                          className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
+                        />
+                        <label className="px-3 py-2 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1">
+                          <Upload size={12} />
+                          <span>Upload</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = (evt) => {
+                                  if (evt.target?.result) setManualMatchBannerUrl(evt.target.result as string);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex gap-1.5 flex-wrap items-center pt-0.5">
+                        <span className="text-[9px] font-bold text-slate-400">Presets:</span>
+                        <button
+                          type="button"
+                          onClick={() => setManualMatchBannerUrl('https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=1280&q=80')}
+                          className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition"
+                        >
+                          Stadium
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setManualMatchBannerUrl('https://images.unsplash.com/photo-1531415074868-036b1c5f53ec?w=1280&q=80')}
+                          className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition"
+                        >
+                          Turf
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setManualMatchBannerUrl('https://images.unsplash.com/photo-1587280501635-68a0e82cd5ff?w=1280&q=80')}
+                          className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-indigo-400 transition"
+                        >
+                          Arena
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex gap-2 z-20 shrink-0">
+                <button
+                  onClick={() => setShowCreateMatchModal(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateManualMatch}
+                  className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20 transition"
+                >
+                  Schedule Match
+                </button>
               </div>
             </div>
-
-            <div className="sticky bottom-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-5 py-3 border-t border-slate-200 dark:border-slate-800 flex gap-2 z-20 shrink-0">
-              <button
-                onClick={() => setShowCreateMatchModal(false)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateManualMatch}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/20 transition"
-              >
-                Schedule Match
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* EDIT TOURNAMENT MODAL */}
       {showEditTourModal && (
