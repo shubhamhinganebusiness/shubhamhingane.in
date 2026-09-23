@@ -34,9 +34,6 @@ interface CompletedRecordsSliderProps {
   onDownloadAward?: (match: MatchState, award?: 'potm' | 'best_batter' | 'best_bowler') => void;
   isScoreManager?: boolean;
   homepageMode?: boolean;
-  onToggleHide?: (matchId: string, currentHidden: boolean) => void;
-  onToggleBlock?: (matchId: string, currentBlocked: boolean) => void;
-  onDeleteMatch?: (matchId: string) => void;
 }
 
 export interface SponsorAdSlide {
@@ -808,10 +805,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
   onExportPDF,
   onDownloadAward,
   isScoreManager = false,
-  homepageMode = false,
-  onToggleHide,
-  onToggleBlock,
-  onDeleteMatch
+  homepageMode = false
 }) => {
   const validMatches = (matches || []).filter(
     m => m && m.id && !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted'
@@ -1061,9 +1055,6 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
             onDownloadAward={onDownloadAward}
             onShareWhatsApp={handleShareWhatsApp}
             isAdmin={isScoreManager}
-            onToggleHide={onToggleHide}
-            onToggleBlock={onToggleBlock}
-            onDeleteMatch={onDeleteMatch}
           />
         ))}
 

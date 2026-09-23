@@ -14,6 +14,7 @@ import { SpectatorSliderAdmin } from './cricket/SpectatorSliderAdmin';
 import { BroadcastThemeStudio } from './cricket/BroadcastThemeStudio';
 import { CompletedMatchesAdminManager } from './cricket/CompletedMatchesAdminManager';
 import { CertificateDesignStudioAdmin } from './cricket/CertificateDesignStudioAdmin';
+import { CricbuzzStorageManager } from './cricket/CricbuzzStorageManager';
 
 interface PasswordStrength {
   score: number; // 0 to 4
@@ -1326,6 +1327,13 @@ export const SuperAdmin: React.FC = () => {
                     >
                       🏆 Certificate Design
                     </button>
+                    <button
+                      onClick={() => setCricketSubTab('cricbuzz_storage')}
+                      type="button"
+                      className={`px-3 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all border-none cursor-pointer ${cricketSubTab === 'cricbuzz_storage' ? 'bg-emerald-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900 bg-transparent'}`}
+                    >
+                      🗂️ Cricbuzz Storage Engine
+                    </button>
                   </div>
                 </div>
 
@@ -1339,6 +1347,8 @@ export const SuperAdmin: React.FC = () => {
                   <BroadcastThemeStudio />
                 ) : cricketSubTab === 'certificate_design' ? (
                   <CertificateDesignStudioAdmin />
+                ) : cricketSubTab === 'cricbuzz_storage' ? (
+                  <CricbuzzStorageManager />
                 ) : (
                   <div className="space-y-8">
                     {/* Score Manager creation form */}

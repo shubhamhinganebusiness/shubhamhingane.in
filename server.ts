@@ -272,19 +272,19 @@ async function generateContentWithFallback(
 
 async function startServer() {
   const app = express();
-  // Support dynamic Cloud Run PORT (e.g., 8080) with default 3000 for local dev
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
 
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-  // Security & Frame Headers (Configured to support Google AI Studio preview iframe & overlays)
+  // High-Traffic Security & Anti-DDoS Headers (Cricbuzz-grade standards)
   app.use((req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-    // Explicitly do not set X-Frame-Options: SAMEORIGIN so Google AI Studio iframe preview can render without white blank screen
+    // In AI Studio preview iframe, do not set X-Frame-Options SAMEORIGIN so the preview renders properly
+    res.setHeader("Content-Security-Policy", "frame-ancestors *;");
     next();
   });
 
@@ -408,20 +408,28 @@ async function startServer() {
         return res.status(413).json({ error: "Image exceeds 25MB limit." });
       }
 
-      // 1. Logical Cricbuzz-standard Folder Classification
-      let cleanFolder = folder.replace(/^\/+|\/+$/g, "").toLowerCase();
-      // Normalize synonyms to standard folders
-      if (cleanFolder.includes("player") || cleanFolder === "squad_players") {
-        cleanFolder = "players";
-      } else if (cleanFolder.includes("match") || cleanFolder === "spectator_banners") {
-        cleanFolder = "matches";
-      } else if (cleanFolder.includes("ad") || cleanFolder.includes("sponsor")) {
-        cleanFolder = "ads";
-      } else if (cleanFolder.includes("team")) {
-        cleanFolder = "teams";
+      // 1. Logical Cricbuzz-standard Hierarchical Folder Classification
+      let cleanFolder = folder.replace(/^\/+|\/+$/g, "");
+      const folderLower = cleanFolder.toLowerCase();
+
+      // Normalize common synonyms to full Cricbuzz standard paths
+      if (folderLower === "players" || folderLower === "players/avatars" || folderLower === "squad_players") {
+        cleanFolder = "players/avatars";
+      } else if (folderLower === "players/action_shots" || folderLower === "action_shots") {
+        cleanFolder = "players/action_shots";
+      } else if (folderLower === "teams" || folderLower === "teams/logos") {
+        cleanFolder = "teams/logos";
+      } else if (folderLower === "tournaments" || folderLower === "tournaments/banners") {
+        cleanFolder = "tournaments/banners";
+      } else if (folderLower === "tournaments/trophies" || folderLower === "trophies") {
+        cleanFolder = "tournaments/trophies";
+      } else if (folderLower === "ads" || folderLower === "ads/sponsor_banners" || folderLower === "sponsors") {
+        cleanFolder = "ads/sponsor_banners";
+      } else if (folderLower === "player_identity_docs" || folderLower === "docs" || folderLower === "kyc") {
+        cleanFolder = "player_identity_docs";
       }
 
-      // 2. Sharp Image Optimization & High-Performance Compression
+      // 2. Sharp Image Optimization & Cricbuzz-Grade Compression
       let outputBuffer = inputBuffer;
       let outputContentType = inputContentType;
       let outputExt = "webp";
@@ -435,60 +443,75 @@ async function startServer() {
           if (sharp) {
             const sharpImg = sharp(inputBuffer).rotate(); // auto-orient via EXIF
 
-            if (cleanFolder === "players" || cropSquare) {
-            // Cricbuzz Player Portrait standard:
-            // 200x200 pixels square crop focused on upper face (prevents 5MB phone photos lagging UI)
-            const targetDim = maxWidth && maxWidth <= 400 ? maxWidth : 200;
-            outputBuffer = await sharpImg
-              .resize(targetDim, targetDim, {
-                fit: "cover",
-                position: "top" // Focus on upper body / headshot
-              })
-              .webp({ quality: quality || 82, effort: 4 })
-              .toBuffer();
-            outputContentType = "image/webp";
-            outputExt = "webp";
-          } else if (cleanFolder === "teams") {
-            // Team Logo standard: 200x200 contain with alpha transparency
-            const targetDim = maxWidth && maxWidth <= 400 ? maxWidth : 200;
-            outputBuffer = await sharpImg
-              .resize(targetDim, targetDim, {
-                fit: "contain",
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
-              })
-              .webp({ quality: quality || 85, effort: 4 })
-              .toBuffer();
-            outputContentType = "image/webp";
-            outputExt = "webp";
-          } else if (cleanFolder === "matches" || cleanFolder === "ads") {
-            // Match & Ad Banner standard: 1280x720 (16:9)
-            const targetW = maxWidth || 1280;
-            const targetH = maxHeight || 720;
-            outputBuffer = await sharpImg
-              .resize(targetW, targetH, {
-                fit: "inside",
-                withoutEnlargement: true
-              })
-              .webp({ quality: quality || 85, effort: 4 })
-              .toBuffer();
-            outputContentType = "image/webp";
-            outputExt = "webp";
-          } else {
-            // General site asset resize
-            const targetW = maxWidth || 1200;
-            const targetH = maxHeight || 1200;
-            outputBuffer = await sharpImg
-              .resize(targetW, targetH, {
-                fit: "inside",
-                withoutEnlargement: true
-              })
-              .webp({ quality: quality || 82 })
-              .toBuffer();
-            outputContentType = "image/webp";
-            outputExt = "webp";
+            if (cleanFolder.includes("players/avatars") || cropSquare) {
+              // Cricbuzz Player Portrait Standard:
+              // 200x200 square crop focused on upper face (compresses 5MB photos to ~15KB for 2G/3G gully networks)
+              const targetDim = maxWidth && maxWidth <= 400 ? maxWidth : 200;
+              outputBuffer = await sharpImg
+                .resize(targetDim, targetDim, {
+                  fit: "cover",
+                  position: "top" // Headshot focus
+                })
+                .webp({ quality: quality || 82, effort: 4 })
+                .toBuffer();
+              outputContentType = "image/webp";
+              outputExt = "webp";
+            } else if (cleanFolder.includes("teams/logos") || cleanFolder.includes("trophies")) {
+              // Cricbuzz Team Crest / Trophy Standard:
+              // 200x200 or 400x400 contain with transparent alpha background
+              const targetDim = cleanFolder.includes("trophies") ? (maxWidth || 400) : (maxWidth && maxWidth <= 400 ? maxWidth : 200);
+              outputBuffer = await sharpImg
+                .resize(targetDim, targetDim, {
+                  fit: "contain",
+                  background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .webp({ quality: quality || 85, effort: 4 })
+                .toBuffer();
+              outputContentType = "image/webp";
+              outputExt = "webp";
+            } else if (cleanFolder.includes("share_cards") || cleanFolder.includes("potm")) {
+              // CricHeroes Viral Share Card Standard:
+              // Up to 1200x1350 for WhatsApp Status & Instagram Cards
+              const targetW = maxWidth || 1200;
+              const targetH = maxHeight || 1350;
+              outputBuffer = await sharpImg
+                .resize(targetW, targetH, {
+                  fit: "inside",
+                  withoutEnlargement: true
+                })
+                .webp({ quality: quality || 88, effort: 4 })
+                .toBuffer();
+              outputContentType = "image/webp";
+              outputExt = "webp";
+            } else if (cleanFolder.includes("tournaments/banners") || cleanFolder.includes("matches") || cleanFolder.includes("sponsor_banners")) {
+              // Cricbuzz 16:9 Match & Tournament Banner Standard: 1280x720
+              const targetW = maxWidth || 1280;
+              const targetH = maxHeight || 720;
+              outputBuffer = await sharpImg
+                .resize(targetW, targetH, {
+                  fit: "inside",
+                  withoutEnlargement: true
+                })
+                .webp({ quality: quality || 85, effort: 4 })
+                .toBuffer();
+              outputContentType = "image/webp";
+              outputExt = "webp";
+            } else {
+              // General asset resize
+              const targetW = maxWidth || 1200;
+              const targetH = maxHeight || 1200;
+              outputBuffer = await sharpImg
+                .resize(targetW, targetH, {
+                  fit: "inside",
+                  withoutEnlargement: true
+                })
+                .webp({ quality: quality || 82 })
+                .toBuffer();
+              outputContentType = "image/webp";
+              outputExt = "webp";
+            }
           }
         }
-      }
       } catch (sharpError) {
         console.warn("[Upload Route] Sharp image processing note, using original buffer:", sharpError);
         outputBuffer = inputBuffer;
@@ -500,14 +523,22 @@ async function startServer() {
       if (entityId) {
         const sanitizedId = entityId.replace(/[^a-zA-Z0-9_-]/g, "_");
         safeName = `${sanitizedId}.${outputExt}`;
-      } else if (cleanFolder === "players") {
-        safeName = `player_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
-      } else if (cleanFolder === "matches") {
+      } else if (cleanFolder.includes("players/avatars")) {
+        safeName = `avatar_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder.includes("players/action_shots")) {
+        safeName = `action_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder.includes("teams/logos")) {
+        safeName = `logo_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder.includes("tournaments/banners")) {
+        safeName = `tournament_banner_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder.includes("tournaments/trophies")) {
+        safeName = `trophy_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder.includes("share_cards")) {
+        safeName = `share_card_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
+      } else if (cleanFolder.includes("matches")) {
         safeName = `match_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
-      } else if (cleanFolder === "ads") {
+      } else if (cleanFolder.includes("ads") || cleanFolder.includes("sponsor")) {
         safeName = `sponsor_ad_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
-      } else if (cleanFolder === "teams") {
-        safeName = `team_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${outputExt}`;
       } else if (filename) {
         safeName = `${filename.replace(/[^a-zA-Z0-9_-]/g, "_")}.${outputExt}`;
       } else {
@@ -2931,13 +2962,13 @@ Adopting modular paradigms accelerates iteration velocity while keeping technica
   });
 
   // Determine production mode:
-  // In dev environment, tsx runs via "dev" script with NODE_ENV !== "production".
-  // In deployed Cloud Run environment, dist/index.html is pre-built via "npm run build" and started via "node server.ts".
-  const isDev = process.env.npm_lifecycle_event === "dev" || process.env.NODE_ENV === "development";
+  // True if NODE_ENV === "production", or if executing the compiled dist/server.cjs bundle,
+  // or if running in a container where dist/index.html is pre-built.
   const isProduction =
-    !isDev &&
-    (process.env.NODE_ENV === "production" ||
-      fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
+    process.env.NODE_ENV === "production" ||
+    (typeof __filename !== "undefined" && __filename.includes("server.cjs")) ||
+    (Boolean(process.argv[1]) && process.argv[1].includes("server.cjs")) ||
+    (!process.argv[1]?.endsWith("server.ts") && fs.existsSync(path.join(process.cwd(), "dist", "index.html")));
 
   if (!isProduction) {
     console.log("Starting in DEVELOPMENT mode");

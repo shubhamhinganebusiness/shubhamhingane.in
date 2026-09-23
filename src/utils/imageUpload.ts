@@ -5,19 +5,36 @@ import { normalizeImageUrl, isGoogleDriveUrl, extractGoogleDriveId, handleSmartI
 export { normalizeImageUrl, isGoogleDriveUrl, extractGoogleDriveId, handleSmartImageError };
 
 /**
- * Recommended Logical Folder Structure in Firebase Storage (Cricbuzz Standard)
- * - players/ → Store player profile photos (e.g., players/player_id_123.webp)
- * - matches/ → Store match & tournament banners (e.g., matches/match_id_789.webp)
- * - ads/     → Store advertisement and sponsor banners (e.g., ads/sponsor_ad_01.webp)
- * - teams/   → Store team logos & club emblems (e.g., teams/team_123.webp)
- * - player_identity_docs/ → Store government ID proofs & documents
+ * Cricbuzz & CricHeroes Standard Cloud Storage Folder Hierarchy
+ *
+ * /players/avatars/             -> High-speed 200x200 square headshots for scorecards & commentary (~15KB WebP)
+ * /players/action_shots/        -> Up to 960x960 action shots for player profile hubs (~75KB WebP)
+ * /teams/logos/                 -> 200x200 transparent crests for scorecards & standings (~15KB WebP/PNG)
+ * /tournaments/banners/         -> 1280x720 (16:9) cover banners for tournament headers (~90KB WebP)
+ * /tournaments/trophies/        -> 400x400 transparent awards & trophy assets (~30KB WebP)
+ * /matches/{id}/share_cards/    -> 1200x1350 viral Player of the Match / century cards (~110KB WebP)
+ * /matches/{id}/scorecards/     -> Printable official scorecards & verified match PDFs (~200KB PDF)
+ * /matches/{id}/audio/          -> Vernacular gully audio commentary snippets (~50KB/min)
+ * /ads/sponsor_banners/         -> 1280x720 spectator scoreboard sponsorship banners (~95KB WebP)
+ * /player_identity_docs/{uid}/  -> Zero-trust secure government ID proofs
  */
 export const STORAGE_FOLDERS = {
-  PLAYERS: 'players',
+  PLAYERS: 'players/avatars',
+  PLAYERS_AVATARS: 'players/avatars',
+  PLAYERS_ACTION: 'players/action_shots',
+  TEAMS: 'teams/logos',
+  TEAMS_LOGOS: 'teams/logos',
+  TOURNAMENTS: 'tournaments/banners',
+  TOURNAMENTS_BANNERS: 'tournaments/banners',
+  TOURNAMENTS_TROPHIES: 'tournaments/trophies',
   MATCHES: 'matches',
-  ADS: 'ads',
-  TEAMS: 'teams',
-  DOCS: 'player_identity_docs'
+  MATCHES_SHARE_CARDS: 'matches/share_cards',
+  MATCHES_SCORECARDS: 'matches/scorecards',
+  MATCHES_AUDIO: 'matches/audio_commentary',
+  ADS: 'ads/sponsor_banners',
+  ADS_SPONSORS: 'ads/sponsor_banners',
+  DOCS: 'player_identity_docs',
+  PLAYER_DOCS: 'player_identity_docs',
 } as const;
 
 export type StorageFolder = typeof STORAGE_FOLDERS[keyof typeof STORAGE_FOLDERS] | string;
@@ -28,7 +45,7 @@ export interface UploadProgressCallback {
 
 export interface UploadOptions {
   folder?: StorageFolder;
-  entityId?: string; // e.g., 'player_id_123', 'match_id_789', 'sponsor_ad_01'
+  entityId?: string; // e.g., 'player_virat_18', 'team_chennai', 'match_889_potm'
   onProgress?: UploadProgressCallback;
   compress?: boolean;
   maxWidth?: number;
@@ -49,6 +66,117 @@ export interface UploadResult {
   folder?: string;
   isBase64Fallback?: boolean;
   cacheControl?: string;
+}
+
+export interface FolderPreset {
+  maxWidth: number;
+  maxHeight: number;
+  quality: number;
+  cropSquare: boolean;
+  cacheControl: string;
+}
+
+export function getFolderUploadPreset(folder: StorageFolder): FolderPreset {
+  const f = (folder || '').toLowerCase();
+  if (f.includes('avatars') || f === 'players' || f === 'players/avatars') {
+    return {
+      maxWidth: 200,
+      maxHeight: 200,
+      quality: 0.82,
+      cropSquare: true,
+      cacheControl: 'public, max-age=31536000, immutable',
+    };
+  }
+  if (f.includes('action_shots')) {
+    return {
+      maxWidth: 960,
+      maxHeight: 960,
+      quality: 0.85,
+      cropSquare: false,
+      cacheControl: 'public, max-age=31536000, immutable',
+    };
+  }
+  if (f.includes('teams') || f.includes('logos')) {
+    return {
+      maxWidth: 200,
+      maxHeight: 200,
+      quality: 0.85,
+      cropSquare: false,
+      cacheControl: 'public, max-age=31536000, immutable',
+    };
+  }
+  if (f.includes('trophies')) {
+    return {
+      maxWidth: 400,
+      maxHeight: 400,
+      quality: 0.85,
+      cropSquare: false,
+      cacheControl: 'public, max-age=31536000, immutable',
+    };
+  }
+  if (f.includes('share_cards') || f.includes('potm')) {
+    return {
+      maxWidth: 1200,
+      maxHeight: 1350,
+      quality: 0.88,
+      cropSquare: false,
+      cacheControl: 'public, max-age=2592000',
+    };
+  }
+  if (f.includes('player_identity_docs') || f.includes('docs')) {
+    return {
+      maxWidth: 1200,
+      maxHeight: 1200,
+      quality: 0.82,
+      cropSquare: false,
+      cacheControl: 'private, max-age=3600',
+    };
+  }
+  // Default for banners, ads, matches
+  return {
+    maxWidth: 1280,
+    maxHeight: 720,
+    quality: 0.85,
+    cropSquare: false,
+    cacheControl: 'public, max-age=31536000, immutable',
+  };
+}
+
+export function getPlayerAvatarStoragePath(playerId: string): string {
+  const cleanId = (playerId || 'player').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `players/avatars/${cleanId}.webp`;
+}
+
+export function getTeamLogoStoragePath(teamId: string): string {
+  const cleanId = (teamId || 'team').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `teams/logos/${cleanId}.webp`;
+}
+
+export function getTournamentBannerStoragePath(tourId: string): string {
+  const cleanId = (tourId || 'tournament').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `tournaments/banners/${cleanId}.webp`;
+}
+
+export function getTournamentTrophyStoragePath(trophyId: string): string {
+  const cleanId = (trophyId || 'trophy').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `tournaments/trophies/${cleanId}.webp`;
+}
+
+export function getMatchShareCardStoragePath(matchId: string, cardType = 'potm'): string {
+  const cleanMatch = (matchId || 'match').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanType = (cardType || 'share').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `matches/${cleanMatch}/share_cards/${cleanType}.webp`;
+}
+
+export function getSponsorBannerStoragePath(sponsorId: string): string {
+  const cleanId = (sponsorId || 'sponsor').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `ads/sponsor_banners/${cleanId}.webp`;
+}
+
+export function getPlayerDocStoragePath(userId: string, docType = 'aadhaar'): string {
+  const cleanUser = (userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanDoc = (docType || 'doc').replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `player_identity_docs/${cleanUser}/${cleanDoc}.webp`;
 }
 
 // Lazy initialization of Firebase Storage
@@ -137,7 +265,6 @@ export async function compressImage(
   targetFormat: 'image/webp' | 'image/jpeg' = 'image/webp',
   cropSquare = false
 ): Promise<Blob> {
-  // If SVG or GIF, preserve raw animation/vector without canvas rasterization
   if ('type' in file && (file.type === 'image/svg+xml' || file.type === 'image/gif')) {
     return file;
   }
@@ -153,7 +280,6 @@ export async function compressImage(
         const canvas = document.createElement('canvas');
 
         if (cropSquare) {
-          // Cricbuzz Player Face Standard: Square crop biased towards upper face area
           const side = Math.min(width, height);
           const startX = Math.round((width - side) / 2);
           const startY = Math.round(Math.max(0, (height - side) * 0.2));
@@ -189,7 +315,6 @@ export async function compressImage(
             if (blob) {
               resolve(blob);
             } else {
-              // Fallback to JPEG if WebP blob generation fails
               canvas.toBlob(
                 (fallbackBlob) => (fallbackBlob ? resolve(fallbackBlob) : resolve(file)),
                 'image/jpeg',
@@ -207,10 +332,6 @@ export async function compressImage(
   });
 }
 
-/**
- * Generates a clean, logical filename matching Cricbuzz/storage best practices:
- * players/player_id_123.webp, matches/match_id_789.webp, ads/sponsor_ad_01.webp
- */
 function generateSafeFileName(originalName: string, ext = 'webp', entityId?: string, folder?: string): string {
   const timestamp = Date.now();
   if (entityId) {
@@ -218,8 +339,20 @@ function generateSafeFileName(originalName: string, ext = 'webp', entityId?: str
     return `${cleanEntity}.${ext}`;
   }
   const cleanFolder = (folder || '').toLowerCase();
-  if (cleanFolder.includes('player')) {
-    return `player_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+  if (cleanFolder.includes('avatars') || cleanFolder.includes('player')) {
+    return `avatar_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+  }
+  if (cleanFolder.includes('action')) {
+    return `action_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+  }
+  if (cleanFolder.includes('trophy')) {
+    return `trophy_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+  }
+  if (cleanFolder.includes('tournament')) {
+    return `tournament_banner_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+  }
+  if (cleanFolder.includes('share_card')) {
+    return `share_card_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
   }
   if (cleanFolder.includes('match')) {
     return `match_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
@@ -227,8 +360,8 @@ function generateSafeFileName(originalName: string, ext = 'webp', entityId?: str
   if (cleanFolder.includes('ad') || cleanFolder.includes('sponsor')) {
     return `sponsor_ad_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
   }
-  if (cleanFolder.includes('team')) {
-    return `team_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+  if (cleanFolder.includes('team') || cleanFolder.includes('logo')) {
+    return `logo_${timestamp}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
   }
   const cleanBase = originalName
     .replace(/\.[^/.]+$/, '')
@@ -245,20 +378,19 @@ export async function uploadImageToStorage(
   file: File,
   options: UploadOptions = {}
 ): Promise<UploadResult> {
-  const isPlayerFolder = options.folder === STORAGE_FOLDERS.PLAYERS || options.folder === 'players';
-  const isTeamFolder = options.folder === STORAGE_FOLDERS.TEAMS || options.folder === 'teams';
+  const preset = getFolderUploadPreset(options.folder || STORAGE_FOLDERS.PLAYERS);
 
   const {
     folder = STORAGE_FOLDERS.PLAYERS,
     entityId,
     onProgress,
     compress = true,
-    maxWidth = isPlayerFolder ? 200 : isTeamFolder ? 200 : 1280,
-    maxHeight,
-    quality = 0.85,
+    maxWidth = preset.maxWidth,
+    maxHeight = preset.maxHeight,
+    quality = preset.quality,
     maxSizeMB = 10,
-    cropSquare = isPlayerFolder,
-    cacheControl = 'public, max-age=31536000, immutable',
+    cropSquare = preset.cropSquare,
+    cacheControl = preset.cacheControl,
     fallbackToBase64 = true
   } = options;
 
@@ -279,13 +411,14 @@ export async function uploadImageToStorage(
       fileExt = 'webp';
       contentType = 'image/webp';
     } catch (compErr) {
-      console.warn('[Image Upload] Client-side compression skipped:', compErr);
+      console.warn('[Image Upload] Client-side compression note:', compErr);
       uploadBlob = file;
     }
   }
 
   const fileName = generateSafeFileName(file.name, fileExt, entityId, folder);
-  const fullPath = `${folder.replace(/^\/+|\/+$/g, '')}/${fileName}`;
+  const cleanFolder = folder.replace(/^\/+|\/+$/g, '');
+  const fullPath = `${cleanFolder}/${fileName}`;
   const storage = getFirebaseStorage();
 
   // 3. Attempt direct Firebase Storage upload with CDN Cache-Control headers
@@ -294,7 +427,7 @@ export async function uploadImageToStorage(
       const storageRef = ref(storage, fullPath);
       const metadata = {
         contentType,
-        cacheControl, // Google Cloud CDN caching header
+        cacheControl,
         customMetadata: {
           originalName: file.name,
           entityId: entityId || '',
@@ -315,7 +448,7 @@ export async function uploadImageToStorage(
             }
           },
           (error) => {
-            console.warn('[Firebase Storage] Direct upload error, checking fallback:', error?.message || error);
+            console.warn('[Firebase Storage] Direct upload error, trying backend route:', error?.message || error);
             uploadImageViaBackend(uploadBlob, {
               folder,
               entityId,
@@ -362,7 +495,6 @@ export async function uploadImageToStorage(
                 isBase64Fallback: false
               });
             } catch (urlErr) {
-              // Try backend route or fallback if download url fails
               uploadImageViaBackend(uploadBlob, {
                 folder,
                 entityId,
@@ -439,8 +571,6 @@ export async function uploadImageToStorage(
 
 /**
  * Uploads an image via the Express Node.js backend route (/api/upload-image)
- * The backend compresses with Sharp, saves to Firebase Storage, sets CDN cache headers,
- * and generates a public Download URL.
  */
 export async function uploadImageViaBackend(
   fileOrDataUrl: File | Blob | string,
@@ -517,7 +647,7 @@ export async function uploadImageViaBackend(
  */
 export async function deleteImageFromStorage(pathOrUrl: string): Promise<void> {
   if (!pathOrUrl || pathOrUrl.startsWith('data:')) {
-    return; // Base64 data URL doesn't need cloud deletion
+    return;
   }
 
   const storage = getFirebaseStorage();

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, Trash2, Edit2, Image as ImageIcon, Check, X, 
   ExternalLink, Eye, EyeOff, AlertCircle, Sparkles, Upload, 
-  RefreshCw, Sliders, ShieldCheck, ArrowUpDown
+  RefreshCw, Sliders, ShieldCheck, ArrowUpDown, FolderTree, Database
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { 
@@ -16,6 +16,7 @@ import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from '../.
 import { CricketMatchBanner } from './CricketImageFallback';
 import { DEFAULT_PRESET_SPONSORS } from '../../utils/cricketSponsorsStorage';
 import { SPECTATOR_SLIDER_CACHE_KEY } from './useSpectatorSliderImages';
+import { CricbuzzStorageManager } from './CricbuzzStorageManager';
 
 export interface SliderImageDoc {
   id: string;
@@ -57,6 +58,7 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [adminViewTab, setAdminViewTab] = useState<'slider_banners' | 'cricbuzz_storage'>('slider_banners');
 
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -340,8 +342,42 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
 
   return (
     <div id="spectator-slider-admin" className="space-y-6">
-      {/* Header & Controls */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 md:p-8 rounded-3xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+      {/* Top Module Switcher Tabs */}
+      <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl w-fit border border-slate-200 dark:border-slate-700/60 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setAdminViewTab('slider_banners')}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+            adminViewTab === 'slider_banners'
+              ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Sliders size={14} className="text-emerald-500" />
+          <span>16:9 Spectator Banners</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAdminViewTab('cricbuzz_storage')}
+          className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+            adminViewTab === 'cricbuzz_storage'
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <FolderTree size={14} />
+          <span>Cricbuzz Storage & Media Hierarchy</span>
+          <span className="px-1.5 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 text-[9px] font-mono">STEP 1</span>
+        </button>
+      </div>
+
+      {adminViewTab === 'cricbuzz_storage' ? (
+        <CricbuzzStorageManager />
+      ) : (
+        <>
+          {/* Header & Controls */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 p-6 md:p-8 rounded-3xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-emerald-500/10 text-emerald-600 rounded-xl">
@@ -808,6 +844,8 @@ export const SpectatorSliderAdmin: React.FC<SpectatorSliderAdminProps> = () => {
           </div>
         )}
       </AnimatePresence>
+        </>
+      )}
     </div>
   );
 };

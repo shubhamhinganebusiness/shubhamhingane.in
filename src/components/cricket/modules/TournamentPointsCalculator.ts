@@ -1,5 +1,42 @@
 // TournamentPointsCalculator.ts
-// Standard ICC & League Cricket Tournament Hierarchy, Points Table, and NRR Engine
+// Standard ICC, Cricbuzz & CricHeroes Tournament Hierarchy, Dynamic Points Table, and NRR Engine
+
+export type TieBreakerRule = 'icc_standard' | 'head_to_head_first';
+
+export interface HeadToHeadSummary {
+  teamAId: string;
+  teamBId: string;
+  played: number;
+  winsA: number;
+  winsB: number;
+  ties: number;
+  noResults: number;
+  matches: {
+    matchId: string;
+    stage?: string;
+    winnerId: string | null;
+    winnerName?: string;
+    margin?: string;
+    scoreA: string;
+    scoreB: string;
+    date?: string;
+  }[];
+}
+
+export interface QualificationBadge {
+  code: 'Q' | 'E' | 'TOP2' | 'CONT';
+  label: string;
+  color: string; // Tailwind class identifier
+  description: string;
+}
+
+export interface QualificationMath {
+  remainingMatches: number;
+  maxPossiblePoints: number;
+  minPossiblePoints: number;
+  magicNumber?: number | null; // Wins needed to guarantee playoff qualification
+  summary: string;
+}
 
 export interface StandingsTeamStats {
   id: string;
@@ -24,9 +61,22 @@ export interface StandingsTeamStats {
   againstRunRate: number;
   NRR: number;
   streak?: string[]; // e.g. ['W', 'W', 'L', 'W']
-  qualificationStatus?: 'qualified' | 'eliminated' | 'contention' | 'champion' | 'runner_up';
+  qualificationStatus?: 'qualified' | 'eliminated' | 'contention' | 'top2_secured' | 'champion' | 'runner_up';
+  qualificationBadge?: QualificationBadge;
+  qualificationMath?: QualificationMath;
+  tiebreakReason?: string;
+  h2hSummaryAgainstOthers?: Record<string, { played: number; won: number; lost: number; tied: number }>;
   formGuide?: ('W' | 'L' | 'T' | 'NR')[];
-  matchHistory?: { matchId: string; result: 'W' | 'L' | 'T' | 'NR'; opponentName: string; scoreSummary: string }[];
+  matchHistory?: { 
+    matchId: string; 
+    result: 'W' | 'L' | 'T' | 'NR'; 
+    opponentName: string; 
+    opponentId?: string;
+    scoreSummary: string; 
+    date?: string;
+    stage?: string;
+    margin?: string;
+  }[];
 }
 
 export interface MatchScoreInput {
@@ -46,6 +96,7 @@ export interface MatchScoreInput {
   stage?: string; // 'League', 'League Stage', 'Group Stage', 'Group A', 'Quarter-Final', 'Semi-Final', 'Final'
   allOutA?: boolean; // if team was bowled all out, full quota of overs is applied
   allOutB?: boolean;
+  date?: string;
 }
 
 export interface PointsSystemRules {
@@ -55,6 +106,7 @@ export interface PointsSystemRules {
   pointsForLoss: number;
   standardOversQuota: number; // default e.g. 20 for T20, 10 for Box, 50 for ODI
   qualifyingSpots: number; // e.g. top 4 for playoffs
+  tieBreakerRule?: TieBreakerRule; // 'icc_standard' (Pts > W > NRR > H2H) vs 'head_to_head_first' (Pts > H2H > W > NRR)
 }
 
 export const DEFAULT_POINTS_RULES: PointsSystemRules = {
@@ -64,6 +116,7 @@ export const DEFAULT_POINTS_RULES: PointsSystemRules = {
   pointsForLoss: 0,
   standardOversQuota: 20,
   qualifyingSpots: 4,
+  tieBreakerRule: 'icc_standard',
 };
 
 /**
@@ -86,7 +139,6 @@ export function convertOversToDecimal(oversInput: string | number | undefined | 
   const num = parseFloat(str);
   if (isNaN(num)) return 0;
   
-  // If it's already a float like 19.3, parse integer and fraction
   const completed = Math.floor(num);
   const fractional = Math.round((num - completed) * 10);
   if (fractional > 0 && fractional <= 5) {
@@ -129,20 +181,207 @@ export function parseScoreDetails(scoreStr: string | undefined | null): { runs: 
 }
 
 /**
- * Master calculation of tournament points table with accurate ICC Net Run Rate rules.
- * 
- * Rules Implemented:
- * 1. Automatic Wins, Losses, Ties, No Results, Points tallying.
- * 2. ICC Rule 16.10.2 for Net Run Rate:
- *    - If a team is all out inside their allotted overs, their run rate is calculated based on their full quota of overs.
- *    - In matches where overs are reduced (DLS or rain), recalculates based on actual targets/overs faced.
- *    - Formula: NRR = (Total Runs Scored / Total Overs Faced in Decimal) - (Total Runs Conceded / Total Overs Bowled in Decimal)
- * 3. Standard Tournament Tie-Breakers Hierarchy:
- *    - Primary: Points (descending)
- *    - Secondary: Number of Wins (descending)
- *    - Tertiary: Net Run Rate (descending)
- *    - Quaternary: Head-to-Head record (if applicable)
- *    - Final: Alphabetical / Team Name
+ * Helper to determine if a stage is a knockout / playoff stage that should NOT be part of group/league standings
+ */
+export const isKnockoutStage = (stage?: string) => {
+  if (!stage) return false;
+  const s = stage.toLowerCase().trim();
+  return (
+    s.includes('semi-final') ||
+    s.includes('semifinal') ||
+    s.includes('semi final') ||
+    s.includes('quarter-final') ||
+    s.includes('quarterfinal') ||
+    s.includes('quarter final') ||
+    s.includes('eliminator') ||
+    s.includes('elimination bracket') ||
+    s.includes('qualifier 1') ||
+    s.includes('qualifier 2') ||
+    s.includes('playoff') ||
+    s.includes('knockout') ||
+    s === 'final' ||
+    s === 'finals' ||
+    s.endsWith(' final')
+  );
+};
+
+/**
+ * Helper to determine if a match has finished
+ */
+export const isMatchFinished = (m: MatchScoreInput) => {
+  if (m.status === 'completed') return true;
+  if (m.winnerId && m.winnerId !== 'scheduled' && m.winnerId !== '') return true;
+  if (m.winner && m.winner !== 'scheduled' && m.winner !== '') return true;
+  if (m.winReason && !m.winReason.toLowerCase().includes('scheduled')) return true;
+  const sA = parseScoreDetails(m.scoreA);
+  const sB = parseScoreDetails(m.scoreB);
+  if (sA.runs > 0 && sB.runs > 0 && (sA.isAllOut || sB.isAllOut || m.oversA || m.oversB)) return true;
+  return false;
+};
+
+/**
+ * Constructs a pairwise Head-to-Head matrix of all matches between all pairs of teams.
+ * Used for Cricbuzz & CricHeroes cross-table matrix and dynamic tiebreaking.
+ */
+export function buildHeadToHeadMatrix(
+  teams: { id: string; name: string }[],
+  matches: MatchScoreInput[]
+): Record<string, Record<string, HeadToHeadSummary>> {
+  const matrix: Record<string, Record<string, HeadToHeadSummary>> = {};
+
+  teams.forEach(t1 => {
+    matrix[t1.id] = {};
+    teams.forEach(t2 => {
+      if (t1.id !== t2.id) {
+        matrix[t1.id][t2.id] = {
+          teamAId: t1.id,
+          teamBId: t2.id,
+          played: 0,
+          winsA: 0,
+          winsB: 0,
+          ties: 0,
+          noResults: 0,
+          matches: [],
+        };
+      }
+    });
+  });
+
+  const completedMatches = matches.filter(m => isMatchFinished(m) && !isKnockoutStage(m.stage));
+
+  completedMatches.forEach(m => {
+    const tA = teams.find(t => t.id === m.teamAId || t.name.toLowerCase().trim() === m.teamAName?.toLowerCase().trim());
+    const tB = teams.find(t => t.id === m.teamBId || t.name.toLowerCase().trim() === m.teamBName?.toLowerCase().trim());
+
+    if (!tA || !tB || tA.id === tB.id) return;
+
+    if (!matrix[tA.id]) matrix[tA.id] = {};
+    if (!matrix[tB.id]) matrix[tB.id] = {};
+
+    if (!matrix[tA.id][tB.id]) {
+      matrix[tA.id][tB.id] = {
+        teamAId: tA.id,
+        teamBId: tB.id,
+        played: 0,
+        winsA: 0,
+        winsB: 0,
+        ties: 0,
+        noResults: 0,
+        matches: [],
+      };
+    }
+    if (!matrix[tB.id][tA.id]) {
+      matrix[tB.id][tA.id] = {
+        teamAId: tB.id,
+        teamBId: tA.id,
+        played: 0,
+        winsA: 0,
+        winsB: 0,
+        ties: 0,
+        noResults: 0,
+        matches: [],
+      };
+    }
+
+    const sA = parseScoreDetails(m.scoreA);
+    const sB = parseScoreDetails(m.scoreB);
+
+    const isNoResult = m.winReason?.toLowerCase().includes('no result') || m.winReason?.toLowerCase().includes('abandoned');
+    const isTie = m.winnerId === 'tie' || m.winner?.toLowerCase() === 'tie' || m.winReason?.toLowerCase().includes('tie') || (!m.winnerId && !m.winner && sA.runs === sB.runs && sA.runs > 0);
+
+    const normAName = (m.teamAName || tA.name).toLowerCase().trim();
+    const isWinnerA = !isNoResult && !isTie && (
+      m.winnerId === tA.id || 
+      m.winnerId === m.teamAId || 
+      (m.winner || '').toLowerCase().trim() === normAName ||
+      (m.winReason && m.winReason.toLowerCase().includes(normAName) && !m.winReason.toLowerCase().includes((m.teamBName || tB.name).toLowerCase().trim())) ||
+      (!m.winnerId && !m.winner && sA.runs > sB.runs)
+    );
+
+    const isWinnerB = !isNoResult && !isTie && !isWinnerA && (
+      m.winnerId === tB.id || 
+      m.winnerId === m.teamBId || 
+      (m.winner || '').toLowerCase().trim() === (m.teamBName || tB.name).toLowerCase().trim() ||
+      (!m.winnerId && !m.winner && sB.runs > sA.runs)
+    );
+
+    const matchRecordA = {
+      matchId: m.id,
+      stage: m.stage,
+      winnerId: isWinnerA ? tA.id : isWinnerB ? tB.id : null,
+      winnerName: isWinnerA ? tA.name : isWinnerB ? tB.name : undefined,
+      margin: m.winReason,
+      scoreA: m.scoreA,
+      scoreB: m.scoreB,
+      date: m.date,
+    };
+
+    // Update A vs B
+    const recAB = matrix[tA.id][tB.id];
+    recAB.played += 1;
+    if (isNoResult) recAB.noResults += 1;
+    else if (isTie) recAB.ties += 1;
+    else if (isWinnerA) recAB.winsA += 1;
+    else if (isWinnerB) recAB.winsB += 1;
+    recAB.matches.push(matchRecordA);
+
+    // Update B vs A (symmetric)
+    const recBA = matrix[tB.id][tA.id];
+    recBA.played += 1;
+    if (isNoResult) recBA.noResults += 1;
+    else if (isTie) recBA.ties += 1;
+    else if (isWinnerA) recBA.winsB += 1; // From B's perspective, winsB is opponent wins
+    else if (isWinnerB) recBA.winsA += 1; // From B's perspective, winsA is B's wins
+    recBA.matches.push({
+      matchId: m.id,
+      stage: m.stage,
+      winnerId: isWinnerA ? tA.id : isWinnerB ? tB.id : null,
+      winnerName: isWinnerA ? tA.name : isWinnerB ? tB.name : undefined,
+      margin: m.winReason,
+      scoreA: m.scoreB,
+      scoreB: m.scoreA,
+      date: m.date,
+    });
+  });
+
+  return matrix;
+}
+
+/**
+ * Head-to-head tiebreak comparator between two teams
+ */
+export function getHeadToHeadAdvantage(
+  teamAId: string,
+  teamBId: string,
+  matrix: Record<string, Record<string, HeadToHeadSummary>>
+): { advantage: 'A' | 'B' | 'TIE' | 'NONE'; reason: string } {
+  const h2h = matrix[teamAId]?.[teamBId];
+  if (!h2h || h2h.played === 0) {
+    return { advantage: 'NONE', reason: 'No head-to-head match played yet' };
+  }
+
+  if (h2h.winsA > h2h.winsB) {
+    const lastWin = h2h.matches.find(m => m.winnerId === teamAId);
+    return {
+      advantage: 'A',
+      reason: `Head-to-head advantage (${h2h.winsA} - ${h2h.winsB})${lastWin?.margin ? `: ${lastWin.margin}` : ''}`,
+    };
+  }
+
+  if (h2h.winsB > h2h.winsA) {
+    const lastWin = h2h.matches.find(m => m.winnerId === teamBId);
+    return {
+      advantage: 'B',
+      reason: `Head-to-head advantage (${h2h.winsB} - ${h2h.winsA})${lastWin?.margin ? `: ${lastWin.margin}` : ''}`,
+    };
+  }
+
+  return { advantage: 'TIE', reason: `Head-to-head level (${h2h.winsA} - ${h2h.winsB})` };
+}
+
+/**
+ * Master calculation of tournament points table with accurate ICC Net Run Rate rules
+ * and advanced Cricbuzz/CricHeroes dynamic tiebreaker hierarchy.
  */
 export function calculateTournamentStandings(
   teams: { id: string; name: string; captain?: string; logo?: string; shortName?: string }[],
@@ -182,52 +421,21 @@ export function calculateTournamentStandings(
       NRR: 0,
       streak: [],
       formGuide: [],
+      matchHistory: [],
+      h2hSummaryAgainstOthers: {},
       qualificationStatus: 'contention',
     };
   });
 
-  // Helper to determine if a stage is a knockout / playoff stage that should NOT be part of group/league standings
-  const isKnockoutStage = (stage?: string) => {
-    if (!stage) return false;
-    const s = stage.toLowerCase().trim();
-    return (
-      s.includes('semi-final') ||
-      s.includes('semifinal') ||
-      s.includes('semi final') ||
-      s.includes('quarter-final') ||
-      s.includes('quarterfinal') ||
-      s.includes('quarter final') ||
-      s.includes('eliminator') ||
-      s.includes('elimination bracket') ||
-      s.includes('qualifier 1') ||
-      s.includes('qualifier 2') ||
-      s.includes('playoff') ||
-      s.includes('knockout') ||
-      s === 'final' ||
-      s === 'finals' ||
-      s.endsWith(' final')
-    );
-  };
+  // Build Head-to-Head matrix for tiebreaker calculations
+  const h2hMatrix = buildHeadToHeadMatrix(teams, matches);
 
-  // Helper to determine if a match has finished
-  const isMatchFinished = (m: MatchScoreInput) => {
-    if (m.status === 'completed') return true;
-    if (m.winnerId && m.winnerId !== 'scheduled' && m.winnerId !== '') return true;
-    if (m.winner && m.winner !== 'scheduled' && m.winner !== '') return true;
-    if (m.winReason && !m.winReason.toLowerCase().includes('scheduled')) return true;
-    const sA = parseScoreDetails(m.scoreA);
-    const sB = parseScoreDetails(m.scoreB);
-    if (sA.runs > 0 && sB.runs > 0 && (sA.isAllOut || sB.isAllOut || m.oversA || m.oversB)) return true;
-    return false;
-  };
-
-  // Filter completed league/group stage matches (includes 'League', 'League Stage', 'Group Stage', 'Group A', 'Round 1', etc.)
+  // Filter completed league/group stage matches
   const completedLeagueMatches = matches.filter(
     m => isMatchFinished(m) && !isKnockoutStage(m.stage)
   );
 
   completedLeagueMatches.forEach(m => {
-    // Lookup teams by ID or by name (case-insensitive) for bulletproof matching
     const tA = table[m.teamAId] || Object.values(table).find(t => 
       t.name.toLowerCase().trim() === m.teamAName?.toLowerCase().trim() ||
       (t.shortName && m.teamAName && t.shortName.toLowerCase().trim() === m.teamAName?.toLowerCase().trim())
@@ -303,7 +511,7 @@ export function calculateTournamentStandings(
 
     const isWinnerB = !isNoResult && !isExplicitTie && !isWinnerA && (
       winnerIdVal === tB.id || 
-      winnerIdVal === m.teamBId ||
+      winnerIdVal === m.teamBId || 
       winnerIdent === tB.name.toLowerCase().trim() ||
       winnerIdent === normBName ||
       (m.winReason && (
@@ -322,8 +530,8 @@ export function calculateTournamentStandings(
       tB.streak?.push('NR');
       tA.formGuide?.push('NR');
       tB.formGuide?.push('NR');
-      tA.matchHistory.push({ matchId: m.id, result: 'NR', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
-      tB.matchHistory.push({ matchId: m.id, result: 'NR', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
+      tA.matchHistory.push({ matchId: m.id, result: 'NR', opponentName: m.teamBName || tB.name, opponentId: tB.id, scoreSummary: `${m.scoreA} vs ${m.scoreB}`, date: m.date, stage: m.stage, margin: m.winReason });
+      tB.matchHistory.push({ matchId: m.id, result: 'NR', opponentName: m.teamAName || tA.name, opponentId: tA.id, scoreSummary: `${m.scoreB} vs ${m.scoreA}`, date: m.date, stage: m.stage, margin: m.winReason });
     } else if (isWinnerA) {
       tA.won += 1;
       tA.points += mergedRules.pointsForWin;
@@ -333,8 +541,8 @@ export function calculateTournamentStandings(
       tB.streak?.push('L');
       tA.formGuide?.push('W');
       tB.formGuide?.push('L');
-      tA.matchHistory.push({ matchId: m.id, result: 'W', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
-      tB.matchHistory.push({ matchId: m.id, result: 'L', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
+      tA.matchHistory.push({ matchId: m.id, result: 'W', opponentName: m.teamBName || tB.name, opponentId: tB.id, scoreSummary: `${m.scoreA} vs ${m.scoreB}`, date: m.date, stage: m.stage, margin: m.winReason });
+      tB.matchHistory.push({ matchId: m.id, result: 'L', opponentName: m.teamAName || tA.name, opponentId: tA.id, scoreSummary: `${m.scoreB} vs ${m.scoreA}`, date: m.date, stage: m.stage, margin: m.winReason });
     } else if (isWinnerB) {
       tB.won += 1;
       tB.points += mergedRules.pointsForWin;
@@ -344,8 +552,8 @@ export function calculateTournamentStandings(
       tA.streak?.push('L');
       tB.formGuide?.push('W');
       tA.formGuide?.push('L');
-      tB.matchHistory.push({ matchId: m.id, result: 'W', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
-      tA.matchHistory.push({ matchId: m.id, result: 'L', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
+      tB.matchHistory.push({ matchId: m.id, result: 'W', opponentName: m.teamAName || tA.name, opponentId: tA.id, scoreSummary: `${m.scoreB} vs ${m.scoreA}`, date: m.date, stage: m.stage, margin: m.winReason });
+      tA.matchHistory.push({ matchId: m.id, result: 'L', opponentName: m.teamBName || tB.name, opponentId: tB.id, scoreSummary: `${m.scoreA} vs ${m.scoreB}`, date: m.date, stage: m.stage, margin: m.winReason });
     } else {
       // Tie
       tA.tied += 1;
@@ -356,16 +564,32 @@ export function calculateTournamentStandings(
       tB.streak?.push('T');
       tA.formGuide?.push('T');
       tB.formGuide?.push('T');
-      tA.matchHistory.push({ matchId: m.id, result: 'T', opponentName: m.teamBName, scoreSummary: `${m.scoreA} vs ${m.scoreB}` });
-      tB.matchHistory.push({ matchId: m.id, result: 'T', opponentName: m.teamAName, scoreSummary: `${m.scoreB} vs ${m.scoreA}` });
+      tA.matchHistory.push({ matchId: m.id, result: 'T', opponentName: m.teamBName || tB.name, opponentId: tB.id, scoreSummary: `${m.scoreA} vs ${m.scoreB}`, date: m.date, stage: m.stage, margin: m.winReason });
+      tB.matchHistory.push({ matchId: m.id, result: 'T', opponentName: m.teamAName || tA.name, opponentId: tA.id, scoreSummary: `${m.scoreB} vs ${m.scoreA}`, date: m.date, stage: m.stage, margin: m.winReason });
     }
   });
 
-  // Calculate NRR and format overs for all teams
+  // Calculate NRR, format overs and attach H2H for all teams
   const standings = Object.values(table).map(t => {
     const forRate = t.oversFacedDecimal > 0 ? (t.runsScored / t.oversFacedDecimal) : 0;
     const againstRate = t.oversBowledDecimal > 0 ? (t.runsConceded / t.oversBowledDecimal) : 0;
     const nrr = Number((forRate - againstRate).toFixed(3));
+
+    // Compile quick H2H stats against every other team
+    const h2hSummary: Record<string, { played: number; won: number; lost: number; tied: number }> = {};
+    Object.keys(table).forEach(otherId => {
+      if (otherId !== t.id) {
+        const h = h2hMatrix[t.id]?.[otherId];
+        if (h && h.played > 0) {
+          h2hSummary[otherId] = {
+            played: h.played,
+            won: h.winsA,
+            lost: h.winsB,
+            tied: h.ties,
+          };
+        }
+      }
+    });
 
     return {
       ...t,
@@ -375,33 +599,223 @@ export function calculateTournamentStandings(
       oversFacedDisplay: formatDecimalToOversDisplay(t.oversFacedDecimal),
       oversBowledDisplay: formatDecimalToOversDisplay(t.oversBowledDecimal),
       formGuide: (t.formGuide || []).slice(-5), // last 5 results
+      h2hSummaryAgainstOthers: h2hSummary,
     };
   });
 
-  // Sort by Points (descending) -> Wins (descending) -> NRR (descending) -> Alphabetical
+  // Multi-tier Tiebreaker sorting
+  const tieRule = mergedRules.tieBreakerRule || 'icc_standard';
+
   standings.sort((a, b) => {
+    // 1. Primary: Points (descending)
     if (b.points !== a.points) return b.points - a.points;
-    if (b.won !== a.won) return b.won - a.won;
-    if (b.NRR !== a.NRR) return b.NRR - a.NRR;
+
+    if (tieRule === 'head_to_head_first') {
+      // Grassroots / CricHeroes Mode: Points -> Head to Head -> Wins -> NRR
+      const h2hAdv = getHeadToHeadAdvantage(a.id, b.id, h2hMatrix);
+      if (h2hAdv.advantage === 'A') return -1;
+      if (h2hAdv.advantage === 'B') return 1;
+
+      // Secondary: Wins
+      if (b.won !== a.won) return b.won - a.won;
+
+      // Tertiary: NRR
+      if (b.NRR !== a.NRR) return b.NRR - a.NRR;
+    } else {
+      // ICC / Cricbuzz Standard Mode: Points -> Wins -> NRR -> Head to Head -> Runs Scored
+      // 2. Secondary: Wins (descending)
+      if (b.won !== a.won) return b.won - a.won;
+
+      // 3. Tertiary: Net Run Rate (descending)
+      if (b.NRR !== a.NRR) return b.NRR - a.NRR;
+
+      // 4. Quaternary: Head-to-Head between the tied pair
+      const h2hAdv = getHeadToHeadAdvantage(a.id, b.id, h2hMatrix);
+      if (h2hAdv.advantage === 'A') return -1;
+      if (h2hAdv.advantage === 'B') return 1;
+    }
+
+    // 5. Higher total runs scored
+    if (b.runsScored !== a.runsScored) return b.runsScored - a.runsScored;
+
+    // 6. Alphabetical
     return a.name.localeCompare(b.name);
   });
 
-  // Annotate qualification indicators
-  const totalMatchesPerTeam = Math.max(teams.length - 1, 1);
-  standings.forEach((team, idx) => {
-    if (idx < mergedRules.qualifyingSpots) {
-      team.qualificationStatus = 'qualified';
-    } else {
-      const remainingMatches = totalMatchesPerTeam - team.played;
-      const maxPossiblePoints = team.points + (remainingMatches * mergedRules.pointsForWin);
-      const cutoffPoints = standings[mergedRules.qualifyingSpots - 1]?.points || 0;
-      
-      if (maxPossiblePoints < cutoffPoints) {
-        team.qualificationStatus = 'eliminated';
+  // Calculate dynamic tie-breaker explanations for adjacent teams with identical points
+  for (let i = 0; i < standings.length; i++) {
+    const current = standings[i];
+    const prev = standings[i - 1];
+    const next = standings[i + 1];
+
+    if (next && next.points === current.points) {
+      if (current.won !== next.won) {
+        current.tiebreakReason = `Ahead of ${next.shortName || next.name} on Wins (${current.won} vs ${next.won})`;
+      } else if (tieRule === 'head_to_head_first') {
+        const adv = getHeadToHeadAdvantage(current.id, next.id, h2hMatrix);
+        if (adv.advantage === 'A') {
+          current.tiebreakReason = `Ahead of ${next.shortName || next.name} via Head-to-Head`;
+        } else if (current.NRR !== next.NRR) {
+          current.tiebreakReason = `Ahead of ${next.shortName || next.name} on NRR (${current.NRR > 0 ? '+' : ''}${current.NRR.toFixed(3)} vs ${next.NRR > 0 ? '+' : ''}${next.NRR.toFixed(3)})`;
+        }
+      } else if (current.NRR !== next.NRR) {
+        current.tiebreakReason = `Ahead of ${next.shortName || next.name} on NRR (${current.NRR > 0 ? '+' : ''}${current.NRR.toFixed(3)} vs ${next.NRR > 0 ? '+' : ''}${next.NRR.toFixed(3)})`;
       } else {
-        team.qualificationStatus = 'contention';
+        const adv = getHeadToHeadAdvantage(current.id, next.id, h2hMatrix);
+        if (adv.advantage === 'A') {
+          current.tiebreakReason = `Ahead of ${next.shortName || next.name} via Head-to-Head win`;
+        } else if (current.runsScored !== next.runsScored) {
+          current.tiebreakReason = `Ahead on total runs scored (${current.runsScored} vs ${next.runsScored})`;
+        }
+      }
+    } else if (prev && prev.points === current.points) {
+      current.tiebreakReason = `Level on points with ${prev.shortName || prev.name}`;
+    }
+  }
+
+  // Cricbuzz & CricHeroes True Mathematical Qualification Engine
+  // Computes remaining matches, maximum possible points, and realistic qualification tags
+  const qualSpots = mergedRules.qualifyingSpots;
+  const totalLeagueMatchesPerTeam: Record<string, number> = {};
+
+  // Count scheduled / remaining league matches per team
+  const scheduledLeagueMatches = matches.filter(m => m.status === 'scheduled' && !isKnockoutStage(m.stage));
+
+  teams.forEach(t => {
+    const remainingCount = scheduledLeagueMatches.filter(m => 
+      m.teamAId === t.id || 
+      m.teamBId === t.id ||
+      m.teamAName?.toLowerCase().trim() === t.name.toLowerCase().trim() ||
+      m.teamBName?.toLowerCase().trim() === t.name.toLowerCase().trim()
+    ).length;
+
+    totalLeagueMatchesPerTeam[t.id] = remainingCount;
+  });
+
+  // Calculate qualification status
+  standings.forEach((team, idx) => {
+    const remaining = totalLeagueMatchesPerTeam[team.id] ?? Math.max(teams.length - 1 - team.played, 0);
+    const maxPoints = team.points + (remaining * mergedRules.pointsForWin);
+    const minPoints = team.points;
+
+    // Thresholds
+    // Cutoff team is the team currently in the last qualification spot (spot K-1 in 0-indexed)
+    const cutoffIndex = Math.min(qualSpots - 1, standings.length - 1);
+    const cutoffTeam = standings[cutoffIndex];
+    const cutoffCurrentPoints = cutoffTeam ? cutoffTeam.points : 0;
+
+    // The team just outside the playoffs (spot K)
+    const bubbleTeam = standings[qualSpots];
+    const bubbleMaxPoints = bubbleTeam ? (bubbleTeam.points + ((totalLeagueMatchesPerTeam[bubbleTeam.id] ?? 0) * mergedRules.pointsForWin)) : 0;
+
+    // The team in 3rd place (for top 2 lock calculations)
+    const thirdPlaceTeam = standings[2];
+    const thirdPlaceMaxPoints = thirdPlaceTeam ? (thirdPlaceTeam.points + ((totalLeagueMatchesPerTeam[thirdPlaceTeam.id] ?? 0) * mergedRules.pointsForWin)) : 0;
+
+    let status: 'qualified' | 'eliminated' | 'contention' | 'top2_secured' = 'contention';
+    let badge: QualificationBadge;
+    let magicNumber: number | null = null;
+    let summary = '';
+
+    // Has tournament started? (At least 1 match played overall)
+    const hasAnyPlayed = standings.some(s => s.played > 0);
+
+    if (!hasAnyPlayed) {
+      status = 'contention';
+      badge = {
+        code: 'CONT',
+        label: 'In Race',
+        color: 'text-slate-400 bg-slate-100 dark:bg-slate-800 border-slate-300 dark:border-slate-700',
+        description: 'Tournament yet to start',
+      };
+      summary = `${remaining} matches remaining`;
+    } else if (remaining === 0) {
+      // Completed all matches
+      if (idx < qualSpots) {
+        status = idx < 2 ? 'top2_secured' : 'qualified';
+        badge = {
+          code: idx < 2 ? 'TOP2' : 'Q',
+          label: idx < 2 ? 'Top 2 Locked' : 'Qualified',
+          color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30',
+          description: 'League fixtures concluded in qualification spot',
+        };
+        summary = 'Finished in playoff spots';
+      } else {
+        status = 'eliminated';
+        badge = {
+          code: 'E',
+          label: 'Eliminated',
+          color: 'text-rose-500 bg-rose-500/10 border-rose-500/30',
+          description: 'All league matches concluded outside top spots',
+        };
+        summary = 'Concluded outside playoff bracket';
+      }
+    } else {
+      // Team still has matches to play
+      // 1. Check if mathematically eliminated: Max possible points is strictly lower than cutoff team's current points
+      if (maxPoints < cutoffCurrentPoints && idx >= qualSpots) {
+        status = 'eliminated';
+        badge = {
+          code: 'E',
+          label: 'Eliminated',
+          color: 'text-rose-500 bg-rose-500/10 border-rose-500/30',
+          description: 'Cannot mathematically reach the qualification threshold',
+        };
+        summary = `Max ${maxPoints} pts cannot overtake cutoff (${cutoffCurrentPoints} pts)`;
+      } 
+      // 2. Check if guaranteed Top 2
+      else if (idx < 2 && thirdPlaceTeam && minPoints > thirdPlaceMaxPoints) {
+        status = 'top2_secured';
+        badge = {
+          code: 'TOP2',
+          label: 'Top 2 (Q1)',
+          color: 'text-amber-500 bg-amber-500/10 border-amber-500/30',
+          description: 'Guaranteed top 2 finish — advances to Qualifier 1',
+        };
+        summary = 'Top 2 playoff berth locked';
+      }
+      // 3. Check if guaranteed qualified (cannot be passed by enough lower teams)
+      else if (bubbleTeam && minPoints > bubbleMaxPoints && idx < qualSpots) {
+        status = 'qualified';
+        badge = {
+          code: 'Q',
+          label: 'Qualified',
+          color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30',
+          description: 'Guaranteed playoff qualification spot',
+        };
+        summary = 'Playoff berth secured';
+      }
+      // 4. In Contention: compute magic number
+      else {
+        status = 'contention';
+        const pointsDiffToLock = Math.max(0, (bubbleMaxPoints + 1) - team.points);
+        const winsNeeded = Math.ceil(pointsDiffToLock / mergedRules.pointsForWin);
+        magicNumber = winsNeeded <= remaining && winsNeeded > 0 ? winsNeeded : null;
+
+        badge = {
+          code: 'CONT',
+          label: 'In Race',
+          color: 'text-sky-500 bg-sky-500/10 border-sky-500/30',
+          description: `${remaining} match${remaining > 1 ? 'es' : ''} left • Max ${maxPoints} pts`,
+        };
+
+        if (magicNumber && magicNumber <= remaining) {
+          summary = `Need ${magicNumber} win${magicNumber > 1 ? 's' : ''} from ${remaining} to lock qualification`;
+        } else {
+          summary = `${remaining} match${remaining > 1 ? 'es' : ''} left (Max: ${maxPoints} pts)`;
+        }
       }
     }
+
+    team.qualificationStatus = status;
+    team.qualificationBadge = badge;
+    team.qualificationMath = {
+      remainingMatches: remaining,
+      maxPossiblePoints: maxPoints,
+      minPossiblePoints: minPoints,
+      magicNumber,
+      summary,
+    };
   });
 
   return standings;
