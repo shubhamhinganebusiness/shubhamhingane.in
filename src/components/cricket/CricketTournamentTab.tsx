@@ -38,6 +38,7 @@ import { TournamentMatchScorecardModal } from './TournamentMatchScorecardModal';
 import { TournamentRecentResultsCarousel } from './TournamentRecentResultsCarousel';
 import { TournamentPrize, getTournamentPrizesByTournamentId, saveTournamentPrizesForTournament, getValidActivePrizes } from '../../utils/cricketPrizeStorage';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
+import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from './imageUrlHelper';
 
 interface TournamentTeam {
   id: string;
@@ -616,14 +617,14 @@ export const CricketTournamentTab: React.FC<{
 
   // Automated 1-Click Live Scoring Configuration Trigger
   const handleTriggerLiveScore = (m: TournamentMatch) => {
-    if (!onStartLiveScore || !activeTournament || !activeTournamentId) return;
+    if (!activeTournament || !activeTournamentId) return;
 
     // 1. Resolve Tournament Name & Logo
     const tourName = activeTournament.name?.trim() || 'Gully Premier Championship';
-    let tourLogo = activeTournament.logo || '';
+    let tourLogo = normalizeImageUrl(activeTournament.logo || '');
     if (!tourLogo) {
       try {
-        tourLogo = localStorage.getItem('cricket_tournament_logo') || '';
+        tourLogo = normalizeImageUrl(localStorage.getItem('cricket_tournament_logo') || '');
       } catch (_) {}
     }
 
@@ -649,14 +650,14 @@ export const CricketTournamentTab: React.FC<{
 
     // 3. Resolve Match Officials & Broadcast Crew
     let u1Name = m.umpire1 || activeTournament.umpire1Name || '';
-    let u1Photo = activeTournament.umpire1Photo || '';
+    let u1Photo = normalizeImageUrl(activeTournament.umpire1Photo || '');
     let u2Name = m.umpire2 || activeTournament.umpire2Name || '';
-    let u2Photo = activeTournament.umpire2Photo || '';
+    let u2Photo = normalizeImageUrl(activeTournament.umpire2Photo || '');
     let scName = m.scorer || activeTournament.scoreboardManagerName || '';
-    let scPhoto = activeTournament.scoreboardManagerPhoto || '';
+    let scPhoto = normalizeImageUrl(activeTournament.scoreboardManagerPhoto || '');
     let commName = activeTournament.commentatorName || '';
-    let commPhoto = activeTournament.commentatorPhoto || '';
-    let ytLogo = activeTournament.youtubeChannelLogo || '';
+    let commPhoto = normalizeImageUrl(activeTournament.commentatorPhoto || '');
+    let ytLogo = normalizeImageUrl(activeTournament.youtubeChannelLogo || '');
     let ytName = activeTournament.youtubeChannelName || '';
 
     // Check saved officials in localStorage if tournament fields aren't populated
@@ -684,7 +685,7 @@ export const CricketTournamentTab: React.FC<{
 
     if (!ytLogo) {
       try {
-        ytLogo = localStorage.getItem('cricket_youtube_channel_logo') || '';
+        ytLogo = normalizeImageUrl(localStorage.getItem('cricket_youtube_channel_logo') || '');
       } catch (_) {}
     }
     if (!ytName) {
@@ -697,8 +698,8 @@ export const CricketTournamentTab: React.FC<{
     const teamAObj = activeTournament.teams?.find(t => t.id === m.teamAId || t.name === m.teamAName);
     const teamBObj = activeTournament.teams?.find(t => t.id === m.teamBId || t.name === m.teamBName);
 
-    const teamALogo = teamAObj?.logo || '';
-    const teamBLogo = teamBObj?.logo || '';
+    const teamALogo = normalizeImageUrl(teamAObj?.logo || '');
+    const teamBLogo = normalizeImageUrl(teamBObj?.logo || '');
     const teamASquad = (teamAObj?.players || []).map(p => typeof p === 'string' ? p : p.name);
     const teamBSquad = (teamBObj?.players || []).map(p => typeof p === 'string' ? p : p.name);
     const mergedPlayerPhotos = { ...(teamAObj?.playerPhotos || {}), ...(teamBObj?.playerPhotos || {}) };
@@ -710,11 +711,27 @@ export const CricketTournamentTab: React.FC<{
       ? activeTournament.prizes
       : getTournamentPrizesByTournamentId(activeTournamentId);
 
-    const matchBanner = m.matchBannerUrl || '';
+    const matchBanner = normalizeImageUrl(m.matchBannerUrl || '');
+
+    // Set match status to 'live' in the tournament registry so UI reflects live scoring
+    setTournaments(prev => {
+      const next = prev.map(t => {
+        if (t.id !== activeTournamentId) return t;
+        return {
+          ...t,
+          status: 'active' as const,
+          matches: t.matches.map(item => item.id === m.id ? { ...item, status: 'live' as const } : item)
+        };
+      });
+      try {
+        localStorage.setItem('gully_tournaments_v1', JSON.stringify(next));
+      } catch (_) {}
+      return next;
+    });
 
     const config: TournamentLiveScoreConfig = {
-      teamA: m.teamAName,
-      teamB: m.teamBName,
+      teamA: m.teamAName || 'Team A',
+      teamB: m.teamBName || 'Team B',
       overs,
       customRules: activeTournament.customRules,
       tournamentId: activeTournamentId,
@@ -825,7 +842,52 @@ export const CricketTournamentTab: React.FC<{
       }
     };
 
-    onStartLiveScore(config);
+    if (onStartLiveScore) {
+      onStartLiveScore(config);
+    } else {
+      // Direct scoreboard setup fallback
+      const activeMatchObj = {
+        id: `live_${m.id || Date.now()}`,
+        teamA: m.teamAName || 'Team A',
+        teamB: m.teamBName || 'Team B',
+        oversLimit: overs,
+        tossWinner: m.teamAName || 'Team A',
+        tossChoice: 'bat',
+        currentInningsNum: 1,
+        innings1: null,
+        innings2: null,
+        status: 'setup',
+        date: m.date || new Date().toISOString().split('T')[0],
+        freeHitNext: false,
+        teamALogo,
+        teamBLogo,
+        matchBannerUrl: matchBanner || undefined,
+        teamASquad,
+        teamBSquad,
+        playerPhotos: mergedPlayerPhotos,
+        tournamentId: activeTournamentId,
+        tournamentMatchId: m.id,
+        tournamentName: tourName,
+        tournamentLogo: tourLogo || undefined,
+        groundName: groundVenue,
+        seriesName: tourName,
+        umpire1Name: u1Name,
+        umpire1Photo: u1Photo,
+        umpire2Name: u2Name,
+        umpire2Photo: u2Photo,
+        scoreboardManagerName: scName,
+        scoreboardManagerPhoto: scPhoto,
+        commentatorName: commName,
+        commentatorPhoto: commPhoto,
+        youtubeChannelLogo: ytLogo,
+        youtubeChannelName: ytName
+      };
+      try {
+        localStorage.setItem('cricket_active_match', JSON.stringify(activeMatchObj));
+        window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
+      } catch (_) {}
+      triggerNotification(`Starting live score for ${m.teamAName} vs ${m.teamBName}...`);
+    }
   };
 
   const handleImageUpload = (file: File, callback: (base64Str: string) => void) => {
@@ -1220,16 +1282,24 @@ export const CricketTournamentTab: React.FC<{
         }
       }
 
-      setTournaments(tournaments.map(t => {
+      const updatedTournaments = tournaments.map(t => {
         if (t.id !== activeTournamentId) return t;
         return {
           ...t,
           matches,
-          status: 'active'
+          status: 'active' as const
         };
-      }));
+      });
+      setTournaments(updatedTournaments);
+      try {
+        localStorage.setItem('gully_tournaments_v1', JSON.stringify(updatedTournaments));
+        const activeT = updatedTournaments.find(t => t.id === activeTournamentId);
+        if (activeT && !isFirestoreQuotaExhausted()) {
+          setDoc(doc(db, 'cricket_tournaments', activeTournamentId), activeT, { merge: true }).catch(() => {});
+        }
+      } catch (_) {}
 
-      triggerNotification(`Round-robin schedule created! (${matches.length} matches)`);
+      triggerNotification(`Round-robin schedule created! (${matches.length} matches) — Tap 'Start Scoring' on any match to launch scoreboard`);
       setTourTab('matches');
     } else {
       // Knockout bracket setup (Quarter/Semi/Final based on team count)
@@ -1332,19 +1402,29 @@ export const CricketTournamentTab: React.FC<{
         matches.push({ id: `match_f_${Date.now()}`, teamAId: "", teamBId: "", teamAName: "Winner of SF 1", teamBName: "Winner of SF 2", date: activeTournament.startDate, time: "04:00 PM", venue: defaultTourVenue, status: 'scheduled', scoreA: "", scoreB: "", oversA: "", oversB: "", winnerId: null, winReason: "", manOfTheMatch: "", stage: 'Final', umpire1: u1, umpire2: u2, scorer: sc });
       }
 
-      setTournaments(tournaments.map(t => {
+      const updatedTournaments = tournaments.map(t => {
         if (t.id !== activeTournamentId) return t;
         return {
           ...t,
           matches,
-          status: 'active'
+          status: 'active' as const
         };
-      }));
+      });
+      setTournaments(updatedTournaments);
+      try {
+        localStorage.setItem('gully_tournaments_v1', JSON.stringify(updatedTournaments));
+        const activeT = updatedTournaments.find(t => t.id === activeTournamentId);
+        if (activeT && !isFirestoreQuotaExhausted()) {
+          setDoc(doc(db, 'cricket_tournaments', activeTournamentId), activeT, { merge: true }).catch(() => {});
+        }
+      } catch (_) {}
 
-      triggerNotification(`Knockout bracket constructed!`);
+      triggerNotification(`Knockout bracket constructed! (${matches.length} fixtures) — Tap 'Start Scoring' on any fixture to begin`);
       setTourTab('matches');
     }
   };
+
+  const generateFixtures = generateSchedule;
 
   // Launch schedule editing modal
   const startEditSchedule = (m: TournamentMatch) => {
@@ -2689,6 +2769,16 @@ export const CricketTournamentTab: React.FC<{
                   <p className="text-2xs text-slate-400 font-bold uppercase mt-1">Schedule date/venues, track live progress, and update winner match cards.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {(activeTournament.teams?.length || 0) >= 2 && (
+                    <button
+                      onClick={generateSchedule}
+                      className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-500 rounded-xl border border-indigo-500/20 font-black uppercase text-[10px] cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
+                      title="Regenerate automatic round-robin or knockout match bracket"
+                    >
+                      <RefreshCw size={12} /> Auto-Generate Fixtures
+                    </button>
+                  )}
+
                   <button
                     onClick={openManualMatchModal}
                     className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-500 rounded-xl border border-emerald-500/20 font-black uppercase text-[10px] cursor-pointer flex items-center gap-1.5 transition-all shadow-sm"
@@ -2725,7 +2815,7 @@ export const CricketTournamentTab: React.FC<{
                     </button>
                     {(activeTournament.teams?.length || 0) >= 2 && (
                       <button
-                        onClick={generateFixtures}
+                        onClick={generateSchedule}
                         className="px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-bold uppercase text-xs cursor-pointer flex items-center gap-1.5 transition-all shadow-md shadow-indigo-500/20"
                       >
                         <RefreshCw size={14} /> Auto-Generate Fixtures
@@ -2979,11 +3069,43 @@ export const CricketTournamentTab: React.FC<{
                               className="relative group cursor-pointer overflow-hidden rounded-xl border border-indigo-500/30 w-24 h-14 shrink-0 shadow-sm hover:ring-2 hover:ring-indigo-400 transition-all"
                               title="Click to view or edit match banner"
                             >
-                              <img src={m.matchBannerUrl} alt="Match Banner" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200" referrerPolicy="no-referrer" />
+                              <img
+                                src={normalizeImageUrl(m.matchBannerUrl)}
+                                alt="Match Banner"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => handleSmartImageError(e, m.matchBannerUrl)}
+                              />
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[9px] font-black uppercase text-white transition-opacity gap-1">
                                 <ImageIcon size={10} /> Edit
                               </div>
                             </div>
+                          )}
+
+                          {/* PRIMARY ACTION: START SCORING / RESUME SCORING */}
+                          {!isCompleted && (
+                            <button
+                              onClick={() => handleTriggerLiveScore(m)}
+                              className={`px-4 py-2.5 rounded-xl border-none font-black text-xs uppercase tracking-wider cursor-pointer shadow-lg flex items-center gap-2 transition-all hover:scale-105 active:scale-95 ${
+                                isLive
+                                  ? 'bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-rose-500/30 ring-2 ring-rose-400/40 animate-pulse'
+                                  : 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-emerald-500/30'
+                              }`}
+                              title={isLive ? "Resume scoring this active match in live scoreboard" : "Launch Live Scoreboard with automated tournament metadata, venue, officials & crew"}
+                            >
+                              {isLive ? (
+                                <>
+                                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                                  <Play size={13} className="fill-white" />
+                                  <span>Resume Scoring</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={13} className="fill-white" />
+                                  <span>Start Scoring</span>
+                                </>
+                              )}
+                            </button>
                           )}
 
                           {/* MATCH BANNER BUTTON (Requirement: Option to add match banner in tournament fixture) */}
@@ -3017,13 +3139,13 @@ export const CricketTournamentTab: React.FC<{
                             Schedule
                           </button>
 
-                          {isUpcoming && onStartLiveScore && m.teamAId !== "" && m.teamBId !== "" && (
+                          {isCompleted && (
                             <button
                               onClick={() => handleTriggerLiveScore(m)}
-                              className="px-3.5 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl border-none font-bold text-[9px] uppercase tracking-wider cursor-pointer shadow-sm flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95"
-                              title="Launch Live Scoreboard with automated tournament metadata, venue, officials & crew"
+                              className="px-2.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-[9px] uppercase tracking-wider cursor-pointer transition-all flex items-center gap-1"
+                              title="Re-open match in live scoreboard"
                             >
-                              <Play size={11} className="fill-white" /> Score Live
+                              <Play size={10} /> Re-Score
                             </button>
                           )}
 
@@ -4953,7 +5075,13 @@ export const CricketTournamentTab: React.FC<{
 
                 {schedBannerUrl ? (
                   <div className="relative group rounded-xl overflow-hidden border border-indigo-500/30">
-                    <img src={schedBannerUrl} alt="Banner Preview" className="w-full h-24 object-cover" referrerPolicy="no-referrer" />
+                    <img
+                      src={normalizeImageUrl(schedBannerUrl)}
+                      alt="Banner Preview"
+                      className="w-full h-24 object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => handleSmartImageError(e, schedBannerUrl)}
+                    />
                     <div className="absolute bottom-1 right-1 bg-black/60 text-white px-2 py-0.5 rounded text-[8px] font-bold">
                       Configured in Setup
                     </div>
@@ -4964,8 +5092,15 @@ export const CricketTournamentTab: React.FC<{
                       <input
                         type="url"
                         value={schedBannerUrl}
-                        placeholder="Paste image URL (https://...)"
-                        onChange={(e) => setSchedBannerUrl(e.target.value)}
+                        placeholder="Paste image or Google Drive link..."
+                        onChange={(e) => setSchedBannerUrl(normalizeImageUrl(e.target.value))}
+                        onPaste={(e) => {
+                          const text = e.clipboardData.getData('text');
+                          if (text) {
+                            e.preventDefault();
+                            setSchedBannerUrl(normalizeImageUrl(text.trim()));
+                          }
+                        }}
                         className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
                       />
                       <label className="px-3 py-2 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1">
@@ -4989,6 +5124,11 @@ export const CricketTournamentTab: React.FC<{
                       </label>
                     </div>
                   </div>
+                )}
+                {schedBannerUrl && isGoogleDriveUrl(schedBannerUrl) && (
+                  <p className="text-[10px] text-emerald-500 font-bold flex items-center gap-1 mt-1">
+                    <Check size={11} /> Google Drive link stream active
+                  </p>
                 )}
               </div>
             </div>
@@ -5101,15 +5241,28 @@ export const CricketTournamentTab: React.FC<{
 
                 {quickEditBannerUrl ? (
                   <div className="relative group rounded-xl overflow-hidden border border-indigo-500/30">
-                    <img src={quickEditBannerUrl} alt="Banner Preview" className="w-full h-24 object-cover" referrerPolicy="no-referrer" />
+                    <img
+                      src={normalizeImageUrl(quickEditBannerUrl)}
+                      alt="Banner Preview"
+                      className="w-full h-24 object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => handleSmartImageError(e, quickEditBannerUrl)}
+                    />
                   </div>
                 ) : (
                   <div className="flex gap-2">
                     <input
                       type="url"
                       value={quickEditBannerUrl}
-                      placeholder="Paste image URL (https://...)"
-                      onChange={(e) => setQuickEditBannerUrl(e.target.value)}
+                      placeholder="Paste image or Google Drive link..."
+                      onChange={(e) => setQuickEditBannerUrl(normalizeImageUrl(e.target.value))}
+                      onPaste={(e) => {
+                        const text = e.clipboardData.getData('text');
+                        if (text) {
+                          e.preventDefault();
+                          setQuickEditBannerUrl(normalizeImageUrl(text.trim()));
+                        }
+                      }}
                       className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
                     />
                     <label className="px-3 py-2 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1">
@@ -5133,21 +5286,48 @@ export const CricketTournamentTab: React.FC<{
                     </label>
                   </div>
                 )}
+                {quickEditBannerUrl && isGoogleDriveUrl(quickEditBannerUrl) && (
+                  <p className="text-[10px] text-emerald-500 font-bold flex items-center gap-1 mt-1">
+                    <Check size={11} /> Google Drive link stream active
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex flex-col gap-2 pt-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setQuickEditMatch(null)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveQuickEditMatchUpdate}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none transition"
+                >
+                  Save Changes
+                </button>
+              </div>
+
               <button
-                onClick={() => setQuickEditMatch(null)}
-                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
+                type="button"
+                onClick={() => {
+                  const mToScore = {
+                    ...quickEditMatch,
+                    date: quickEditDate,
+                    time: quickEditTime,
+                    venue: quickEditVenue,
+                    status: quickEditStatus,
+                    matchBannerUrl: quickEditBannerUrl
+                  };
+                  saveQuickEditMatchUpdate();
+                  handleTriggerLiveScore(mToScore);
+                }}
+                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
               >
-                Cancel
-              </button>
-              <button
-                onClick={saveQuickEditMatchUpdate}
-                className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none"
-              >
-                Save Changes
+                <Play size={13} className="fill-white" />
+                <span>Save & Start Scoring Match</span>
               </button>
             </div>
           </div>
@@ -5393,7 +5573,13 @@ export const CricketTournamentTab: React.FC<{
 
                 {manualMatchBannerUrl ? (
                   <div className="relative group rounded-xl overflow-hidden border border-indigo-500/30">
-                    <img src={manualMatchBannerUrl} alt="Banner Preview" className="w-full h-24 object-cover" referrerPolicy="no-referrer" />
+                    <img
+                      src={normalizeImageUrl(manualMatchBannerUrl)}
+                      alt="Banner Preview"
+                      className="w-full h-24 object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => handleSmartImageError(e, manualMatchBannerUrl)}
+                    />
                     <div className="absolute bottom-1 right-1 bg-black/60 text-white px-2 py-0.5 rounded text-[8px] font-bold">
                       Attached ✓
                     </div>
@@ -5404,8 +5590,15 @@ export const CricketTournamentTab: React.FC<{
                       <input
                         type="url"
                         value={manualMatchBannerUrl}
-                        placeholder="Paste image URL (https://...)"
-                        onChange={(e) => setManualMatchBannerUrl(e.target.value)}
+                        placeholder="Paste image or Google Drive link..."
+                        onChange={(e) => setManualMatchBannerUrl(normalizeImageUrl(e.target.value))}
+                        onPaste={(e) => {
+                          const text = e.clipboardData.getData('text');
+                          if (text) {
+                            e.preventDefault();
+                            setManualMatchBannerUrl(normalizeImageUrl(text.trim()));
+                          }
+                        }}
                         className="flex-1 px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs outline-none"
                       />
                       <label className="px-3 py-2 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition flex items-center gap-1">

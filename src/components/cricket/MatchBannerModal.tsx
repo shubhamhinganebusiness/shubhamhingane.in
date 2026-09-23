@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Upload, Image as ImageIcon, Trash2, Check, Sparkles, Calendar, MapPin, Shield } from 'lucide-react';
+import { X, Upload, Image as ImageIcon, Trash2, Check, Sparkles, Calendar, MapPin, Shield, Link2, Info } from 'lucide-react';
+import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from './imageUrlHelper';
 
 export interface MatchBannerModalProps {
   isOpen: boolean;
@@ -24,7 +25,7 @@ export const MatchBannerModal: React.FC<MatchBannerModalProps> = ({
   match,
   onSaveBanner,
 }) => {
-  const [bannerUrl, setBannerUrl] = useState<string>(match.bannerUrl || '');
+  const [bannerUrl, setBannerUrl] = useState<string>(() => normalizeImageUrl(match.bannerUrl || ''));
   const [inputUrl, setInputUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -63,8 +64,16 @@ export const MatchBannerModal: React.FC<MatchBannerModalProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleApplyUrl = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const normalized = normalizeImageUrl(trimmed);
+    setBannerUrl(normalized);
+    setInputUrl('');
+  };
+
   const handleSave = () => {
-    onSaveBanner(bannerUrl);
+    onSaveBanner(normalizeImageUrl(bannerUrl));
     onClose();
   };
 
@@ -135,14 +144,15 @@ export const MatchBannerModal: React.FC<MatchBannerModalProps> = ({
               {bannerUrl ? (
                 <>
                   <img
-                    src={bannerUrl}
+                    src={normalizeImageUrl(bannerUrl)}
                     alt="Match Banner"
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
+                    onError={(e) => handleSmartImageError(e, bannerUrl)}
                   />
                   <button
                     onClick={() => setBannerUrl('')}
-                    className="absolute top-2 right-2 p-2 bg-rose-900/80 hover:bg-rose-800 text-white rounded-xl shadow-md border-none cursor-pointer"
+                    className="absolute top-2 right-2 p-2 bg-rose-900/80 hover:bg-rose-800 text-white rounded-xl shadow-md border-none cursor-pointer transition"
                     title="Remove banner"
                   >
                     <Trash2 size={14} />
@@ -154,10 +164,23 @@ export const MatchBannerModal: React.FC<MatchBannerModalProps> = ({
                     <ImageIcon size={24} />
                   </div>
                   <p className="text-xs text-slate-400 font-medium">No banner attached to this fixture</p>
-                  <p className="text-[10px] text-slate-500">Upload high-res 16:9 poster or match graphics</p>
+                  <p className="text-[10px] text-slate-500">Upload high-res 16:9 poster or paste Google Drive / image link</p>
                 </div>
               )}
             </div>
+
+            {/* Google Drive Status Notification */}
+            {bannerUrl && isGoogleDriveUrl(bannerUrl) && (
+              <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-start gap-2 text-xs text-emerald-400">
+                <Check size={14} className="shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-[11px] leading-tight">Google Drive link auto-converted to direct image stream</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">
+                    Make sure the file sharing in Google Drive is set to <span className="text-white font-semibold">"Anyone with the link can view"</span>.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Upload or URL Controls */}
             <div className="grid grid-cols-1 gap-2.5">
@@ -180,26 +203,33 @@ export const MatchBannerModal: React.FC<MatchBannerModalProps> = ({
                 <Upload size={14} /> Upload Banner Image
               </button>
 
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Or paste external image URL..."
-                  value={inputUrl}
-                  onChange={(e) => setInputUrl(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (inputUrl.trim()) {
-                      setBannerUrl(inputUrl.trim());
-                      setInputUrl('');
-                    }
-                  }}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border-none cursor-pointer"
-                >
-                  Apply
-                </button>
+              <div className="space-y-1.5">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Paste Google Drive sharing link or image URL..."
+                    value={inputUrl}
+                    onChange={(e) => setInputUrl(e.target.value)}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData('text');
+                      if (text) {
+                        e.preventDefault();
+                        handleApplyUrl(text);
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleApplyUrl(inputUrl)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border-none cursor-pointer transition flex items-center gap-1"
+                  >
+                    <Link2 size={12} /> Apply
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                  <Info size={11} className="text-slate-500" /> Supports Google Drive share links, Unsplash, Imgur, or direct web URLs.
+                </p>
               </div>
             </div>
           </div>

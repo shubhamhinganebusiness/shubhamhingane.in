@@ -58,8 +58,8 @@ export function normalizeImageUrl(url: string): string {
   // Google Drive
   const driveId = extractGoogleDriveId(trimmed);
   if (driveId) {
-    // Google User Content CDN link: Direct image bytes with proper headers
-    return `https://lh3.googleusercontent.com/d/${driveId}`;
+    // Google Drive Thumbnail API (1600px width high-res) provides direct viewable images for <img> tags
+    return `https://drive.google.com/thumbnail?id=${driveId}&sz=w1600`;
   }
 
   // Dropbox links: replace dl=0 with raw=1 or use dl.dropboxusercontent.com

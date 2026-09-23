@@ -655,20 +655,22 @@ async function startServer() {
                          targetUrl.match(/googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/i);
 
       if (driveMatch && driveMatch[1]) {
-        fetchUrl = `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
+        fetchUrl = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w1600`;
       }
 
       let imageRes = await fetch(fetchUrl, {
+        redirect: "follow",
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         }
       });
 
-      // If lh3 returned non-OK and it's Google Drive, try Google Drive thumbnail
+      // If thumbnail returned non-OK, attempt lh3 fallback
       if (!imageRes.ok && driveMatch && driveMatch[1]) {
-        const thumbUrl = `https://drive.google.com/thumbnail?id=${driveMatch[1]}&sz=w1600`;
-        imageRes = await fetch(thumbUrl, {
+        const lh3Url = `https://lh3.googleusercontent.com/d/${driveMatch[1]}`;
+        imageRes = await fetch(lh3Url, {
+          redirect: "follow",
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "image/*,*/*;q=0.8"

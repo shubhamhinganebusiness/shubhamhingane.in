@@ -264,10 +264,10 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
       const bestInningSRDetails = `${bestInningRuns}* (${bestInningBalls} balls)`;
 
       const sixesInInn = Math.min(p.sixes, Math.max(1, Math.round(p.sixes * 0.6)));
-      const sixesInInnDetails = `${sixesInInn} sixes in Match #${Math.abs(p.playerName.charCodeAt(0) % 5) + 1}`;
+      const sixesInInningDetails = `${sixesInInn} sixes in Match #${Math.abs(p.playerName.charCodeAt(0) % 5) + 1}`;
 
       const foursInInn = Math.min(p.fours, Math.max(1, Math.round(p.fours * 0.5)));
-      const foursInInnDetails = `${foursInInn} fours in Match #${Math.abs(p.playerName.charCodeAt(0) % 5) + 1}`;
+      const foursInInningDetails = `${foursInInn} fours in Match #${Math.abs(p.playerName.charCodeAt(0) % 5) + 1}`;
 
       const longestBalls = Math.max(12, Math.round(p.balls * 0.45));
       const longestDetails = `${longestBalls} balls (${Math.round(p.highestScore * 0.9)} runs)`;
