@@ -470,16 +470,17 @@ const computePointsTable = (teams: any[], matches: any[]) => {
 export const LiveMatchGlobalBanner = () => {
   const [liveMatches, setLiveMatches] = useState<MatchState[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
-  const [showDrawer, setShowDrawer] = useState<boolean>(false);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { adminAds } = useSpectatorSliderImages();
 
-  // Hide on dedicated cricket arena / scoring pages to prevent clutter
+  // Hide on dedicated cricket arena / scoring pages and homepage / hero section to prevent clutter
   const isDedicatedCricketScreen = useMemo(() => {
     const p = location.pathname;
     return (
+      p === '/' ||
+      p === '' ||
       p.startsWith('/live/cricket-details') ||
       p.startsWith('/live/cricket-scoreboard') ||
       p.startsWith('/live/cricket-overlay') ||
@@ -704,20 +705,6 @@ export const LiveMatchGlobalBanner = () => {
           )}
 
           <button
-            onClick={() => setShowDrawer(!showDrawer)}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
-          >
-            Scorecard {showDrawer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-
-          <button
-            onClick={() => navigate(`/live/cricket-details?matchId=${activeMatch.id}`)}
-            className="flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md shadow-emerald-900/30 transition-all hover:scale-105"
-          >
-            Spectator Arena <ExternalLink className="w-3.5 h-3.5" />
-          </button>
-
-          <button
             onClick={() => setIsDismissed(true)}
             className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
             title="Hide live banner for now"
@@ -726,104 +713,6 @@ export const LiveMatchGlobalBanner = () => {
           </button>
         </div>
       </div>
-
-      {/* Expandable Quick Scorecard Drawer */}
-      <AnimatePresence>
-        {showDrawer && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="border-t border-slate-800 bg-slate-900/95 px-4 sm:px-8 py-4 overflow-hidden"
-          >
-            <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start text-xs text-slate-200">
-              {/* Batsmen summary */}
-              <div>
-                <div className="flex items-center justify-between font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1">
-                  <span>Batting ({battingTeam})</span>
-                  <span className="text-[10px] text-slate-400">R (B) • 4s / 6s • SR</span>
-                </div>
-                <div className="space-y-1.5">
-                  {striker && (
-                    <div className="flex items-center justify-between p-1.5 rounded bg-emerald-950/40 border border-emerald-500/20">
-                      <span className="font-bold text-white flex items-center gap-1">
-                        🏏 {striker.name} <span className="text-emerald-400 text-[10px] font-black">*</span>
-                      </span>
-                      <span className="font-mono">
-                        <strong className="text-white">{striker.runs}</strong> ({striker.balls}) • {striker.fours}/{striker.sixes} •{' '}
-                        {striker.balls > 0 ? ((striker.runs / striker.balls) * 100).toFixed(1) : '0.0'}
-                      </span>
-                    </div>
-                  )}
-                  {nonStriker && (
-                    <div className="flex items-center justify-between p-1.5 rounded bg-slate-800/60">
-                      <span className="text-slate-200">{nonStriker.name}</span>
-                      <span className="font-mono text-slate-300">
-                        <strong className="text-white">{nonStriker.runs}</strong> ({nonStriker.balls}) • {nonStriker.fours}/{nonStriker.sixes} •{' '}
-                        {nonStriker.balls > 0 ? ((nonStriker.runs / nonStriker.balls) * 100).toFixed(1) : '0.0'}
-                      </span>
-                    </div>
-                  )}
-                  {!striker && !nonStriker && (
-                    <p className="text-slate-400 italic">No batsmen currently on crease.</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Bowler summary and Match Status */}
-              <div>
-                <div className="flex items-center justify-between font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1">
-                  <span>Bowling ({bowlingTeam})</span>
-                  <span className="text-[10px] text-slate-400">O - M - R - W • ECON</span>
-                </div>
-                {currentBowler ? (
-                  <div className="flex items-center justify-between p-1.5 rounded bg-slate-800/60">
-                    <span className="font-bold text-white flex items-center gap-1">
-                      🥎 {currentBowler.name}
-                    </span>
-                    <span className="font-mono text-slate-200">
-                      {Math.floor(currentBowler.ballsBowled / 6)}.{currentBowler.ballsBowled % 6} - {currentBowler.maidens || 0} -{' '}
-                      {currentBowler.runsConceded} - <strong className="text-rose-400">{currentBowler.wickets}</strong> •{' '}
-                      {currentBowler.ballsBowled > 0 ? ((currentBowler.runsConceded / currentBowler.ballsBowled) * 6).toFixed(2) : '0.00'}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-slate-400 italic">No active bowler assigned.</p>
-                )}
-
-                <div className="mt-4 pt-2 border-t border-slate-800 flex items-center justify-between">
-                  <span className="text-slate-400">
-                    Venue: <strong className="text-slate-200">{activeMatch.groundName || 'Standard Pitch'}</strong>
-                  </span>
-                  <Link
-                    to={`/live/cricket-details?matchId=${activeMatch.id}`}
-                    className="text-emerald-400 hover:text-emerald-300 font-bold underline flex items-center gap-1 text-xs"
-                  >
-                    Open Live Match Center ↗
-                  </Link>
-                </div>
-              </div>
-
-              {/* Active Match Banner & Super Admin Sponsor Advertisements 16:9 Slider */}
-              <div className="md:col-span-2 lg:col-span-1">
-                <div className="flex items-center justify-between font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1">
-                  <span className="flex items-center gap-1.5 text-amber-300">
-                    <Megaphone size={13} className="text-amber-400" />
-                    Match Banner & Sponsor Ads
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400">16:9 HD</span>
-                </div>
-                <ActiveLiveMatchBannerSlider
-                  match={activeMatch}
-                  adminAds={adminAds}
-                  mode="compact"
-                  onSelectMatch={() => navigate(`/live/cricket-details?matchId=${activeMatch.id}`)}
-                />
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

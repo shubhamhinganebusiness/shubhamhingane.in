@@ -1001,12 +1001,33 @@ export const CricketScoreboard: React.FC = () => {
     }
     // If signed in as official scorekeeper / manager, verify ownership
     if (isScoreManager) {
-      if (m.managerId && currentManagerId && m.managerId !== currentManagerId) {
+      const isSuperAdmin = localStorage.getItem('auth_role_super_admin') === 'true' || (user as any)?.role === 'super_admin';
+      if (isSuperAdmin) return true;
+
+      const normCur = (currentManagerId || '').trim().toLowerCase();
+      const normUid = (user?.uid || '').trim().toLowerCase();
+      const normEmail = (user?.email || '').trim().toLowerCase();
+      const normMgr = (m.managerId || '').trim().toLowerCase();
+      const normCreated = (m.createdBy || '').trim().toLowerCase();
+
+      // If match has a designated managerId
+      if (normMgr && normCur) {
+        if (normMgr === normCur) return true;
+        if (normUid && normMgr === normUid) return true;
+        if (normEmail && (normMgr === normEmail || normMgr === normEmail.split('@')[0])) return true;
         return false;
       }
-      if (m.createdBy && currentManagerId && m.createdBy !== currentManagerId && m.createdBy !== user?.uid && m.createdBy !== user?.email) {
+
+      // If match has createdBy
+      if (normCreated) {
+        if (normCreated === normCur || normCreated === normUid || normCreated === normEmail || (normEmail && normCreated === normEmail.split('@')[0])) {
+          return true;
+        }
         return false;
       }
+
+      // Fallback: if unassigned to specific manager, allow current active score manager to manage
+      return true;
     }
     return true;
   };
@@ -15858,43 +15879,64 @@ export const CricketScoreboard: React.FC = () => {
 
             {/* Live Cloud Match Banner (Detected across different devices/laptops) */}
             {!localAutosavedMatch && activeLiveMatches.length > 0 && (
-              <div className="mb-6 p-5 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs shadow-md">
-                <div className="flex gap-3">
-                  <div className="mt-0.5 p-2 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl shrink-0 h-9 w-9 flex items-center justify-center">
-                    <Radio className="animate-pulse" size={16} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded-full bg-red-500 text-white font-black text-[9px] uppercase tracking-wider animate-pulse">LIVE IN CLOUD</span>
-                      <h4 className="font-extrabold uppercase text-emerald-700 dark:text-emerald-400 text-sm">
-                        Live Match Synchronized via Firebase!
-                      </h4>
+              <div className="mb-6 space-y-3">
+                {activeLiveMatches.map((liveM, lIdx) => {
+                  const currInn = liveM.currentInningsNum === 1 ? liveM.innings1 : liveM.innings2;
+                  const balls = currInn?.ballsBowled || 0;
+                  const oversText = `${Math.floor(balls / 6)}.${balls % 6} ov`;
+                  const runs = currInn?.runs || 0;
+                  const wickets = currInn?.wickets || 0;
+
+                  return (
+                    <div 
+                      key={liveM.id || lIdx}
+                      className="p-5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-sky-500/10 to-indigo-500/10 border border-emerald-500/40 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs shadow-md"
+                    >
+                      <div className="flex gap-3">
+                        <div className="mt-0.5 p-2.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl shrink-0 h-10 w-10 flex items-center justify-center">
+                          <Radio className="animate-pulse" size={18} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded-full bg-red-500 text-white font-black text-[9px] uppercase tracking-wider animate-pulse flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping inline-block" />
+                              LIVE IN FIREBASE CLOUD
+                            </span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400">
+                              Overs: {liveM.oversLimit} • Innings {liveM.currentInningsNum}
+                            </span>
+                          </div>
+                          <h4 className="font-extrabold uppercase text-slate-900 dark:text-white text-sm mt-1">
+                            {liveM.teamA} vs {liveM.teamB}
+                          </h4>
+                          <p className="text-slate-600 dark:text-slate-300 font-semibold leading-normal mt-0.5">
+                            Current Score: <span className="font-black text-emerald-600 dark:text-emerald-400">{runs}/{wickets} ({oversText})</span>
+                            <span className="text-slate-400 ml-1.5">• Ready to resume scoring seamlessly on this phone</span>
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMatch(liveM);
+                            setSearchParams({ matchId: liveM.id });
+                            showNotification(`Resumed live match: ${liveM.teamA} vs ${liveM.teamB}!`, 'success');
+                          }}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all shadow-md flex items-center gap-1.5 active:scale-95"
+                        >
+                          <Play size={13} fill="currentColor" /> Resume Scoring on Phone
+                        </button>
+                        <Link
+                          to={`/live/cricket-details?matchId=${liveM.id}`}
+                          className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-none rounded-xl font-black uppercase text-[10px] tracking-wider transition-all no-underline text-center"
+                        >
+                          Spectator View
+                        </Link>
+                      </div>
                     </div>
-                    <p className="text-slate-600 dark:text-slate-300 font-semibold leading-normal mt-1">
-                      Ongoing: <span className="font-black text-slate-900 dark:text-white">{activeLiveMatches[0].teamA} vs {activeLiveMatches[0].teamB}</span>
-                      {' '}&bull; {activeLiveMatches[0].oversLimit} Overs &bull; Real-time listeners active across devices.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMatch(activeLiveMatches[0]);
-                      setSearchParams({ matchId: activeLiveMatches[0].id });
-                      showNotification('Connected to live cloud match!', 'success');
-                    }}
-                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all shadow-sm flex items-center gap-1.5"
-                  >
-                    <Play size={12} fill="currentColor" /> Resume Live Match
-                  </button>
-                  <Link
-                    to={`/live/cricket-details?matchId=${activeLiveMatches[0].id}`}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-none rounded-xl font-black uppercase text-[10px] tracking-wider transition-all no-underline text-center"
-                  >
-                    Spectator Mode
-                  </Link>
-                </div>
+                  );
+                })}
               </div>
             )}
 
