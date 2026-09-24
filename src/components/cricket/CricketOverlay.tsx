@@ -2830,8 +2830,9 @@ export const CricketOverlay: React.FC = () => {
 
             return (
               <StarTVScorebug 
+                inningsNum={inningsNum}
                 battingTeamName={currentInnings?.battingTeam || match?.teamA || 'TEAM A'}
-                battingTeamSubtext={inningsNum === 1 ? 'BAT FIRST' : '2ND INNINGS'}
+                battingTeamSubtext={inningsNum === 1 ? '1ST INNINGS' : (match?.targetRuns ? `2ND INNINGS • TGT ${match.targetRuns}` : '2ND INNINGS')}
                 battingTeamColor={
                   (currentInnings?.battingTeam || '') === (match?.teamA || '')
                     ? (globalStudioTheme?.teamAColor || activeConfig.teamAColor || '#0143a3') 
@@ -3020,13 +3021,18 @@ export const CricketOverlay: React.FC = () => {
                   CRR {calculateCRR}
                 </span>
               </div>
-              <div className="flex items-baseline gap-2 mt-0.5">
+              <div className="flex items-baseline gap-2 mt-0.5 flex-wrap">
                 <span className="text-3xl font-mono font-black tracking-tight text-white drop-shadow">
                   {currentInnings.runs}/{currentInnings.wickets}
                 </span>
                 <span className="text-xs font-mono font-bold text-slate-300">
                   ({Math.floor(currentInnings.ballsBowled / 6)}.{currentInnings.ballsBowled % 6}/{match.oversLimit} ov)
                 </span>
+                {inningsNum === 2 && match.targetRuns ? (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono font-black text-[9px] uppercase tracking-wider shadow-sm animate-pulse">
+                    TGT {match.targetRuns}
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>
@@ -3345,12 +3351,20 @@ export const CricketOverlay: React.FC = () => {
             </div>
           )}
 
-          {/* Equation or CRR */}
+          {/* Innings & Equation or CRR */}
           <div className="h-4 w-px bg-white/20" />
-          <div className="text-xs font-mono font-black text-amber-400 shrink-0">
-            {inningsNum === 2 && match.targetRuns 
-              ? `Need ${Math.max(0, match.targetRuns - currentInnings.runs)} in ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b`
-              : `CRR ${calculateCRR}`}
+          <div className="text-xs font-mono font-black shrink-0 flex items-center gap-1.5">
+            <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-bold ${inningsNum === 2 ? 'bg-amber-400 text-slate-950' : 'bg-white/10 text-slate-300'}`}>
+              {inningsNum === 1 ? '1st INN' : '2nd INN'}
+            </span>
+            {inningsNum === 2 && match.targetRuns ? (
+              <span className="text-amber-300">
+                <span className="text-rose-400 font-black mr-1">TGT {match.targetRuns}</span>
+                (Need {Math.max(0, match.targetRuns - currentInnings.runs)} in {Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b)
+              </span>
+            ) : (
+              <span className="text-amber-400">CRR {calculateCRR}</span>
+            )}
           </div>
         </div>
       )}
@@ -3432,10 +3446,22 @@ export const CricketOverlay: React.FC = () => {
             </div>
             
             {/* Innings Target or Toss situation caption */}
+            <div className="flex items-center gap-2 mt-1">
+              <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider ${
+                inningsNum === 2 ? 'bg-amber-400 text-slate-950' : 'bg-sky-500/20 text-sky-300 border border-sky-400/30'
+              }`}>
+                {inningsNum === 1 ? '1ST INNINGS' : '2ND INNINGS'}
+              </span>
+              {inningsNum === 2 && match.targetRuns && (
+                <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[9px] font-mono font-black uppercase tracking-wider border border-rose-400/50 shadow-sm animate-pulse">
+                  TARGET: {match.targetRuns}
+                </span>
+              )}
+            </div>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block">
               {inningsNum === 1 
-                ? `1st Innings — Setup Target` 
-                : `2nd Innings — Need ${match.targetRuns ? match.targetRuns - currentInnings.runs : 0} runs from ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)} balls`
+                ? `1st Innings — Setting Target` 
+                : `Need ${match.targetRuns ? match.targetRuns - currentInnings.runs : 0} runs from ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)} balls`
               }
             </span>
           </div>
@@ -3706,7 +3732,19 @@ export const CricketOverlay: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1.5 block">
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider ${
+                    inningsNum === 2 ? 'bg-amber-400 text-slate-950' : 'bg-sky-500/20 text-sky-300 border border-sky-400/30'
+                  }`}>
+                    {inningsNum === 1 ? '1ST INNINGS' : '2ND INNINGS'}
+                  </span>
+                  {inningsNum === 2 && match.targetRuns && (
+                    <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[9.5px] font-mono font-black uppercase tracking-wider border border-rose-400/50 shadow-sm animate-pulse">
+                      TARGET: {match.targetRuns}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1 block">
                   {inningsNum === 1 
                     ? `1st Innings — Set Target` 
                     : `Need ${match.targetRuns ? match.targetRuns - currentInnings.runs : 0} runs from ${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)} balls`
@@ -4040,10 +4078,20 @@ export const CricketOverlay: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Bottom Half: Full silver banner representing CRR */}
-                <div className="bg-gradient-to-b from-[#f8fafc] via-[#f1f5f9] to-[#cbd5e1] h-[40%] flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.8)] border-t border-black/10">
-                  <div className="skew-x-[15deg] font-sans font-black text-[#0f172a] text-[10px] tracking-widest uppercase">
-                    CRR: <span className="font-mono font-black">{calculateCRR}</span>
+                {/* Bottom Half: Full silver banner representing CRR, Innings & Target */}
+                <div className="bg-gradient-to-b from-[#f8fafc] via-[#f1f5f9] to-[#cbd5e1] h-[40%] flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.8)] border-t border-black/10 px-2">
+                  <div className="skew-x-[15deg] font-sans font-black text-[#0f172a] text-[9.5px] tracking-wider uppercase flex items-center gap-1.5 flex-wrap justify-center">
+                    <span className={`px-1.5 py-0.2 rounded text-[8px] font-mono font-black ${
+                      inningsNum === 2 ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-white'
+                    }`}>
+                      {inningsNum === 1 ? '1ST INN' : '2ND INN'}
+                    </span>
+                    {inningsNum === 2 && match.targetRuns && (
+                      <span className="text-rose-700 font-mono font-black text-[9px] bg-rose-100 px-1 py-0.2 rounded border border-rose-300 animate-pulse">
+                        TGT: {match.targetRuns}
+                      </span>
+                    )}
+                    <span>CRR: <span className="font-mono font-black">{calculateCRR}</span></span>
                   </div>
                 </div>
               </div>

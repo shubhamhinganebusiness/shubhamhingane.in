@@ -435,6 +435,7 @@ export const BroadcastThemeStudio: React.FC = () => {
 
   // Live simulation interactive test stinger alert
   const [activeStinger, setActiveStinger] = useState<{ type: 'four' | 'six' | 'wicket' | 'fifty' | 'freehit'; text: string } | null>(null);
+  const [previewInnings, setPreviewInnings] = useState<1 | 2>(1);
 
   // Load from Firestore on mount
   useEffect(() => {
@@ -667,6 +668,34 @@ export const BroadcastThemeStudio: React.FC = () => {
               </button>
             </div>
 
+            {/* Innings Selector for testing 1st vs 2nd Inning Scorebug */}
+            <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPreviewInnings(1)}
+                className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                  previewInnings === 1
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+                    : 'text-slate-400 hover:text-white bg-transparent'
+                }`}
+                title="Preview 1st Innings broadcast display"
+              >
+                1st Inning
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewInnings(2)}
+                className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                  previewInnings === 2
+                    ? 'bg-rose-600 text-white font-black shadow-sm'
+                    : 'text-slate-400 hover:text-white bg-transparent'
+                }`}
+                title="Preview 2nd Innings broadcast display with Target"
+              >
+                2nd Inning (Target)
+              </button>
+            </div>
+
             {/* Backdrop Switcher */}
             <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
               <span className="text-[9px] font-black uppercase text-slate-400 px-1.5 hidden sm:inline-block">Backdrop:</span>
@@ -774,24 +803,29 @@ export const BroadcastThemeStudio: React.FC = () => {
               /* ENHANCED LIVE TV BROADCAST SCOREBUG (REFERENCE DESIGN) */
               <div className="w-full">
                 <StarTVScorebug 
+                  inningsNum={previewInnings}
                   battingTeamName={theme.teamAName || 'TEAM A'}
-                  battingTeamSubtext={theme.teamASubtext || 'BAT FIRST'}
+                  battingTeamSubtext={previewInnings === 1 ? (theme.teamASubtext || '1ST INNINGS') : '2ND INNINGS • TGT 195'}
                   battingTeamColor={theme.teamAColor || '#0143a3'}
                   strikerName="ROHIT SHARMA"
-                  strikerRuns={45}
-                  strikerBalls={32}
+                  strikerRuns={previewInnings === 1 ? 45 : 72}
+                  strikerBalls={previewInnings === 1 ? 32 : 48}
                   strikerFours={5}
                   strikerSixes={2}
                   nonStrikerName="VIRAT KOHLI"
-                  nonStrikerRuns={28}
-                  nonStrikerBalls={18}
+                  nonStrikerRuns={previewInnings === 1 ? 28 : 54}
+                  nonStrikerBalls={previewInnings === 1 ? 18 : 36}
                   nonStrikerFours={3}
                   nonStrikerSixes={1}
-                  score={78}
-                  wickets={1}
-                  overs="10.2"
+                  score={previewInnings === 1 ? 78 : 168}
+                  wickets={previewInnings === 1 ? 1 : 3}
+                  overs={previewInnings === 1 ? "10.2" : "17.2"}
                   oversLimit={20}
-                  crr={7.55}
+                  crr={previewInnings === 1 ? 7.55 : 9.69}
+                  targetRuns={previewInnings === 2 ? 195 : undefined}
+                  remainingRuns={previewInnings === 2 ? 27 : undefined}
+                  remainingBalls={previewInnings === 2 ? 16 : undefined}
+                  rrr={previewInnings === 2 ? 10.1 : undefined}
                   partnershipRuns={52}
                   partnershipBalls={34}
                   last5OversRuns={44}
@@ -902,23 +936,36 @@ export const BroadcastThemeStudio: React.FC = () => {
                     </div>
 
                     {/* Batting Team Pill */}
-                    <div 
-                      className="px-2.5 py-1 rounded font-black text-xs sm:text-sm tracking-wider uppercase text-white shadow shrink-0"
-                      style={{ backgroundColor: theme.teamAColor }}
-                    >
-                      IND
+                    {/* Batting Team Pill + Innings */}
+                    <div className="flex items-center gap-1.5">
+                      <div 
+                        className="px-2.5 py-1 rounded font-black text-xs sm:text-sm tracking-wider uppercase text-white shadow shrink-0"
+                        style={{ backgroundColor: theme.teamAColor }}
+                      >
+                        IND
+                      </div>
+                      <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-mono font-black uppercase ${
+                        previewInnings === 2 ? 'bg-amber-400 text-slate-950' : 'bg-white/10 text-slate-300'
+                      }`}>
+                        {previewInnings === 1 ? '1ST INN' : '2ND INN'}
+                      </span>
                     </div>
 
                     {/* Batting Score & Overs & CRR */}
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-xl sm:text-2xl font-black font-mono tracking-tight" style={{ color: theme.textColor }}>
-                        168/3
+                        {previewInnings === 1 ? '78/1' : '168/3'}
                       </span>
                       <span className="text-xs sm:text-sm font-bold opacity-80 font-mono" style={{ color: theme.textMutedColor }}>
-                        (16.4 Ov)
+                        ({previewInnings === 1 ? '10.2' : '16.4'} Ov)
                       </span>
+                      {previewInnings === 2 && (
+                        <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono font-black text-[9px] uppercase tracking-wider shadow animate-pulse">
+                          TGT 195
+                        </span>
+                      )}
                       <span className="text-[9.5px] font-mono font-black px-1.5 py-0.5 rounded bg-white/10 text-emerald-400 shrink-0">
-                        CRR 10.08
+                        CRR {previewInnings === 1 ? '7.55' : '10.08'}
                       </span>
                     </div>
                   </div>
@@ -1036,10 +1083,10 @@ export const BroadcastThemeStudio: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="text-[9.5px] font-mono font-bold uppercase tracking-wider text-slate-300">
-                          TGT 195 • NEED 27 (20b)
+                          {previewInnings === 2 ? 'TGT 195 • NEED 27 (20b)' : '1ST INNINGS • PROJ 190'}
                         </span>
                         <span className="text-[8.5px] font-mono px-1 rounded bg-white/10 text-amber-300">
-                          RRR 8.1
+                          {previewInnings === 2 ? 'RRR 8.1' : 'CRR 7.55'}
                         </span>
                       </div>
                       {theme.showWinProbability && (

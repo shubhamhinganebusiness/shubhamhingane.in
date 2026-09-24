@@ -4,7 +4,8 @@ import {
   Trophy, Clock, Activity, Users, Radio, ArrowRight, Share2, Download, FileText,
   ChevronLeft, ChevronRight, Calendar, BarChart3, HelpCircle, AlertCircle, Copy, Search,
   Flame, ShieldAlert, Award, Zap, Info, Sparkles, Lock, Eye, Bot, Play, Send, Volume2,
-  RefreshCw, ChevronDown, ChevronUp, X, ExternalLink, Medal, Megaphone
+  RefreshCw, ChevronDown, ChevronUp, X, ExternalLink, Medal, Megaphone,
+  Crown, Gift, Building2, Phone, ShieldCheck, BadgeCheck, DollarSign
 } from 'lucide-react';
 import { useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
 
@@ -59,6 +60,19 @@ import { useSpectatorSliderImages } from './useSpectatorSliderImages';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
 import { computeFighterOfTheMatch, extractSquadPlayersForCertificates } from '../../utils/certificateVerification';
 import { useAuth } from '../AuthContext';
+import { 
+  TournamentPrize, 
+  getTournamentPrizesByTournamentId, 
+  getTournamentPrizes,
+  STANDARD_TOURNAMENT_PRIZES,
+  SAMPLE_DEMO_PRIZES 
+} from '../../utils/cricketPrizeStorage';
+import { 
+  LocalCricketSponsor, 
+  getLocalSponsors, 
+  subscribeToSponsors,
+  DEFAULT_PRESET_SPONSORS 
+} from '../../utils/cricketSponsorsStorage';
 
 // Struct definitions matching those in CricketScoreboard.tsx
 interface Batsman {
@@ -811,7 +825,19 @@ export const SpectatorScoreboardSection = ({
   const [showMatchSelectionHub, setShowMatchSelectionHub] = useState(false);
   const [dismissedAutoSelect, setDismissedAutoSelect] = useState(false);
   const [typedMatchId, setTypedMatchId] = useState('');
-  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'standing' | 'media'>('arena');
+  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'standing' | 'sponsors-prizes' | 'media'>('arena');
+  const [sponsorsList, setSponsorsList] = useState<LocalCricketSponsor[]>(() => getLocalSponsors());
+
+  useEffect(() => {
+    const unsub = subscribeToSponsors((updated) => {
+      if (updated && updated.length > 0) {
+        setSponsorsList(updated);
+      }
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [copiedOBSNotification, setCopiedOBSNotification] = useState(false);
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
@@ -2256,6 +2282,143 @@ export const SpectatorScoreboardSection = ({
     
     return matches;
   }, [completedMatches, completedSearchQuery, historyResultFilter]);
+
+  // Resolve active tournament for the selected match
+  const activeTournamentOfMatch = useMemo(() => {
+    if (!selectedMatch) return null;
+    const tid = selectedMatch.tournamentId;
+    const tName = selectedMatch.tournamentName;
+    const tMatchId = (selectedMatch as any).tournamentMatchId;
+    const mId = selectedMatch.id;
+
+    // 1. Match by tournamentId
+    if (tid && tournaments && tournaments.length > 0) {
+      const found = tournaments.find((t: any) => t.id === tid);
+      if (found) return found;
+    }
+
+    // 2. Match by match ID in tournament matches array
+    if (tournaments && tournaments.length > 0) {
+      const foundByMatch = tournaments.find((t: any) =>
+        t.matches && t.matches.some((m: any) => m.id === mId || (tMatchId && m.id === tMatchId))
+      );
+      if (foundByMatch) return foundByMatch;
+    }
+
+    // 3. Match by tournament name
+    if (tName && tournaments && tournaments.length > 0) {
+      const foundByName = tournaments.find((t: any) =>
+        t.name && t.name.toLowerCase().trim() === tName.toLowerCase().trim()
+      );
+      if (foundByName) return foundByName;
+    }
+
+    // 4. Fallback: inspect localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('gully_tournaments_v1');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            if (tid) {
+              const f = parsed.find((t: any) => t.id === tid);
+              if (f) return f;
+            }
+            if (tName) {
+              const f = parsed.find((t: any) => t.name && t.name.toLowerCase().trim() === tName.toLowerCase().trim());
+              if (f) return f;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    return null;
+  }, [selectedMatch, tournaments]);
+
+  // Is the current match part of a tournament?
+  const isTournamentMatch = useMemo(() => {
+    if (!selectedMatch) return false;
+    return Boolean(
+      activeTournamentOfMatch ||
+      selectedMatch.tournamentId ||
+      (selectedMatch as any).isTournamentMatch ||
+      selectedMatch.tournamentMatchId ||
+      selectedMatch.tournamentName
+    );
+  }, [selectedMatch, activeTournamentOfMatch]);
+
+  // If match is not a tournament match, prevent activeTab being 'points-table'
+  useEffect(() => {
+    if (!isTournamentMatch && activeTab === 'points-table') {
+      setActiveTab('arena');
+    }
+  }, [isTournamentMatch, activeTab]);
+
+  // Compute Championship Standings for tournament
+  const matchStandings = useMemo(() => {
+    if (!isTournamentMatch) return [];
+    if (activeTournamentOfMatch && Array.isArray(activeTournamentOfMatch.teams) && activeTournamentOfMatch.teams.length > 0) {
+      return computePointsTable(activeTournamentOfMatch.teams || [], activeTournamentOfMatch.matches || [])
+        .sort((a, b) => b.points !== a.points ? b.points - a.points : b.NRR - a.NRR);
+    }
+    if (selectedMatch) {
+      const teams = [
+        { id: selectedMatch.teamAId || 'teamA', name: selectedMatch.teamA, logo: selectedMatch.teamALogo },
+        { id: selectedMatch.teamBId || 'teamB', name: selectedMatch.teamB, logo: selectedMatch.teamBLogo }
+      ];
+      return computePointsTable(teams, selectedMatch.status === 'completed' ? [selectedMatch] : [])
+        .sort((a, b) => b.points !== a.points ? b.points - a.points : b.NRR - a.NRR);
+    }
+    return [];
+  }, [isTournamentMatch, activeTournamentOfMatch, selectedMatch]);
+
+  // Tournament Prizes & Awards list
+  const tournamentPrizes = useMemo<TournamentPrize[]>(() => {
+    if (!selectedMatch) return STANDARD_TOURNAMENT_PRIZES;
+
+    if (activeTournamentOfMatch?.prizes && Array.isArray(activeTournamentOfMatch.prizes) && activeTournamentOfMatch.prizes.length > 0) {
+      return activeTournamentOfMatch.prizes;
+    }
+
+    const tid = activeTournamentOfMatch?.id || selectedMatch.tournamentId;
+    if (tid) {
+      const tourPrizes = getTournamentPrizesByTournamentId(tid);
+      if (tourPrizes && tourPrizes.length > 0) return tourPrizes;
+    }
+
+    const matchPrizes = getTournamentPrizes(selectedMatch.id);
+    if (matchPrizes && matchPrizes.length > 0) return matchPrizes;
+
+    return SAMPLE_DEMO_PRIZES;
+  }, [selectedMatch, activeTournamentOfMatch]);
+
+  // Tournament Sponsors list
+  const effectiveSponsors = useMemo<LocalCricketSponsor[]>(() => {
+    const customTourSponsors = (activeTournamentOfMatch as any)?.sponsors;
+    if (Array.isArray(customTourSponsors) && customTourSponsors.length > 0) {
+      return customTourSponsors;
+    }
+    return sponsorsList && sponsorsList.length > 0 ? sponsorsList : DEFAULT_PRESET_SPONSORS;
+  }, [activeTournamentOfMatch, sponsorsList]);
+
+  // Calculate total prize purse
+  const totalPrizePurse = useMemo(() => {
+    if (!tournamentPrizes || tournamentPrizes.length === 0) return '1,00,000+';
+    let sum = 0;
+    let hasValid = false;
+    tournamentPrizes.forEach(p => {
+      if (p.isActive !== false) {
+        const clean = String(p.amount || '').replace(/[^0-9]/g, '');
+        const val = parseInt(clean, 10);
+        if (!isNaN(val) && val > 0) {
+          sum += val;
+          hasValid = true;
+        }
+      }
+    });
+    return hasValid ? sum.toLocaleString('en-IN') : '1,00,000+';
+  }, [tournamentPrizes]);
 
   // Compute player matches played and averages from completed match history database
   const playerStatsMap = useMemo(() => {
@@ -5476,8 +5639,69 @@ export const SpectatorScoreboardSection = ({
             </>
             )}
 
-                     {/* Selector Nav Tabs for Details Card */}
-              <div id="details-nav-tabs" className="space-y-6">
+            {/* Tournament Championship & Sponsors Quick Access Banner */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-4 sm:p-5 border border-indigo-500/20 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative overflow-hidden mb-6">
+              <div className="absolute top-0 right-0 w-80 h-full bg-gradient-to-l from-indigo-500/10 via-amber-500/5 to-transparent pointer-events-none" />
+              <div className="space-y-1 relative z-10 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {isTournamentMatch ? (
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black text-[9px] uppercase tracking-widest flex items-center gap-1.5 shadow-sm">
+                      <Trophy size={11} className="text-amber-400" />
+                      Championship Tournament Fixture
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black text-[9px] uppercase tracking-widest flex items-center gap-1.5 shadow-sm">
+                      <Activity size={11} className="text-emerald-400" />
+                      Single Match Feature
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-300 font-mono">
+                    Purse: <strong className="text-amber-300 font-black">₹{totalPrizePurse}</strong>
+                  </span>
+                </div>
+                <h4 className="text-base sm:text-lg font-black text-white tracking-tight flex items-center gap-2 truncate">
+                  {isTournamentMatch ? (activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Tournament Championship') : `${selectedMatch.teamA} vs ${selectedMatch.teamB}`}
+                </h4>
+                <p className="text-xs text-slate-300 font-medium">
+                  {isTournamentMatch 
+                    ? `Official tournament standings, title sponsors & cash prize pool active for ${activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Championship'}.`
+                    : `Official match awards, commercial sponsors, and player honors showcase.`
+                  }
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap shrink-0 relative z-10 w-full md:w-auto">
+                {isTournamentMatch && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('points-table')}
+                    className={`flex-1 md:flex-none px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer border-none shadow-sm ${
+                      activeTab === 'points-table'
+                        ? 'bg-amber-500 text-slate-950 font-black shadow-amber-500/20'
+                        : 'bg-white/10 hover:bg-white/20 text-white'
+                    }`}
+                  >
+                    <Trophy size={13} className="text-amber-400" />
+                    <span>Points Table ({matchStandings.length})</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('sponsors-prizes')}
+                  className={`flex-1 md:flex-none px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer border-none shadow-sm ${
+                    activeTab === 'sponsors-prizes'
+                      ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black shadow-amber-500/20'
+                      : 'bg-white/10 hover:bg-white/20 text-white'
+                  }`}
+                >
+                  <Gift size={13} className="text-amber-400" />
+                  <span>Sponsors & Prizes</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Selector Nav Tabs for Details Card */}
+            <div id="details-nav-tabs" className="space-y-6">
                 
                 {/* Visual tabs selectors */}
                 <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/60 dark:bg-slate-900 rounded-2xl w-full overflow-x-auto scrollbar-none md:flex-wrap">
@@ -5486,7 +5710,9 @@ export const SpectatorScoreboardSection = ({
                     { id: 'scorecard', label: '📊 Full Scorecard' },
                     { id: 'overs', label: '⚾ Overs Analysis' },
                     { id: 'highlights', label: '✨ Highlights & Comm' },
-                    { id: 'standing', label: '🏆 Squads & Standings' },
+                    ...(isTournamentMatch ? [{ id: 'points-table', label: '🏆 Points Table' }] : []),
+                    { id: 'standing', label: isTournamentMatch ? '👥 Squads XI' : '👥 Squads & Teams' },
+                    { id: 'sponsors-prizes', label: '🎁 Sponsors & Prizes' },
                     { id: 'media', label: '📺 News & Media' }
                   ].map((tab) => (
                     <button
@@ -6955,6 +7181,222 @@ export const SpectatorScoreboardSection = ({
                   </div>
                 )}
 
+                {/* ===================== TAB: TOURNAMENT CHAMPIONSHIP POINTS TABLE ===================== */}
+                {activeTab === 'points-table' && isTournamentMatch && (
+                  <div className="space-y-6 animate-fade-in">
+                    <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 sm:p-8 rounded-[2.5rem] shadow-sm space-y-6">
+                      
+                      {/* Championship Header */}
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-black text-[9px] uppercase tracking-widest flex items-center gap-1.5">
+                              <Trophy size={12} className="text-amber-500" />
+                              Official Tournament Standings
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[9px] uppercase tracking-wider">
+                              ● Real-Time Points Table
+                            </span>
+                          </div>
+                          <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                            <span>🏆</span>
+                            <span>{activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Tournament Championship'} Points Table</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                            Official team standings with automated Net Run Rate (NRR) and qualification indicators.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('sponsors-prizes')}
+                            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-xs"
+                          >
+                            <Gift size={13} className="text-amber-500" />
+                            <span>View Sponsors & Prizes →</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* In-Play Match Context Banner */}
+                      <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/20 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                          <div className="text-xs">
+                            <span className="font-bold text-slate-700 dark:text-slate-300">In-Play Live Fixture: </span>
+                            <strong className="text-emerald-600 dark:text-emerald-400 font-black">
+                              {selectedMatch.teamA} vs {selectedMatch.teamB}
+                            </strong>
+                            <span className="text-slate-400 dark:text-slate-500 ml-2">
+                              (Highlighted in standings below)
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                          2 PTS for Win • 1 PT for Tie/NR
+                        </span>
+                      </div>
+
+                      {/* Points Table Responsive Container */}
+                      <div className="overflow-x-auto rounded-2xl border border-slate-100 dark:border-slate-800 shadow-xs">
+                        <table className="w-full text-left text-xs font-medium text-slate-700 dark:text-slate-200 min-w-[640px]">
+                          <thead className="bg-slate-50 dark:bg-slate-950">
+                            <tr className="text-[9px] uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                              <th className="py-3.5 px-4 text-center w-16">Pos</th>
+                              <th className="py-3.5 px-4">Team</th>
+                              <th className="py-3.5 px-3 text-center">Played</th>
+                              <th className="py-3.5 px-3 text-center">Won</th>
+                              <th className="py-3.5 px-3 text-center">Lost</th>
+                              <th className="py-3.5 px-3 text-center">Tied/NR</th>
+                              <th className="py-3.5 px-4 text-center">NRR</th>
+                              <th className="py-3.5 px-4 text-center font-black">PTS</th>
+                              <th className="py-3.5 px-4 text-center">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                            {matchStandings.length > 0 ? (
+                              matchStandings.map((row: any, idx: number) => {
+                                const isCurrentMatchTeam = row.name === selectedMatch.teamA || row.name === selectedMatch.teamB;
+                                const isTop4 = idx < 4;
+                                const isRank1 = idx === 0;
+                                const isRank2 = idx === 1;
+                                const isRank3 = idx === 2;
+
+                                return (
+                                  <tr 
+                                    key={row.id || `${row.name}-${idx}`} 
+                                    className={`transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-800/30 ${
+                                      isCurrentMatchTeam ? 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.03]' : ''
+                                    }`}
+                                  >
+                                    {/* Position / Rank */}
+                                    <td className="py-3.5 px-4 text-center">
+                                      <div className="flex items-center justify-center gap-1">
+                                        {isRank1 ? (
+                                          <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-black shadow-xs">
+                                            🥇
+                                          </span>
+                                        ) : isRank2 ? (
+                                          <span className="w-6 h-6 rounded-full bg-slate-400/20 text-slate-500 flex items-center justify-center text-xs font-black">
+                                            🥈
+                                          </span>
+                                        ) : isRank3 ? (
+                                          <span className="w-6 h-6 rounded-full bg-amber-700/20 text-amber-700 flex items-center justify-center text-xs font-black">
+                                            🥉
+                                          </span>
+                                        ) : (
+                                          <span className="font-mono font-bold text-slate-500 text-xs">
+                                            {idx + 1}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+
+                                    {/* Team Name and In-Play Badge */}
+                                    <td className="py-3.5 px-4">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs uppercase shadow-xs shrink-0 ${
+                                          idx === 0 
+                                            ? 'bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 font-black' 
+                                            : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                                        }`}>
+                                          {row.name.substring(0, 2)}
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">
+                                              {row.name}
+                                            </span>
+                                            {isCurrentMatchTeam && (
+                                              <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-white font-black text-[8px] uppercase tracking-wider animate-pulse shrink-0">
+                                                In Play
+                                              </span>
+                                            )}
+                                          </div>
+                                          {row.captain && row.captain !== 'None' && (
+                                            <span className="text-[10px] text-slate-400 block">
+                                              Cpt: {row.captain}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </td>
+
+                                    {/* P, W, L, T */}
+                                    <td className="py-3.5 px-3 text-center font-mono font-bold">{row.played}</td>
+                                    <td className="py-3.5 px-3 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">{row.won}</td>
+                                    <td className="py-3.5 px-3 text-center font-mono font-bold text-rose-600 dark:text-rose-400">{row.lost}</td>
+                                    <td className="py-3.5 px-3 text-center font-mono font-bold text-amber-600 dark:text-amber-400">{row.tied}</td>
+
+                                    {/* NRR */}
+                                    <td className="py-3.5 px-4 text-center font-mono font-bold">
+                                      <span className={`px-2 py-0.5 rounded text-[11px] ${
+                                        (row.NRR || 0) > 0 
+                                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' 
+                                          : (row.NRR || 0) < 0 
+                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' 
+                                          : 'text-slate-400'
+                                      }`}>
+                                        {row.NRR ? (row.NRR > 0 ? `+${row.NRR.toFixed(3)}` : row.NRR.toFixed(3)) : '0.000'}
+                                      </span>
+                                    </td>
+
+                                    {/* PTS */}
+                                    <td className="py-3.5 px-4 text-center">
+                                      <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-950 font-mono font-black text-xs shadow-xs">
+                                        {row.points}
+                                      </span>
+                                    </td>
+
+                                    {/* Qualification Status */}
+                                    <td className="py-3.5 px-4 text-center">
+                                      {isTop4 ? (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                          Playoffs
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-medium text-slate-400 uppercase tracking-wider">
+                                          Elimination
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={9} className="p-8 text-center text-slate-400 dark:text-slate-500 font-bold uppercase italic font-mono text-[10px] tracking-wider">
+                                  Calculating Championship Standings... No completed records registered yet.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Standings Footnote & Scoring Regulations */}
+                      <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[10px] text-slate-400 font-medium">
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <span>Top 4 Qualify for Semi-Finals / Playoffs</span>
+                          </span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" />
+                            <span>Elimination Zone</span>
+                          </span>
+                        </div>
+                        <span className="font-mono">
+                          Tie-breaker: Points → Net Run Rate (NRR) → Head-to-Head
+                        </span>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
                 {/* ===================== TAB 5: SQUADS XI & LEAGUE STANDINGSPoints Table ===================== */}
                 {activeTab === 'standing' && (
                   <div className="space-y-6 animate-fade-in">
@@ -7151,88 +7593,395 @@ export const SpectatorScoreboardSection = ({
                       })}
                     </div>
 
-                    {/* Standing points table */}
-                    {selectedMatch.tournamentId ? (() => {
-                      const activeTournamentOfMatch = tournaments.find(t => t.id === selectedMatch.tournamentId);
-                      const realTournamentStandings = activeTournamentOfMatch 
-                        ? computePointsTable(activeTournamentOfMatch.teams || [], activeTournamentOfMatch.matches || []).sort((a,b) => b.points !== a.points ? b.points - a.points : b.NRR - a.NRR)
-                        : [];
-
-                      return (
-                        <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[2.5rem] shadow-sm">
-                          <div className="pb-3 border-b border-slate-50 dark:border-slate-800 mb-4 flex items-center justify-between">
-                            <div>
-                              <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest block mb-0.5">
-                                {activeTournamentOfMatch?.name || 'Tournament'} Club Standings
-                              </span>
-                              <h4 className="text-base font-black text-slate-855 dark:text-white">
-                                {activeTournamentOfMatch?.name || 'Tournament'} Points Table
-                              </h4>
-                            </div>
-                            <span className="text-[9px] font-mono text-slate-400 font-bold uppercase">LIVE standings</span>
+                    {/* Standing points table - only show if tournament match; if not tournament match then don't show */}
+                    {isTournamentMatch && matchStandings.length > 0 && (
+                      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-6 rounded-[2.5rem] shadow-sm">
+                        <div className="pb-3 border-b border-slate-50 dark:border-slate-800 mb-4 flex items-center justify-between">
+                          <div>
+                            <span className="text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest block mb-0.5">
+                              {activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Tournament'} Club Standings
+                            </span>
+                            <h4 className="text-base font-black text-slate-855 dark:text-white">
+                              {activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Tournament'} Points Table
+                            </h4>
                           </div>
-
-                          <div className="overflow-x-auto rounded-2xl border border-slate-100 dark:border-slate-800">
-                            <table className="w-full text-left text-xs font-medium text-slate-655 dark:text-slate-300 min-w-[500px]">
-                              <thead className="bg-slate-50 dark:bg-slate-950">
-                                <tr className="text-[9px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800">
-                                  <th className="p-4">Rank position</th>
-                                  <th className="p-4">Cricket team name</th>
-                                  <th className="p-4 text-center">Played (P)</th>
-                                  <th className="p-4 text-center">Won (W)</th>
-                                  <th className="p-4 text-center">Lost (L)</th>
-                                  <th className="p-4 text-center">Tied (T)</th>
-                                  <th className="p-4 text-center">Net Run Rate (NRR)</th>
-                                  <th className="p-4 text-center">Points (PTS)</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
-                                {realTournamentStandings.length > 0 ? (
-                                  realTournamentStandings.map((row: any, idx: number) => (
-                                    <tr 
-                                      key={row.id || `${row.name}-${idx}`} 
-                                      className={`hover:bg-slate-50/50 dark:hover:bg-slate-950/20 ${
-                                        row.name === selectedMatch.teamA || row.name === selectedMatch.teamB ? 'bg-emerald-500/[0.02] dark:bg-emerald-500/[0.01]' : ''
-                                      }`}
-                                    >
-                                      <td className="p-4 font-mono font-black">{idx + 1}</td>
-                                      <td className="p-4 font-black text-slate-855 dark:text-white flex items-center gap-1.5">
-                                        {row.name}
-                                        {(row.name === selectedMatch.teamA || row.name === selectedMatch.teamB) && (
-                                          <span className="text-[8px] bg-emerald-500/10 text-emerald-650 dark:text-emerald-400 px-1.5 py-0.5 rounded font-bold">In Play</span>
-                                        )}
-                                      </td>
-                                      <td className="p-4 text-center font-mono">{row.played}</td>
-                                      <td className="p-4 text-center font-mono text-emerald-505 font-bold">{row.won}</td>
-                                      <td className="p-4 text-center font-mono text-rose-500">{row.lost}</td>
-                                      <td className="p-4 text-center font-mono text-amber-500">{row.tied}</td>
-                                      <td className="p-4 text-center font-mono font-bold">{row.NRR ? (row.NRR > 0 ? `+${row.NRR.toFixed(3)}` : row.NRR.toFixed(3)) : '0.000'}</td>
-                                      <td className="p-4 text-center font-mono font-black text-slate-855 dark:text-slate-100 text-sm">{row.points}</td>
-                                    </tr>
-                                  ))
-                                ) : (
-                                  <tr>
-                                    <td colSpan={8} className="p-4 text-center text-slate-505 dark:text-slate-400 font-bold uppercase italic font-mono text-[9px] tracking-wider py-8">
-                                      Calculating Standings... No match records registered yet.
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
+                          <span className="text-[9px] font-mono text-slate-400 font-bold uppercase">LIVE standings</span>
                         </div>
-                      );
-                    })() : (
-                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-205 dark:border-slate-850 p-6 rounded-3xl text-center shadow-inner">
-                        <span className="text-2xl block mb-2">🏆</span>
-                        <p className="text-[10px] text-slate-505 dark:text-slate-400 font-bold uppercase tracking-widest leading-normal">
-                          This is a custom single match.
-                        </p>
-                        <p className="text-[9px] text-slate-400 leading-normal mt-1">
-                          No league standing or points table calculation is generated for non-tournament games.
-                        </p>
+
+                        <div className="overflow-x-auto rounded-2xl border border-slate-100 dark:border-slate-800">
+                          <table className="w-full text-left text-xs font-medium text-slate-655 dark:text-slate-300 min-w-[500px]">
+                            <thead className="bg-slate-50 dark:bg-slate-950">
+                              <tr className="text-[9px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                                <th className="p-4">Rank position</th>
+                                <th className="p-4">Cricket team name</th>
+                                <th className="p-4 text-center">Played (P)</th>
+                                <th className="p-4 text-center">Won (W)</th>
+                                <th className="p-4 text-center">Lost (L)</th>
+                                <th className="p-4 text-center">Tied (T)</th>
+                                <th className="p-4 text-center">Net Run Rate (NRR)</th>
+                                <th className="p-4 text-center">Points (PTS)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-850">
+                              {matchStandings.map((row: any, idx: number) => (
+                                <tr 
+                                  key={row.id || `${row.name}-${idx}`} 
+                                  className={`hover:bg-slate-50/50 dark:hover:bg-slate-950/20 ${
+                                    row.name === selectedMatch.teamA || row.name === selectedMatch.teamB ? 'bg-emerald-500/[0.02] dark:bg-emerald-500/[0.01]' : ''
+                                  }`}
+                                >
+                                  <td className="p-4 font-mono font-black">{idx + 1}</td>
+                                  <td className="p-4 font-black text-slate-855 dark:text-white flex items-center gap-1.5">
+                                    {row.name}
+                                    {(row.name === selectedMatch.teamA || row.name === selectedMatch.teamB) && (
+                                      <span className="text-[8px] bg-emerald-500/10 text-emerald-650 dark:text-emerald-400 px-1.5 py-0.5 rounded font-bold">In Play</span>
+                                    )}
+                                  </td>
+                                  <td className="p-4 text-center font-mono">{row.played}</td>
+                                  <td className="p-4 text-center font-mono text-emerald-505 font-bold">{row.won}</td>
+                                  <td className="p-4 text-center font-mono text-rose-500">{row.lost}</td>
+                                  <td className="p-4 text-center font-mono text-amber-500">{row.tied}</td>
+                                  <td className="p-4 text-center font-mono font-bold">{row.NRR ? (row.NRR > 0 ? `+${row.NRR.toFixed(3)}` : row.NRR.toFixed(3)) : '0.000'}</td>
+                                  <td className="p-4 text-center font-mono font-black text-slate-855 dark:text-slate-100 text-sm">{row.points}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
+
+                  </div>
+                )}
+
+                {/* ===================== TAB: TOURNAMENT SPONSORS & PRIZE LIST ===================== */}
+                {activeTab === 'sponsors-prizes' && (
+                  <div className="space-y-8 animate-fade-in">
+                    
+                    {/* Top Grand Prize Purse Header Card */}
+                    <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-6 sm:p-8 rounded-[2.5rem] border border-amber-500/20 shadow-xl relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-96 h-full bg-gradient-to-l from-amber-500/10 via-yellow-500/5 to-transparent pointer-events-none" />
+                      
+                      <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-3 py-1 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black text-[10px] uppercase tracking-wider shadow-sm flex items-center gap-1.5">
+                              <Crown size={12} className="text-slate-950" />
+                              Official Grand Prize Purse
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-full bg-white/10 text-white font-mono text-[10px]">
+                              {activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Championship Tournament'}
+                            </span>
+                          </div>
+                          <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2.5">
+                            <span className="text-amber-400">₹{totalPrizePurse}</span>
+                            <span className="text-slate-300 text-base sm:text-lg font-medium">Total Tournament Prize Pool</span>
+                          </h3>
+                          <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                            Official commercial sponsors, corporate partners, patron donors, and prize money purse allocated for outstanding team and player achievements.
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
+                          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xs text-center">
+                            <span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Active Prizes</span>
+                            <span className="text-lg font-black text-amber-400 font-mono">{tournamentPrizes.length}</span>
+                          </div>
+                          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xs text-center">
+                            <span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Sponsors</span>
+                            <span className="text-lg font-black text-emerald-400 font-mono">{effectiveSponsors.length}</span>
+                          </div>
+                          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-xs text-center col-span-2 sm:col-span-1">
+                            <span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">Verified</span>
+                            <span className="text-xs font-black text-white flex items-center justify-center gap-1 mt-1">
+                              <ShieldCheck size={14} className="text-emerald-400" />
+                              Official
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 1: Tournament Cash Prizes & Trophy Honors */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest block">
+                            Championship Podium & Individual Honors
+                          </span>
+                          <h4 className="text-lg font-black text-slate-900 dark:text-white">
+                            Tournament Prize List
+                          </h4>
+                        </div>
+                        <span className="text-xs text-slate-400 font-bold font-mono">
+                          {tournamentPrizes.length} Categories
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                        {tournamentPrizes.map((prize, pIdx) => {
+                          const isFirst = prize.category === 'tournament_1st' || pIdx === 0;
+                          const isSecond = prize.category === 'tournament_2nd' || pIdx === 1;
+                          const isThird = prize.category === 'tournament_3rd' || pIdx === 2;
+                          const isManOfSeries = prize.category === 'man_of_series';
+                          const isBestBatsman = prize.category === 'best_batsman';
+                          const isBestBowler = prize.category === 'best_bowler';
+
+                          return (
+                            <div 
+                              key={prize.id || `prize-${pIdx}`}
+                              className={`rounded-3xl p-5 sm:p-6 border transition-all duration-200 relative overflow-hidden flex flex-col justify-between shadow-sm hover:shadow-md ${
+                                isFirst 
+                                  ? 'bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-white dark:to-slate-900 border-amber-400/40 ring-1 ring-amber-400/20' 
+                                  : isSecond 
+                                  ? 'bg-gradient-to-b from-slate-200/40 via-slate-100/20 to-white dark:to-slate-900 border-slate-300 dark:border-slate-700' 
+                                  : isThird 
+                                  ? 'bg-gradient-to-b from-amber-700/10 via-amber-700/5 to-white dark:to-slate-900 border-amber-600/30'
+                                  : isManOfSeries
+                                  ? 'bg-gradient-to-b from-purple-500/10 via-purple-500/5 to-white dark:to-slate-900 border-purple-400/30'
+                                  : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'
+                              }`}
+                            >
+                              <div>
+                                {/* Header badge & icon */}
+                                <div className="flex items-center justify-between gap-2 mb-3">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                                    isFirst 
+                                      ? 'bg-amber-500 text-slate-950' 
+                                      : isSecond 
+                                      ? 'bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-100' 
+                                      : isThird 
+                                      ? 'bg-amber-700/20 text-amber-700 dark:text-amber-400' 
+                                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                                  }`}>
+                                    {prize.customBadge || (isFirst ? '🥇 Champion' : isSecond ? '🥈 Runner-Up' : isThird ? '🥉 3rd Place' : prize.category ? prize.category.replace(/_/g, ' ') : 'Award')}
+                                  </span>
+                                  <span className="text-xl">
+                                    {isFirst ? '🏆' : isSecond ? '🥈' : isThird ? '🥉' : isManOfSeries ? '⭐' : isBestBatsman ? '🏏' : isBestBowler ? '🎯' : '🎁'}
+                                  </span>
+                                </div>
+
+                                {/* Prize Title & Subtitle */}
+                                <h5 className="text-base font-black text-slate-900 dark:text-white leading-tight mb-1">
+                                  {prize.title}
+                                </h5>
+                                {prize.subtitle && (
+                                  <p className="text-xs text-slate-400 font-medium mb-3">
+                                    {prize.subtitle}
+                                  </p>
+                                )}
+
+                                {/* Cash Amount */}
+                                <div className="mt-2 mb-4 p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800/80 flex items-baseline gap-1">
+                                  <span className="text-xs font-black text-amber-500">
+                                    {prize.currencySymbol || '₹'}
+                                  </span>
+                                  <span className="text-2xl font-black text-slate-900 dark:text-white font-mono tracking-tight">
+                                    {prize.amount}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase ml-1">
+                                    Cash + Trophy
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Sponsor & Patron Details */}
+                              {(prize.sponsorName || prize.personName) && (
+                                <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 mt-auto">
+                                  <span className="text-[8.5px] font-black uppercase text-slate-400 tracking-wider block mb-2">
+                                    {prize.tagline || 'Sponsored & Donated By'}
+                                  </span>
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 overflow-hidden shrink-0 flex items-center justify-center shadow-xs">
+                                      {prize.sponsorPhoto || prize.personPhoto ? (
+                                        <img 
+                                          src={prize.sponsorPhoto || prize.personPhoto} 
+                                          alt={prize.sponsorName || prize.personName} 
+                                          className="w-full h-full object-cover" 
+                                          referrerPolicy="no-referrer" 
+                                        />
+                                      ) : (
+                                        <span className="text-base">🤝</span>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                                        {prize.sponsorName || prize.personName}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400 truncate">
+                                        {prize.sponsorDesignation || prize.personDesignation || 'Chief Tournament Patron'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Section 2: Tournament Official Sponsors & Commercial Partners */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                        <div>
+                          <span className="text-[9px] font-black uppercase text-indigo-500 tracking-widest block">
+                            Commercial & Media Partners
+                          </span>
+                          <h4 className="text-lg font-black text-slate-900 dark:text-white">
+                            Official Tournament Sponsors
+                          </h4>
+                        </div>
+                        <span className="text-xs text-slate-400 font-bold font-mono">
+                          {effectiveSponsors.length} Partners
+                        </span>
+                      </div>
+
+                      {/* Featured Title Sponsor Card (if exists) */}
+                      {(() => {
+                        const titleSponsor = effectiveSponsors.find(s => s.sponsorTier === 'Title Sponsor' || s.category === 'title');
+                        if (!titleSponsor) return null;
+
+                        return (
+                          <div className="bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/5 rounded-3xl p-6 sm:p-8 border border-amber-400/40 shadow-sm relative overflow-hidden">
+                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+                              <div className="flex items-start sm:items-center gap-4">
+                                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white dark:bg-slate-900 border-2 border-amber-400/60 p-2 shrink-0 flex items-center justify-center overflow-hidden shadow-md">
+                                  {titleSponsor.logoUrl ? (
+                                    <img src={titleSponsor.logoUrl} alt={titleSponsor.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <Building2 size={32} className="text-amber-500" />
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-wider flex items-center gap-1 shadow-xs">
+                                      <Crown size={11} className="text-slate-950" />
+                                      Title Sponsor
+                                    </span>
+                                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                                      <BadgeCheck size={13} /> Verified Partner
+                                    </span>
+                                  </div>
+                                  <h5 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white">
+                                    {titleSponsor.name}
+                                  </h5>
+                                  {titleSponsor.tagline && (
+                                    <p className="text-xs text-slate-600 dark:text-slate-300 font-medium mt-1 max-w-xl leading-relaxed">
+                                      {titleSponsor.tagline}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 w-full md:w-auto shrink-0">
+                                {titleSponsor.phone && (
+                                  <a
+                                    href={`tel:${titleSponsor.phone}`}
+                                    className="flex-1 md:flex-none px-4 py-2.5 bg-white dark:bg-slate-900 hover:bg-amber-50 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border border-amber-300/40 shadow-xs no-underline"
+                                  >
+                                    <Phone size={13} className="text-amber-500" />
+                                    <span>Call Sponsor</span>
+                                  </a>
+                                )}
+                                {titleSponsor.website && (
+                                  <a
+                                    href={titleSponsor.website}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex-1 md:flex-none px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 border-none shadow-sm no-underline"
+                                  >
+                                    <ExternalLink size={13} />
+                                    <span>Visit Site</span>
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Sponsors Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {effectiveSponsors.map((sponsor, sIdx) => {
+                          const isTitle = sponsor.sponsorTier === 'Title Sponsor' || sponsor.category === 'title';
+
+                          return (
+                            <div 
+                              key={sponsor.id || `sponsor-${sIdx}`}
+                              className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-1.5 shrink-0 flex items-center justify-center overflow-hidden shadow-xs">
+                                  {sponsor.logoUrl ? (
+                                    <img src={sponsor.logoUrl} alt={sponsor.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <Building2 size={20} className="text-slate-400" />
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <span className={`inline-block px-2 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider mb-1 ${
+                                    isTitle ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                                  }`}>
+                                    {sponsor.sponsorTier || 'Associate Partner'}
+                                  </span>
+                                  <h6 className="text-sm font-black text-slate-900 dark:text-white truncate">
+                                    {sponsor.name}
+                                  </h6>
+                                  {sponsor.tagline && (
+                                    <p className="text-[11px] text-slate-400 line-clamp-2 mt-0.5">
+                                      {sponsor.tagline}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2 text-xs">
+                                {sponsor.phone ? (
+                                  <a 
+                                    href={`tel:${sponsor.phone}`}
+                                    className="text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 font-bold flex items-center gap-1 text-[11px] no-underline"
+                                  >
+                                    <Phone size={11} className="text-slate-400" />
+                                    <span>{sponsor.phone}</span>
+                                  </a>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 font-mono">Official Partner</span>
+                                )}
+
+                                {sponsor.website && (
+                                  <a 
+                                    href={sponsor.website}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-indigo-500 transition-colors"
+                                    title="Open website"
+                                  >
+                                    <ExternalLink size={12} />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Section 3: Sponsorship Helpline & Inquiry Callout */}
+                    <div className="p-6 rounded-3xl bg-slate-100/80 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+                      <div className="space-y-1">
+                        <h5 className="text-sm font-black text-slate-900 dark:text-white flex items-center justify-center sm:justify-start gap-2">
+                          <Medal size={16} className="text-amber-500" />
+                          Partner with {activeTournamentOfMatch?.name || selectedMatch.tournamentName || 'Tournament'}
+                        </h5>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Connect with local audiences, sponsor live overs, display brand cards, and donate player accolade trophies.
+                        </p>
+                      </div>
+                      <span className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-xs font-black uppercase tracking-wider shrink-0 shadow-sm">
+                        Official Tournament Registry
+                      </span>
+                    </div>
 
                   </div>
                 )}

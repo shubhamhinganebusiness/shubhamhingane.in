@@ -74,6 +74,8 @@ export interface StarTVScorebugProps {
   targetRuns?: number;
   remainingRuns?: number;
   remainingBalls?: number;
+  inningsNum?: 1 | 2 | number;
+  innings?: 1 | 2 | number;
   activeStinger?: string | null;
 
   // New Pro Enhancements Props
@@ -168,6 +170,8 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   targetRuns,
   remainingRuns,
   remainingBalls,
+  inningsNum,
+  innings,
   activeStinger = null,
 
   // Enhanced Pro Props
@@ -264,6 +268,18 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   // Scorebug overlay mode state (supports both controlled and uncontrolled usage)
   const [activeScorebugMode, setActiveScorebugMode] = useState<'this_over' | 'tournament' | 'toss_equation' | 'last_batsman' | 'partnership' | 'projected_crr' | 'officials_venue'>(scorebugOverlayMode || 'this_over');
   const [tossEquationMode, setTossEquationMode] = useState<'auto' | 'toss' | 'equation'>('auto');
+
+  // Resolved Innings number and status (1st or 2nd innings)
+  const resolvedInningsNum = useMemo(() => {
+    if (inningsNum === 1 || inningsNum === 2) return inningsNum;
+    if (innings === 1 || innings === 2) return innings;
+    if (targetRuns && targetRuns > 0) return 2;
+    const sub = (battingTeamSubtext || '').toLowerCase();
+    if (sub.includes('2nd') || sub.includes('second') || sub.includes('chase') || sub.includes('target')) return 2;
+    return 1;
+  }, [inningsNum, innings, targetRuns, battingTeamSubtext]);
+
+  const isSecondInnings = resolvedInningsNum === 2;
 
   // Automated Alternating Display: Team Names Mode vs Tournament Logo Mode
   // When showing tournament logo on left & right sides: show ONLY the tournament logo (no team name, no team logo).
@@ -710,18 +726,30 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       },
       {
         id: 'rates_chase',
-        category: targetRuns && targetRuns > 0 ? 'CHASE EQUATION' : 'RUN RATES & PROJECTIONS',
-        categoryColor: 'text-amber-400',
-        content: targetRuns && targetRuns > 0 ? (
+        category: isSecondInnings ? '2ND INNINGS CHASE EQUATION' : '1ST INNINGS RUN RATES & PROJECTIONS',
+        categoryColor: isSecondInnings ? 'text-rose-400' : 'text-sky-400',
+        content: isSecondInnings ? (
           <span className="text-white">
+            <span className="text-amber-400 font-black mr-1.5">[2ND INNINGS]</span>
+            {targetRuns && targetRuns > 0 && (
+              <>
+                TARGET: <strong className="text-rose-400 font-black">{targetRuns}</strong>
+                <span className="text-white/30 mx-2">•</span>
+              </>
+            )}
             CRR: <strong className="text-amber-300">{computedCRR}</strong>
             <span className="text-white/30 mx-2">•</span>
-            REQ RR: <strong className="text-rose-400">{computedRRR ?? '0.0'}</strong>
-            <span className="text-white/30 mx-2">•</span>
-            TARGET: <strong className="text-sky-300">{targetRuns}</strong> (Need {remainingRuns ?? Math.max(0, targetRuns - score)} off {remainingBalls ?? 0}b)
+            REQ RR: <strong className="text-rose-300">{computedRRR ?? '0.0'}</strong>
+            {targetRuns && (
+              <>
+                <span className="text-white/30 mx-2">•</span>
+                NEED: <strong className="text-sky-300">{remainingRuns ?? Math.max(0, targetRuns - score)}</strong> off <strong className="text-sky-300">{remainingBalls ?? 0}b</strong>
+              </>
+            )}
           </span>
         ) : (
           <span className="text-white">
+            <span className="text-sky-400 font-black mr-1.5">[1ST INNINGS]</span>
             CRR: <strong className="text-amber-300">{computedCRR}</strong>
             <span className="text-white/30 mx-2">•</span>
             PROJECTED TOTAL: <strong className="text-emerald-400">{projectedScores.projCurrent}</strong> (at current RR)
@@ -927,7 +955,9 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                       {battingTeamName}
                     </span>
                     <span className="text-[9px] sm:text-[10px] font-bold text-white/80 uppercase tracking-widest leading-none">
-                      {battingTeamSubtext}
+                      {isSecondInnings 
+                        ? (targetRuns && targetRuns > 0 ? `2ND INNINGS • TGT ${targetRuns}` : '2ND INNINGS') 
+                        : (battingTeamSubtext || '1ST INNINGS')}
                     </span>
                   </div>
                 </motion.div>
@@ -1087,12 +1117,12 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         </div>
 
         {/* =====================================================================
-            2. ELEVATED CENTER SHIELD: SCORE & WICKETS & OVERS
+            2. ELEVATED CENTER SHIELD: SCORE & WICKETS & OVERS & INNINGS & TARGET
             ===================================================================== */}
         <div 
           id="star-tv-center-shield"
-          className="relative z-20 px-5 sm:px-8 flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-[#070b14] to-slate-950 text-white shrink-0 border-x border-white/20 shadow-[0_0_25px_rgba(0,0,0,0.9)]"
-          style={{ minWidth: '180px' }}
+          className="relative z-20 px-3.5 sm:px-6 py-1 flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 via-[#070b14] to-slate-950 text-white shrink-0 border-x border-white/20 shadow-[0_0_25px_rgba(0,0,0,0.9)] select-none"
+          style={{ minWidth: isSecondInnings && targetRuns ? '200px' : '175px' }}
         >
           <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-sky-400 to-transparent opacity-80" />
 
@@ -1104,6 +1134,31 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
             </div>
           )}
 
+          {/* Innings & Target Row: Displays 1st or 2nd innings, and target when in 2nd innings */}
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span 
+              id="star-tv-innings-badge"
+              className={`px-1.5 sm:px-2 py-0.5 rounded text-[8.5px] sm:text-[9.5px] font-mono font-black uppercase tracking-wider ${
+                isSecondInnings
+                  ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-[0_0_10px_rgba(251,191,36,0.6)]'
+                  : 'bg-sky-500/25 text-sky-300 border border-sky-400/40 shadow-sm'
+              }`}
+            >
+              {isSecondInnings ? '2ND INNINGS' : '1ST INNINGS'}
+            </span>
+
+            {isSecondInnings && targetRuns && targetRuns > 0 && (
+              <span 
+                id="star-tv-target-badge"
+                className="px-1.5 sm:px-2 py-0.5 rounded bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white text-[8.5px] sm:text-[9.5px] font-mono font-black uppercase tracking-wider shadow-[0_0_12px_rgba(225,29,72,0.8)] flex items-center gap-1 border border-rose-300/60 animate-pulse"
+                title={`Target: ${targetRuns} runs`}
+              >
+                <Target size={10} className="stroke-[3] text-white" />
+                <span>TARGET {targetRuns}</span>
+              </span>
+            )}
+          </div>
+
           {/* Main Score & Wickets Display */}
           <div className="flex items-baseline gap-1">
             <span className="text-2xl sm:text-3xl md:text-4xl font-black font-mono tracking-tight text-white drop-shadow-[0_2px_10px_rgba(255,255,255,0.25)]">
@@ -1111,12 +1166,17 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
             </span>
           </div>
 
-          {/* Overs Indicator */}
+          {/* Overs Indicator & Need equation */}
           <div className="flex items-center gap-1.5 -mt-0.5">
-            <span className="text-[11px] sm:text-xs font-bold font-mono text-sky-300 tracking-wider">
+            <span className="text-[10.5px] sm:text-xs font-bold font-mono text-sky-300 tracking-wider">
               {overs}
               {oversLimit ? <span className="text-slate-400 font-normal"> / {oversLimit} OV</span> : ' OV'}
             </span>
+            {isSecondInnings && targetRuns && targetRuns > 0 && remainingRuns !== undefined && (
+              <span className="text-[9.5px] sm:text-[10.5px] font-mono font-black text-amber-300 tracking-tight">
+                • Need {remainingRuns}{remainingBalls !== undefined ? ` (${remainingBalls}b)` : ''}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1286,9 +1346,9 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                       {winnerDetails ? (
                         `MATCH CONCLUDED • TOSS: ${resolvedTossText}`
                       ) : isShowingToss ? (
-                        hasChaseTarget ? `${equationText || `NEED ${remainingRuns} OFF ${remainingBalls}`} • RRR: ${rrr ?? '-'}` : `1ST INNINGS IN PLAY • ${battingTeamName} BATTING FIRST`
+                        hasChaseTarget ? `2ND INNINGS • ${targetRuns ? `TARGET: ${targetRuns} • ` : ''}${equationText || `NEED ${remainingRuns} OFF ${remainingBalls}`} • RRR: ${rrr ?? '-'}` : `1ST INNINGS IN PLAY • ${battingTeamName} BATTING FIRST`
                       ) : (
-                        `${rrr !== undefined ? `RRR: ${rrr} • ` : ''}TOSS: ${resolvedTossText}`
+                        `2ND INNINGS • ${targetRuns ? `TARGET: ${targetRuns} • ` : ''}${rrr !== undefined ? `RRR: ${rrr} • ` : ''}TOSS: ${resolvedTossText}`
                       )}
                     </span>
                   </motion.div>
