@@ -196,11 +196,15 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
             const bowlInnings = isTeamA ? lm.innings2 : lm.innings1;
 
             // Batting in this match
-            if (batInnings?.batsmanList) {
-              const b = batInnings.batsmanList.find((bat: any) => bat.batsmanName?.trim().toLowerCase() === p.name.trim().toLowerCase());
+            const batList = batInnings?.batsmen || batInnings?.batsmanList || batInnings?.batters;
+            if (Array.isArray(batList) && batList.length > 0) {
+              const b = batList.find((bat: any) => {
+                const bName = (bat.name || bat.batsmanName || bat.playerName || bat.player || '').trim().toLowerCase();
+                return bName === p.name.trim().toLowerCase();
+              });
               if (b) {
                 pInnings += 1;
-                const r = Number(b.runs) || 0;
+                const r = Number(b.runs) || Number(b.score) || 0;
                 pRuns += r;
                 pBalls += Number(b.balls) || 0;
                 pFours += Number(b.fours) || 0;
@@ -210,11 +214,15 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
             }
 
             // Bowling in this match
-            if (bowlInnings?.bowlerList) {
-              const bw = bowlInnings.bowlerList.find((bowl: any) => bowl.bowlerName?.trim().toLowerCase() === p.name.trim().toLowerCase());
+            const bowlList = bowlInnings?.bowlers || bowlInnings?.bowlerList;
+            if (Array.isArray(bowlList) && bowlList.length > 0) {
+              const bw = bowlList.find((bowl: any) => {
+                const bwName = (bowl.name || bowl.bowlerName || bowl.playerName || bowl.player || '').trim().toLowerCase();
+                return bwName === p.name.trim().toLowerCase();
+              });
               if (bw) {
                 const w = Number(bw.wickets) || 0;
-                const rc = Number(bw.runsConceded) || 0;
+                const rc = Number(bw.runsConceded) || Number(bw.runs) || 0;
                 const ov = Number(bw.overs) || 0;
                 pWickets += w;
                 pRunsConceded += rc;

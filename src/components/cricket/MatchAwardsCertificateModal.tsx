@@ -1591,6 +1591,89 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
           }
         }
       } catch (_) {}
+
+      // 3. Search local match registries by matchId or team names
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const parseList = (key: string) => {
+            try {
+              const r = localStorage.getItem(key);
+              if (!r) return [];
+              const p = JSON.parse(r);
+              return Array.isArray(p) ? p : [p];
+            } catch (_) {
+              return [];
+            }
+          };
+
+          const caches = [
+            ...parseList('cricket_matches_local_registry'),
+            ...parseList('cricket_custom_past_matches'),
+            ...parseList('cricket_active_match')
+          ];
+
+          for (const mItem of caches) {
+            if (!mItem) continue;
+            const matchesId = data.matchId && mItem.id === data.matchId;
+            const matchesTeams = (isTeamMatch(mItem.teamA, winnerTeamName) && isTeamMatch(mItem.teamB, runnerUpTeamName)) ||
+              (isTeamMatch(mItem.teamB, winnerTeamName) && isTeamMatch(mItem.teamA, runnerUpTeamName));
+
+            if (matchesId || matchesTeams) {
+              const extracted = extractSquadPlayersForCertificates({ ...mItem, squadPlayers: undefined });
+              extracted.forEach(sp => {
+                if (!sp.name || /^player\s*\d+$/i.test(sp.name)) return;
+                const exists = list.some(x => x.name.toLowerCase() === sp.name.toLowerCase() && isTeamMatch(x.team, sp.team));
+                if (!exists) {
+                  list.push(sp);
+                }
+              });
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 4. Ensure awards standout players are always in the list if missing
+    if (data.playerOfTheMatch?.name && !/^player\s*\d+$/i.test(data.playerOfTheMatch.name)) {
+      const potm = data.playerOfTheMatch;
+      const targetTeam = isTeamMatch(potm.team, runnerUpTeamName) ? runnerUpTeamName : winnerTeamName;
+      const exists = list.some(x => x.name.toLowerCase() === potm.name.toLowerCase());
+      if (!exists) {
+        list.unshift({
+          id: `${potm.name.toLowerCase()}__${targetTeam.toLowerCase()}`,
+          name: potm.name,
+          team: targetTeam,
+          isWinner: targetTeam === winnerTeamName,
+          isCaptain: false,
+          role: 'Player of the Match',
+          runs: potm.runs || 0,
+          balls: potm.balls,
+          wickets: potm.wickets || 0,
+          runsConceded: potm.runsConceded,
+          points: potm.points || 50
+        });
+      }
+    }
+
+    if (data.fighterOfTheMatch?.name && !/^player\s*\d+$/i.test(data.fighterOfTheMatch.name)) {
+      const fighter = data.fighterOfTheMatch;
+      const targetTeam = runnerUpTeamName;
+      const exists = list.some(x => x.name.toLowerCase() === fighter.name.toLowerCase());
+      if (!exists) {
+        list.push({
+          id: `${fighter.name.toLowerCase()}__${targetTeam.toLowerCase()}`,
+          name: fighter.name,
+          team: targetTeam,
+          isWinner: false,
+          isCaptain: false,
+          role: 'Fighter of the Match',
+          runs: fighter.runs || 0,
+          balls: fighter.balls,
+          wickets: fighter.wickets || 0,
+          runsConceded: fighter.runsConceded,
+          points: fighter.points || 40
+        });
+      }
     }
 
     return list;
@@ -1619,10 +1702,15 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     // If squad roster is still empty, bootstrap a standard 11-player squad roster
     if (filtered.length === 0) {
       const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : (data.teamA || 'Team'));
+      const starName = selectedTeamFilter === 'winner' 
+        ? (data.playerOfTheMatch?.name && !/^player\s*\d+$/i.test(data.playerOfTheMatch.name) ? data.playerOfTheMatch.name : (data.bestBatsman?.name && !data.bestBatsman.name.includes('Top Batter') ? data.bestBatsman.name : ''))
+        : (data.fighterOfTheMatch?.name && !/^player\s*\d+$/i.test(data.fighterOfTheMatch.name) ? data.fighterOfTheMatch.name : (data.bestBowler?.name && !data.bestBowler.name.includes('Strike Bowler') ? data.bestBowler.name : ''));
+
       for (let i = 1; i <= 11; i++) {
+        const pName = (i === 1 && starName) ? starName : `${targetTeam} Player ${i}`;
         filtered.push({
           id: `${targetTeam.toLowerCase()}_player_${i}`,
-          name: `${targetTeam} Player ${i}`,
+          name: pName,
           team: targetTeam,
           isWinner: selectedTeamFilter === 'winner',
           isCaptain: i === 1,

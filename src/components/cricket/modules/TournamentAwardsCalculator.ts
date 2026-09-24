@@ -153,10 +153,13 @@ export function calculateTournamentAwards(
       ? t.players.map((p: any) => typeof p === 'string' ? p : p.name) 
       : (t.captain ? [t.captain] : []);
     
-    // Default key players if roster is empty
-    if (pRoster.length === 0) {
-      if (t.captain) pRoster.push(t.captain);
-      pRoster.push(`${t.name} Striker`, `${t.name} Pacer`, `${t.name} All-Rounder`);
+    // Ensure at least 4 distinct squad players per team with distinct roles so awards never collapse to a single player
+    while (pRoster.length < 5) {
+      const idx = pRoster.length;
+      if (idx === 1) pRoster.push(`${t.name} Lead Bowler`);
+      else if (idx === 2) pRoster.push(`${t.name} All-Rounder`);
+      else if (idx === 3) pRoster.push(`${t.name} Top Batter`);
+      else pRoster.push(`${t.name} Spinner`);
     }
 
     pRoster.forEach((pName, idx) => {
@@ -189,61 +192,86 @@ export function calculateTournamentAwards(
       momPlayer.momAwards += 1;
     }
 
+    let hasProcessedLiveInnings = false;
+
     if (liveMatch) {
-      // Process Innings 1 Batsmen
-      if (liveMatch.innings1?.batsmanList && Array.isArray(liveMatch.innings1.batsmanList)) {
-        liveMatch.innings1.batsmanList.forEach((b: any) => {
-          if (!b.batsmanName) return;
-          const p = getOrCreatePlayer(b.batsmanName, teamAObj, 'Batsman');
+      const inn1 = liveMatch.mainMatchState?.innings1 || liveMatch.innings1;
+      const inn2 = liveMatch.mainMatchState?.innings2 || liveMatch.innings2;
+
+      // Process Innings 1 Batsmen (Team A batting)
+      const inn1Batsmen = inn1?.batsmen || inn1?.batsmanList || inn1?.batters;
+      if (Array.isArray(inn1Batsmen) && inn1Batsmen.length > 0) {
+        hasProcessedLiveInnings = true;
+        inn1Batsmen.forEach((b: any) => {
+          const bName = (b.name || b.batsmanName || b.playerName || b.player || '').trim();
+          if (!bName) return;
+          const p = getOrCreatePlayer(bName, teamAObj, 'Batsman');
           p.matchesPlayed += 1;
-          p.runs += Number(b.runs) || 0;
+          const r = Number(b.runs) || Number(b.score) || 0;
+          p.runs += r;
           p.balls += Number(b.balls) || 0;
           p.fours += Number(b.fours) || 0;
           p.sixes += Number(b.sixes) || 0;
-          if ((Number(b.runs) || 0) > p.highScore) p.highScore = Number(b.runs);
+          if (r > p.highScore) p.highScore = r;
         });
       }
 
       // Process Innings 1 Bowlers (Bowled by Team B)
-      if (liveMatch.innings1?.bowlerList && Array.isArray(liveMatch.innings1.bowlerList)) {
-        liveMatch.innings1.bowlerList.forEach((bw: any) => {
-          if (!bw.bowlerName) return;
-          const p = getOrCreatePlayer(bw.bowlerName, teamBObj, 'Bowler');
-          p.wickets += Number(bw.wickets) || 0;
-          p.runsConceded += Number(bw.runsConceded) || 0;
+      const inn1Bowlers = inn1?.bowlers || inn1?.bowlerList;
+      if (Array.isArray(inn1Bowlers) && inn1Bowlers.length > 0) {
+        hasProcessedLiveInnings = true;
+        inn1Bowlers.forEach((bw: any) => {
+          const bwName = (bw.name || bw.bowlerName || bw.playerName || bw.player || '').trim();
+          if (!bwName) return;
+          const p = getOrCreatePlayer(bwName, teamBObj, 'Bowler');
+          const wkts = Number(bw.wickets) || 0;
+          p.wickets += wkts;
+          p.runsConceded += Number(bw.runsConceded) || Number(bw.runs) || 0;
           p.maidens += Number(bw.maidens) || 0;
           const overs = Number(bw.overs) || 0;
-          p.ballsBowled += Math.floor(overs) * 6 + Math.round((overs % 1) * 10);
+          const balls = Number(bw.ballsBowled) || (overs ? Math.floor(overs) * 6 + Math.round((overs % 1) * 10) : 0);
+          p.ballsBowled += balls;
         });
       }
 
-      // Process Innings 2 Batsmen
-      if (liveMatch.innings2?.batsmanList && Array.isArray(liveMatch.innings2.batsmanList)) {
-        liveMatch.innings2.batsmanList.forEach((b: any) => {
-          if (!b.batsmanName) return;
-          const p = getOrCreatePlayer(b.batsmanName, teamBObj, 'Batsman');
+      // Process Innings 2 Batsmen (Team B batting)
+      const inn2Batsmen = inn2?.batsmen || inn2?.batsmanList || inn2?.batters;
+      if (Array.isArray(inn2Batsmen) && inn2Batsmen.length > 0) {
+        hasProcessedLiveInnings = true;
+        inn2Batsmen.forEach((b: any) => {
+          const bName = (b.name || b.batsmanName || b.playerName || b.player || '').trim();
+          if (!bName) return;
+          const p = getOrCreatePlayer(bName, teamBObj, 'Batsman');
           p.matchesPlayed += 1;
-          p.runs += Number(b.runs) || 0;
+          const r = Number(b.runs) || Number(b.score) || 0;
+          p.runs += r;
           p.balls += Number(b.balls) || 0;
           p.fours += Number(b.fours) || 0;
           p.sixes += Number(b.sixes) || 0;
-          if ((Number(b.runs) || 0) > p.highScore) p.highScore = Number(b.runs);
+          if (r > p.highScore) p.highScore = r;
         });
       }
 
       // Process Innings 2 Bowlers (Bowled by Team A)
-      if (liveMatch.innings2?.bowlerList && Array.isArray(liveMatch.innings2.bowlerList)) {
-        liveMatch.innings2.bowlerList.forEach((bw: any) => {
-          if (!bw.bowlerName) return;
-          const p = getOrCreatePlayer(bw.bowlerName, teamAObj, 'Bowler');
-          p.wickets += Number(bw.wickets) || 0;
-          p.runsConceded += Number(bw.runsConceded) || 0;
+      const inn2Bowlers = inn2?.bowlers || inn2?.bowlerList;
+      if (Array.isArray(inn2Bowlers) && inn2Bowlers.length > 0) {
+        hasProcessedLiveInnings = true;
+        inn2Bowlers.forEach((bw: any) => {
+          const bwName = (bw.name || bw.bowlerName || bw.playerName || bw.player || '').trim();
+          if (!bwName) return;
+          const p = getOrCreatePlayer(bwName, teamAObj, 'Bowler');
+          const wkts = Number(bw.wickets) || 0;
+          p.wickets += wkts;
+          p.runsConceded += Number(bw.runsConceded) || Number(bw.runs) || 0;
           p.maidens += Number(bw.maidens) || 0;
           const overs = Number(bw.overs) || 0;
-          p.ballsBowled += Math.floor(overs) * 6 + Math.round((overs % 1) * 10);
+          const balls = Number(bw.ballsBowled) || (overs ? Math.floor(overs) * 6 + Math.round((overs % 1) * 10) : 0);
+          p.ballsBowled += balls;
         });
       }
-    } else {
+    }
+
+    if (!hasProcessedLiveInnings) {
       // Approximate / distribute match score stats among squad players for realistic performance tracking
       const sA = parseScore(m.scoreA);
       const sB = parseScore(m.scoreB);

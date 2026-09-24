@@ -155,6 +155,13 @@ interface OverlayConfig {
   tournamentBaseFours?: number;
   tournamentBaseSixes?: number;
   boundaryCounterPosition?: 'bottom-right' | 'bottom-center' | 'top-right' | 'top-left';
+  boundarySponsorName?: string;
+  boundarySponsorLogoUrl?: string;
+  boundarySponsorTagline?: string;
+  boundarySponsorFour?: string;
+  boundarySponsorSix?: string;
+  showBoundaryDistance?: boolean;
+  showBoundaryMilestones?: boolean;
   youtubeChannelLogo?: string;
   showYoutubeChannelLogo?: boolean;
   youtubeChannelName?: string;
@@ -383,6 +390,11 @@ export const CricketOverlay: React.FC = () => {
     visible: boolean;
     type: 'four' | 'six';
     batterName?: string;
+    distance?: string;
+    speed?: string;
+    shotZone?: string;
+    isMilestone?: boolean;
+    milestoneText?: string;
     timestamp?: number;
   }>({
     visible: false,
