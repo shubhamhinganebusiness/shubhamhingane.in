@@ -433,6 +433,16 @@ export function broadcastMatchChange(match: MatchState | null, eventType: 'updat
           detail: { match, eventType, timestamp: Date.now() }
         })
       );
+      window.dispatchEvent(
+        new CustomEvent('cricket_matches_updated', {
+          detail: { match, eventType, timestamp: Date.now() }
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('cricket_active_match_changed', {
+          detail: { match, eventType, timestamp: Date.now() }
+        })
+      );
     } catch (e) {
       console.warn('CustomEvent dispatch error:', e);
     }
@@ -841,9 +851,114 @@ export function purgeCachedAIMatches(): void {
   }
 }
 
+export const DELETED_TOURNAMENTS_REGISTRY_KEY = 'cricket_deleted_tournaments_registry';
+
+/**
+ * Checks whether a tournament has been permanently deleted
+ */
+export function isTournamentDeleted(id: string): boolean {
+  if (typeof window === 'undefined' || !id) return false;
+  const trimmedId = String(id).trim();
+  try {
+    if (sessionStorage.getItem(`deleted_tour_${trimmedId}`) === 'true') {
+      return true;
+    }
+    const raw = localStorage.getItem(DELETED_TOURNAMENTS_REGISTRY_KEY);
+    if (!raw) return false;
+    const deletedMap = JSON.parse(raw);
+    if (deletedMap && typeof deletedMap === 'object' && deletedMap[trimmedId]) {
+      return true;
+    }
+  } catch (e) {
+    console.warn('Failed to read deleted tournaments registry:', e);
+  }
+  return false;
+}
+
+/**
+ * Marks a tournament as deleted in tombstone registry and purges it from local caches
+ */
+export function markTournamentDeleted(id: string): void {
+  if (typeof window === 'undefined' || !id) return;
+  const trimmedId = String(id).trim();
+  try {
+    sessionStorage.setItem(`deleted_tour_${trimmedId}`, 'true');
+    const raw = localStorage.getItem(DELETED_TOURNAMENTS_REGISTRY_KEY);
+    const deletedMap: Record<string, number> = raw ? JSON.parse(raw) : {};
+    deletedMap[trimmedId] = Date.now();
+    localStorage.setItem(DELETED_TOURNAMENTS_REGISTRY_KEY, JSON.stringify(deletedMap));
+
+    // Remove from gully_tournaments_v1 in localStorage
+    const saved = localStorage.getItem('gully_tournaments_v1');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        const remaining = parsed.filter((t: any) => t && t.id !== trimmedId && !isTournamentDeleted(t.id));
+        localStorage.setItem('gully_tournaments_v1', JSON.stringify(remaining));
+      }
+    }
+
+    // Remove from gully_active_tournament_id if it was active
+    const activeTourId = localStorage.getItem('gully_active_tournament_id');
+    if (activeTourId === trimmedId) {
+      localStorage.removeItem('gully_active_tournament_id');
+    }
+  } catch (e) {
+    console.warn('Failed to mark tournament deleted:', e);
+  }
+}
+
+/**
+ * Permanently deletes a tournament locally, marks tombstone, notifies listeners, and calls backend API
+ */
+export function deleteLocalTournament(id: string): void {
+  if (!id) return;
+  const trimmedId = String(id).trim();
+  markTournamentDeleted(trimmedId);
+
+  // Sync to server-side tombstone
+  try {
+    fetch('/api/cricket/delete-tournament', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tournamentId: trimmedId })
+    }).catch(() => {});
+  } catch (_) {}
+
+  // Dispatch events to refresh all components across window
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(new CustomEvent('gully_tournaments_updated', { detail: { deletedTournamentId: trimmedId } }));
+      window.dispatchEvent(new CustomEvent('cricket_tournament_deleted', { detail: { id: trimmedId } }));
+      window.dispatchEvent(new Event('gully_tournaments_updated'));
+    } catch (_) {}
+  }
+}
+
+/**
+ * Purges deleted tournaments based on server-side tombstone list
+ */
+export function syncDeletedTournamentsFromServer(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    fetch('/api/cricket/deleted-tournaments')
+      .then(res => res.json())
+      .then(data => {
+        if (data && Array.isArray(data.deletedIds)) {
+          data.deletedIds.forEach((id: string) => {
+            markTournamentDeleted(id);
+          });
+          window.dispatchEvent(new CustomEvent('gully_tournaments_updated', { detail: { sync: true } }));
+        }
+      })
+      .catch(() => {});
+  } catch (_) {}
+}
+
 // Automatically invoke on client load
 if (typeof window !== 'undefined') {
   purgeCachedAIMatches();
+  syncDeletedTournamentsFromServer();
 }
 
 /**
@@ -867,6 +982,8 @@ export function subscribeToMatchSync(callback: () => void): () => void {
   };
 
   window.addEventListener('cricket_match_updated', handleCustomEvent);
+  window.addEventListener('cricket_matches_updated', handleCustomEvent);
+  window.addEventListener('cricket_active_match_changed', handleCustomEvent);
   window.addEventListener('storage', handleStorageEvent);
 
   if (broadcastChannel) {
@@ -874,10 +991,12 @@ export function subscribeToMatchSync(callback: () => void): () => void {
   }
 
   // Fallback poller to ensure UI never desyncs even on edge cases
-  const intervalId = setInterval(callback, 3000);
+  const intervalId = setInterval(callback, 2000);
 
   return () => {
     window.removeEventListener('cricket_match_updated', handleCustomEvent);
+    window.removeEventListener('cricket_matches_updated', handleCustomEvent);
+    window.removeEventListener('cricket_active_match_changed', handleCustomEvent);
     window.removeEventListener('storage', handleStorageEvent);
     if (broadcastChannel) {
       broadcastChannel.removeEventListener('message', handleBroadcastMessage);

@@ -70,6 +70,58 @@ class LiveFanOutClient {
     }
   }
 
+  /**
+   * Immediately warm and notify local subscribers with a freshly started or updated match
+   */
+  public publishMatch(match: any): void {
+    if (!match || !match.id) return;
+    const summary = {
+      id: match.id,
+      teamA: match.teamA,
+      teamB: match.teamB,
+      teamALogo: match.teamALogo,
+      teamBLogo: match.teamBLogo,
+      status: match.status,
+      currentInningsNum: match.currentInningsNum,
+      oversLimit: match.oversLimit,
+      updatedAt: match.updatedAt || Date.now(),
+      match
+    };
+    
+    // Update local cached feed
+    const currentMatches = this.cachedFeed?.matches ? [...this.cachedFeed.matches] : [];
+    const idx = currentMatches.findIndex(m => m && m.id === match.id);
+    if (idx >= 0) {
+      currentMatches[idx] = summary;
+    } else {
+      currentMatches.unshift(summary);
+    }
+    this.cachedFeed = {
+      source: 'origin_db',
+      cachedAt: Date.now(),
+      etag: `W/"live-${Date.now()}"`,
+      matches: currentMatches
+    };
+    this.feedSubscribers.forEach(cb => {
+      try { cb(this.cachedFeed!); } catch (_) {}
+    });
+
+    // Update match summary subscribers
+    const matchSummaryRes: CachedMatchSummaryResponse = {
+      source: 'origin_db',
+      cachedAt: Date.now(),
+      etag: `W/"match-${match.id}-${Date.now()}"`,
+      summary
+    };
+    this.cachedMatchSummaries.set(match.id, matchSummaryRes);
+    const matchSubs = this.matchSubscribers.get(match.id);
+    if (matchSubs) {
+      matchSubs.forEach(cb => {
+        try { cb(matchSummaryRes); } catch (_) {}
+      });
+    }
+  }
+
   public static getInstance(): LiveFanOutClient {
     if (!LiveFanOutClient.instance) {
       LiveFanOutClient.instance = new LiveFanOutClient();

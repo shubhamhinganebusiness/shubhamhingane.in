@@ -38,6 +38,7 @@ import autoTable from 'jspdf-autotable';
 import { ConfettiCanvas } from './ConfettiCanvas';
 import { CricketTournamentTab } from './CricketTournamentTab';
 import { DLSCalculatorModal } from './DLSCalculatorModal';
+import { liveFanOutClient } from './modules/LiveFanOutClient';
 import { SpinCoinModal, SpinCoinResult } from './SpinCoinModal';
 import { VoiceAssistedScorer } from './VoiceAssistedScorer';
 import { FieldPositionManagerModal } from './FieldPositionManagerModal';
@@ -56,7 +57,8 @@ import {
   sanitizeForFirestore,
   compressImageFile,
   isDemoOrAIMatch,
-  purgeCachedAIMatches
+  purgeCachedAIMatches,
+  isTournamentDeleted
 } from './cricketStorage';
 import { 
   recordBallDelivery, 
@@ -608,8 +610,10 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
           localList = JSON.parse(localRaw);
           if (Array.isArray(localList)) {
             tournament = localList.find((t: any) => 
-              (tournamentId && t.id === tournamentId) || 
-              (matchState.tournamentName && t.name?.toLowerCase().trim() === matchState.tournamentName?.toLowerCase().trim())
+              t && !isTournamentDeleted(t.id) && (
+                (tournamentId && t.id === tournamentId) || 
+                (matchState.tournamentName && t.name?.toLowerCase().trim() === matchState.tournamentName?.toLowerCase().trim())
+              )
             );
           }
         }
@@ -1576,6 +1580,7 @@ export const CricketScoreboard: React.FC = () => {
   const [aiCommentaryEnabled, setAiCommentaryEnabled] = useState(true);
   const [isAiCommentaryLoading, setIsAiCommentaryLoading] = useState(false);
   const [userCommentaryLang, setUserCommentaryLang] = useCommentaryLanguage('en');
+  const [commentaryDeskSubTab, setCommentaryDeskSubTab] = useState<'feed' | 'podium'>('feed');
 
   // Copy Overlay Link state
   const [copiedOverlayLink, setCopiedOverlayLink] = useState(false);
@@ -3135,7 +3140,11 @@ export const CricketScoreboard: React.FC = () => {
     setTeamB(stored.teamB);
     if (stored.overs) setOversLimit(stored.overs);
     if (stored.venue) setGroundName(stored.venue);
-    setTossWinner(stored.tossWinner === stored.teamB ? 'Team B' : 'Team A');
+    const isStoredWinnerB = stored.teamB && stored.tossWinner && (
+      stored.tossWinner.trim().toLowerCase() === stored.teamB.trim().toLowerCase() ||
+      stored.tossWinner.trim().toLowerCase() === 'team b'
+    );
+    setTossWinner(isStoredWinnerB ? 'Team B' : 'Team A');
     setTossChoice(stored.tossChoice || 'bat');
     setConnectedTossInfo({
       tossWinner: stored.tossWinner,
@@ -3151,7 +3160,7 @@ export const CricketScoreboard: React.FC = () => {
 
   // Apply Spin Coin interactive toss result directly to match setup
   const handleApplySpinCoinToss = (result: SpinCoinResult) => {
-    setTossWinner(result.winner);
+    setTossWinner(result.winner === 'Team B' ? 'Team B' : 'Team A');
     setTossChoice(result.choice);
     const tossData = {
       teamA: teamA.trim() || 'Team A',
@@ -3249,30 +3258,67 @@ export const CricketScoreboard: React.FC = () => {
     });
   };
 
+  // Helper to accurately resolve toss outcome and 1st innings batting/bowling teams
+  const getTossResolution = () => {
+    const normWinner = (tossWinner || '').trim().toLowerCase();
+    const normTeamA = (teamA || '').trim().toLowerCase();
+    const normTeamB = (teamB || '').trim().toLowerCase();
+
+    let isTeamAWinner = false;
+    if (
+      normWinner === 'team a' ||
+      normWinner === 'teama' ||
+      normWinner === 'team_a' ||
+      normWinner === 'a'
+    ) {
+      isTeamAWinner = true;
+    } else if (
+      normWinner === 'team b' ||
+      normWinner === 'teamb' ||
+      normWinner === 'team_b' ||
+      normWinner === 'b'
+    ) {
+      isTeamAWinner = false;
+    } else if (normTeamA && (normWinner === normTeamA || (normWinner.length > 2 && normTeamA.startsWith(normWinner)))) {
+      isTeamAWinner = true;
+    } else if (normTeamB && (normWinner === normTeamB || (normWinner.length > 2 && normTeamB.startsWith(normWinner)))) {
+      isTeamAWinner = false;
+    } else {
+      isTeamAWinner = true; // Fallback to Team A
+    }
+
+    const effectiveTossWinner = isTeamAWinner ? (teamA.trim() || 'Team A') : (teamB.trim() || 'Team B');
+    const effectiveTossLoser = isTeamAWinner ? (teamB.trim() || 'Team B') : (teamA.trim() || 'Team A');
+
+    const effectiveBattingTeam = tossChoice === 'bat' ? effectiveTossWinner : effectiveTossLoser;
+    const effectiveBowlingTeam = tossChoice === 'bat' ? effectiveTossLoser : effectiveTossWinner;
+
+    return {
+      isTeamAWinner,
+      effectiveTossWinner,
+      effectiveTossLoser,
+      effectiveBattingTeam,
+      effectiveBowlingTeam
+    };
+  };
+
   // Start a fresh Match
   const handleStartMatch = () => {
     if (!teamA.trim() || !teamB.trim()) {
       showNotification('Please fill in both Team names!', 'alert');
       return;
     }
-    const coinTossWinTeam = tossWinner === 'Team A' ? teamA : teamB;
-    const coinTossLoseTeam = tossWinner === 'Team A' ? teamB : teamA;
 
-    // Determine who bats first
-    let batFirstTeam = '';
-    let bowlFirstTeam = '';
-
-    if (tossChoice === 'bat') {
-      batFirstTeam = coinTossWinTeam;
-      bowlFirstTeam = coinTossLoseTeam;
-    } else {
-      batFirstTeam = coinTossLoseTeam;
-      bowlFirstTeam = coinTossWinTeam;
-    }
+    const { effectiveTossWinner, effectiveTossLoser, effectiveBattingTeam, effectiveBowlingTeam } = getTossResolution();
+    const coinTossWinTeam = effectiveTossWinner;
+    const coinTossLoseTeam = effectiveTossLoser;
+    const batFirstTeam = effectiveBattingTeam;
+    const bowlFirstTeam = effectiveBowlingTeam;
 
     // Load custom team rosters if they exist
-    const batRoster = batFirstTeam === teamA ? selectedTeamARoster : selectedTeamBRoster;
-    const bowlRoster = bowlFirstTeam === teamA ? selectedTeamARoster : selectedTeamBRoster;
+    const isBattingTeamA = batFirstTeam.trim().toLowerCase() === (teamA || '').trim().toLowerCase();
+    const batRoster = isBattingTeamA ? selectedTeamARoster : selectedTeamBRoster;
+    const bowlRoster = isBattingTeamA ? selectedTeamBRoster : selectedTeamARoster;
 
     const batsman1Name = setupOpeningBatsman1.trim() || ((batRoster && batRoster.length > 0) ? batRoster[0] : 'Batter 1 State');
     const batsman2Name = setupOpeningBatsman2.trim() || ((batRoster && batRoster.length > 1) ? batRoster[1] : 'Batter 2 State');
@@ -3444,45 +3490,55 @@ export const CricketScoreboard: React.FC = () => {
       );
     }
 
-    // Synchronize active match pointer for permanent OBS link
+    // Synchronize active match pointer for permanent OBS link across all channels
+    const mgrPayload = {
+      managerId: currentManagerId || 'official_scorer',
+      managerName: currentManagerName || 'Official Scorer',
+      streamKey: streamKey || null,
+      activeMatchId: newMatch.id,
+      status: 'live',
+      activeMatchSummary: {
+        id: newMatch.id,
+        teamA: newMatch.teamA,
+        teamB: newMatch.teamB,
+        oversLimit: newMatch.oversLimit
+      },
+      updatedAt: Date.now()
+    };
+
     if (currentManagerId) {
-      const managerDocRef = doc(db, 'score_managers', currentManagerId);
-      safeSetDoc(managerDocRef, {
-        managerId: currentManagerId,
-        managerName: currentManagerName,
-        streamKey: streamKey,
-        activeMatchId: newMatch.id,
-        status: 'live',
-        activeMatchSummary: {
-          id: newMatch.id,
-          teamA: newMatch.teamA,
-          teamB: newMatch.teamB,
-          oversLimit: newMatch.oversLimit
-        },
-        updatedAt: Date.now()
-      }, { merge: true }).catch(() => {});
-
-      if (streamKey) {
-        safeSetDoc(doc(db, 'score_managers', streamKey), {
-          managerId: currentManagerId,
-          streamKey: streamKey,
-          activeMatchId: newMatch.id,
-          status: 'live',
-          updatedAt: Date.now()
-        }, { merge: true }).catch(() => {});
-      }
-
-      fetch('/api/cricket/set-active-match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          managerId: currentManagerId,
-          matchId: newMatch.id,
-          streamKey: streamKey,
-          matchData: sanitizeForFirestore(newMatch)
-        })
-      }).catch(() => {});
+      safeSetDoc(doc(db, 'score_managers', currentManagerId), mgrPayload, { merge: true }).catch(() => {});
     }
+    // Also write to official_scorer and default so permanent OBS links immediately resolve to this match
+    safeSetDoc(doc(db, 'score_managers', 'official_scorer'), mgrPayload, { merge: true }).catch(() => {});
+    safeSetDoc(doc(db, 'score_managers', 'default'), mgrPayload, { merge: true }).catch(() => {});
+
+    if (streamKey) {
+      safeSetDoc(doc(db, 'score_managers', streamKey), mgrPayload, { merge: true }).catch(() => {});
+    }
+
+    // Instant sync to Realtime Database so spectator and OBS update in 0 ms!
+    syncScoreToRealtimeDB(newMatch.id, sanitizeForFirestore(newMatch));
+    
+    // Instant Edge Fan-out publish
+    try {
+      liveFanOutClient.publishMatch(newMatch);
+    } catch (_) {}
+
+    try {
+      sessionStorage.setItem('last_selected_match_id', newMatch.id);
+    } catch (_) {}
+
+    fetch('/api/cricket/set-active-match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        managerId: currentManagerId || 'official_scorer',
+        matchId: newMatch.id,
+        streamKey: streamKey || undefined,
+        matchData: sanitizeForFirestore(newMatch)
+      })
+    }).catch(() => {});
 
     // Set parameters and trigger Firestore write with safe fallback
     setSearchParams({ matchId: newMatch.id });
@@ -7010,6 +7066,33 @@ export const CricketScoreboard: React.FC = () => {
             }, { merge: true }).catch(() => {});
           }
 
+          // D) Also sync to official_scorer and default for permanent OBS link consistency
+          const fallbackActPointer = {
+            managerId: currentManagerId,
+            managerName: currentManagerName,
+            streamKey: streamKey,
+            activeMatchId: matchIdToActivate,
+            status: 'live',
+            activeMatchSummary: {
+              id: matchIdToActivate,
+              teamA: updatedMatch.teamA,
+              teamB: updatedMatch.teamB,
+              oversLimit: updatedMatch.oversLimit
+            },
+            updatedAt: Date.now()
+          };
+          safeSetDoc(doc(db, 'score_managers', 'official_scorer'), fallbackActPointer, { merge: true }).catch(() => {});
+          safeSetDoc(doc(db, 'score_managers', 'default'), fallbackActPointer, { merge: true }).catch(() => {});
+
+          // Instant push to Realtime Database and Edge Fan-out
+          syncScoreToRealtimeDB(matchIdToActivate, sanitizeForFirestore(updatedMatch));
+          try {
+            liveFanOutClient.publishMatch(updatedMatch);
+          } catch (_) {}
+          try {
+            sessionStorage.setItem('last_selected_match_id', matchIdToActivate);
+          } catch (_) {}
+
           // D) Retire any existing matches in Firestore for this manager that were 'live'
           if (activeLiveMatches && activeLiveMatches.length > 0) {
             for (const oldM of activeLiveMatches) {
@@ -7110,13 +7193,15 @@ export const CricketScoreboard: React.FC = () => {
       return;
     }
 
-    const coinTossWinTeam = tossWinner === 'Team A' ? teamA.trim() : teamB.trim();
-    const coinTossLoseTeam = tossWinner === 'Team A' ? teamB.trim() : teamA.trim();
-    const batFirstTeam = tossChoice === 'bat' ? coinTossWinTeam : coinTossLoseTeam;
-    const bowlFirstTeam = tossChoice === 'bat' ? coinTossLoseTeam : coinTossWinTeam;
+    const { effectiveTossWinner, effectiveTossLoser, effectiveBattingTeam, effectiveBowlingTeam } = getTossResolution();
+    const coinTossWinTeam = effectiveTossWinner;
+    const coinTossLoseTeam = effectiveTossLoser;
+    const batFirstTeam = effectiveBattingTeam;
+    const bowlFirstTeam = effectiveBowlingTeam;
 
-    const batRoster = batFirstTeam === teamA ? selectedTeamARoster : selectedTeamBRoster;
-    const bowlRoster = bowlFirstTeam === teamA ? selectedTeamARoster : selectedTeamBRoster;
+    const isBattingTeamA = batFirstTeam.trim().toLowerCase() === (teamA || '').trim().toLowerCase();
+    const batRoster = isBattingTeamA ? selectedTeamARoster : selectedTeamBRoster;
+    const bowlRoster = isBattingTeamA ? selectedTeamBRoster : selectedTeamARoster;
     const batsman1Name = (batRoster && batRoster.length > 0) ? batRoster[0] : 'Batter 1';
     const batsman2Name = (batRoster && batRoster.length > 1) ? batRoster[1] : 'Batter 2';
     const bowler1Name = (bowlRoster && bowlRoster.length > 0) ? bowlRoster[0] : 'Bowler 1';
@@ -13194,36 +13279,155 @@ export const CricketScoreboard: React.FC = () => {
                 {/* TAB: Commentary feed with user selected language */}
                 {activeScorecardTab === 'comm' && (
                   <div className="flex-1 flex flex-col min-h-0 space-y-2">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-800 gap-1 flex-wrap">
                       <div className="flex items-center gap-1">
-                        <span className="text-[8px] font-black uppercase text-slate-400">Language:</span>
-                        {(['mr', 'hi', 'en'] as const).map(l => (
-                          <button
-                            key={l}
-                            type="button"
-                            onClick={() => setUserCommentaryLang(l)}
-                            className={`px-2 py-0.5 rounded text-[8px] font-black uppercase transition-all border-none cursor-pointer ${
-                              userCommentaryLang === l
-                                ? 'bg-emerald-600 text-white shadow-xs'
-                                : 'text-slate-400 hover:text-white bg-slate-950'
-                            }`}
-                          >
-                            {l === 'mr' ? '🚩 मराठी' : l === 'hi' ? '🇮🇳 हिंदी' : '🌐 English'}
-                          </button>
-                        ))}
+                        <button
+                          type="button"
+                          onClick={() => setCommentaryDeskSubTab('feed')}
+                          className={`px-2 py-0.5 rounded text-[8px] font-black uppercase transition-all border-none cursor-pointer flex items-center gap-1 ${
+                            commentaryDeskSubTab === 'feed'
+                              ? 'bg-rose-600 text-white shadow-xs'
+                              : 'text-slate-400 hover:text-white bg-slate-950'
+                          }`}
+                        >
+                          <span>🎙️ Feed</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCommentaryDeskSubTab('podium')}
+                          className={`px-2 py-0.5 rounded text-[8px] font-black uppercase transition-all border-none cursor-pointer flex items-center gap-1 ${
+                            commentaryDeskSubTab === 'podium'
+                              ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-xs'
+                              : 'text-amber-400 hover:text-amber-300 bg-amber-500/10'
+                          }`}
+                        >
+                          <span>🏆 Podium & Prizes</span>
+                        </button>
                       </div>
-                      <span className="text-[8px] font-mono text-slate-400">
-                        {currentInnings.commentaryList?.length || 0} entries
-                      </span>
+
+                      {commentaryDeskSubTab === 'feed' && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[8px] font-black uppercase text-slate-400">Language:</span>
+                          {(['mr', 'hi', 'en'] as const).map(l => (
+                            <button
+                              key={l}
+                              type="button"
+                              onClick={() => setUserCommentaryLang(l)}
+                              className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase transition-all border-none cursor-pointer ${
+                                userCommentaryLang === l
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-slate-400 hover:text-white bg-slate-950'
+                              }`}
+                            >
+                              {l === 'mr' ? '🚩 मराठी' : l === 'hi' ? '🇮🇳 हिंदी' : '🌐 EN'}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Contextual Tone Shifter Banner */}
-                    {(() => {
+                    {commentaryDeskSubTab === 'feed' && (() => {
                       const matchTone = getMatchContextualTone(match, currentInnings);
                       return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />;
                     })()}
 
+                    {/* Podium & Honors in Commentary Desk */}
+                    {(() => {
+                      const tId = match.tournamentId;
+                      const tourPrizes = tId ? getTournamentPrizesByTournamentId(tId) : null;
+                      const matchPrizes = getTournamentPrizes(match.id);
+                      const prizesList = (tourPrizes && tourPrizes.length > 0) ? tourPrizes : (match.tournamentPrizes && match.tournamentPrizes.length > 0) ? match.tournamentPrizes : matchPrizes;
+                      
+                      const p1 = prizesList.find(p => p.category === 'tournament_1st') || prizesList[0];
+                      const p2 = prizesList.find(p => p.category === 'tournament_2nd') || (prizesList[1]?.id !== p1?.id ? prizesList[1] : undefined);
+                      const p3 = prizesList.find(p => p.category === 'tournament_3rd') || (prizesList[2]?.id !== p1?.id && prizesList[2]?.id !== p2?.id ? prizesList[2] : undefined);
+                      const mos = prizesList.find(p => p.category === 'man_of_series' || (p.title || '').toLowerCase().includes('series') || (p.title || '').toLowerCase().includes('tournament'));
+                      const bBat = prizesList.find(p => p.category === 'best_batsman' || (p.title || '').toLowerCase().includes('batsman') || (p.title || '').toLowerCase().includes('batter'));
+                      const bBowl = prizesList.find(p => p.category === 'best_bowler' || (p.title || '').toLowerCase().includes('bowler'));
 
+                      if (commentaryDeskSubTab === 'podium') {
+                        return (
+                          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 scrollbar-thin max-h-[300px]">
+                            {/* 3-Step Podium */}
+                            <div className="p-3 rounded-2xl bg-gradient-to-b from-amber-500/10 via-slate-950 to-slate-900 border border-amber-500/30 text-center">
+                              <span className="text-[9px] font-black uppercase tracking-wider text-amber-400 block mb-2">
+                                👑 Championship Podium
+                              </span>
+                              <div className="grid grid-cols-3 gap-1.5 items-end">
+                                <div className="p-2 rounded-xl bg-slate-800/80 border border-slate-600/40 text-center">
+                                  <span className="text-base">🥈</span>
+                                  <span className="text-[7px] font-black uppercase text-slate-300 block">2nd Place</span>
+                                  <div className="font-bold text-[9px] text-slate-100 truncate">{p2?.title || 'Runner-Up'}</div>
+                                  <div className="font-mono font-black text-xs text-slate-200">{p2?.currencySymbol || '₹'}{p2?.amount || '31,000'}</div>
+                                </div>
+                                <div className="p-2.5 rounded-xl bg-amber-500/20 border-2 border-amber-400/60 text-center">
+                                  <span className="text-xl">🏆</span>
+                                  <span className="text-[7.5px] font-black uppercase text-amber-300 block">Champion 1st</span>
+                                  <div className="font-bold text-[10px] text-amber-200 truncate">{p1?.title || 'Champion'}</div>
+                                  <div className="font-mono font-black text-sm text-amber-400">{p1?.currencySymbol || '₹'}{p1?.amount || '51,000'}</div>
+                                </div>
+                                <div className="p-2 rounded-xl bg-amber-900/20 border border-amber-700/40 text-center">
+                                  <span className="text-base">🥉</span>
+                                  <span className="text-[7px] font-black uppercase text-amber-500 block">3rd Place</span>
+                                  <div className="font-bold text-[9px] text-slate-100 truncate">{p3?.title || '3rd Place'}</div>
+                                  <div className="font-mono font-black text-xs text-amber-300">{p3?.currencySymbol || '₹'}{p3?.amount || '11,000'}</div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Individual Honors */}
+                            <div className="grid grid-cols-3 gap-1.5 text-center">
+                              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                                <span className="text-xs">⭐</span>
+                                <span className="text-[7px] font-bold text-purple-300 uppercase block">Series MVP</span>
+                                <div className="font-mono font-black text-[10px] text-purple-400">{mos?.currencySymbol || '₹'}{mos?.amount || '5,000'}</div>
+                              </div>
+                              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                                <span className="text-xs">🏏</span>
+                                <span className="text-[7px] font-bold text-amber-300 uppercase block">Best Batter</span>
+                                <div className="font-mono font-black text-[10px] text-amber-400">{bBat?.currencySymbol || '₹'}{bBat?.amount || '3,000'}</div>
+                              </div>
+                              <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
+                                <span className="text-xs">🎯</span>
+                                <span className="text-[7px] font-bold text-cyan-300 uppercase block">Best Bowler</span>
+                                <div className="font-mono font-black text-[10px] text-cyan-400">{bBowl?.currencySymbol || '₹'}{bBowl?.amount || '3,000'}</div>
+                              </div>
+                            </div>
+
+                            {/* Tournament Prize List */}
+                            <div className="space-y-1">
+                              <span className="text-[8px] font-black uppercase text-slate-400 block px-1">
+                                Complete Tournament Prize List ({prizesList.length})
+                              </span>
+                              <div className="space-y-1 max-h-36 overflow-y-auto pr-1 scrollbar-thin">
+                                {prizesList.map((pz, idx) => (
+                                  <div key={pz.id || idx} className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between text-[9px]">
+                                    <span className="text-slate-200 font-bold truncate">{pz.title}</span>
+                                    <span className="font-mono font-black text-amber-400">{pz.currencySymbol || '₹'}{pz.amount}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div 
+                          onClick={() => setCommentaryDeskSubTab('podium')}
+                          className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/15 to-purple-500/15 border border-amber-500/30 flex items-center justify-between text-[8px] font-semibold text-amber-300 cursor-pointer hover:border-amber-400 transition-all mb-1"
+                        >
+                          <span className="flex items-center gap-1 font-bold">
+                            <span>🏆</span>
+                            <span>Championship Podium & Individual Honors ({prizesList.length})</span>
+                          </span>
+                          <span className="font-bold underline text-amber-400">View Prize List →</span>
+                        </div>
+                      );
+                    })()}
+
+                    {commentaryDeskSubTab === 'feed' && (
                     <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin max-h-[300px]">
                       {(!currentInnings.commentaryList || currentInnings.commentaryList.length === 0) ? (
                         <p className="text-center text-xs text-slate-500 py-8 italic">No commentary yet for this innings.</p>
@@ -13287,6 +13491,7 @@ export const CricketScoreboard: React.FC = () => {
                         })
                       )}
                     </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -17720,8 +17925,8 @@ export const CricketScoreboard: React.FC = () => {
                       type="button"
                       onClick={() => setTossWinner('Team A')}
                       className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                        tossWinner === 'Team A' 
-                          ? 'bg-emerald-600 text-white shadow-sm' 
+                        getTossResolution().isTeamAWinner 
+                          ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400/40' 
                           : 'text-slate-400 dark:text-slate-500 bg-transparent'
                       }`}
                     >
@@ -17731,8 +17936,8 @@ export const CricketScoreboard: React.FC = () => {
                       type="button"
                       onClick={() => setTossWinner('Team B')}
                       className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                        tossWinner === 'Team B' 
-                          ? 'bg-emerald-600 text-white shadow-sm' 
+                        !getTossResolution().isTeamAWinner 
+                          ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400/40' 
                           : 'text-slate-400 dark:text-slate-500 bg-transparent'
                       }`}
                     >
@@ -18705,8 +18910,9 @@ export const CricketScoreboard: React.FC = () => {
 
               {/* Opening Batsmen & Opening Bowler Selection with Squad Dropdown Menus */}
               {(() => {
-                const setupBattingTeam = (tossWinner === 'teamA' ? (tossChoice === 'bat' ? teamA : teamB) : (tossChoice === 'bat' ? teamB : teamA)) || teamA;
-                const setupBowlingTeam = setupBattingTeam === teamA ? teamB : teamA;
+                const { effectiveTossWinner, effectiveBattingTeam, effectiveBowlingTeam } = getTossResolution();
+                const setupBattingTeam = effectiveBattingTeam;
+                const setupBowlingTeam = effectiveBowlingTeam;
 
                 const getTeamPlayers = (tName: string, explicitRoster: string[]): string[] => {
                   if (explicitRoster && explicitRoster.length > 0) return explicitRoster;
@@ -18717,8 +18923,9 @@ export const CricketScoreboard: React.FC = () => {
                   return [];
                 };
 
-                const setupBattingList = getTeamPlayers(setupBattingTeam, setupBattingTeam === teamA ? selectedTeamARoster : selectedTeamBRoster);
-                const setupBowlingList = getTeamPlayers(setupBowlingTeam, setupBowlingTeam === teamA ? selectedTeamARoster : selectedTeamBRoster);
+                const isBattingTeamA = setupBattingTeam.toLowerCase().trim() === (teamA || '').toLowerCase().trim();
+                const setupBattingList = getTeamPlayers(setupBattingTeam, isBattingTeamA ? selectedTeamARoster : selectedTeamBRoster);
+                const setupBowlingList = getTeamPlayers(setupBowlingTeam, isBattingTeamA ? selectedTeamBRoster : selectedTeamARoster);
 
                 return (
                   <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 text-left space-y-3">
@@ -18728,7 +18935,7 @@ export const CricketScoreboard: React.FC = () => {
                           Opening Players (Crease & First Over)
                         </span>
                         <span className="text-[8.5px] text-slate-400">
-                          Batting: <strong className="text-emerald-400">{setupBattingTeam}</strong> • Bowling: <strong className="text-amber-400">{setupBowlingTeam}</strong>
+                          Toss: <strong className="text-amber-400">{effectiveTossWinner}</strong> ({tossChoice === 'bat' ? 'Batting 1st' : 'Bowling 1st'}) • Batting: <strong className="text-emerald-400">{setupBattingTeam}</strong> • Bowling: <strong className="text-amber-400">{setupBowlingTeam}</strong>
                         </span>
                       </div>
                       <span className="text-[8.5px] text-slate-400 italic">Select from squad dropdown or quick tap</span>

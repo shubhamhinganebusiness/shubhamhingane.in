@@ -802,6 +802,79 @@ async function startServer() {
     }
   });
 
+  // Cricket deleted tournaments persistence & cross-device synchronization
+  const DELETED_TOURNAMENTS_FILE = path.join(process.cwd(), "cricket-deleted-tournaments.json");
+  function loadDeletedTournamentIds(): string[] {
+    try {
+      if (fs.existsSync(DELETED_TOURNAMENTS_FILE)) {
+        const raw = fs.readFileSync(DELETED_TOURNAMENTS_FILE, "utf-8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) return list;
+      }
+    } catch (e) {
+      console.warn("[Cricket Deleted Tournaments] Failed to read file:", e);
+    }
+    return [];
+  }
+
+  app.get("/api/cricket/deleted-tournaments", (req, res) => {
+    const ids = loadDeletedTournamentIds();
+    res.json({ deletedIds: ids });
+  });
+
+  app.post("/api/cricket/delete-tournament", async (req, res) => {
+    try {
+      const { tournamentId } = req.body || {};
+      if (!tournamentId || typeof tournamentId !== 'string') {
+        return res.status(400).json({ error: "tournamentId required" });
+      }
+      const ids = loadDeletedTournamentIds();
+      if (!ids.includes(tournamentId)) {
+        ids.push(tournamentId);
+        try {
+          fs.writeFileSync(DELETED_TOURNAMENTS_FILE, JSON.stringify(ids, null, 2), "utf-8");
+        } catch (err) {
+          console.warn("[Cricket Deleted Tournaments] Failed to write file:", err);
+        }
+      }
+
+      // Delete doc in Firestore
+      try {
+        const db = await getFirebaseDb();
+        if (db) {
+          const { doc, deleteDoc } = await import("firebase/firestore");
+          deleteDoc(doc(db, "cricket_tournaments", tournamentId)).catch(() => {});
+        }
+      } catch (fErr) {
+        console.warn("[Cricket Deleted Tournaments] Firestore deleteDoc notice:", fErr);
+      }
+
+      res.json({ success: true, tournamentId });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to mark tournament deleted" });
+    }
+  });
+
+  app.delete("/api/cricket/tournaments/:id", async (req, res) => {
+    const tournamentId = req.params.id;
+    if (!tournamentId) return res.status(400).json({ error: "id required" });
+    const ids = loadDeletedTournamentIds();
+    if (!ids.includes(tournamentId)) {
+      ids.push(tournamentId);
+      try {
+        fs.writeFileSync(DELETED_TOURNAMENTS_FILE, JSON.stringify(ids, null, 2), "utf-8");
+      } catch (err) {}
+    }
+    try {
+      const db = await getFirebaseDb();
+      if (db) {
+        const { doc, deleteDoc } = await import("firebase/firestore");
+        deleteDoc(doc(db, "cricket_tournaments", tournamentId)).catch(() => {});
+      }
+    } catch (_) {}
+    res.json({ success: true, tournamentId });
+  });
+
   // Active Match routing endpoint for OBS overlay and external integrations
   app.get("/api/cricket/active-match/:managerId", async (req, res) => {
     try {
@@ -818,41 +891,69 @@ async function startServer() {
       const { doc, getDoc, collection, query, where, getDocs, limit } = await import("firebase/firestore");
 
       // 1. Check direct score_managers pointer document
+      let mgrData: any = null;
       const managerRef = doc(db, "score_managers", managerId);
       const managerSnap = await getDoc(managerRef);
       if (managerSnap.exists()) {
-        const mgrData = managerSnap.data();
-        if (mgrData.status === 'live' && mgrData.activeMatchId) {
-          const matchRef = doc(db, "cricket_matches", mgrData.activeMatchId);
-          const matchSnap = await getDoc(matchRef);
-          if (matchSnap.exists() && matchSnap.data().status === 'live') {
-            return res.json({
-              active: true,
-              managerId,
-              matchId: mgrData.activeMatchId,
-              streamKey: mgrData.streamKey || null,
-              match: matchSnap.data()
-            });
+        mgrData = managerSnap.data();
+      }
+
+      // Fallback check to 'official_scorer' or 'default' if managerId doc had no live match
+      if (!mgrData || mgrData.status !== 'live' || !mgrData.activeMatchId) {
+        if (managerId !== 'official_scorer') {
+          const offSnap = await getDoc(doc(db, "score_managers", "official_scorer")).catch(() => null);
+          if (offSnap && offSnap.exists() && offSnap.data()?.status === 'live' && offSnap.data()?.activeMatchId) {
+            mgrData = offSnap.data();
+          }
+        }
+        if (!mgrData || mgrData.status !== 'live' || !mgrData.activeMatchId) {
+          const defSnap = await getDoc(doc(db, "score_managers", "default")).catch(() => null);
+          if (defSnap && defSnap.exists() && defSnap.data()?.status === 'live' && defSnap.data()?.activeMatchId) {
+            mgrData = defSnap.data();
           }
         }
       }
 
-      // 2. Query cricket_matches for any live match by managerId or streamKey
+      if (mgrData && mgrData.status === 'live' && mgrData.activeMatchId) {
+        const matchRef = doc(db, "cricket_matches", mgrData.activeMatchId);
+        const matchSnap = await getDoc(matchRef);
+        if (matchSnap.exists() && matchSnap.data().status === 'live') {
+          return res.json({
+            active: true,
+            managerId,
+            matchId: mgrData.activeMatchId,
+            streamKey: mgrData.streamKey || null,
+            match: matchSnap.data()
+          });
+        }
+      }
+
+      // 2. Query cricket_matches for any live match, sorting by updatedAt descending so NEWEST is picked
       const q = query(
         collection(db, "cricket_matches"),
-        where("managerId", "==", managerId),
-        where("status", "==", "live"),
-        limit(1)
+        where("status", "==", "live")
       );
       const qSnap = await getDocs(q);
       if (!qSnap.empty) {
-        const matchDoc = qSnap.docs[0];
-        return res.json({
-          active: true,
-          managerId,
-          matchId: matchDoc.id,
-          match: matchDoc.data()
-        });
+        const allLive = qSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
+        allLive.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+        let liveMatch = allLive.find(m => m.managerId === managerId || m.createdBy === managerId);
+        if (!liveMatch && (managerId === 'official_scorer' || managerId === 'default' || managerId === 'current')) {
+          liveMatch = allLive[0];
+        }
+        if (!liveMatch && allLive.length > 0) {
+          liveMatch = allLive[0];
+        }
+
+        if (liveMatch) {
+          return res.json({
+            active: true,
+            managerId,
+            matchId: liveMatch.id,
+            match: liveMatch
+          });
+        }
       }
 
       // No active match currently running
@@ -1506,13 +1607,18 @@ function cleanServerUndefined(obj: any): any {
 
       // 3. Update pointer in score_managers
       const managerRef = doc(db, "score_managers", managerId);
-      await setDoc(managerRef, {
+      const pointerPayload = {
         managerId,
         streamKey: streamKey || null,
         activeMatchId: matchId,
         status: "live",
         updatedAt: Date.now()
-      }, { merge: true });
+      };
+      await setDoc(managerRef, pointerPayload, { merge: true });
+
+      // Keep official_scorer and default in sync so permanent OBS links resolve without delay
+      await setDoc(doc(db, "score_managers", "official_scorer"), pointerPayload, { merge: true }).catch(() => {});
+      await setDoc(doc(db, "score_managers", "default"), pointerPayload, { merge: true }).catch(() => {});
 
       if (streamKey) {
         await setDoc(doc(db, "score_managers", streamKey), {

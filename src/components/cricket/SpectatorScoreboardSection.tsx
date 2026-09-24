@@ -38,7 +38,8 @@ import {
   pruneDeletedMatchesFromStorage,
   getAnyActiveOrRecentMatch,
   getOrCreateDefaultMatch,
-  isDemoOrAIMatch
+  isDemoOrAIMatch,
+  isTournamentDeleted
 } from './cricketStorage';
 
 // Recharts imports
@@ -767,12 +768,15 @@ export const SpectatorScoreboardSection = ({
       if (matchId) return matchId;
     }
 
-    // 4. If not homepageMode, check session storage or active local match
+    // 4. If not homepageMode, check active live match first, then session storage
     if (!homepageMode && typeof window !== 'undefined') {
       try {
+        const activeLocal = getActiveMatch();
+        if (activeLocal && activeLocal.id && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal)) {
+          return activeLocal.id;
+        }
         const lastSessionId = sessionStorage.getItem('last_selected_match_id');
         if (lastSessionId && !isMatchDeleted(lastSessionId)) return lastSessionId;
-        const activeLocal = getActiveMatch();
         if (activeLocal && activeLocal.id && !isMatchDeleted(activeLocal.id)) return activeLocal.id;
       } catch (_) {}
     }
@@ -846,6 +850,8 @@ export const SpectatorScoreboardSection = ({
   const [commentaryFilter, setCommentaryFilter] = useState<'all' | 'boundary' | 'wicket' | 'extra'>('all');
   const [commentarySearch, setCommentarySearch] = useState('');
   const [spectatorCommentaryLang, setSpectatorCommentaryLang] = useCommentaryLanguage('en');
+  const [spectatorCommentaryCardTab, setSpectatorCommentaryCardTab] = useState<'feed' | 'podium'>('feed');
+  const [commentaryLogPodiumOpen, setCommentaryLogPodiumOpen] = useState(false);
   const [selectedScorecardInnings, setSelectedScorecardInnings] = useState<1 | 2>(1);
   const [historyResultFilter, setHistoryResultFilter] = useState<'all' | 'wins' | 'ties'>('all');
   const [toastNotification, setToastNotification] = useState<string | null>(null);
@@ -1479,8 +1485,16 @@ export const SpectatorScoreboardSection = ({
         } catch (_) {}
         return Array.from(map.values()).filter(m => !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted');
       });
+
+      const liveOne = active.find(m => m.status === 'live') || getActiveMatch();
+      if (liveOne && liveOne.status === 'live' && !matchIdParam) {
+        setSelectedMatch(prev => (!prev || prev.status !== 'live' ? liveOne : prev));
+        setLocalSelectedMatchId(prev => (!prev ? liveOne.id : prev));
+      }
     };
     window.addEventListener('cricket_matches_updated', handleMatchesUpdated);
+    window.addEventListener('cricket_match_updated', handleMatchesUpdated);
+    window.addEventListener('cricket_active_match_changed', handleMatchesUpdated);
 
     // Subscribe to cross-tab / cross-component match sync
     const unsubSync = subscribeToMatchSync(() => {
@@ -1498,13 +1512,14 @@ export const SpectatorScoreboardSection = ({
             }
           });
           active.forEach(a => { 
-            if (map.has(a.id) && !isMatchDeleted(a.id) && a.status !== 'deleted' && !(a as any).isDeleted && !isDemoOrAIMatch(a)) {
+            if (!isMatchDeleted(a.id) && a.status !== 'deleted' && !(a as any).isDeleted && !isDemoOrAIMatch(a)) {
               const isTour = !!a.tournamentId || a.id.startsWith('tour_') || (a as any).isTournamentMatch;
               if (a.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(a.id) && !isTour) {
                 map.delete(a.id);
                 return;
               }
-              map.set(a.id, { ...map.get(a.id)!, ...a });
+              const existing = map.get(a.id);
+              map.set(a.id, existing ? { ...existing, ...a } : a);
             }
           });
 
@@ -1524,6 +1539,12 @@ export const SpectatorScoreboardSection = ({
             !(m.status === 'completed' && isFirestoreCollectionLoadedRef.current && remoteCompletedMatchIdsRef.current && !remoteCompletedMatchIdsRef.current.has(m.id) && !isTour);
           });
         });
+
+        const liveOne = active.find(m => m.status === 'live') || getActiveMatch();
+        if (liveOne && liveOne.status === 'live' && !matchIdParam) {
+          setSelectedMatch(prev => (!prev || prev.status !== 'live' ? liveOne : prev));
+          setLocalSelectedMatchId(prev => (!prev ? liveOne.id : prev));
+        }
       }
       setSelectedMatch(current => (current && (isMatchDeleted(current.id) || current.status === 'deleted' || (current as any).isDeleted || isDemoOrAIMatch(current)) ? null : current));
     });
@@ -1650,6 +1671,8 @@ export const SpectatorScoreboardSection = ({
       unsubDeleted();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('cricket_matches_updated', handleMatchesUpdated);
+      window.removeEventListener('cricket_match_updated', handleMatchesUpdated);
+      window.removeEventListener('cricket_active_match_changed', handleMatchesUpdated);
       window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
       window.removeEventListener('cricket_select_match', handleSelectMatchEvent);
     };
@@ -1809,7 +1832,7 @@ export const SpectatorScoreboardSection = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setTournaments(parsed);
+          setTournaments(parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id)));
         }
       }
     } catch (_) {}
@@ -1818,14 +1841,22 @@ export const SpectatorScoreboardSection = ({
       const list: any[] = [];
       snap.forEach((doc) => {
         const data = doc.data();
-        list.push({ ...data, id: data.id || doc.id });
+        const tid = data?.id || doc.id;
+        if (!isTournamentDeleted(tid)) {
+          list.push({ ...data, id: tid });
+        }
       });
 
       // Merge with local storage so completed matches are never overwritten by stale remote documents
       let localList: any[] = [];
       try {
         const saved = localStorage.getItem('gully_tournaments_v1');
-        if (saved) localList = JSON.parse(saved);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            localList = parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+          }
+        }
       } catch (_) {}
 
       const merged = list.map((remoteT: any) => {
@@ -1861,14 +1892,13 @@ export const SpectatorScoreboardSection = ({
       });
 
       localList.forEach((localT: any) => {
-        if (!merged.some((m: any) => m.id === localT.id)) {
+        if (!isTournamentDeleted(localT.id) && !merged.some((m: any) => m.id === localT.id)) {
           merged.push(localT);
         }
       });
 
-      if (merged.length > 0) {
-        setTournaments(merged);
-      }
+      const validTournaments = merged.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+      setTournaments(validTournaments);
     }, (err) => {
       console.warn("Warning subscribing to cricket_tournaments:", err);
     });
@@ -1879,7 +1909,7 @@ export const SpectatorScoreboardSection = ({
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            setTournaments(parsed);
+            setTournaments(parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id)));
           }
         }
       } catch (e) {
@@ -2157,11 +2187,16 @@ export const SpectatorScoreboardSection = ({
       return true;
     });
 
-    // Only if completely offline and list is empty, fallback to active local match
-    if (list.length === 0 && connectionStatus === 'offline') {
-      const activeLocal = getActiveMatch();
-      if (activeLocal && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !(activeLocal as any).isDeleted && !isDemoOrAIMatch(activeLocal)) {
-        list.push(activeLocal);
+    // Seamlessly ensure active local live match is included with zero latency
+    const activeLocal = getActiveMatch();
+    if (activeLocal && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !(activeLocal as any).isDeleted && !isDemoOrAIMatch(activeLocal)) {
+      const existingIdx = list.findIndex(m => m.id === activeLocal.id);
+      if (existingIdx === -1) {
+        list.unshift(activeLocal);
+      } else {
+        if ((activeLocal.updatedAt || 0) >= (list[existingIdx].updatedAt || 0)) {
+          list[existingIdx] = { ...list[existingIdx], ...activeLocal };
+        }
       }
     }
 
@@ -2421,6 +2456,33 @@ export const SpectatorScoreboardSection = ({
       }
     });
     return hasValid ? sum.toLocaleString('en-IN') : '1,00,000+';
+  }, [tournamentPrizes]);
+
+  // Championship Podium and Individual Honors derived from tournamentPrizes
+  const { podium1st, podium2nd, podium3rd, mosPrize, bestBatPrize, bestBowlPrize, bestFieldPrize, maxSixPrize, otherHonors } = useMemo(() => {
+    const p1 = tournamentPrizes.find(p => p.category === 'tournament_1st') || tournamentPrizes[0];
+    const p2 = tournamentPrizes.find(p => p.category === 'tournament_2nd') || (tournamentPrizes[1]?.id !== p1?.id ? tournamentPrizes[1] : undefined);
+    const p3 = tournamentPrizes.find(p => p.category === 'tournament_3rd') || (tournamentPrizes[2]?.id !== p1?.id && tournamentPrizes[2]?.id !== p2?.id ? tournamentPrizes[2] : undefined);
+
+    const mos = tournamentPrizes.find(p => p.category === 'man_of_series' || (p.title || '').toLowerCase().includes('series') || (p.title || '').toLowerCase().includes('tournament'));
+    const bBat = tournamentPrizes.find(p => p.category === 'best_batsman' || (p.title || '').toLowerCase().includes('batsman') || (p.title || '').toLowerCase().includes('batter'));
+    const bBowl = tournamentPrizes.find(p => p.category === 'best_bowler' || (p.title || '').toLowerCase().includes('bowler'));
+    const bField = tournamentPrizes.find(p => p.category === 'best_fielder' || (p.title || '').toLowerCase().includes('fielder') || (p.title || '').toLowerCase().includes('keeper'));
+    const max6 = tournamentPrizes.find(p => p.category === 'maximum_sixes' || (p.title || '').toLowerCase().includes('six'));
+
+    const others = tournamentPrizes.filter(p => p.id !== p1?.id && p.id !== p2?.id && p.id !== p3?.id);
+
+    return {
+      podium1st: p1,
+      podium2nd: p2,
+      podium3rd: p3,
+      mosPrize: mos,
+      bestBatPrize: bBat,
+      bestBowlPrize: bBowl,
+      bestFieldPrize: bField,
+      maxSixPrize: max6,
+      otherHonors: others
+    };
   }, [tournamentPrizes]);
 
   // Compute player matches played and averages from completed match history database
@@ -5680,43 +5742,312 @@ export const SpectatorScoreboardSection = ({
                     </div>
                   </motion.div>
                         {/* Live Ball-by-Ball Commentary Feed (Prominent placement!) */}
+                {/* Live Ball-by-Ball Commentary Feed & Championship Podium */}
                 <motion.div 
-                  key={`spectator-comm-card-${currentInnings.runs}-${currentInnings.wickets}-${currentInnings.ballsBowled}`}
+                  key={`spectator-comm-card-${currentInnings.runs}-${currentInnings.wickets}-${currentInnings.ballsBowled}-${spectatorCommentaryCardTab}`}
                   initial={{ opacity: 0, y: 15, scale: 0.99 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.25, delay: 0.05 }}
                   className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-6 shadow-md flex flex-col justify-between"
                 >
                   <div className="flex-1 flex flex-col min-h-0">
-                    <div className="flex items-center justify-between pb-3 border-b border-slate-50 dark:border-slate-800/80 mb-4 gap-2 flex-wrap">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-50 dark:border-slate-800/80 mb-3 gap-2 flex-wrap">
                       <div>
                         <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest block mb-0.5 animate-pulse">🔴 Live Commentary</span>
-                        <h4 className="text-base font-black text-slate-800 dark:text-slate-100 font-sans">Ball-by-Ball Feed</h4>
+                        <h4 className="text-base font-black text-slate-800 dark:text-slate-100 font-sans">
+                          {spectatorCommentaryCardTab === 'podium' ? 'Championship Podium & Prizes' : 'Ball-by-Ball Feed'}
+                        </h4>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {/* Compact language switcher for user */}
-                        <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200/60 dark:border-slate-800">
-                          {(['mr', 'hi', 'en'] as const).map(langId => (
-                            <button
-                              key={langId}
-                              type="button"
-                              onClick={() => setSpectatorCommentaryLang(langId)}
-                              className={`px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all border-none cursor-pointer ${
-                                spectatorCommentaryLang === langId
-                                  ? 'bg-emerald-600 text-white shadow-xs'
-                                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
-                              }`}
-                              title={langId === 'mr' ? 'मराठी कॉमेंट्री' : langId === 'hi' ? 'हिंदी कमेंट्री' : 'English Commentary'}
-                            >
-                              {langId === 'mr' ? '🚩 मराठी' : langId === 'hi' ? '🇮🇳 हिंदी' : '🌐 EN'}
-                            </button>
-                          ))}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Tab Switcher: Feed vs Championship Podium & Prize List */}
+                        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => setSpectatorCommentaryCardTab('feed')}
+                            className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
+                              spectatorCommentaryCardTab === 'feed'
+                                ? 'bg-rose-600 text-white shadow-xs'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
+                            }`}
+                          >
+                            <span>🎙️</span>
+                            <span>Feed</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSpectatorCommentaryCardTab('podium')}
+                            className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
+                              spectatorCommentaryCardTab === 'podium'
+                                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-xs'
+                                : 'text-amber-600 dark:text-amber-400 hover:text-amber-500 bg-amber-500/10'
+                            }`}
+                          >
+                            <span>🏆</span>
+                            <span>Podium & Prizes ({tournamentPrizes.length})</span>
+                          </button>
                         </div>
-                        <span className="text-[9px] font-mono text-slate-400 font-bold bg-slate-50 dark:bg-slate-950 px-2.5 py-0.5 rounded border border-slate-200/50 hidden sm:inline-block">REAL-TIME</span>
+
+                        {/* Compact language switcher for user (shown in feed view) */}
+                        {spectatorCommentaryCardTab === 'feed' && (
+                          <div className="flex items-center gap-0.5 bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200/60 dark:border-slate-800">
+                            {(['mr', 'hi', 'en'] as const).map(langId => (
+                              <button
+                                key={langId}
+                                type="button"
+                                onClick={() => setSpectatorCommentaryLang(langId)}
+                                className={`px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all border-none cursor-pointer ${
+                                  spectatorCommentaryLang === langId
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 bg-transparent'
+                                }`}
+                                title={langId === 'mr' ? 'मराठी कॉमेंट्री' : langId === 'hi' ? 'हिंदी कमेंट्री' : 'English Commentary'}
+                              >
+                                {langId === 'mr' ? '🚩 मराठी' : langId === 'hi' ? '🇮🇳 हिंदी' : '🌐 EN'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <span className="text-[9px] font-mono text-slate-400 font-bold bg-slate-50 dark:bg-slate-950 px-2 py-0.5 rounded border border-slate-200/50 hidden sm:inline-block">
+                          {spectatorCommentaryCardTab === 'podium' ? 'AWARDS DESK' : 'REAL-TIME'}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="space-y-2.5 max-h-[17.5rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
+                    {spectatorCommentaryCardTab === 'podium' ? (
+                      /* Championship Podium & Individual Honors - Tournament Prize List View */
+                      <div className="space-y-3.5 max-h-[22rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
+                        {/* 1. Championship Podium (Olympic 3-Step) */}
+                        <div className="p-3.5 rounded-2xl bg-gradient-to-b from-amber-500/10 via-slate-950/80 to-slate-900 border border-amber-500/25 text-center space-y-2.5 shadow-sm">
+                          <div className="flex items-center justify-between pb-1.5 border-b border-amber-500/20">
+                            <span className="text-[9px] font-black uppercase text-amber-500 tracking-wider flex items-center gap-1">
+                              <Crown className="w-3 h-3 text-amber-400 animate-bounce" /> Championship Podium
+                            </span>
+                            <span className="text-[8px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30">
+                              Purse: ₹{totalPrizePurse}
+                            </span>
+                          </div>
+
+                          {/* 3-Step Visual Podium */}
+                          <div className="grid grid-cols-3 gap-2 items-end pt-1">
+                            {/* 2nd Place / Runner-Up */}
+                            <div className="p-2.5 rounded-xl bg-gradient-to-t from-slate-700/40 via-slate-800/60 to-slate-900 border border-slate-400/40 flex flex-col items-center justify-end min-h-[105px] shadow-sm">
+                              <span className="text-xl mb-1">🥈</span>
+                              <span className="px-1.5 py-0.2 rounded-full text-[7.5px] font-black uppercase bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-100 tracking-wider">
+                                Runner-Up
+                              </span>
+                              <h6 className="text-[10px] font-black text-slate-200 mt-1 truncate max-w-full">
+                                {podium2nd?.title || 'Runner-Up 2nd'}
+                              </h6>
+                              <div className="mt-1 font-mono font-black text-xs text-white">
+                                {podium2nd?.currencySymbol || '₹'}{podium2nd?.amount || '31,000'}
+                              </div>
+                              <span className="text-[7px] text-slate-400 mt-0.5 font-semibold">Trophy + Silver</span>
+                            </div>
+
+                            {/* 1st Place / Champion */}
+                            <div className="p-3 rounded-2xl bg-gradient-to-t from-amber-600/30 via-amber-500/20 to-amber-950/80 border-2 border-amber-400/60 flex flex-col items-center justify-end min-h-[130px] shadow-[0_0_15px_rgba(245,158,11,0.25)] relative">
+                              <div className="absolute -top-3 w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xs shadow-md">
+                                👑
+                              </div>
+                              <span className="text-2xl mb-1 animate-pulse">🏆</span>
+                              <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 tracking-wider shadow-xs">
+                                Champion 1st
+                              </span>
+                              <h6 className="text-[11px] font-black text-amber-200 mt-1 truncate max-w-full">
+                                {podium1st?.title || 'Grand Champion'}
+                              </h6>
+                              <div className="mt-1 font-mono font-black text-base text-amber-400">
+                                {podium1st?.currencySymbol || '₹'}{podium1st?.amount || '51,000'}
+                              </div>
+                              <span className="text-[7.5px] text-amber-300/90 mt-0.5 font-bold">Gold Trophy + Cash</span>
+                            </div>
+
+                            {/* 3rd Place */}
+                            <div className="p-2 rounded-xl bg-gradient-to-t from-amber-900/30 via-slate-800/60 to-slate-900 border border-amber-700/40 flex flex-col items-center justify-end min-h-[95px] shadow-sm">
+                              <span className="text-lg mb-1">🥉</span>
+                              <span className="px-1.5 py-0.2 rounded-full text-[7.5px] font-black uppercase bg-amber-800/40 text-amber-400 tracking-wider">
+                                3rd Place
+                              </span>
+                              <h6 className="text-[9.5px] font-black text-slate-200 mt-1 truncate max-w-full">
+                                {podium3rd?.title || '3rd Position'}
+                              </h6>
+                              <div className="mt-1 font-mono font-black text-xs text-amber-300">
+                                {podium3rd?.currencySymbol || '₹'}{podium3rd?.amount || '11,000'}
+                              </div>
+                              <span className="text-[7px] text-slate-400 mt-0.5 font-semibold">Bronze Trophy</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Individual Honors & Special Recognitions */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <span className="text-[9px] font-black uppercase text-purple-600 dark:text-purple-400 tracking-wider flex items-center gap-1">
+                              <Award className="w-3 h-3 text-purple-400" /> Individual Honors & Special Awards
+                            </span>
+                            <span className="text-[8px] font-mono text-slate-400">Player Honors</span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            {/* Man of the Series */}
+                            <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/25 flex flex-col justify-between">
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <span className="text-[7.5px] font-black uppercase text-purple-400 px-1.5 py-0.2 rounded bg-purple-500/20">
+                                  ⭐ Series MVP
+                                </span>
+                                <span className="text-sm">🌟</span>
+                              </div>
+                              <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
+                                {mosPrize?.title || 'Man of the Series'}
+                              </div>
+                              <div className="mt-1 flex items-baseline justify-between text-xs">
+                                <span className="font-mono font-black text-purple-400">
+                                  {mosPrize?.currencySymbol || '₹'}{mosPrize?.amount || '5,000'}
+                                </span>
+                                <span className="text-[7px] text-slate-400">Trophy + Cert</span>
+                              </div>
+                            </div>
+
+                            {/* Best Batsman */}
+                            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex flex-col justify-between">
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <span className="text-[7.5px] font-black uppercase text-amber-400 px-1.5 py-0.2 rounded bg-amber-500/20">
+                                  🏏 Best Batter
+                                </span>
+                                <span className="text-sm">🏏</span>
+                              </div>
+                              <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
+                                {bestBatPrize?.title || 'Best Batsman (Orange Cap)'}
+                              </div>
+                              <div className="mt-1 flex items-baseline justify-between text-xs">
+                                <span className="font-mono font-black text-amber-400">
+                                  {bestBatPrize?.currencySymbol || '₹'}{bestBatPrize?.amount || '3,000'}
+                                </span>
+                                <span className="text-[7px] text-slate-400">Silver Bat</span>
+                              </div>
+                            </div>
+
+                            {/* Best Bowler */}
+                            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 flex flex-col justify-between">
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <span className="text-[7.5px] font-black uppercase text-cyan-400 px-1.5 py-0.2 rounded bg-cyan-500/20">
+                                  🎯 Best Bowler
+                                </span>
+                                <span className="text-sm">🎯</span>
+                              </div>
+                              <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
+                                {bestBowlPrize?.title || 'Best Bowler (Purple Cap)'}
+                              </div>
+                              <div className="mt-1 flex items-baseline justify-between text-xs">
+                                <span className="font-mono font-black text-cyan-400">
+                                  {bestBowlPrize?.currencySymbol || '₹'}{bestBowlPrize?.amount || '3,000'}
+                                </span>
+                                <span className="text-[7px] text-slate-400">Golden Ball</span>
+                              </div>
+                            </div>
+
+                            {/* Maximum Sixes or Best Fielder */}
+                            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex flex-col justify-between">
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <span className="text-[7.5px] font-black uppercase text-emerald-400 px-1.5 py-0.2 rounded bg-emerald-500/20">
+                                  {maxSixPrize ? '🚀 Max Sixes' : '🧤 Best Fielder'}
+                                </span>
+                                <span className="text-sm">{maxSixPrize ? '🚀' : '🧤'}</span>
+                              </div>
+                              <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
+                                {maxSixPrize?.title || bestFieldPrize?.title || 'Super Striker / Best Fielder'}
+                              </div>
+                              <div className="mt-1 flex items-baseline justify-between text-xs">
+                                <span className="font-mono font-black text-emerald-400">
+                                  {(maxSixPrize || bestFieldPrize)?.currencySymbol || '₹'}{(maxSixPrize || bestFieldPrize)?.amount || '2,000'}
+                                </span>
+                                <span className="text-[7px] text-slate-400">Shield</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 3. Tournament Prize List (All Categories Breakdown) */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
+                            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                              Tournament Prize List ({tournamentPrizes.length} Categories)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setActiveTab('prizes')}
+                              className="text-[8.5px] font-bold text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-0.5"
+                            >
+                              Full Prize Room →
+                            </button>
+                          </div>
+
+                          <div className="space-y-1 max-h-32 overflow-y-auto pr-1 scrollbar-thin">
+                            {tournamentPrizes.map((pz, idx) => (
+                              <div
+                                key={pz.id || idx}
+                                className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 flex items-center justify-between text-[10px]"
+                              >
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-xs">
+                                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🎖️'}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <span className="font-bold text-slate-800 dark:text-slate-200 block truncate">
+                                      {pz.title}
+                                    </span>
+                                    {pz.subtitle && (
+                                      <span className="text-[8px] text-slate-400 block truncate">
+                                        {pz.subtitle}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0 ml-2">
+                                  <span className="font-mono font-black text-amber-500 text-xs">
+                                    {pz.currencySymbol || '₹'}{pz.amount}
+                                  </span>
+                                  <span className="text-[7.5px] text-slate-400 block font-semibold">
+                                    {pz.trophyIncluded ? 'Trophy + Cash' : 'Award'}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Live Ball-by-Ball Feed View */
+                      <div className="space-y-2.5 max-h-[17.5rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
+                        {/* Championship Podium Quick Ticker Banner */}
+                        <div 
+                          onClick={() => setSpectatorCommentaryCardTab('podium')}
+                          className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/10 to-emerald-500/15 border border-amber-500/30 hover:border-amber-400/60 cursor-pointer transition-all shadow-xs group"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-xs shrink-0 group-hover:scale-110 transition-transform">
+                                🏆
+                              </span>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
+                                    Championship Podium & Individual Honors
+                                  </span>
+                                  <span className="text-[8px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono">
+                                    ₹{totalPrizePurse} Purse
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate">
+                                  🥇 1st: ₹{podium1st?.amount || '51,000'} • 🥈 2nd: ₹{podium2nd?.amount || '31,000'} • ⭐ Series: ₹{mosPrize?.amount || '5,000'}
+                                </p>
+                              </div>
+                            </div>
+                            <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 group-hover:text-amber-500 flex items-center gap-0.5 shrink-0">
+                              Prize List →
+                            </span>
+                          </div>
+                        </div>
                       {(() => {
                         const commentary = effectiveCommentaryList || [];
                         if (commentary.length === 0) {
@@ -5886,11 +6217,39 @@ export const SpectatorScoreboardSection = ({
                         });
                       })()}
                     </div>
+                  )}
                   </div>
 
-                  <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between text-[10px] font-black text-slate-450 dark:text-slate-640 uppercase tracking-widest">
-                    <span>Read-Only Viewer Feed</span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between text-[10px] font-black text-slate-450 dark:text-slate-640 uppercase tracking-widest flex-wrap gap-2">
+                    {spectatorCommentaryCardTab === 'podium' ? (
+                      <>
+                        <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1 font-mono">
+                          <Trophy size={11} className="text-amber-400" />
+                          Purse: ₹{totalPrizePurse} • {tournamentPrizes.length} Categories
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSpectatorCommentaryCardTab('feed')}
+                          className="text-rose-500 hover:text-rose-400 font-black bg-transparent border-none cursor-pointer flex items-center gap-1 uppercase tracking-wider text-[9.5px]"
+                        >
+                          <span>🎙️ Back to Live Feed →</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span>Read-Only Viewer Feed</span>
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSpectatorCommentaryCardTab('podium')}
+                          className="text-amber-600 dark:text-amber-400 hover:text-amber-500 font-black bg-transparent border-none cursor-pointer flex items-center gap-1 uppercase tracking-wider text-[9.5px]"
+                        >
+                          <span>🏆 View Podium & Prize List ({tournamentPrizes.length}) →</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </motion.div>
               </div>
@@ -7289,6 +7648,225 @@ export const SpectatorScoreboardSection = ({
                           </div>
                         </div>
                       </div>
+                    </div>
+
+                    {/* Championship Podium & Individual Honors • Tournament Prize List Banner & Showcase */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border border-amber-500/30 flex items-center justify-center text-xl shadow-xs">
+                            🏆
+                          </div>
+                          <div>
+                            <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest block mb-0.5">
+                              Championship Podium & Individual Honors
+                            </span>
+                            <h4 className="text-base font-black text-slate-900 dark:text-white">
+                              Tournament Prize List
+                            </h4>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
+                            Total Purse: <strong className="font-black">₹{totalPrizePurse}</strong>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCommentaryLogPodiumOpen(!commentaryLogPodiumOpen)}
+                            className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 cursor-pointer flex items-center gap-1.5 transition-all shadow-xs"
+                          >
+                            <span>{commentaryLogPodiumOpen ? '▲ Collapse' : '▼ Expand Podium & Prizes'}</span>
+                            <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[8px] font-mono">
+                              {tournamentPrizes.length}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Always show a compact quick-bar; expand for full podium & honors grid */}
+                      {!commentaryLogPodiumOpen ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                          <div 
+                            onClick={() => setCommentaryLogPodiumOpen(true)}
+                            className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 hover:border-amber-400/40 cursor-pointer transition-all flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">🥇</span>
+                              <div>
+                                <span className="text-[8px] font-black uppercase text-amber-500 block">Champion 1st</span>
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{podium1st?.title || 'Tournament Winner'}</span>
+                              </div>
+                            </div>
+                            <span className="font-mono font-black text-sm text-amber-500">₹{podium1st?.amount || '51,000'}</span>
+                          </div>
+
+                          <div 
+                            onClick={() => setCommentaryLogPodiumOpen(true)}
+                            className="p-3 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800 hover:border-slate-300 cursor-pointer transition-all flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">🥈</span>
+                              <div>
+                                <span className="text-[8px] font-black uppercase text-slate-400 block">Runner-Up 2nd</span>
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{podium2nd?.title || 'Runner-Up'}</span>
+                              </div>
+                            </div>
+                            <span className="font-mono font-black text-sm text-slate-700 dark:text-slate-200">₹{podium2nd?.amount || '31,000'}</span>
+                          </div>
+
+                          <div 
+                            onClick={() => setCommentaryLogPodiumOpen(true)}
+                            className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 hover:border-purple-400/40 cursor-pointer transition-all flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">⭐</span>
+                              <div>
+                                <span className="text-[8px] font-black uppercase text-purple-400 block">Series MVP</span>
+                                <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{mosPrize?.title || 'Player of Tournament'}</span>
+                              </div>
+                            </div>
+                            <span className="font-mono font-black text-sm text-purple-400">₹{mosPrize?.amount || '5,000'}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4 pt-1">
+                          {/* 3-Step Olympic Championship Podium */}
+                          <div className="p-4 rounded-2xl bg-gradient-to-b from-amber-500/10 via-slate-950/80 to-slate-900 border border-amber-500/25">
+                            <div className="grid grid-cols-3 gap-2 sm:gap-4 items-end">
+                              {/* 2nd Place */}
+                              <div className="p-3 rounded-2xl bg-gradient-to-t from-slate-700/40 via-slate-800/60 to-slate-900 border border-slate-400/40 text-center min-h-[120px] flex flex-col items-center justify-end shadow-sm">
+                                <span className="text-2xl mb-1">🥈</span>
+                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-100 tracking-wider">
+                                  Runner-Up
+                                </span>
+                                <h6 className="text-[11px] font-black text-slate-200 mt-1 truncate max-w-full">
+                                  {podium2nd?.title || 'Runner-Up 2nd'}
+                                </h6>
+                                <div className="mt-1 font-mono font-black text-sm text-white">
+                                  {podium2nd?.currencySymbol || '₹'}{podium2nd?.amount || '31,000'}
+                                </div>
+                                <span className="text-[7.5px] text-slate-400 mt-0.5 font-semibold">Trophy + Silver</span>
+                              </div>
+
+                              {/* 1st Place */}
+                              <div className="p-3 sm:p-4 rounded-3xl bg-gradient-to-t from-amber-600/30 via-amber-500/20 to-amber-950/80 border-2 border-amber-400/60 text-center min-h-[150px] flex flex-col items-center justify-end shadow-[0_0_20px_rgba(245,158,11,0.3)] relative">
+                                <div className="absolute -top-3 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-sm shadow-md">
+                                  👑
+                                </div>
+                                <span className="text-3xl mb-1 animate-pulse">🏆</span>
+                                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 tracking-wider shadow-xs">
+                                  Champion 1st
+                                </span>
+                                <h6 className="text-xs font-black text-amber-200 mt-1 truncate max-w-full">
+                                  {podium1st?.title || 'Tournament Winner'}
+                                </h6>
+                                <div className="mt-1 font-mono font-black text-lg text-amber-400">
+                                  {podium1st?.currencySymbol || '₹'}{podium1st?.amount || '51,000'}
+                                </div>
+                                <span className="text-[8px] text-amber-300/90 mt-0.5 font-bold">Gold Trophy + Cash</span>
+                              </div>
+
+                              {/* 3rd Place */}
+                              <div className="p-3 rounded-2xl bg-gradient-to-t from-amber-900/30 via-slate-800/60 to-slate-900 border border-amber-700/40 text-center min-h-[105px] flex flex-col items-center justify-end shadow-sm">
+                                <span className="text-xl mb-1">🥉</span>
+                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-amber-800/40 text-amber-400 tracking-wider">
+                                  3rd Place
+                                </span>
+                                <h6 className="text-[10px] font-black text-slate-200 mt-1 truncate max-w-full">
+                                  {podium3rd?.title || '3rd Position'}
+                                </h6>
+                                <div className="mt-1 font-mono font-black text-sm text-amber-300">
+                                  {podium3rd?.currencySymbol || '₹'}{podium3rd?.amount || '11,000'}
+                                </div>
+                                <span className="text-[7.5px] text-slate-400 mt-0.5 font-semibold">Bronze Trophy</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Individual Honors Grid */}
+                          <div className="space-y-2">
+                            <span className="text-[9px] font-black uppercase text-purple-600 dark:text-purple-400 tracking-wider block">
+                              Individual Honors & Special Recognitions
+                            </span>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                              {/* Series MVP */}
+                              <div className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-center">
+                                <span className="text-lg block mb-0.5">⭐</span>
+                                <span className="text-[8px] font-bold text-purple-400 uppercase block">Series MVP</span>
+                                <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{mosPrize?.title || 'Player of Tournament'}</div>
+                                <div className="font-mono font-black text-xs text-purple-400 mt-1">{mosPrize?.currencySymbol || '₹'}{mosPrize?.amount || '5,000'}</div>
+                              </div>
+
+                              {/* Best Batsman */}
+                              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-center">
+                                <span className="text-lg block mb-0.5">🏏</span>
+                                <span className="text-[8px] font-bold text-amber-400 uppercase block">Best Batter</span>
+                                <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{bestBatPrize?.title || 'Best Batsman'}</div>
+                                <div className="font-mono font-black text-xs text-amber-400 mt-1">{bestBatPrize?.currencySymbol || '₹'}{bestBatPrize?.amount || '3,000'}</div>
+                              </div>
+
+                              {/* Best Bowler */}
+                              <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-center">
+                                <span className="text-lg block mb-0.5">🎯</span>
+                                <span className="text-[8px] font-bold text-cyan-400 uppercase block">Best Bowler</span>
+                                <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{bestBowlPrize?.title || 'Best Bowler'}</div>
+                                <div className="font-mono font-black text-xs text-cyan-400 mt-1">{bestBowlPrize?.currencySymbol || '₹'}{bestBowlPrize?.amount || '3,000'}</div>
+                              </div>
+
+                              {/* Maximum Sixes */}
+                              <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center">
+                                <span className="text-lg block mb-0.5">{maxSixPrize ? '🚀' : '🧤'}</span>
+                                <span className="text-[8px] font-bold text-emerald-400 uppercase block">{maxSixPrize ? 'Max Sixes' : 'Best Fielder'}</span>
+                                <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{(maxSixPrize || bestFieldPrize)?.title || 'Super Striker'}</div>
+                                <div className="font-mono font-black text-xs text-emerald-400 mt-1">{(maxSixPrize || bestFieldPrize)?.currencySymbol || '₹'}{(maxSixPrize || bestFieldPrize)?.amount || '2,000'}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Full Prize List Table / Cards */}
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
+                              <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+                                All {tournamentPrizes.length} Tournament Prize Categories
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab('prizes')}
+                                className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-1"
+                              >
+                                <span>Trophy Room Page</span>
+                                <ArrowRight size={10} />
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
+                              {tournamentPrizes.map((p, idx) => (
+                                <div 
+                                  key={p.id || idx}
+                                  className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-sm">
+                                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🎖️'}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="font-bold text-slate-800 dark:text-slate-100 truncate">{p.title}</div>
+                                      {p.subtitle && (
+                                        <div className="text-[8.5px] text-slate-400 truncate">{p.subtitle}</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0 ml-2">
+                                    <div className="font-mono font-black text-amber-500">{p.currencySymbol || '₹'}{p.amount}</div>
+                                    <div className="text-[7.5px] text-slate-400">{p.trophyIncluded ? 'Trophy + Cash' : 'Award'}</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Delivery Log commentary feed with filters and text search */}

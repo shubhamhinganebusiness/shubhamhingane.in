@@ -7,10 +7,21 @@ import { useSearchParams, useParams } from 'react-router-dom';
 import { CricketOverlayAnimations } from './CricketOverlayAnimations';
 import { IndividualStatsOverlay } from './IndividualStatsOverlay';
 
-// Firestore imports
-import { db, safeSetDoc } from '../../lib/firebase';
+// Firestore and Realtime Database imports
+import { db, safeSetDoc, subscribeToRealtimeDBActiveLive, subscribeToRealtimeDBMatch } from '../../lib/firebase';
 import { doc, onSnapshot, collection, query, where, limit } from 'firebase/firestore';
-import { isMatchDeleted, markMatchDeleted, getAnyActiveOrRecentMatch, getOrCreateDefaultMatch, sanitizeForFirestore } from './cricketStorage';
+import { 
+  isMatchDeleted, 
+  markMatchDeleted, 
+  getAnyActiveOrRecentMatch, 
+  getOrCreateDefaultMatch, 
+  sanitizeForFirestore,
+  getActiveMatch,
+  getLocalMatchById,
+  getLocalMatches,
+  isDemoOrAIMatch
+} from './cricketStorage';
+import { liveFanOutClient } from './modules/LiveFanOutClient';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 import { getThemeBackground } from './BroadcastThemeStudio';
 import { StarTVScorebug } from './StarTVScorebug';
@@ -217,11 +228,70 @@ interface MatchState {
 export const CricketOverlay: React.FC = () => {
   const routeParams = useParams<{ managerId?: string }>();
   const [searchParams] = useSearchParams();
-  const [matchId, setMatchId] = useState<string>('');
-  const [managerId, setManagerId] = useState<string>('');
-  const [streamKey, setStreamKey] = useState<string>('');
-  const [isPermanentLink, setIsPermanentLink] = useState<boolean>(false);
-  const [isLiveActive, setIsLiveActive] = useState<boolean>(false);
+
+  const initRoute = useMemo(() => {
+    let pManager = routeParams.managerId || '';
+    let pKey = '';
+    let pMatch = '';
+
+    if (typeof window !== 'undefined') {
+      const sParams = new URLSearchParams(window.location.search);
+      if (!pManager) pManager = sParams.get('managerId') || sParams.get('userId') || sParams.get('user') || '';
+      if (!pKey) pKey = sParams.get('streamKey') || sParams.get('key') || '';
+      if (!pMatch) pMatch = sParams.get('matchId') || '';
+
+      const hash = window.location.hash || '';
+      const hashQueryIdx = hash.indexOf('?');
+      if (hashQueryIdx !== -1) {
+        const hParams = new URLSearchParams(hash.substring(hashQueryIdx));
+        if (!pManager) pManager = hParams.get('managerId') || hParams.get('userId') || hParams.get('user') || '';
+        if (!pKey) pKey = hParams.get('streamKey') || hParams.get('key') || '';
+        if (!pMatch) pMatch = hParams.get('matchId') || '';
+      }
+
+      if (!pMatch) {
+        const activeLocal = getActiveMatch();
+        if (activeLocal && activeLocal.id && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal)) {
+          pMatch = activeLocal.id;
+        }
+      }
+    }
+
+    const isPerm = !!(pManager || pKey);
+    return { pManager, pKey, pMatch, isPerm };
+  }, []);
+
+  const [matchId, setMatchId] = useState<string>(() => initRoute.pMatch);
+  const [managerId, setManagerId] = useState<string>(() => initRoute.pManager);
+  const [streamKey, setStreamKey] = useState<string>(() => initRoute.pKey);
+  const [isPermanentLink, setIsPermanentLink] = useState<boolean>(() => initRoute.isPerm);
+  const [isLiveActive, setIsLiveActive] = useState<boolean>(() => !initRoute.isPerm || !!initRoute.pMatch);
+
+  // Synchronous Match State initialization to eliminate initial lag
+  const [match, setMatch] = useState<MatchState | null>(() => {
+    const isExplicitDemo = typeof window !== 'undefined' && (
+      new URLSearchParams(window.location.search).get('demo') === 'true' ||
+      (window.location.hash.includes('?') && new URLSearchParams(window.location.hash.substring(window.location.hash.indexOf('?'))).get('demo') === 'true')
+    );
+    if (isExplicitDemo) {
+      return getOrCreateDefaultMatch();
+    }
+
+    if (initRoute.pMatch) {
+      const found = getLocalMatchById(initRoute.pMatch);
+      if (found && !isMatchDeleted(found.id) && !isDemoOrAIMatch(found)) {
+        return found;
+      }
+    }
+
+    const activeLocal = getActiveMatch();
+    if (activeLocal && activeLocal.id && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal)) {
+      return activeLocal;
+    }
+
+    return null;
+  });
+
   const [localYoutubeChannelLogo, setLocalYoutubeChannelLogo] = useState<string>(() => {
     try {
       return localStorage.getItem('cricket_youtube_channel_logo') || '';
@@ -302,20 +372,16 @@ export const CricketOverlay: React.FC = () => {
     // 5. Try getting from active match state from localStorage if no explicit URL routing
     if (!qManager && !qKey && !qMatch && !routeParams.managerId) {
       try {
-        const activeStr = localStorage.getItem('cricket_active_match');
-        if (activeStr) {
-          const parsed = JSON.parse(activeStr);
-          if (parsed && parsed.id) {
-            setMatchId(parsed.id);
-            if (parsed.managerId) setManagerId(parsed.managerId);
-          }
+        const activeLocal = getActiveMatch();
+        if (activeLocal && activeLocal.id && activeLocal.status === 'live' && !isMatchDeleted(activeLocal.id) && !isDemoOrAIMatch(activeLocal)) {
+          setMatchId(activeLocal.id);
+          setMatch(activeLocal);
+          setIsLiveActive(true);
+          if (activeLocal.managerId) setManagerId(activeLocal.managerId);
         }
       } catch {}
     }
   }, [routeParams, searchParams]);
-  
-  // Real-time Match State synced via Firestore & LocalStorage fallback
-  const [match, setMatch] = useState<MatchState | null>(null);
 
   // Superadmin Global Studio Theme listener
   const [globalStudioTheme, setGlobalStudioTheme] = useState<any>(() => {
@@ -693,28 +759,36 @@ export const CricketOverlay: React.FC = () => {
     }
   }, [match?.status, match?.id, searchParams]);
 
-  // Fallback to any recent/default match if standalone overlay is opened or match is not loaded
+  // Fallback to active live match if standalone overlay is opened without URL param
   useEffect(() => {
-    if (!match) {
-      const recent = getAnyActiveOrRecentMatch();
-      if (recent && (recent.id === matchId || !matchId)) {
-        setMatch(recent);
-      } else if (!matchId) {
-        const def = getOrCreateDefaultMatch();
-        if (def) setMatch(def);
+    if (!match && !isPermanentLink) {
+      const active = getActiveMatch();
+      if (active && active.status === 'live' && !isMatchDeleted(active.id) && !isDemoOrAIMatch(active)) {
+        setMatch(active);
+        setMatchId(active.id);
+        setIsLiveActive(true);
+      } else {
+        const isExplicitDemo = typeof window !== 'undefined' && (
+          new URLSearchParams(window.location.search).get('demo') === 'true' ||
+          (window.location.hash.includes('?') && new URLSearchParams(window.location.hash.substring(window.location.hash.indexOf('?'))).get('demo') === 'true')
+        );
+        if (isExplicitDemo) {
+          const def = getOrCreateDefaultMatch();
+          if (def) setMatch(def);
+        }
       }
     }
-  }, [match, matchId]);
+  }, [match, isPermanentLink]);
 
-  // Listen for the manager's active live match pointer in Firestore for permanent OBS link
+  // Listen for the manager's active live match pointer across RTDB, Firestore, and Edge Fan-out for permanent OBS link
   useEffect(() => {
-    const targetManagerId = managerId || streamKey;
-    if (!targetManagerId) return;
+    const targetManagerId = managerId || streamKey || 'official_scorer';
 
     let unsubMgrDoc: (() => void) | null = null;
+    let unsubFallbackMgrDoc: (() => void) | null = null;
     let unsubMatchesQuery: (() => void) | null = null;
 
-    // A) Direct subscription to /score_managers/{managerId}
+    // A) Direct subscription to /score_managers/{targetManagerId} in Firestore
     try {
       const mgrRef = doc(db, 'score_managers', targetManagerId);
       unsubMgrDoc = onSnapshot(mgrRef, (docSnap) => {
@@ -732,26 +806,42 @@ export const CricketOverlay: React.FC = () => {
       }, (err) => {
         console.warn('[Permanent OBS] Manager doc subscription notice:', err);
       });
+
+      // Also listen to official_scorer fallback if targetManagerId is custom
+      if (targetManagerId !== 'official_scorer') {
+        const fallbackRef = doc(db, 'score_managers', 'official_scorer');
+        unsubFallbackMgrDoc = onSnapshot(fallbackRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.status === 'live' && data.activeMatchId) {
+              setMatchId(data.activeMatchId);
+              setIsLiveActive(true);
+            }
+          }
+        }, () => {});
+      }
     } catch (err) {
       console.warn('[Permanent OBS] Manager doc setup error:', err);
     }
 
-    // B) Real-time collection query for live matches for this manager
+    // B) Real-time query for latest live match
     try {
       const matchQ = query(
         collection(db, 'cricket_matches'),
-        where('managerId', '==', targetManagerId),
         where('status', '==', 'live'),
-        limit(1)
+        limit(5)
       );
       unsubMatchesQuery = onSnapshot(matchQ, (qSnap) => {
         if (!qSnap.empty) {
-          const liveDoc = qSnap.docs[0];
-          const liveMatch = liveDoc.data() as MatchState;
-          console.log('[Permanent OBS] Query detected live match:', liveMatch.id);
-          setMatchId(liveDoc.id);
-          setMatch(liveMatch);
-          setIsLiveActive(true);
+          const docs = qSnap.docs.map(d => ({ id: d.id, ...d.data() as MatchState }));
+          docs.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+          const targetLive = docs.find(m => m.managerId === targetManagerId) || docs[0];
+          if (targetLive && !isMatchDeleted(targetLive.id) && !isDemoOrAIMatch(targetLive)) {
+            console.log('[Permanent OBS] Query detected live match:', targetLive.id);
+            setMatchId(targetLive.id);
+            setMatch(targetLive);
+            setIsLiveActive(true);
+          }
         }
       }, (err) => {
         console.warn('[Permanent OBS] Live query notice:', err);
@@ -760,8 +850,35 @@ export const CricketOverlay: React.FC = () => {
       console.warn('[Permanent OBS] Query setup error:', err);
     }
 
-    // C) Periodic HTTP polling fallback to backend active-match API
-    const pollInterval = setInterval(async () => {
+    // C) Zero-latency Realtime Database active match listener (fires in 5-20ms)
+    const unsubRTDBLive = subscribeToRealtimeDBActiveLive((rtdbData) => {
+      if (!rtdbData) return;
+      const liveMatch = rtdbData.match || rtdbData;
+      if (liveMatch && liveMatch.id && liveMatch.status === 'live' && !isMatchDeleted(liveMatch.id) && !isDemoOrAIMatch(liveMatch)) {
+        console.log('[Permanent OBS RTDB] Instant active live match detected:', liveMatch.id);
+        setMatchId(liveMatch.id);
+        setMatch(prev => {
+          if (!prev || (liveMatch.updatedAt || 0) >= (prev.updatedAt || 0) || (liveMatch.version || 0) >= (prev.version || 0)) {
+            return liveMatch;
+          }
+          return prev;
+        });
+        setIsLiveActive(true);
+      }
+    });
+
+    // D) Edge Fan-out subscription
+    const unsubFanOut = liveFanOutClient.subscribeToLiveFeed((feed) => {
+      if (!feed || !Array.isArray(feed.matches)) return;
+      const liveOne = feed.matches.find(m => m && m.status === 'live' && !isMatchDeleted(m.id));
+      if (liveOne) {
+        setMatchId(prev => prev || liveOne.id);
+        setIsLiveActive(true);
+      }
+    });
+
+    // E) High-frequency backend active-match API polling
+    const fetchActiveApi = async () => {
       try {
         const resp = await fetch(`/api/cricket/active-match/${encodeURIComponent(targetManagerId)}`);
         if (resp.ok) {
@@ -770,18 +887,29 @@ export const CricketOverlay: React.FC = () => {
             setMatchId(result.matchId);
             setIsLiveActive(true);
             if (result.match) {
-              setMatch(result.match);
+              setMatch(prev => {
+                if (!prev || (result.match.updatedAt || 0) >= (prev.updatedAt || 0) || (result.match.version || 0) >= (prev.version || 0)) {
+                  return result.match;
+                }
+                return prev;
+              });
             }
-          } else if (result.active === false) {
+          } else if (result.active === false && !match) {
             setIsLiveActive(false);
           }
         }
       } catch (_) {}
-    }, 5000);
+    };
+
+    fetchActiveApi();
+    const pollInterval = setInterval(fetchActiveApi, 2000);
 
     return () => {
       if (unsubMgrDoc) unsubMgrDoc();
+      if (unsubFallbackMgrDoc) unsubFallbackMgrDoc();
       if (unsubMatchesQuery) unsubMatchesQuery();
+      if (unsubRTDBLive) unsubRTDBLive();
+      if (unsubFanOut) unsubFanOut();
       clearInterval(pollInterval);
     };
   }, [managerId, streamKey]);
@@ -794,6 +922,22 @@ export const CricketOverlay: React.FC = () => {
       setMatch(null);
       return;
     }
+
+    // Ultra-fast Realtime Database live score listener (0-20ms latency)
+    const unsubRTDBMatch = subscribeToRealtimeDBMatch(matchId, (rtdbMatch) => {
+      if (!rtdbMatch || isMatchDeleted(matchId)) return;
+      if (rtdbMatch.status === 'deleted' || (rtdbMatch as any).isDeleted) {
+        markMatchDeleted(matchId);
+        setMatch(null);
+        return;
+      }
+      setMatch(prev => {
+        if (!prev || (rtdbMatch.updatedAt || 0) >= (prev.updatedAt || 0) || (rtdbMatch.version || 0) >= (prev.version || 0)) {
+          return rtdbMatch;
+        }
+        return prev;
+      });
+    });
 
     // Listen on Firestore match document
     const docRef = doc(db, 'cricket_matches', matchId);
@@ -839,6 +983,7 @@ export const CricketOverlay: React.FC = () => {
 
     return () => {
       unsub();
+      if (unsubRTDBMatch) unsubRTDBMatch();
       window.removeEventListener('cricket_match_deleted', handleDeletedEvent);
     };
   }, [matchId]);
@@ -901,16 +1046,9 @@ export const CricketOverlay: React.FC = () => {
     syncFromLocal();
 
     const handleStorage = (e: StorageEvent) => {
-      if ((e.key === 'cricket_matches_offline_pending' || e.key === 'cricket_active_match') && e.newValue) {
+      if ((e.key === 'cricket_matches_offline_pending' || e.key === 'cricket_active_match' || e.key === 'cricket_matches_local_registry') && e.newValue) {
         try {
-          const parsed = JSON.parse(e.newValue) as MatchState;
-          if (parsed && !isMatchDeleted(parsed.id) && parsed.status !== 'deleted' && !(parsed as any).isDeleted && (parsed.id === matchId || !matchId)) {
-            console.log('[Overlay Sync] High-speed active/offline storage trigger:', parsed.id, parsed.version);
-            setMatch(parsed);
-            if (parsed.id && parsed.id !== matchId) {
-              setMatchId(parsed.id);
-            }
-          }
+          syncFromLocal();
         } catch {}
       }
       if (e.key === 'cricket_youtube_channel_logo') {
@@ -922,6 +1060,9 @@ export const CricketOverlay: React.FC = () => {
     };
 
     window.addEventListener('storage', handleStorage);
+    window.addEventListener('cricket_match_updated', syncFromLocal);
+    window.addEventListener('cricket_matches_updated', syncFromLocal);
+    window.addEventListener('cricket_active_match_changed', syncFromLocal);
 
     // Immediate same-page polling sync (fires for iframe/parent tab same-page updates)
     const pollInterval = setInterval(() => {
@@ -930,6 +1071,9 @@ export const CricketOverlay: React.FC = () => {
 
     return () => {
       window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('cricket_match_updated', syncFromLocal);
+      window.removeEventListener('cricket_matches_updated', syncFromLocal);
+      window.removeEventListener('cricket_active_match_changed', syncFromLocal);
       clearInterval(pollInterval);
     };
   }, [matchId]);

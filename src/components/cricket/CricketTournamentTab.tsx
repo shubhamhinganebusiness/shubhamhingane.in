@@ -39,6 +39,7 @@ import { TournamentRecentResultsCarousel } from './TournamentRecentResultsCarous
 import { TournamentPrize, getTournamentPrizesByTournamentId, saveTournamentPrizesForTournament, getValidActivePrizes } from '../../utils/cricketPrizeStorage';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
 import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from './imageUrlHelper';
+import { isTournamentDeleted, deleteLocalTournament, syncDeletedTournamentsFromServer } from './cricketStorage';
 
 interface TournamentTeam {
   id: string;
@@ -163,7 +164,13 @@ export const CricketTournamentTab: React.FC<{
   const [tournaments, setTournaments] = useState<Tournament[]>(() => {
     try {
       const saved = localStorage.getItem('gully_tournaments_v1');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+        }
+      }
+      return [];
     } catch (e) {
       console.warn('LocalStorage gully_tournaments_v1 read blocked:', e);
       return [];
@@ -172,7 +179,12 @@ export const CricketTournamentTab: React.FC<{
 
   const [activeTournamentId, setActiveTournamentId] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('gully_active_tournament_id');
+      const activeId = localStorage.getItem('gully_active_tournament_id');
+      if (activeId && isTournamentDeleted(activeId)) {
+        localStorage.removeItem('gully_active_tournament_id');
+        return null;
+      }
+      return activeId;
     } catch (e) {
       console.warn('LocalStorage gully_active_tournament_id read blocked:', e);
       return null;
@@ -444,7 +456,11 @@ export const CricketTournamentTab: React.FC<{
     const unsub = onSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
       const dbList: Tournament[] = [];
       snap.forEach((docSnap) => {
-        dbList.push({ ...docSnap.data() as Tournament, id: docSnap.id });
+        const tid = docSnap.id;
+        const data = docSnap.data() as Tournament;
+        if (!isTournamentDeleted(tid) && !isTournamentDeleted(data?.id)) {
+          dbList.push({ ...data, id: tid });
+        }
       });
 
       setTournaments((prev) => {
@@ -452,7 +468,12 @@ export const CricketTournamentTab: React.FC<{
         let localList: Tournament[] = [];
         try {
           const raw = localStorage.getItem('gully_tournaments_v1');
-          if (raw) localList = JSON.parse(raw);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              localList = parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+            }
+          }
         } catch (_) {}
 
         // Filter dbList based on creator/tenant
@@ -466,12 +487,12 @@ export const CricketTournamentTab: React.FC<{
 
         // Merge dbList with any tournaments in our local state (including newly created ones)
         prev.forEach((localT) => {
-          if (!filteredMerged.some(m => m.id === localT.id)) {
+          if (!isTournamentDeleted(localT.id) && !filteredMerged.some(m => m.id === localT.id)) {
             filteredMerged.push(localT);
           }
         });
         localList.forEach((localT) => {
-          if (!filteredMerged.some(m => m.id === localT.id)) {
+          if (!isTournamentDeleted(localT.id) && !filteredMerged.some(m => m.id === localT.id)) {
             filteredMerged.push(localT);
           }
         });
@@ -528,7 +549,7 @@ export const CricketTournamentTab: React.FC<{
           };
         });
 
-        return mergedTournaments;
+        return mergedTournaments.filter(t => t && t.id && !isTournamentDeleted(t.id));
       });
     }, (error) => {
       console.warn("Failed to subscribe to tournaments in firestore:", error);
@@ -544,7 +565,7 @@ export const CricketTournamentTab: React.FC<{
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            setTournaments(parsed);
+            setTournaments(parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id)));
           }
         }
       } catch (e) {
@@ -563,13 +584,14 @@ export const CricketTournamentTab: React.FC<{
 
   // Persistence side-effect - saves locally AND archives directly in Firestore
   useEffect(() => {
+    const validTournaments = tournaments.filter(t => t && t.id && !isTournamentDeleted(t.id));
     try {
-      localStorage.setItem('gully_tournaments_v1', JSON.stringify(tournaments));
+      localStorage.setItem('gully_tournaments_v1', JSON.stringify(validTournaments));
     } catch (e) {
       console.warn('LocalStorage gully_tournaments_v1 write blocked:', e);
     }
     if (isFirestoreQuotaExhausted()) return;
-    tournaments.forEach((t) => {
+    validTournaments.forEach((t) => {
       setDoc(doc(db, 'cricket_tournaments', t.id), t).catch((err) => {
         if (isQuotaError(err)) {
           recordFirestoreQuotaExhaustion(60);
@@ -1036,13 +1058,21 @@ export const CricketTournamentTab: React.FC<{
   };
 
   const confirmDeleteTournament = (id: string, name: string) => {
-    setTournaments(tournaments.filter(t => t.id !== id));
+    // 1. Permanently mark deleted in tombstone, purge from localStorage, and notify server & client listeners
+    deleteLocalTournament(id);
+
+    // 2. Immediately update state
+    setTournaments(prev => prev.filter(t => t.id !== id));
     if (activeTournamentId === id) {
       setActiveTournamentId(null);
+      localStorage.removeItem('gully_active_tournament_id');
     }
+
+    // 3. Delete from Firestore permanently
     deleteDoc(doc(db, 'cricket_tournaments', id)).catch((err) => {
       console.warn("Error deleting tournament from Firestore:", err);
     });
+
     setTournamentToDeleteState(null);
     triggerNotification(`Deleted "${name}" permanently.`);
   };
