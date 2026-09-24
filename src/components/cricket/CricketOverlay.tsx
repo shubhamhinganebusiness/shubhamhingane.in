@@ -466,7 +466,7 @@ export const CricketOverlay: React.FC = () => {
       bugPosition: 'bottom-full',
       showBallByBallDots: true,
       showStrikeRates: true,
-      showWinProbability: true,
+      showWinProbability: false,
       showSponsorBadge: true,
       sponsorText: 'GULLY PREMIER LEAGUE',
       showStatsPanel: true,
@@ -536,7 +536,7 @@ export const CricketOverlay: React.FC = () => {
       bugPosition: match.overlayConfig.bugPosition || fallback.bugPosition,
       showBallByBallDots: match.overlayConfig.showBallByBallDots !== false,
       showStrikeRates: match.overlayConfig.showStrikeRates !== false,
-      showWinProbability: match.overlayConfig.showWinProbability !== false,
+      showWinProbability: false,
       showSponsorBadge: match.overlayConfig.showSponsorBadge !== false,
       sponsorText: match.overlayConfig.sponsorText || fallback.sponsorText,
       showStatsPanel: match.overlayConfig.showStatsPanel !== false,
@@ -573,15 +573,11 @@ export const CricketOverlay: React.FC = () => {
     };
   }, [match]);
 
-  // Win Probability HUD Predictor visibility toggle (safely initialized after activeConfig)
-  const [showWinPredictorOverlay, setShowWinPredictorOverlay] = useState<boolean>(() => {
-    return activeConfig?.showWinProbability !== undefined ? !!activeConfig.showWinProbability : true;
-  });
+  // Win Probability HUD Predictor disabled above scorebug per user request
+  const [showWinPredictorOverlay, setShowWinPredictorOverlay] = useState<boolean>(false);
 
   useEffect(() => {
-    if (activeConfig?.showWinProbability !== undefined) {
-      setShowWinPredictorOverlay(activeConfig.showWinProbability);
-    }
+    setShowWinPredictorOverlay(false);
   }, [activeConfig?.showWinProbability]);
 
   // Extract variables for current active innings (Placed immediately after activeConfig to guarantee availability across all hooks and effects)
@@ -672,6 +668,18 @@ export const CricketOverlay: React.FC = () => {
       setActiveGraphic(graphicParam);
     }
   }, [searchParams]);
+
+  // Automatically activate match presentation overlay when a match finishes / completed
+  const hasAutoTriggeredFinishedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (match && match.status === 'completed' && hasAutoTriggeredFinishedRef.current !== match.id) {
+      hasAutoTriggeredFinishedRef.current = match.id;
+      const graphicParam = searchParams.get('graphic');
+      if (!graphicParam) {
+        setActiveGraphic('match_presentation');
+      }
+    }
+  }, [match?.status, match?.id, searchParams]);
 
   // Fallback to any recent/default match if standalone overlay is opened or match is not loaded
   useEffect(() => {
@@ -2028,10 +2036,8 @@ export const CricketOverlay: React.FC = () => {
     // Scorebug is active at bottom of screen:
     if (activeLayout === 'star-tv-broadcast') {
       // Star TV scorebug has bottom context ticker (~38px) + master scorebug (86px) = 124px.
-      // With the top win predictor probability bar (~44px), total scorebug height is ~168px.
-      return showWinPredictorOverlay
-        ? 'bottom-[182px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]'
-        : 'bottom-[138px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]';
+      // Match prediction removed from above scorebug, cleanly positioned at bottom-138px.
+      return 'bottom-[138px] left-1/2 -translate-x-1/2 w-[1100px] max-w-[94vw]';
     }
 
     if (activeLayout === 'ribbon-full' || activeLayout === 'single-line') {
@@ -2767,7 +2773,7 @@ export const CricketOverlay: React.FC = () => {
           prizes={match?.tournamentPrizes}
           layout={activeLayout}
           position={activeConfig.bugPosition}
-          hasWinPredictor={showWinPredictorOverlay}
+          hasWinPredictor={false}
           language={activeConfig.commentaryLanguage}
           lastBdryFlash={lastBdryFlash}
           wicketPopup={wicketPopup}
@@ -2890,7 +2896,7 @@ export const CricketOverlay: React.FC = () => {
                 inningsDotBalls={inningsDotBalls}
                 isFreeHit={Boolean(match?.freeHitNext || (currentOverBalls && currentOverBalls.length > 0 && /nb/i.test(getPillDetails(currentOverBalls[currentOverBalls.length - 1]).label)))}
                 isDrsActive={activeAlert === 'drs'}
-                showWinPredictor={showWinPredictorOverlay}
+                showWinPredictor={false}
 
                 // Star TV Scorebug Mini-Overlay Detail Props
                 scorebugOverlayMode={activeConfig.scorebugOverlayMode || 'this_over'}
@@ -4417,10 +4423,14 @@ export const CricketOverlay: React.FC = () => {
               )}
               <div className="flex justify-between items-center border-b border-white/10 pb-3">
                 <div className="text-left">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
                     {isStarTVTheme && <span className="text-amber-400 text-sm">★</span>}
                     <span className={`text-[10px] font-extrabold block uppercase tracking-widest ${isStarTVTheme ? 'text-amber-400 font-mono' : 'text-amber-500'}`}>
                       {isStarTVTheme ? 'STAR TV BROADCAST • MATCH SUMMARY' : 'TOURNAMENT MATCH SUMMARY'}
+                    </span>
+                    <span className="text-white/30">•</span>
+                    <span className="text-xs font-black uppercase text-amber-300 font-mono">
+                      🏆 {matchTournamentName}
                     </span>
                   </div>
                   <h1 className="text-3xl font-black text-white mt-1">INNINGS COMPREHENSIVE SPLIT</h1>

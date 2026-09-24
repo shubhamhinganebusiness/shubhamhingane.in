@@ -8,7 +8,6 @@ import {
   ChevronLeft, 
   Radio, 
   TrendingUp, 
-  Sparkles, 
   ShieldAlert, 
   X,
   Trophy,
@@ -188,7 +187,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   deliveryType,
   winProbabilityA,
   winProbabilityB,
-  showWinPredictor = true,
+  showWinPredictor = false,
 
   // Mini-Overlay Detail Props
   scorebugOverlayMode = 'this_over',
@@ -555,52 +554,6 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   }, [normalizedBalls, totalBallsBowled]);
 
   // ---------------------------------------------------------------------------
-  // ENHANCEMENT 5: WIN PREDICTOR PROBABILITY METER
-  // ---------------------------------------------------------------------------
-  const [winMeterExpanded, setWinMeterExpanded] = useState<boolean>(true);
-
-  const computedWinProbabilities = useMemo(() => {
-    if (winProbabilityA !== undefined && winProbabilityB !== undefined) {
-      return { teamA: winProbabilityA, teamB: winProbabilityB };
-    }
-
-    // Dynamic Cricket Win Expectancy formula
-    if (targetRuns && targetRuns > 0) {
-      // 2nd innings chasing model
-      const remRuns = remainingRuns ?? Math.max(0, targetRuns - score);
-      const remBalls = remainingBalls ?? Math.max(1, (oversLimit * 6) - totalBallsBowled);
-      const reqRR = (remRuns / remBalls) * 6;
-      const wicketsInHand = Math.max(0, 10 - wickets);
-
-      if (remRuns <= 0) return { teamA: 100, teamB: 0 };
-      if (wickets >= 10 || remBalls <= 0) return { teamA: 0, teamB: 100 };
-
-      // Base win probability of batting team
-      let batProb = 50;
-      // Advantage if required run rate is manageable
-      if (reqRR <= 6.0) batProb += 28;
-      else if (reqRR <= 8.0) batProb += 15;
-      else if (reqRR <= 10.0) batProb += 2;
-      else if (reqRR <= 12.0) batProb -= 16;
-      else if (reqRR <= 15.0) batProb -= 30;
-      else batProb -= 42;
-
-      // Advantage based on wickets in hand
-      batProb += (wicketsInHand - 5) * 4.5;
-      batProb = Math.max(3, Math.min(97, Math.round(batProb)));
-      return { teamA: batProb, teamB: 100 - batProb };
-    } else {
-      // 1st innings par score estimation model
-      const parScore = oversLimit * 8.4; // standard ~168 T20 par
-      const projected = projectedScores.projCurrent;
-      const wicketsLost = wickets;
-      let batProb = 50 + ((projected - parScore) * 0.45) - (wicketsLost * 2.5);
-      batProb = Math.max(8, Math.min(92, Math.round(batProb)));
-      return { teamA: batProb, teamB: 100 - batProb };
-    }
-  }, [winProbabilityA, winProbabilityB, targetRuns, remainingRuns, score, remainingBalls, oversLimit, totalBallsBowled, wickets, projectedScores.projCurrent]);
-
-  // ---------------------------------------------------------------------------
   // ENHANCEMENT 6: BATTER WAGON WHEEL MINI-POPUP
   // ---------------------------------------------------------------------------
   const [activeWagonBatter, setActiveWagonBatter] = useState<'striker' | 'nonStriker' | null>(null);
@@ -877,79 +830,6 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       id="star-tv-scorebug-container"
       className="relative w-full select-none font-sans filter drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)]"
     >
-      {/* =========================================================================
-          ENHANCEMENT 5: OFFICIAL WIN PREDICTOR PROBABILITY METER
-          ========================================================================= */}
-      {showWinPredictor && (
-        <div className="mx-auto w-full max-w-3xl mb-1 px-4">
-          <div className="bg-slate-950/95 border border-white/20 rounded-t-xl px-4 py-1.5 backdrop-blur-xl shadow-2xl flex flex-col gap-1">
-            <div className="flex items-center justify-between text-[10px] font-mono tracking-wider">
-              {/* Left Team Probability */}
-              <div className="flex items-center gap-1.5 font-black text-white">
-                <span 
-                  className="w-2.5 h-2.5 rounded-full inline-block shadow-sm"
-                  style={{ backgroundColor: battingTeamColor }}
-                />
-                <span className="uppercase">{battingTeamName}</span>
-                <span className="text-amber-300 text-xs font-black">{computedWinProbabilities.teamA}%</span>
-              </div>
-
-              {/* Center Star Sports Predictor Label */}
-              <div className="flex items-center gap-1 text-[9px] font-extrabold uppercase text-slate-400">
-                <Sparkles size={11} className="text-amber-400 animate-pulse" />
-                <span className="bg-gradient-to-r from-amber-300 via-sky-300 to-amber-300 bg-clip-text text-transparent font-black">
-                  STAR PREDICTOR • LIVE WIN PROBABILITY
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setWinMeterExpanded(prev => !prev)}
-                  className="ml-1 text-slate-500 hover:text-white transition-colors"
-                  title="Toggle Meter"
-                >
-                  {winMeterExpanded ? '−' : '+'}
-                </button>
-              </div>
-
-              {/* Right Team Probability */}
-              <div className="flex items-center gap-1.5 font-black text-white">
-                <span className="text-sky-300 text-xs font-black">{computedWinProbabilities.teamB}%</span>
-                <span className="uppercase">{bowlingTeamName}</span>
-                <span 
-                  className="w-2.5 h-2.5 rounded-full inline-block shadow-sm"
-                  style={{ backgroundColor: bowlingTeamColor }}
-                />
-              </div>
-            </div>
-
-            {/* Probability Dual Bar */}
-            {winMeterExpanded && (
-              <div className="relative h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-white/10 flex items-stretch">
-                <motion.div 
-                  className="h-full relative transition-all duration-700 ease-out"
-                  style={{ 
-                    width: `${computedWinProbabilities.teamA}%`, 
-                    backgroundColor: battingTeamColor 
-                  }}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/20 via-transparent to-transparent pointer-events-none" />
-                </motion.div>
-                <motion.div 
-                  className="h-full relative transition-all duration-700 ease-out"
-                  style={{ 
-                    width: `${computedWinProbabilities.teamB}%`, 
-                    backgroundColor: bowlingTeamColor 
-                  }}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-l from-white/20 via-transparent to-transparent pointer-events-none" />
-                </motion.div>
-                {/* Center marker line */}
-                <div className="absolute top-0 bottom-0 left-1/2 w-0.5 -translate-x-1/2 bg-white/60 z-10" />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* =========================================================================
           ENHANCEMENT 3: DRS / REVIEW ALERT BANNER
           ========================================================================= */}

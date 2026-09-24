@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { BothSquadsImageOverlay } from './BothSquadsImageOverlay';
 import { TeamSquadImageOverlay } from './TeamSquadImageOverlay';
 import { FieldPositionBroadcastOverlay } from './FieldPositionBroadcastOverlay';
@@ -896,7 +896,12 @@ export const InningsScorecardOverlay: React.FC<{ match: MatchState; onClose?: ()
 /* =========================================================================
    3. MATCH PRESENTATION / RESULTS FULL-SCREEN OVERLAY
    ========================================================================= */
-export const MatchPresentationOverlay: React.FC<{ match: MatchState; onClose?: () => void }> = ({ match, onClose }) => {
+export const MatchPresentationOverlay: React.FC<{ 
+  match: MatchState; 
+  onClose?: () => void;
+  isStarTVTheme?: boolean;
+  starTokens?: any;
+}> = ({ match, onClose, isStarTVTheme, starTokens }) => {
   // Determine winning team and margin
   const winner = match.winner || (match.innings2 && match.targetRuns && match.innings2.runs >= match.targetRuns ? match.innings2.battingTeam : match.teamA);
   const winReason = match.winReason || (match.winner ? `${match.winner} WON THE MATCH` : 'MATCH CONCLUDED');
@@ -906,10 +911,10 @@ export const MatchPresentationOverlay: React.FC<{ match: MatchState; onClose?: (
     // Check manual override in match first
     if (match.playerOfTheMatch) {
       return {
-        name: match.playerOfTheMatch,
+        name: typeof match.playerOfTheMatch === 'object' ? (match.playerOfTheMatch as any).name : match.playerOfTheMatch,
         team: match.potmTeam || winner,
-        stats: match.potmStats || 'Match-winning performance',
-        photo: match.playerPhotos?.[cleanPlayerName(match.playerOfTheMatch).toLowerCase()]
+        stats: match.potmStats || (typeof match.playerOfTheMatch === 'object' && (match.playerOfTheMatch as any).points ? `${(match.playerOfTheMatch as any).points} Impact Points` : 'Match-winning performance'),
+        photo: match.playerPhotos?.[cleanPlayerName(typeof match.playerOfTheMatch === 'object' ? (match.playerOfTheMatch as any).name : match.playerOfTheMatch).toLowerCase()]
       };
     }
 
@@ -958,176 +963,401 @@ export const MatchPresentationOverlay: React.FC<{ match: MatchState; onClose?: (
     return bestPlayer;
   }, [match, winner]);
 
+  // Stage 1: 'tournament_intro' -> Immediately and automatically show ONLY the Tournament Name before adding other match details
+  // Stage 2: 'match_details' -> Reveals the match winner, team scorecards, POTM award, and match statistics
+  const [currentStage, setCurrentStage] = useState<'tournament_intro' | 'match_details'>('tournament_intro');
+  const [countdown, setCountdown] = useState<number>(4);
+
+  // Automatically resolve tournament name with fallbacks
+  const resolvedTournamentName = useMemo(() => {
+    if (match?.tournamentName && String(match.tournamentName).trim().length > 0) return String(match.tournamentName).trim();
+    if ((match as any)?.seriesName && String((match as any).seriesName).trim().length > 0) return String((match as any).seriesName).trim();
+    if ((match as any)?.tournament?.name) return String((match as any).tournament.name).trim();
+    if ((match as any)?.cupName) return String((match as any).cupName).trim();
+    try {
+      const activeStr = localStorage.getItem('cricket_active_match');
+      if (activeStr) {
+        const parsed = JSON.parse(activeStr);
+        if (parsed?.tournamentName && String(parsed.tournamentName).trim().length > 0) return String(parsed.tournamentName).trim();
+      }
+    } catch (_) {}
+    try {
+      const tourRaw = localStorage.getItem('gully_tournaments_v1');
+      if (tourRaw) {
+        const tours = JSON.parse(tourRaw);
+        if (Array.isArray(tours) && tours.length > 0) {
+          const matchTour = tours.find((t: any) => t.id === match?.tournamentId || (t.matches && t.matches.some((m: any) => m.id === match?.id || m.id === match?.tournamentMatchId)));
+          if (matchTour?.name) return matchTour.name;
+          if (tours[0]?.name) return tours[0].name;
+        }
+      }
+    } catch (_) {}
+    return 'CHAMPIONSHIP PREMIER TOURNAMENT 2026';
+  }, [match?.tournamentName, match?.tournamentId, match?.id]);
+
+  // Automatically resolve tournament logo
+  const resolvedTournamentLogo = useMemo(() => {
+    if (match?.tournamentLogo && String(match.tournamentLogo).trim().length > 0) return String(match.tournamentLogo).trim();
+    if ((match as any)?.tournament?.logo) return String((match as any).tournament.logo).trim();
+    try {
+      const stored = localStorage.getItem('cricket_tournament_logo');
+      if (stored && stored.trim().length > 0) return stored.trim();
+    } catch (_) {}
+    try {
+      const tourRaw = localStorage.getItem('gully_tournaments_v1');
+      if (tourRaw) {
+        const tours = JSON.parse(tourRaw);
+        if (Array.isArray(tours) && tours.length > 0) {
+          const matchTour = tours.find((t: any) => t.id === match?.tournamentId);
+          if (matchTour?.logo) return matchTour.logo;
+          if (tours[0]?.logo) return tours[0].logo;
+        }
+      }
+    } catch (_) {}
+    return undefined;
+  }, [match?.tournamentLogo, match?.tournamentId]);
+
+  // Automated timer: show tournament name first, then automatically transition to match details
+  useEffect(() => {
+    if (currentStage !== 'tournament_intro') return;
+    const timer = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setCurrentStage('match_details');
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [currentStage]);
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.98 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-2xl flex flex-col justify-between p-10 select-none text-white text-center"
+      className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-2xl flex flex-col justify-between p-6 sm:p-10 select-none text-white text-center overflow-hidden"
     >
-      {/* Top Header Banner */}
-      <div className="flex justify-between items-center border-b border-white/10 pb-4">
-        <div className="flex items-center gap-4 text-left">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
-            <Trophy size={28} />
-          </div>
-          <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 block font-mono">
-              OFFICIAL MATCH PRESENTATION CEREMONY
-            </span>
-            <h1 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">
-              POST-MATCH AWARDS & FINAL RESULT
-            </h1>
-          </div>
-        </div>
+      <AnimatePresence mode="wait">
+        {currentStage === 'tournament_intro' ? (
+          /* =========================================================================
+             STAGE 1: JUST SHOW THE AUTOMATIC TOURNAMENT NAME FIRST BEFORE MATCH DETAILS
+             ========================================================================= */
+          <motion.div
+            key="stage_tournament_intro"
+            initial={{ opacity: 0, scale: 0.94 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05, filter: 'blur(8px)' }}
+            transition={{ duration: 0.45, ease: 'easeOut' }}
+            className="flex-1 flex flex-col items-center justify-center relative overflow-hidden py-4 w-full h-full"
+          >
+            {/* Ambient Tournament Golden Radial Lighting */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-[700px] h-[450px] bg-gradient-to-r from-amber-500/20 via-yellow-500/25 to-amber-500/20 rounded-full blur-[110px] animate-pulse" />
+              <div className="absolute w-[400px] h-[250px] bg-amber-400/20 rounded-full blur-[70px]" />
+            </div>
 
-        <div className="flex items-center gap-4">
-          <div className="font-mono text-xs text-slate-400 bg-white/5 border border-white/10 px-4 py-2 rounded-xl">
-            {match.tournamentName || 'GULLY PREMIER LEAGUE 2026'}
-          </div>
-          {onClose && (
-            <button 
-              onClick={onClose}
-              className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white transition cursor-pointer"
+            {/* Top Close Control */}
+            {onClose && (
+              <div className="absolute top-0 right-0 z-20">
+                <button 
+                  type="button"
+                  onClick={onClose}
+                  className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white transition cursor-pointer"
+                  title="Close Overlay"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            )}
+
+            {/* Ceremony Tag Ribbon */}
+            <motion.div 
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1, duration: 0.4 }}
+              className="inline-flex items-center gap-2.5 px-6 py-2 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 shadow-[0_0_25px_rgba(245,158,11,0.25)] mb-6 z-10 backdrop-blur-md"
             >
-              <X size={20} />
-            </button>
-          )}
-        </div>
-      </div>
+              <Trophy size={18} className="text-amber-400 animate-bounce" />
+              <span className="text-xs sm:text-sm font-black uppercase tracking-[0.25em] font-mono">
+                OFFICIAL TOURNAMENT MATCH CEREMONY
+              </span>
+              <Sparkles size={16} className="text-amber-400" />
+            </motion.div>
 
-      {/* Main Champion Announcement Strip */}
-      <div className="my-4 p-6 rounded-3xl bg-gradient-to-r from-amber-950/40 via-amber-900/30 to-amber-950/40 border border-amber-500/30 shadow-[0_0_50px_rgba(245,158,11,0.15)] flex flex-col items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/10 via-transparent to-transparent pointer-events-none" />
-        
-        <div className="flex items-center gap-2 text-amber-400 text-xs font-mono font-black uppercase tracking-widest mb-1">
-          <Sparkles size={16} />
-          <span>MATCH WINNER & VICTORY MARGIN</span>
-          <Sparkles size={16} />
-        </div>
-
-        <h2 className="text-4xl font-black text-white uppercase tracking-tight drop-shadow-md">
-          🏆 {winner} WON 🏆
-        </h2>
-
-        <p className="mt-2 text-base font-mono font-bold text-amber-300 uppercase tracking-wide">
-          {winReason}
-        </p>
-
-        {/* Scores summary split */}
-        <div className="mt-4 flex items-center gap-8 font-mono text-sm">
-          <div className="bg-black/30 border border-white/10 px-5 py-2 rounded-xl">
-            <span className="text-slate-400 mr-2">{match.teamA}:</span>
-            <strong className="text-white text-base">
-              {match.innings1 ? `${match.innings1.runs}/${match.innings1.wickets}` : '0/0'}
-            </strong>{' '}
-            <span className="text-xs text-slate-400">
-              ({match.innings1 ? formatOvers(match.innings1.ballsBowled) : '0.0'} ov)
-            </span>
-          </div>
-
-          <span className="text-slate-500 font-sans font-bold text-xs uppercase">vs</span>
-
-          <div className="bg-black/30 border border-white/10 px-5 py-2 rounded-xl">
-            <span className="text-slate-400 mr-2">{match.teamB}:</span>
-            <strong className="text-white text-base">
-              {match.innings2 ? `${match.innings2.runs}/${match.innings2.wickets}` : '0/0'}
-            </strong>{' '}
-            <span className="text-xs text-slate-400">
-              ({match.innings2 ? formatOvers(match.innings2.ballsBowled) : '0.0'} ov)
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Featured "PLAYER OF THE MATCH" Trophy Card */}
-      <div className="max-w-4xl mx-auto w-full my-2 bg-gradient-to-b from-slate-900/90 to-slate-950 border-2 border-amber-500/40 rounded-3xl p-6 shadow-2xl relative overflow-hidden text-left">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        
-        <div className="flex items-center gap-8">
-          {/* Framed Headshot */}
-          <div className="relative shrink-0">
-            <div className="w-32 h-32 rounded-3xl overflow-hidden bg-slate-950 border-2 border-amber-400 p-1 shadow-[0_0_30px_rgba(245,158,11,0.3)]">
-              {potmData.photo ? (
-                <img 
-                  src={potmData.photo} 
-                  alt={potmData.name} 
-                  className="w-full h-full object-cover rounded-2xl" 
-                  referrerPolicy="no-referrer"
-                />
+            {/* Tournament Crest / Emblem */}
+            <motion.div
+              initial={{ scale: 0.75, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.18, duration: 0.5, type: 'spring', damping: 14 }}
+              className="relative mb-6 z-10"
+            >
+              {resolvedTournamentLogo ? (
+                <div className="relative">
+                  <div className="absolute -inset-4 rounded-3xl bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 opacity-75 blur-xl animate-pulse" />
+                  <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-slate-900/90 border-2 border-amber-400/80 p-3 shadow-[0_0_50px_rgba(245,158,11,0.5)] flex items-center justify-center backdrop-blur-xl">
+                    <img 
+                      src={resolvedTournamentLogo} 
+                      alt={resolvedTournamentName} 
+                      className="w-full h-full object-contain filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                </div>
               ) : (
-                <div className="w-full h-full rounded-2xl bg-gradient-to-br from-amber-600 to-amber-900 flex items-center justify-center font-black text-4xl text-amber-200">
-                  {potmData.name.charAt(0)}
+                <div className="relative">
+                  <div className="absolute -inset-4 rounded-full bg-amber-500/30 blur-2xl animate-pulse" />
+                  <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-gradient-to-br from-amber-600/30 via-yellow-500/20 to-amber-900/40 border-2 border-amber-400/80 flex items-center justify-center text-amber-300 shadow-[0_0_50px_rgba(245,158,11,0.4)] backdrop-blur-xl">
+                    <Trophy size={60} className="filter drop-shadow-[0_0_15px_rgba(245,158,11,0.8)]" />
+                  </div>
                 </div>
               )}
+            </motion.div>
+
+            {/* PRIMARY TOURNAMENT NAME DISPLAY */}
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.25, duration: 0.5 }}
+              className="text-center max-w-5xl px-4 z-10"
+            >
+              <div className="text-[11px] sm:text-xs font-mono font-black uppercase tracking-[0.4em] text-amber-400/90 mb-2">
+                TOURNAMENT CHAMPIONSHIP
+              </div>
+              <h1 className="text-4xl sm:text-6xl md:text-7xl font-black uppercase tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white via-amber-200 to-amber-500 drop-shadow-[0_10px_35px_rgba(245,158,11,0.6)] leading-tight">
+                {resolvedTournamentName}
+              </h1>
+              <div className="h-1 w-48 sm:w-72 mx-auto mt-4 bg-gradient-to-r from-transparent via-amber-400 to-transparent rounded-full" />
+              <p className="mt-3 text-xs sm:text-sm font-mono uppercase tracking-widest text-slate-300">
+                MATCH CONCLUDED • OFFICIAL POST-MATCH CEREMONY
+              </p>
+            </motion.div>
+
+            {/* Bottom Actions & Countdown Indicator */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              className="mt-8 flex flex-col sm:flex-row items-center gap-4 z-10"
+            >
+              <button
+                type="button"
+                onClick={() => setCurrentStage('match_details')}
+                className="px-7 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm uppercase tracking-wider flex items-center gap-2 shadow-[0_0_30px_rgba(245,158,11,0.4)] transition-all transform hover:scale-105 cursor-pointer active:scale-95"
+              >
+                <span>View Match Details Now</span>
+                <ChevronRight size={18} />
+              </button>
+
+              <div className="flex items-center gap-2 text-xs font-mono text-amber-300/90 bg-black/40 border border-white/10 px-4 py-2.5 rounded-xl backdrop-blur-sm">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                <span>Showing Tournament Name • Adding match details in {countdown}s...</span>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : (
+          /* =========================================================================
+             STAGE 2: MATCH DETAILS (Winner, Scores, Player of the Match, Awards)
+             ========================================================================= */
+          <motion.div
+            key="stage_match_details"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            className="flex-1 flex flex-col justify-between w-full h-full"
+          >
+            {/* Top Header Banner with Prominent Tournament Name */}
+            <div className="flex justify-between items-center border-b border-white/10 pb-4">
+              <div className="flex items-center gap-4 text-left">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.2)] shrink-0">
+                  <Trophy size={28} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 font-mono">
+                      OFFICIAL MATCH PRESENTATION CEREMONY
+                    </span>
+                    <span className="text-[10px] text-slate-400">•</span>
+                    <span className="text-[11px] font-black uppercase text-amber-300 font-mono">
+                      🏆 {resolvedTournamentName}
+                    </span>
+                  </div>
+                  <h1 className="text-2xl font-black uppercase tracking-tight text-white mt-0.5">
+                    POST-MATCH AWARDS & FINAL RESULT
+                  </h1>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {/* Button to replay tournament intro stage */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCountdown(4);
+                    setCurrentStage('tournament_intro');
+                  }}
+                  className="hidden sm:flex items-center gap-1.5 font-mono text-xs text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-3.5 py-2 rounded-xl transition-all cursor-pointer"
+                  title="Replay Tournament Title Presentation"
+                >
+                  <RotateCcw size={14} />
+                  <span>Tournament Title</span>
+                </button>
+
+                <div className="font-mono text-xs font-bold text-slate-300 bg-white/5 border border-white/10 px-4 py-2 rounded-xl max-w-[240px] truncate">
+                  {resolvedTournamentName}
+                </div>
+
+                {onClose && (
+                  <button 
+                    type="button"
+                    onClick={onClose}
+                    className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-white transition cursor-pointer"
+                    title="Close Overlay"
+                  >
+                    <X size={20} />
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="absolute -bottom-2.5 inset-x-0 flex justify-center">
-              <span className="bg-amber-400 text-slate-950 font-black text-[9px] uppercase tracking-widest px-2.5 py-0.5 rounded-full shadow">
-                MVP AWARD
-              </span>
+
+            {/* Main Champion Announcement Strip */}
+            <div className="my-3 p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-amber-950/40 via-amber-900/30 to-amber-950/40 border border-amber-500/30 shadow-[0_0_50px_rgba(245,158,11,0.15)] flex flex-col items-center justify-center relative overflow-hidden">
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/10 via-transparent to-transparent pointer-events-none" />
+              
+              <div className="flex items-center gap-2 text-amber-400 text-xs font-mono font-black uppercase tracking-widest mb-1">
+                <Sparkles size={16} />
+                <span>MATCH WINNER & VICTORY MARGIN</span>
+                <Sparkles size={16} />
+              </div>
+
+              <h2 className="text-3xl sm:text-4xl font-black text-white uppercase tracking-tight drop-shadow-md">
+                🏆 {winner} WON 🏆
+              </h2>
+
+              <p className="mt-1.5 text-sm sm:text-base font-mono font-bold text-amber-300 uppercase tracking-wide">
+                {winReason}
+              </p>
+
+              {/* Scores summary split */}
+              <div className="mt-3.5 flex flex-wrap items-center justify-center gap-4 sm:gap-8 font-mono text-sm">
+                <div className="bg-black/30 border border-white/10 px-5 py-2 rounded-xl">
+                  <span className="text-slate-400 mr-2">{match.teamA}:</span>
+                  <strong className="text-white text-base">
+                    {match.innings1 ? `${match.innings1.runs}/${match.innings1.wickets}` : '0/0'}
+                  </strong>{' '}
+                  <span className="text-xs text-slate-400">
+                    ({match.innings1 ? formatOvers(match.innings1.ballsBowled) : '0.0'} ov)
+                  </span>
+                </div>
+
+                <span className="text-slate-500 font-sans font-bold text-xs uppercase">vs</span>
+
+                <div className="bg-black/30 border border-white/10 px-5 py-2 rounded-xl">
+                  <span className="text-slate-400 mr-2">{match.teamB}:</span>
+                  <strong className="text-white text-base">
+                    {match.innings2 ? `${match.innings2.runs}/${match.innings2.wickets}` : '0/0'}
+                  </strong>{' '}
+                  <span className="text-xs text-slate-400">
+                    ({match.innings2 ? formatOvers(match.innings2.ballsBowled) : '0.0'} ov)
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Details */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <Award size={18} className="text-amber-400" />
-              <span className="text-xs font-black uppercase tracking-widest text-amber-400 font-mono">
-                PLAYER OF THE MATCH
-              </span>
+            {/* Featured "PLAYER OF THE MATCH" Trophy Card */}
+            <div className="max-w-4xl mx-auto w-full my-2 bg-gradient-to-b from-slate-900/90 to-slate-950 border-2 border-amber-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl relative overflow-hidden text-left">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+              
+              <div className="flex items-center gap-6 sm:gap-8">
+                {/* Framed Headshot */}
+                <div className="relative shrink-0">
+                  <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-3xl overflow-hidden bg-slate-950 border-2 border-amber-400 p-1 shadow-[0_0_30px_rgba(245,158,11,0.3)]">
+                    {potmData.photo ? (
+                      <img 
+                        src={potmData.photo} 
+                        alt={potmData.name} 
+                        className="w-full h-full object-cover rounded-2xl" 
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="w-full h-full rounded-2xl bg-gradient-to-br from-amber-600 to-amber-900 flex items-center justify-center font-black text-3xl sm:text-4xl text-amber-200">
+                        {potmData.name.charAt(0)}
+                      </div>
+                    )}
+                  </div>
+                  <div className="absolute -bottom-2.5 inset-x-0 flex justify-center">
+                    <span className="bg-amber-400 text-slate-950 font-black text-[9px] uppercase tracking-widest px-2.5 py-0.5 rounded-full shadow">
+                      MVP AWARD
+                    </span>
+                  </div>
+                </div>
+
+                {/* Details */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Award size={18} className="text-amber-400" />
+                    <span className="text-xs font-black uppercase tracking-widest text-amber-400 font-mono">
+                      PLAYER OF THE MATCH
+                    </span>
+                  </div>
+
+                  <h3 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-tight mt-1 truncate">
+                    {cleanPlayerName(potmData.name)}
+                  </h3>
+
+                  <span className="text-xs sm:text-sm font-mono text-slate-300 font-bold uppercase block mt-0.5">
+                    Team: <strong className="text-amber-300">{potmData.team}</strong>
+                  </span>
+
+                  {/* Impact Metric Strip */}
+                  <div className="mt-3 inline-flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-4 py-2 text-xs sm:text-sm font-mono">
+                    <span className="text-amber-400 font-black">Impact:</span>
+                    <span className="text-white font-bold">{potmData.stats}</span>
+                  </div>
+                </div>
+
+                {/* Golden Trophy Medallion */}
+                <div className="hidden md:flex flex-col items-center justify-center px-6 border-l border-white/10 shrink-0">
+                  <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-400/40 flex items-center justify-center text-amber-400 shadow-inner">
+                    <Star size={32} />
+                  </div>
+                  <span className="text-[9px] font-mono text-slate-400 uppercase tracking-widest mt-2">
+                    MATCH PRIZE
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <h3 className="text-3xl font-black text-white uppercase tracking-tight mt-1 truncate">
-              {cleanPlayerName(potmData.name)}
-            </h3>
+            {/* Footer Awards Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 font-mono text-xs">
+              <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-left">
+                <span className="text-[9px] text-slate-500 block uppercase">Highest Run Scorer</span>
+                <strong className="text-white text-sm block mt-0.5 truncate">
+                  {match.innings1?.batsmen?.[0]?.name || 'Top Batter'} ({match.innings1?.batsmen?.[0]?.runs || 0})
+                </strong>
+              </div>
 
-            <span className="text-sm font-mono text-slate-300 font-bold uppercase block mt-0.5">
-              Team: <strong className="text-amber-300">{potmData.team}</strong>
-            </span>
+              <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-left">
+                <span className="text-[9px] text-slate-500 block uppercase">Best Bowling Figures</span>
+                <strong className="text-white text-sm block mt-0.5 truncate">
+                  {match.innings2?.bowlers?.[0]?.name || 'Top Bowler'} ({match.innings2?.bowlers?.[0]?.wickets || 0}/{match.innings2?.bowlers?.[0]?.runsConceded || 0})
+                </strong>
+              </div>
 
-            {/* Impact Metric Strip */}
-            <div className="mt-3.5 inline-flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-4 py-2 text-sm font-mono">
-              <span className="text-amber-400 font-black">Impact:</span>
-              <span className="text-white font-bold">{potmData.stats}</span>
+              <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-left">
+                <span className="text-[9px] text-slate-500 block uppercase">Tournament Series</span>
+                <strong className="text-amber-400 text-sm block mt-0.5 truncate">
+                  🏆 {resolvedTournamentName}
+                </strong>
+              </div>
             </div>
-          </div>
-
-          {/* Golden Trophy Medallion */}
-          <div className="hidden md:flex flex-col items-center justify-center px-6 border-l border-white/10 shrink-0">
-            <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-400/40 flex items-center justify-center text-amber-400 shadow-inner">
-              <Star size={32} />
-            </div>
-            <span className="text-[9px] font-mono text-slate-400 uppercase tracking-widest mt-2">
-              MATCH PRIZE ₹10,000
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer Awards Row */}
-      <div className="grid grid-cols-3 gap-4 font-mono text-xs">
-        <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-left">
-          <span className="text-[9px] text-slate-500 block uppercase">Highest Run Scorer</span>
-          <strong className="text-white text-sm block mt-0.5 truncate">
-            {match.innings1?.batsmen?.[0]?.name || 'Top Batter'} (58)
-          </strong>
-        </div>
-
-        <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-left">
-          <span className="text-[9px] text-slate-500 block uppercase">Best Bowling Figures</span>
-          <strong className="text-white text-sm block mt-0.5 truncate">
-            {match.innings2?.bowlers?.[0]?.name || 'Top Bowler'} (2/22)
-          </strong>
-        </div>
-
-        <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/5 text-left">
-          <span className="text-[9px] text-slate-500 block uppercase">Super Sixes Award</span>
-          <strong className="text-amber-400 text-sm block mt-0.5">
-            Total 7 Maximums registered
-          </strong>
-        </div>
-      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
@@ -2597,7 +2827,7 @@ export const CricketFullScreenTransitions: React.FC<Props> = ({
 
   // 3. Match Presentation / Results
   if (activeGraphic === 'match_presentation' || activeGraphic === 'potm_card' || activeGraphic === 'presentation') {
-    return <MatchPresentationOverlay match={match} onClose={onClose} />;
+    return <MatchPresentationOverlay match={match} onClose={onClose} isStarTVTheme={isStarTVTheme} starTokens={starTokens} />;
   }
 
   // 4. Tournament Standings / Points Table

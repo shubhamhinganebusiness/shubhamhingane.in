@@ -152,7 +152,7 @@ export const DEFAULT_BROADCAST_STUDIO_THEME: BroadcastStudioTheme = {
   teamBSubtext: 'BOWLING',
   showBallByBallDots: true,
   showStrikeRates: true,
-  showWinProbability: true,
+  showWinProbability: false,
   showSponsorBadge: true,
   sponsorText: 'LIVE CRICKET BROADCAST',
   showTicker: false,
@@ -807,7 +807,7 @@ export const BroadcastThemeStudio: React.FC = () => {
                   bowlingTeamSubtext={theme.teamBSubtext || 'BOWLING'}
                   bowlingTeamColor={theme.teamBColor || '#c8102e'}
                   activeStinger={activeStinger}
-                  showWinPredictor={true}
+                  showWinPredictor={false}
                   winProbabilityA={68}
                   winProbabilityB={32}
                   tournamentName="T20 WORLD CHAMPIONSHIP 2026"

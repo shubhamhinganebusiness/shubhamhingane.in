@@ -319,14 +319,17 @@ export interface SquadPlayerCertificateItem {
 export function extractSquadPlayersForCertificates(match: any): SquadPlayerCertificateItem[] {
   if (!match) return [];
 
-  const teamA = match.teamA || 'Team A';
-  const teamB = match.teamB || 'Team B';
-  const winnerStr = (match.winner || '').trim().toLowerCase();
-  const teamALower = teamA.trim().toLowerCase();
-  const teamBLower = teamB.trim().toLowerCase();
+  const teamA = (match.teamA || 'Team A').trim();
+  const teamB = (match.teamB || 'Team B').trim();
+  const winnerStr = String(match.winner || '').trim().toLowerCase();
+  const teamALower = teamA.toLowerCase();
+  const teamBLower = teamB.toLowerCase();
 
-  const isTeamAWinner = winnerStr.includes(teamALower) || (!winnerStr.includes(teamBLower) && winnerStr.length > 0 && !winnerStr.includes('tie'));
-  const isTeamBWinner = winnerStr.includes(teamBLower);
+  const isBWinnerDirect = (winnerStr === teamBLower) || (winnerStr.includes(teamBLower) && !winnerStr.includes(teamALower));
+  const isAWinnerDirect = (winnerStr === teamALower) || (winnerStr.includes(teamALower) && !winnerStr.includes(teamBLower));
+
+  const isTeamBWinner = isBWinnerDirect || (winnerStr.includes(teamBLower) && !winnerStr.includes(teamALower));
+  const isTeamAWinner = isAWinnerDirect || (!isTeamBWinner && (winnerStr.includes(teamALower) || (!winnerStr.includes('tie') && winnerStr.length > 0)));
 
   const inn1 = match.mainMatchState?.innings1 || match.innings1;
   const inn2 = match.mainMatchState?.innings2 || match.innings2;
@@ -343,7 +346,10 @@ export function extractSquadPlayersForCertificates(match: any): SquadPlayerCerti
   ) => {
     if (!rawName || typeof rawName !== 'string' || !rawName.trim()) return;
     const name = rawName.trim();
+    // Do not register dummy placeholder names if they appear
+    const isGenericDummy = /^player\s*\d+$/i.test(name) || /^(team\s*[ab]?\s*player\s*\d+)$/i.test(name);
     const key = normalizeKey(name, teamName);
+
     if (!playersMap.has(key)) {
       playersMap.set(key, {
         id: key,
@@ -360,7 +366,7 @@ export function extractSquadPlayersForCertificates(match: any): SquadPlayerCerti
         runsConceded: 0,
         maidens: 0,
         ballsBowled: 0,
-        points: 10
+        points: isGenericDummy ? 5 : 10
       });
     } else if (meta?.isCaptain) {
       const existing = playersMap.get(key)!;
@@ -392,7 +398,7 @@ export function extractSquadPlayersForCertificates(match: any): SquadPlayerCerti
     });
   }
 
-  // Also check if match has tournament teams attached
+  // 2. Also check if match has tournament teams attached
   if (Array.isArray(match.teams)) {
     match.teams.forEach((t: any) => {
       if (!t || !t.name) return;
@@ -416,7 +422,7 @@ export function extractSquadPlayersForCertificates(match: any): SquadPlayerCerti
     });
   }
 
-  // 2. Ingest batsmen and bowlers from innings1 & innings2
+  // 3. Ingest batsmen and bowlers from innings1 & innings2
   const processInnings = (inn: any, defaultBatTeam: string, defaultBowlTeam: string, batIsWinner: boolean, bowlIsWinner: boolean) => {
     if (!inn) return;
     const batTeam = inn.battingTeam || defaultBatTeam;
@@ -450,7 +456,75 @@ export function extractSquadPlayersForCertificates(match: any): SquadPlayerCerti
   processInnings(inn1, teamA, teamB, isTeamAWinner, isTeamBWinner);
   processInnings(inn2, teamB, teamA, isTeamBWinner, isTeamAWinner);
 
-  // 3. Compute final MVP points
+  // 4. Fallback search across local tournament storage if players for either team are missing
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const rawTours = localStorage.getItem('gully_tournaments_v1');
+      if (rawTours) {
+        const tourList = JSON.parse(rawTours);
+        if (Array.isArray(tourList)) {
+          const foundTour = tourList.find((t: any) => 
+            (match.tournamentId && (t.id === match.tournamentId || t.name === match.tournamentId)) ||
+            (match.tournamentName && t.name?.trim().toLowerCase() === match.tournamentName?.trim().toLowerCase()) ||
+            ((t.teams || []).some((tt: any) => tt.name?.trim().toLowerCase() === teamALower) &&
+             (t.teams || []).some((tt: any) => tt.name?.trim().toLowerCase() === teamBLower))
+          );
+          if (foundTour && Array.isArray(foundTour.teams)) {
+            foundTour.teams.forEach((t: any) => {
+              if (!t || !t.name) return;
+              const isTeamA = t.name.trim().toLowerCase() === teamALower;
+              const isTeamB = t.name.trim().toLowerCase() === teamBLower;
+              if (!isTeamA && !isTeamB) return;
+              const teamName = isTeamA ? teamA : teamB;
+              const isWinner = isTeamA ? isTeamAWinner : isTeamBWinner;
+              const cap = t.captain || '';
+              if (Array.isArray(t.players)) {
+                t.players.forEach((p: any, pIdx: number) => {
+                  const pName = (typeof p === 'string' ? p : p?.name || '').trim();
+                  if (pName && !/^player\s*\d+$/i.test(pName)) {
+                    registerPlayer(pName, teamName, isWinner, {
+                      isCaptain: cap ? cap.toLowerCase() === pName.toLowerCase() : pIdx === 0,
+                      role: typeof p === 'object' && p?.role ? p.role : undefined
+                    });
+                  }
+                });
+              }
+            });
+          }
+        }
+      }
+
+      // Check saved teams backup
+      const rawSaved = localStorage.getItem('cricket_saved_teams_backup');
+      if (rawSaved) {
+        const savedTeams = JSON.parse(rawSaved);
+        if (Array.isArray(savedTeams)) {
+          savedTeams.forEach((st: any) => {
+            if (!st || !st.name) return;
+            const isTeamA = st.name.trim().toLowerCase() === teamALower;
+            const isTeamB = st.name.trim().toLowerCase() === teamBLower;
+            if (!isTeamA && !isTeamB) return;
+            const teamName = isTeamA ? teamA : teamB;
+            const isWinner = isTeamA ? isTeamAWinner : isTeamBWinner;
+            const cap = st.captainName || st.captain || '';
+            if (Array.isArray(st.players)) {
+              st.players.forEach((p: any, pIdx: number) => {
+                const pName = (typeof p === 'string' ? p : p?.name || '').trim();
+                if (pName && !/^player\s*\d+$/i.test(pName)) {
+                  registerPlayer(pName, teamName, isWinner, {
+                    isCaptain: cap ? cap.toLowerCase() === pName.toLowerCase() : pIdx === 0,
+                    role: typeof p === 'object' && p?.role ? p.role : undefined
+                  });
+                }
+              });
+            }
+          });
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 5. Compute final MVP points
   playersMap.forEach((item) => {
     item.points = (item.runs * 1) + (item.wickets * 25) + ((item.sixes || 0) * 2) + ((item.maidens || 0) * 10);
     if (item.points === 0) {

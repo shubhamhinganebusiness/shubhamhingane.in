@@ -60,6 +60,7 @@ export interface AwardPlayer {
 export interface MatchCertificateData {
   matchId: string;
   tournamentName?: string;
+  tournamentId?: string;
   matchDate: string;
   teamA: string;
   teamB: string;
@@ -77,6 +78,13 @@ export interface MatchCertificateData {
   squadPlayers?: SquadPlayerCertificateItem[];
   isFinalMatch?: boolean;
   matchStage?: string;
+  teamASquad?: any[];
+  teamBSquad?: any[];
+  teamAPlayers?: any[];
+  teamBPlayers?: any[];
+  innings1?: any;
+  innings2?: any;
+  teams?: any[];
 }
 
 export interface CertificateTheme {
@@ -1416,20 +1424,58 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   const [isExporting, setIsExporting] = useState(false);
   const [downloadSuccessMessage, setDownloadSuccessMessage] = useState<string | null>(null);
 
-  // Identify Winner and Runner-up teams
-  const winnerTeamName = useMemo(() => {
-    if (data.winner && data.winner !== 'Tie' && data.winner !== 'Completed') {
-      return data.winner.trim();
-    }
-    return data.teamA || 'Team A';
-  }, [data.winner, data.teamA]);
+  // Helper to reliably match player team to target team
+  const isTeamMatch = (playerTeam: string | undefined, targetTeam: string | undefined) => {
+    const pT = (playerTeam || '').trim().toLowerCase();
+    const tT = (targetTeam || '').trim().toLowerCase();
+    if (!pT || !tT) return false;
+    return pT === tT || pT.includes(tT) || tT.includes(pT);
+  };
 
-  const runnerUpTeamName = useMemo(() => {
-    if (winnerTeamName.toLowerCase() === (data.teamA || '').trim().toLowerCase()) {
-      return data.teamB || 'Team B';
+  // Identify Winner and Runner-up teams
+  const { winnerTeamName, runnerUpTeamName } = useMemo(() => {
+    const tA = (data.teamA || 'Team A').trim();
+    const tB = (data.teamB || 'Team B').trim();
+    const winStr = String(data.winner || '').trim().toLowerCase();
+    const tALower = tA.toLowerCase();
+    const tBLower = tB.toLowerCase();
+
+    let winTeam = tA;
+    let runTeam = tB;
+
+    if (winStr && winStr !== 'tie' && winStr !== 'completed') {
+      const matchesB = (winStr === tBLower || winStr.startsWith(tBLower) || winStr.includes(` ${tBLower}`) || winStr.includes(`${tBLower} won`));
+      const matchesA = (winStr === tALower || winStr.startsWith(tALower) || winStr.includes(` ${tALower}`) || winStr.includes(`${tALower} won`));
+
+      if (matchesB && !matchesA) {
+        winTeam = tB;
+        runTeam = tA;
+      } else if (matchesA && !matchesB) {
+        winTeam = tA;
+        runTeam = tB;
+      } else if (winStr.includes(tBLower) && !winStr.includes(tALower)) {
+        winTeam = tB;
+        runTeam = tA;
+      } else if (winStr.includes(tALower) && !winStr.includes(tBLower)) {
+        winTeam = tA;
+        runTeam = tB;
+      } else {
+        const cleanWin = data.winner ? data.winner.trim() : '';
+        if (cleanWin.toLowerCase() === tBLower) {
+          winTeam = tB;
+          runTeam = tA;
+        } else if (cleanWin.toLowerCase() === tALower) {
+          winTeam = tA;
+          runTeam = tB;
+        } else {
+          winTeam = cleanWin || tA;
+          runTeam = (winTeam.toLowerCase() === tALower) ? tB : tA;
+        }
+      }
     }
-    return data.teamA || 'Team A';
-  }, [winnerTeamName, data.teamA, data.teamB]);
+
+    return { winnerTeamName: winTeam, runnerUpTeamName: runTeam };
+  }, [data.winner, data.teamA, data.teamB]);
 
   // Squad Batch Mode State
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<'winner' | 'runner_up' | 'all'>(
@@ -1448,13 +1494,107 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     statusText: string;
   } | null>(null);
 
-  // Extract raw squad players from match/tournament data
+  // Extract raw squad players from match/tournament data with comprehensive fallback sources
   const rawSquadPlayers = useMemo<SquadPlayerCertificateItem[]>(() => {
-    if (data.squadPlayers && data.squadPlayers.length > 0) {
-      return data.squadPlayers;
+    let list: SquadPlayerCertificateItem[] = [];
+    if (data.squadPlayers && Array.isArray(data.squadPlayers) && data.squadPlayers.length > 0) {
+      list = [...data.squadPlayers];
+    } else {
+      list = extractSquadPlayersForCertificates(data);
     }
-    return extractSquadPlayersForCertificates(data);
-  }, [data]);
+
+    const hasWinnerPlayers = list.some(p => isTeamMatch(p.team, winnerTeamName) && !/^player\s*\d+$/i.test(p.name));
+    const hasRunnerUpPlayers = list.some(p => isTeamMatch(p.team, runnerUpTeamName) && !/^player\s*\d+$/i.test(p.name));
+
+    // If either team is missing players, attempt deep search from local storage!
+    if (!hasWinnerPlayers || !hasRunnerUpPlayers) {
+      // 1. Search gully_tournaments_v1
+      try {
+        const rawTours = typeof localStorage !== 'undefined' ? localStorage.getItem('gully_tournaments_v1') : null;
+        if (rawTours) {
+          const tours = JSON.parse(rawTours);
+          if (Array.isArray(tours)) {
+            const tour = tours.find((t: any) => 
+              (data.tournamentId && (t.id === data.tournamentId || t.name === data.tournamentId)) ||
+              (data.tournamentName && t.name?.trim().toLowerCase() === data.tournamentName?.trim().toLowerCase()) ||
+              ((t.teams || []).some((tt: any) => isTeamMatch(tt.name, winnerTeamName)) &&
+               (t.teams || []).some((tt: any) => isTeamMatch(tt.name, runnerUpTeamName)))
+            );
+            if (tour && Array.isArray(tour.teams)) {
+              tour.teams.forEach((t: any) => {
+                if (!t || !t.name) return;
+                const isWinner = isTeamMatch(t.name, winnerTeamName);
+                const isRunnerUp = isTeamMatch(t.name, runnerUpTeamName);
+                if (!isWinner && !isRunnerUp) return;
+                const teamName = isWinner ? winnerTeamName : runnerUpTeamName;
+                const cap = t.captain || '';
+                if (Array.isArray(t.players)) {
+                  t.players.forEach((p: any, idx: number) => {
+                    const pName = (typeof p === 'string' ? p : p?.name || '').trim();
+                    if (!pName || /^player\s*\d+$/i.test(pName)) return;
+                    const exists = list.some(x => x.name.toLowerCase() === pName.toLowerCase() && isTeamMatch(x.team, teamName));
+                    if (!exists) {
+                      list.push({
+                        id: `${pName.toLowerCase()}__${teamName.toLowerCase()}`,
+                        name: pName,
+                        team: teamName,
+                        isWinner,
+                        isCaptain: cap ? cap.toLowerCase() === pName.toLowerCase() : idx === 0,
+                        role: typeof p === 'object' && p?.role ? p.role : (idx === 0 ? 'Captain' : 'Playing XI'),
+                        runs: 0,
+                        wickets: 0,
+                        points: 25
+                      });
+                    }
+                  });
+                }
+              });
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 2. Search cricket_saved_teams_backup
+      try {
+        const rawSaved = typeof localStorage !== 'undefined' ? localStorage.getItem('cricket_saved_teams_backup') : null;
+        if (rawSaved) {
+          const savedTeams = JSON.parse(rawSaved);
+          if (Array.isArray(savedTeams)) {
+            savedTeams.forEach((st: any) => {
+              if (!st || !st.name) return;
+              const isWinner = isTeamMatch(st.name, winnerTeamName);
+              const isRunnerUp = isTeamMatch(st.name, runnerUpTeamName);
+              if (!isWinner && !isRunnerUp) return;
+              const teamName = isWinner ? winnerTeamName : runnerUpTeamName;
+              const cap = st.captainName || st.captain || '';
+              if (Array.isArray(st.players)) {
+                st.players.forEach((p: any, idx: number) => {
+                  const pName = (typeof p === 'string' ? p : p?.name || '').trim();
+                  if (!pName || /^player\s*\d+$/i.test(pName)) return;
+                  const exists = list.some(x => x.name.toLowerCase() === pName.toLowerCase() && isTeamMatch(x.team, teamName));
+                  if (!exists) {
+                    list.push({
+                      id: `${pName.toLowerCase()}__${teamName.toLowerCase()}`,
+                      name: pName,
+                      team: teamName,
+                      isWinner,
+                      isCaptain: cap ? cap.toLowerCase() === pName.toLowerCase() : idx === 0,
+                      role: typeof p === 'object' && p?.role ? p.role : (idx === 0 ? 'Captain' : 'Playing XI'),
+                      runs: 0,
+                      wickets: 0,
+                      points: 25
+                    });
+                  }
+                });
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    return list;
+  }, [data, winnerTeamName, runnerUpTeamName]);
 
   const [editableSquadList, setEditableSquadList] = useState<SquadPlayerCertificateItem[]>([]);
 
@@ -1463,12 +1603,12 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     let filtered: SquadPlayerCertificateItem[] = [];
     if (selectedTeamFilter === 'winner') {
       filtered = rawSquadPlayers.filter(p => 
-        p.isWinner || p.team.trim().toLowerCase() === winnerTeamName.toLowerCase()
+        isTeamMatch(p.team, winnerTeamName) || (!isTeamMatch(p.team, runnerUpTeamName) && p.isWinner)
       );
       setSelectedSquadAwardType('champion_squad');
     } else if (selectedTeamFilter === 'runner_up') {
       filtered = rawSquadPlayers.filter(p => 
-        !p.isWinner || p.team.trim().toLowerCase() === runnerUpTeamName.toLowerCase()
+        isTeamMatch(p.team, runnerUpTeamName) || (!isTeamMatch(p.team, winnerTeamName) && !p.isWinner)
       );
       setSelectedSquadAwardType('runner_up_squad');
     } else {
@@ -1476,7 +1616,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       setSelectedSquadAwardType('participation');
     }
 
-    // If squad roster is empty, bootstrap a standard 11-player squad roster
+    // If squad roster is still empty, bootstrap a standard 11-player squad roster
     if (filtered.length === 0) {
       const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : (data.teamA || 'Team'));
       for (let i = 1; i <= 11; i++) {
@@ -1496,7 +1636,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
 
     setEditableSquadList(filtered);
     setSelectedSquadPlayerIndex(0);
-  }, [selectedTeamFilter, rawSquadPlayers, winnerTeamName, runnerUpTeamName]);
+  }, [selectedTeamFilter, rawSquadPlayers, winnerTeamName, runnerUpTeamName, data.teamA]);
 
   // Squad auto-fill helpers (supports expanding squad to full 11 or 15 players)
   const handleAutoFillSquad = (targetCount: number = 11) => {
@@ -1570,10 +1710,8 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       if (['champion_squad', 'runner_up_squad', 'participation'].includes(initialAward)) {
         setActiveTab('squad_batch');
         setSelectedSquadAwardType(initialAward);
-        if (initialAward === 'runner_up_squad') {
+        if (initialAward === 'runner_up_squad' || initialAward === 'participation') {
           setSelectedTeamFilter('runner_up');
-        } else if (initialAward === 'participation') {
-          setSelectedTeamFilter('all');
         } else {
           setSelectedTeamFilter('winner');
         }
@@ -1609,19 +1747,19 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   // Filter individual squad rosters for Winning team and Runner-up/Participant team
   const winningSquadPlayers = useMemo(() => {
     const list = rawSquadPlayers.filter(p => 
-      p.isWinner || p.team.trim().toLowerCase() === winnerTeamName.toLowerCase()
+      isTeamMatch(p.team, winnerTeamName) || (!isTeamMatch(p.team, runnerUpTeamName) && p.isWinner)
     );
     if (list.length > 0) return list;
-    return editableSquadList.filter(p => p.isWinner || p.team.trim().toLowerCase() === winnerTeamName.toLowerCase());
-  }, [rawSquadPlayers, editableSquadList, winnerTeamName]);
+    return editableSquadList.filter(p => isTeamMatch(p.team, winnerTeamName) || p.isWinner);
+  }, [rawSquadPlayers, editableSquadList, winnerTeamName, runnerUpTeamName]);
 
   const runnerUpSquadPlayers = useMemo(() => {
     const list = rawSquadPlayers.filter(p => 
-      !p.isWinner || p.team.trim().toLowerCase() === runnerUpTeamName.toLowerCase()
+      isTeamMatch(p.team, runnerUpTeamName) || (!isTeamMatch(p.team, winnerTeamName) && !p.isWinner)
     );
     if (list.length > 0) return list;
-    return editableSquadList.filter(p => !p.isWinner || p.team.trim().toLowerCase() === runnerUpTeamName.toLowerCase());
-  }, [rawSquadPlayers, editableSquadList, runnerUpTeamName]);
+    return editableSquadList.filter(p => isTeamMatch(p.team, runnerUpTeamName) || !p.isWinner);
+  }, [rawSquadPlayers, editableSquadList, runnerUpTeamName, winnerTeamName]);
 
   const [selectedWinningPlayerIdx, setSelectedWinningPlayerIdx] = useState<number>(0);
   const [selectedRunnerUpPlayerIdx, setSelectedRunnerUpPlayerIdx] = useState<number>(0);

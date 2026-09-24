@@ -444,7 +444,7 @@ export const ContinuousPrizeMoneyBanner: React.FC<ContinuousPrizeMoneyBannerProp
   // Dynamic positioning cleanly ABOVE the scorebug based on active layout and bug position
   const isTop = position === 'top-full';
   let positionClasses = '';
-  const showWinBar = hasWinPredictor !== false;
+  const showWinBar = hasWinPredictor === true;
 
   if (isTop) {
     if (layout === 'star-tv-broadcast') {
