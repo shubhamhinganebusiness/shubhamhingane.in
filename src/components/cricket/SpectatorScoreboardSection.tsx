@@ -52,7 +52,8 @@ import {
   CommentaryLanguage,
   useCommentaryLanguage,
   getCommentaryText,
-  CommentaryLanguageSelector
+  CommentaryLanguageSelector,
+  createSquadAnnouncementCommentary
 } from './modules/commentaryLanguage';
 import { SpectatorImageSlider } from './SpectatorImageSlider';
 import { ActiveLiveMatchBannerSlider } from './ActiveLiveMatchBannerSlider';
@@ -848,6 +849,8 @@ export const SpectatorScoreboardSection = ({
   const [selectedScorecardInnings, setSelectedScorecardInnings] = useState<1 | 2>(1);
   const [historyResultFilter, setHistoryResultFilter] = useState<'all' | 'wins' | 'ties'>('all');
   const [toastNotification, setToastNotification] = useState<string | null>(null);
+  const [expandedArenaSquad, setExpandedArenaSquad] = useState(false);
+  const [copiedSquadsNotification, setCopiedSquadsNotification] = useState(false);
   const [prevPredA, setPrevPredA] = useState<number | null>(null);
   const [showPlayerRegistration, setShowPlayerRegistration] = useState(false);
   const [showMatchResultModal, setShowMatchResultModal] = useState(false);
@@ -2474,6 +2477,133 @@ export const SpectatorScoreboardSection = ({
     }
     return inn;
   }, [selectedMatch]);
+
+  // Resolve both teams playing squads with captain & wicketkeeper info
+  const matchBothSquads = useMemo(() => {
+    if (!selectedMatch) {
+      return {
+        teamASquad: [] as Array<{ name: string; isCaptain?: boolean; isWicketkeeper?: boolean; role?: string }>,
+        teamBSquad: [] as Array<{ name: string; isCaptain?: boolean; isWicketkeeper?: boolean; role?: string }>
+      };
+    }
+
+    const extractSquad = (teamName: string, teamId?: string | null, rawSquad?: any[]) => {
+      // 1. If explicit squad array provided in match
+      if (Array.isArray(rawSquad) && rawSquad.length > 0) {
+        return rawSquad.map((item, idx) => {
+          if (typeof item === 'string') {
+            const isCap = item.includes('(c)') || item.includes('(C)') || idx === 0;
+            const isWk = item.includes('(wk)') || item.includes('(WK)') || idx === 1;
+            const cleanName = item.replace(/\s*\((c|C|wk|WK|c & wk|C & WK)\)/g, '').trim();
+            return { name: cleanName || item, isCaptain: isCap, isWicketkeeper: isWk };
+          }
+          return {
+            name: (item.name || `Player ${idx + 1}`).replace(/\s*\((c|C|wk|WK|c & wk|C & WK)\)/g, '').trim(),
+            isCaptain: !!item.isCaptain,
+            isWicketkeeper: !!item.isWicketkeeper,
+            role: item.role
+          };
+        });
+      }
+
+      // 2. Check tournament teams
+      if (activeTournamentOfMatch?.teams && Array.isArray(activeTournamentOfMatch.teams)) {
+        const tournTeam = activeTournamentOfMatch.teams.find(
+          (t: any) => (teamId && t.id === teamId) || (t.name && t.name.trim().toLowerCase() === teamName.trim().toLowerCase())
+        );
+        if (tournTeam) {
+          if (Array.isArray(tournTeam.squadDetails) && tournTeam.squadDetails.length > 0) {
+            return tournTeam.squadDetails.map((p: any, idx: number) => ({
+              name: (p.name || `Player ${idx + 1}`).trim(),
+              isCaptain: !!p.isCaptain || p.name === tournTeam.captainName || idx === 0,
+              isWicketkeeper: !!p.isWicketkeeper || idx === 1,
+              role: p.role
+            }));
+          }
+          if (Array.isArray(tournTeam.players) && tournTeam.players.length > 0) {
+            return tournTeam.players.map((p: any, idx: number) => {
+              const pName = typeof p === 'string' ? p : p.name;
+              return {
+                name: (pName || `Player ${idx + 1}`).trim(),
+                isCaptain: idx === 0 || (typeof p !== 'string' && !!p.isCaptain) || pName === tournTeam.captainName,
+                isWicketkeeper: idx === 1 || (typeof p !== 'string' && !!p.isWicketkeeper),
+                role: typeof p !== 'string' ? p.role : undefined
+              };
+            });
+          }
+        }
+      }
+
+      // 3. Extract from innings batsmen & bowlers
+      const inn = selectedMatch.innings1?.battingTeam === teamName ? selectedMatch.innings1 : 
+                  (selectedMatch.innings2?.battingTeam === teamName ? selectedMatch.innings2 : null);
+      const bowlInn = selectedMatch.innings1?.bowlingTeam === teamName ? selectedMatch.innings1 : 
+                      (selectedMatch.innings2?.bowlingTeam === teamName ? selectedMatch.innings2 : null);
+
+      const listBatNames = inn ? (inn.batsmen || []).map((b: any) => b.name) : [];
+      const listBowlNames = bowlInn ? (bowlInn.bowlers || []).map((b: any) => b.name) : [];
+      const uniquePlayerNames = Array.from(new Set([...listBatNames, ...listBowlNames])).filter(Boolean);
+
+      const regionNames = ["A. Shinde", "S. Pawar", "R. Gaikwad", "G. Kulkarni", "P. Jagtap", "M. Deshmukh", "V. Joshi", "S. Jamkhedkar", "K. Bhosale", "D. More", "B. Shelar"];
+      const squadList = [...uniquePlayerNames];
+      let nameIdx = 0;
+      while (squadList.length < 11 && nameIdx < regionNames.length) {
+        const name = regionNames[nameIdx];
+        if (!squadList.includes(name)) {
+          squadList.push(name);
+        }
+        nameIdx++;
+      }
+
+      return squadList.map((player, idx) => ({
+        name: player.replace(/\s*\((c|C|wk|WK|c & wk|C & WK)\)/g, '').trim(),
+        isCaptain: idx === 0,
+        isWicketkeeper: idx === 1
+      }));
+    };
+
+    const squadA = extractSquad(selectedMatch.teamA, selectedMatch.teamAId, (selectedMatch as any).teamASquad);
+    const squadB = extractSquad(selectedMatch.teamB, selectedMatch.teamBId, (selectedMatch as any).teamBSquad);
+
+    return { teamASquad: squadA, teamBSquad: squadB };
+  }, [selectedMatch, activeTournamentOfMatch]);
+
+  // Ensure commentary stream contains the official Squad Announcement at delivery 0.0 (before 0.1)
+  const effectiveCommentaryList = useMemo(() => {
+    if (!selectedMatch) return [];
+    const base = currentInnings?.commentaryList ? [...currentInnings.commentaryList] : [];
+
+    const hasSquadComm = base.some((c: any) => 
+      c.announcementType === 'squad_announcement' || 
+      (c.overBall === '0.0' && (c.description || '').toLowerCase().includes('squad'))
+    );
+
+    if (!hasSquadComm) {
+      const b1 = currentInnings?.batsmen?.[0]?.name || 'Opening Batter 1';
+      const b2 = currentInnings?.batsmen?.[1]?.name || 'Opening Batter 2';
+      const bwl = currentInnings?.bowlers?.[0]?.name || 'Opening Bowler';
+
+      const squadComm = createSquadAnnouncementCommentary(
+        {
+          tournamentName: activeTournamentOfMatch?.name || selectedMatch.tournamentName || null,
+          groundName: (selectedMatch as any).groundName || 'Gully Ground',
+          teamA: selectedMatch.teamA,
+          teamB: selectedMatch.teamB,
+          tossWinner: selectedMatch.tossWinner,
+          tossChoice: selectedMatch.tossChoice
+        },
+        matchBothSquads.teamASquad,
+        matchBothSquads.teamBSquad,
+        b1,
+        b2,
+        bwl
+      );
+
+      base.push(squadComm);
+    }
+
+    return base;
+  }, [selectedMatch, currentInnings, activeTournamentOfMatch, matchBothSquads]);
 
   const activeSpotlight = useMemo(() => {
     if (!currentInnings) return null;
@@ -5588,18 +5718,146 @@ export const SpectatorScoreboardSection = ({
 
                     <div className="space-y-2.5 max-h-[17.5rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
                       {(() => {
-                        const commentary = currentInnings.commentaryList || [];
+                        const commentary = effectiveCommentaryList || [];
                         if (commentary.length === 0) {
                           return (
-                            <p className="text-center text-xs text-slate-400 py-10 italic">Waiting for the match to record ball commentary...</p>
+                            <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-slate-900/60 to-slate-950 border border-emerald-500/20 text-center space-y-2">
+                              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-500 flex items-center justify-center gap-1">
+                                <Sparkles className="w-3 h-3 text-emerald-400 animate-pulse" /> Pre-Match AI Briefing
+                              </span>
+                              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                                Official squads announced before ball 0.1
+                              </p>
+                              <div className="flex justify-center gap-2 text-[10px]">
+                                <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                                  {selectedMatch.teamA}: {matchBothSquads.teamASquad.length} Players
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
+                                  {selectedMatch.teamB}: {matchBothSquads.teamBSquad.length} Players
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab('standing')}
+                                className="text-[10px] text-emerald-500 hover:text-emerald-400 font-bold bg-transparent border-none cursor-pointer underline"
+                              >
+                                View Playing XI Roster →
+                              </button>
+                            </div>
                           );
                         }
                         return commentary.slice(0, 15).map((comm) => {
+                          const isSquadAnnouncement = comm.announcementType === 'squad_announcement' || 
+                            (comm.overBall === '0.0' && (comm.description || '').toLowerCase().includes('squad'));
                           const isWkt = comm.type === 'wicket';
                           const isBnd = comm.type === 'boundary';
                           const isExt = comm.type === 'extra';
                           const isMls = comm.type === 'milestone';
                           const displayText = getCommentaryText(comm, spectatorCommentaryLang);
+
+                          if (isSquadAnnouncement) {
+                            return (
+                              <div 
+                                key={comm.id}
+                                className="p-3 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-emerald-950/20 to-slate-900/80 border-2 border-emerald-500/30 text-[11px] shadow-sm space-y-2.5 transition-all"
+                              >
+                                <div className="flex items-center justify-between pb-1.5 border-b border-emerald-500/20">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="bg-emerald-500 text-slate-950 font-black text-[8px] uppercase tracking-wider px-1.5 py-0.5 rounded shadow-xs flex items-center gap-1">
+                                      <Sparkles className="w-2.5 h-2.5" /> SQUADS ANNOUNCED
+                                    </span>
+                                    <span className="text-[8px] font-mono font-bold text-amber-500 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                      BEFORE BALL 0.1
+                                    </span>
+                                  </div>
+                                  <span className="font-mono text-[9px] text-slate-400 font-bold">Delivery 0.0</span>
+                                </div>
+
+                                <p className="text-[11px] text-slate-700 dark:text-slate-200 leading-relaxed font-semibold whitespace-pre-line">
+                                  {displayText}
+                                </p>
+
+                                {/* Both Teams Squad Rosters Preview */}
+                                <div className="grid grid-cols-1 gap-2 pt-1">
+                                  {/* Team A */}
+                                  <div className="bg-white/60 dark:bg-slate-950/70 p-2 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="font-black text-[10px] text-slate-900 dark:text-white truncate">
+                                        🏏 {selectedMatch.teamA}
+                                      </span>
+                                      <span className="text-[8px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded">
+                                        {matchBothSquads.teamASquad.length} Players
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-0.5 scrollbar-thin">
+                                      {(expandedArenaSquad ? matchBothSquads.teamASquad : matchBothSquads.teamASquad.slice(0, 5)).map((p, pIdx) => (
+                                        <span
+                                          key={pIdx}
+                                          className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-0.5"
+                                        >
+                                          <span className="text-slate-400 text-[8px]">#{pIdx + 1}</span> {p.name}
+                                          {p.isCaptain && <span className="text-amber-500 font-black text-[7.5px]">(C)</span>}
+                                          {p.isWicketkeeper && <span className="text-sky-500 font-black text-[7.5px]">(WK)</span>}
+                                        </span>
+                                      ))}
+                                      {!expandedArenaSquad && matchBothSquads.teamASquad.length > 5 && (
+                                        <span className="text-[8.5px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold">
+                                          +{matchBothSquads.teamASquad.length - 5} more
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Team B */}
+                                  <div className="bg-white/60 dark:bg-slate-950/70 p-2 rounded-xl border border-slate-200/60 dark:border-slate-800">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="font-black text-[10px] text-slate-900 dark:text-white truncate">
+                                        ⚡ {selectedMatch.teamB}
+                                      </span>
+                                      <span className="text-[8px] font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 px-1 py-0.2 rounded">
+                                        {matchBothSquads.teamBSquad.length} Players
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-0.5 scrollbar-thin">
+                                      {(expandedArenaSquad ? matchBothSquads.teamBSquad : matchBothSquads.teamBSquad.slice(0, 5)).map((p, pIdx) => (
+                                        <span
+                                          key={pIdx}
+                                          className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200/50 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium flex items-center gap-0.5"
+                                        >
+                                          <span className="text-slate-400 text-[8px]">#{pIdx + 1}</span> {p.name}
+                                          {p.isCaptain && <span className="text-amber-500 font-black text-[7.5px]">(C)</span>}
+                                          {p.isWicketkeeper && <span className="text-sky-500 font-black text-[7.5px]">(WK)</span>}
+                                        </span>
+                                      ))}
+                                      {!expandedArenaSquad && matchBothSquads.teamBSquad.length > 5 && (
+                                        <span className="text-[8.5px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-400 font-bold">
+                                          +{matchBothSquads.teamBSquad.length - 5} more
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Crease matchup & Quick actions */}
+                                <div className="flex items-center justify-between pt-1 border-t border-slate-200/40 dark:border-slate-800/80 text-[9px]">
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedArenaSquad(!expandedArenaSquad)}
+                                    className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline bg-transparent border-none p-0 cursor-pointer flex items-center gap-1"
+                                  >
+                                    {expandedArenaSquad ? '▲ Collapse Squad' : '▼ Show All 11 Players'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveTab('standing')}
+                                    className="text-slate-500 dark:text-slate-400 hover:text-emerald-500 font-bold bg-transparent border-none p-0 cursor-pointer flex items-center gap-0.5"
+                                  >
+                                    Squads XI Tab →
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
 
                           return (
                             <div 
@@ -7108,7 +7366,7 @@ export const SpectatorScoreboardSection = ({
                       {/* Feeds stream logs */}
                       <div className="max-h-96 overflow-y-auto space-y-3 pr-2 font-mono scrollbar-thin">
                         {(() => {
-                          const baseList = currentInnings?.commentaryList || [];
+                          const baseList = effectiveCommentaryList || [];
                           let list = [...baseList];
                           
                           if (commentaryFilter === 'boundary') {
@@ -7135,11 +7393,186 @@ export const SpectatorScoreboardSection = ({
                           }
 
                           return list.map((comm) => {
+                            const isSquadAnnouncement = comm.announcementType === 'squad_announcement' || 
+                              (comm.overBall === '0.0' && (comm.description || '').toLowerCase().includes('squad'));
                             const isWkt = comm.type === 'wicket';
                             const isBnd = comm.type === 'boundary';
                             const isExt = comm.type === 'extra';
                             const isMls = comm.type === 'milestone';
                             const displayText = getCommentaryText(comm, spectatorCommentaryLang);
+
+                            if (isSquadAnnouncement) {
+                              const b1 = currentInnings?.batsmen?.[0]?.name || (selectedMatch.innings1?.batsmen?.[0]?.name) || 'Opening Batter 1';
+                              const b2 = currentInnings?.batsmen?.[1]?.name || (selectedMatch.innings1?.batsmen?.[1]?.name) || 'Opening Batter 2';
+                              const bwl = currentInnings?.bowlers?.[0]?.name || (selectedMatch.innings1?.bowlers?.[0]?.name) || 'Opening Bowler';
+
+                              return (
+                                <div
+                                  key={comm.id}
+                                  className="p-5 sm:p-6 rounded-[2rem] bg-gradient-to-br from-emerald-500/10 via-emerald-950/20 to-slate-900/90 border-2 border-emerald-500/40 text-xs shadow-md space-y-4 transition-all"
+                                >
+                                  {/* Top Banner Header */}
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-emerald-500/20">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="bg-emerald-500 text-slate-950 font-black text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-lg shadow-sm flex items-center gap-1.5">
+                                        <Sparkles className="w-3.5 h-3.5" /> OFFICIAL SQUADS ANNOUNCEMENT
+                                      </span>
+                                      <span className="text-[9.5px] font-mono font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/30">
+                                        BEFORE BALL 0.1
+                                      </span>
+                                      <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                        AI COMMENTARY DESK
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-[10px] text-slate-400 font-bold bg-slate-950/80 px-2 py-0.5 rounded border border-slate-800">
+                                        Delivery 0.0
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const squadAText = `${selectedMatch.teamA} (${matchBothSquads.teamASquad.length} Players):\n` +
+                                            matchBothSquads.teamASquad.map((p, i) => `${i + 1}. ${p.name}${p.isCaptain ? ' (C)' : ''}${p.isWicketkeeper ? ' (WK)' : ''}`).join('\n');
+                                          const squadBText = `${selectedMatch.teamB} (${matchBothSquads.teamBSquad.length} Players):\n` +
+                                            matchBothSquads.teamBSquad.map((p, i) => `${i + 1}. ${p.name}${p.isCaptain ? ' (C)' : ''}${p.isWicketkeeper ? ' (WK)' : ''}`).join('\n');
+                                          const share = `🏏 OFFICIAL MATCH SQUADS (Before Ball 0.1)\n${selectedMatch.teamA} vs ${selectedMatch.teamB}\n\n${squadAText}\n\n${squadBText}\n\n${displayText}`;
+                                          navigator.clipboard?.writeText(share).then(() => {
+                                            setCopiedSquadsNotification(true);
+                                            setTimeout(() => setCopiedSquadsNotification(false), 2000);
+                                          });
+                                        }}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-[10px] font-black uppercase tracking-wider border border-emerald-500/30 cursor-pointer transition-all"
+                                      >
+                                        <Copy className="w-3 h-3" />
+                                        {copiedSquadsNotification ? 'Copied!' : 'Copy Squads'}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Narrative AI commentary speech */}
+                                  <div className="bg-white/70 dark:bg-slate-950/70 p-3.5 rounded-2xl border border-emerald-500/20">
+                                    <p className="text-xs sm:text-sm text-slate-800 dark:text-slate-100 font-medium leading-relaxed font-sans whitespace-pre-line">
+                                      {displayText}
+                                    </p>
+                                  </div>
+
+                                  {/* Both Teams Squads Grids */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1 font-sans">
+                                    {/* Team A Card */}
+                                    <div className="bg-white/80 dark:bg-slate-950/80 p-4 rounded-2xl border border-emerald-500/25 shadow-xs space-y-3">
+                                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white font-black text-xs shadow-xs">
+                                            {selectedMatch.teamA.slice(0, 2).toUpperCase()}
+                                          </div>
+                                          <div>
+                                            <h5 className="font-black text-sm text-slate-900 dark:text-white">{selectedMatch.teamA}</h5>
+                                            <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+                                              Playing Squad Lineup
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                          {matchBothSquads.teamASquad.length} Players
+                                        </span>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                                        {matchBothSquads.teamASquad.map((player, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800 text-[11px]"
+                                          >
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <span className="font-mono text-[9px] font-bold text-slate-400 w-4">#{idx + 1}</span>
+                                              <span className="font-bold text-slate-800 dark:text-slate-200 truncate">{player.name}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              {player.isCaptain && (
+                                                <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                                                  (C)
+                                                </span>
+                                              )}
+                                              {player.isWicketkeeper && (
+                                                <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                                                  (WK)
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {/* Team B Card */}
+                                    <div className="bg-white/80 dark:bg-slate-950/80 p-4 rounded-2xl border border-sky-500/25 shadow-xs space-y-3">
+                                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                                        <div className="flex items-center gap-2">
+                                          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center text-white font-black text-xs shadow-xs">
+                                            {selectedMatch.teamB.slice(0, 2).toUpperCase()}
+                                          </div>
+                                          <div>
+                                            <h5 className="font-black text-sm text-slate-900 dark:text-white">{selectedMatch.teamB}</h5>
+                                            <span className="text-[9px] font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider">
+                                              Playing Squad Lineup
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30">
+                                          {matchBothSquads.teamBSquad.length} Players
+                                        </span>
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                                        {matchBothSquads.teamBSquad.map((player, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="flex items-center justify-between p-2 rounded-xl bg-slate-50/80 dark:bg-slate-900/80 border border-slate-200/60 dark:border-slate-800 text-[11px]"
+                                          >
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <span className="font-mono text-[9px] font-bold text-slate-400 w-4">#{idx + 1}</span>
+                                              <span className="font-bold text-slate-800 dark:text-slate-200 truncate">{player.name}</span>
+                                            </div>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              {player.isCaptain && (
+                                                <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-amber-500/20 text-amber-500 border border-amber-500/30">
+                                                  (C)
+                                                </span>
+                                              )}
+                                              {player.isWicketkeeper && (
+                                                <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500/20 text-sky-400 border border-sky-500/30">
+                                                  (WK)
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Matchup Crease Highlight & Action Footer */}
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] font-sans">
+                                    <div className="flex items-center gap-3 flex-wrap">
+                                      <span className="text-slate-300 font-semibold flex items-center gap-1">
+                                        🏏 <strong className="text-white">Opening Batters:</strong> {b1} & {b2}
+                                      </span>
+                                      <span className="text-slate-500 hidden sm:inline">•</span>
+                                      <span className="text-slate-300 font-semibold flex items-center gap-1">
+                                        🎯 <strong className="text-white">Opening Bowler:</strong> {bwl}
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveTab('standing')}
+                                      className="text-emerald-400 hover:text-emerald-300 font-bold bg-transparent border-none p-0 cursor-pointer flex items-center gap-1 self-start sm:self-auto underline"
+                                    >
+                                      View Full Squads XI Roster →
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            }
 
                             return (
                               <div 
@@ -7148,7 +7581,7 @@ export const SpectatorScoreboardSection = ({
                                   isWkt ? 'bg-rose-500/10 border-rose-500/15 text-rose-600 dark:text-rose-400' :
                                   isBnd ? 'bg-amber-500/10 border-amber-500/15 text-amber-600 dark:text-amber-400 font-bold' :
                                   isMls ? 'bg-purple-500/10 border-purple-500/15 text-purple-600 dark:text-purple-400' :
-                                  isExt ? 'bg-sky-500/10 border-sky-400/15 text-sky-600 dark:text-sky-450' :
+                                  isExt ? 'bg-sky-550 bg-sky-500/10 border-sky-400/15 text-sky-600 dark:text-sky-450' :
                                   'bg-slate-50 dark:bg-slate-950 border-slate-100 dark:border-slate-850 text-slate-600 dark:text-slate-400'
                                 }`}
                               >

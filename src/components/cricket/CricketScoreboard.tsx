@@ -83,6 +83,7 @@ import {
   createRunChaseEquationCommentary,
   createMatchWinningCommentary,
   createMatchStartCommentary,
+  createSquadAnnouncementCommentary,
   createTournamentSponsorsMatchStartCommentary,
   createOverSponsorCommentary,
   createInningsBreakSponsorCommentary,
@@ -3278,6 +3279,22 @@ export const CricketScoreboard: React.FC = () => {
     const bowler1Name = setupOpeningBowler.trim() || ((bowlRoster && bowlRoster.length > 0) ? bowlRoster[0] : 'Bowler 1 State');
 
     // Initialize first innings
+    const squadAnnounceComm = createSquadAnnouncementCommentary(
+      {
+        tournamentName: tournamentName || match?.tournamentName || null,
+        groundName: groundName || match?.groundName || 'Gully Ground',
+        teamA,
+        teamB,
+        tossWinner: coinTossWinTeam,
+        tossChoice
+      },
+      selectedTeamARoster || (match as any)?.teamASquad || [],
+      selectedTeamBRoster || (match as any)?.teamBSquad || [],
+      batsman1Name,
+      batsman2Name,
+      bowler1Name
+    );
+
     const startMatchComm = createMatchStartCommentary(
       {
         tournamentName: tournamentName || match?.tournamentName || null,
@@ -3327,7 +3344,9 @@ export const CricketScoreboard: React.FC = () => {
       nonStrikerIndex: 1,
       currentBowlerIndex: 0,
       fallOfWickets: [],
-      commentaryList: sponsorStartComm ? [sponsorStartComm, startMatchComm] : [startMatchComm],
+      commentaryList: sponsorStartComm 
+        ? [sponsorStartComm, startMatchComm, squadAnnounceComm] 
+        : [startMatchComm, squadAnnounceComm],
       history: [
         { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
       ]

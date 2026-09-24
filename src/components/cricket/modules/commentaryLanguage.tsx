@@ -1550,6 +1550,82 @@ export function createTournamentSponsorsMatchStartCommentary(
 }
 
 /**
+ * Generates official Squad Announcement commentary for both teams before ball 0.1
+ */
+export function createSquadAnnouncementCommentary(
+  match: {
+    tournamentName?: string | null;
+    groundName?: string | null;
+    teamA?: string;
+    teamB?: string;
+    tossWinner?: string | null;
+    tossChoice?: string | null;
+  },
+  teamASquad: (string | { name: string; isCaptain?: boolean; isWicketkeeper?: boolean })[],
+  teamBSquad: (string | { name: string; isCaptain?: boolean; isWicketkeeper?: boolean })[],
+  batsman1Name?: string,
+  batsman2Name?: string,
+  bowler1Name?: string
+): CommentaryWithTranslations {
+  const tHdr = match.tournamentName ? `🏆 [${match.tournamentName}] ` : '';
+  const teamA = match.teamA || 'Team A';
+  const teamB = match.teamB || 'Team B';
+  const gName = match.groundName || 'Gully Ground';
+
+  const formatSquadNames = (list: (string | { name: string; isCaptain?: boolean; isWicketkeeper?: boolean })[]) => {
+    if (!list || list.length === 0) return '';
+    return list.map(item => {
+      if (typeof item === 'string') return item;
+      let badge = '';
+      if (item.isCaptain && item.isWicketkeeper) badge = ' (C & WK)';
+      else if (item.isCaptain) badge = ' (C)';
+      else if (item.isWicketkeeper) badge = ' (WK)';
+      return `${item.name}${badge}`;
+    }).join(', ');
+  };
+
+  const squadANames = formatSquadNames(teamASquad);
+  const squadBNames = formatSquadNames(teamBSquad);
+
+  const b1 = batsman1Name ? batsman1Name.trim() : '';
+  const b2 = batsman2Name ? batsman2Name.trim() : '';
+  const bwl = bowler1Name ? bowler1Name.trim() : '';
+
+  const openerInfoEn = (b1 && b2 && bwl) 
+    ? ` Opening batters ${b1} & ${b2} are taking strike against opening bowler ${bwl} for delivery 0.1!`
+    : ' Players are taking the field for delivery 0.1!';
+  const openerInfoHi = (b1 && b2 && bwl)
+    ? ` सलामी बल्लेबाज ${b1} व ${b2} क्रीज पर तैयार, गेंदबाज ${bwl} पहली गेंद 0.1 फेंकने को तैयार!`
+    : ' दोनों टीमें मैदान में आ चुकी हैं और पहली गेंद 0.1 डाली जाने वाली है!';
+  const openerInfoMr = (b1 && b2 && bwl)
+    ? ` सलामीवीर फलंदाज ${b1} आणि ${b2} क्रीजवर सज्ज, गोलंदाज ${bwl} पहिला चेंडू 0.1 टाकण्यासाठी सज्ज!`
+    : ' दोन्ही संघ मैदानात दाखल झाले असून चेंडू 0.1 लवकरच टाकला जाणार!';
+
+  const en = `${tHdr}📋 OFFICIAL SQUADS ANNOUNCED (Before Ball 0.1) at ${gName}:\n🏏 ${teamA} Squad: ${squadANames || 'Announced in lineup'}\n⚡ ${teamB} Squad: ${squadBNames || 'Announced in lineup'}.${openerInfoEn}`;
+  const hi = `${tHdr}📋 दोनों टीमों की आधिकारिक स्क्वॉड (गेंद 0.1 से पहले घोषित) - ${gName}:\n🏏 ${teamA} स्क्वॉड: ${squadANames || 'घोषित'}\n⚡ ${teamB} स्क्वॉड: ${squadBNames || 'घोषित'}.${openerInfoHi}`;
+  const mr = `${tHdr}📋 चेंडू 0.1 टाकण्यापूर्वी दोन्ही संघांची अधिकृत खेळाडू यादी जाहीर - ${gName}:\n🏏 ${teamA} संघ: ${squadANames || 'जाहीर'}\n⚡ ${teamB} संघ: ${squadBNames || 'जाहीर'}.${openerInfoMr}`;
+
+  return {
+    id: `comm-squad-announce-${Date.now()}`,
+    overBall: '0.0',
+    description: en,
+    type: 'milestone',
+    announcementType: 'squad_announcement',
+    soundWave: true,
+    translations: { en, hi, mr },
+    metadata: {
+      teamA,
+      teamB,
+      teamASquad,
+      teamBSquad,
+      batsman1: b1,
+      batsman2: b2,
+      bowler: bwl
+    }
+  };
+}
+
+/**
  * Generates an over completion commentary record with rotating prize sponsor acknowledgement
  */
 export function createOverSponsorCommentary(
