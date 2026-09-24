@@ -42,6 +42,11 @@ export default defineConfig(({mode}) => {
       emptyOutDir: true,
       sourcemap: false,
       minify: 'esbuild',
+      target: 'es2020',
+      cssCodeSplit: true,
+      modulePreload: {
+        polyfill: false,
+      },
       rollupOptions: {
         output: {
           manualChunks(id) {

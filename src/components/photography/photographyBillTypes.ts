@@ -38,7 +38,7 @@ export interface LateFeeConfig {
   feeType: 'percent' | 'flat';
   value: number; // e.g. 2 for 2% or 1500 for flat
   gracePeriodDays: number; // e.g. 3 days
-  frequency: 'flat_once' | 'daily' | 'monthly';
+  frequency?: 'flat_once' | 'daily' | 'monthly';
 }
 
 export interface ReminderLog {

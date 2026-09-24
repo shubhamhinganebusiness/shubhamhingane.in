@@ -566,6 +566,7 @@ export const PavatiBookSection: React.FC<PavatiBookSectionProps> = ({
           lang={lang}
           onAddDonor={handleAddDonor}
           onSelectDonorForPavati={handleSelectDonorForPavati}
+          onViewReceipt={onViewReceipt}
         />
       )}
 

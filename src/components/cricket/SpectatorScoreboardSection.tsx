@@ -830,7 +830,7 @@ export const SpectatorScoreboardSection = ({
   const [showMatchSelectionHub, setShowMatchSelectionHub] = useState(false);
   const [dismissedAutoSelect, setDismissedAutoSelect] = useState(false);
   const [typedMatchId, setTypedMatchId] = useState('');
-  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'standing' | 'sponsors-prizes' | 'media'>('arena');
+  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'standing' | 'sponsors-prizes'>('arena');
   const [sponsorsList, setSponsorsList] = useState<LocalCricketSponsor[]>(() => getLocalSponsors());
 
   useEffect(() => {
@@ -3777,6 +3777,14 @@ export const SpectatorScoreboardSection = ({
 
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
             <button
+              onClick={() => navigate('/live/cricket-scoreboard')}
+              className="px-4 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-md shadow-emerald-600/10"
+              title="Open Cricket Scoreboard Management Console"
+            >
+              <ShieldCheck size={14} className="text-amber-300" />
+              <span>Scoreboard Management</span>
+            </button>
+            <button
               onClick={() => setShowPlayerRegistration(true)}
               className="px-4 py-3.5 bg-slate-900 hover:bg-slate-850 text-white dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-md"
             >
@@ -4734,6 +4742,14 @@ export const SpectatorScoreboardSection = ({
                   className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-200 text-slate-800 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border-none shadow-sm active:scale-95 hover:scale-[1.02]"
                 >
                   ← Change Match (Home Scoreboard)
+                </button>
+                <button
+                  onClick={() => navigate(`/live/cricket-scoreboard?matchId=${selectedMatch.id}`)}
+                  className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-md shadow-emerald-600/20 active:scale-95"
+                  title="Open Cricket Scoreboard Management Console"
+                >
+                  <ShieldCheck size={14} className="text-amber-300" />
+                  <span>Scoreboard Management</span>
                 </button>
                 <button
                   onClick={() => navigate('/')}
@@ -5755,11 +5771,11 @@ export const SpectatorScoreboardSection = ({
                       <div>
                         <span className="text-[10px] font-black uppercase text-rose-500 tracking-widest block mb-0.5 animate-pulse">🔴 Live Commentary</span>
                         <h4 className="text-base font-black text-slate-800 dark:text-slate-100 font-sans">
-                          {spectatorCommentaryCardTab === 'podium' ? 'Championship Podium & Prizes' : 'Ball-by-Ball Feed'}
+                          {spectatorCommentaryCardTab === 'podium' ? 'Prize & Sponsor Details' : 'Ball-by-Ball Feed'}
                         </h4>
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {/* Tab Switcher: Feed vs Championship Podium & Prize List */}
+                        {/* Tab Switcher: Feed vs Tournament Prize & Sponsor Details */}
                         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/60 dark:border-slate-800">
                           <button
                             type="button"
@@ -5783,7 +5799,7 @@ export const SpectatorScoreboardSection = ({
                             }`}
                           >
                             <span>🏆</span>
-                            <span>Podium & Prizes ({tournamentPrizes.length})</span>
+                            <span>Prize Details ({tournamentPrizes.length})</span>
                           </button>
                         </div>
 
@@ -5808,73 +5824,169 @@ export const SpectatorScoreboardSection = ({
                           </div>
                         )}
                         <span className="text-[9px] font-mono text-slate-400 font-bold bg-slate-50 dark:bg-slate-950 px-2 py-0.5 rounded border border-slate-200/50 hidden sm:inline-block">
-                          {spectatorCommentaryCardTab === 'podium' ? 'AWARDS DESK' : 'REAL-TIME'}
+                          {spectatorCommentaryCardTab === 'podium' ? 'PRIZE DETAILS' : 'REAL-TIME'}
                         </span>
                       </div>
                     </div>
 
                     {spectatorCommentaryCardTab === 'podium' ? (
-                      /* Championship Podium & Individual Honors - Tournament Prize List View */
-                      <div className="space-y-3.5 max-h-[22rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
-                        {/* 1. Championship Podium (Olympic 3-Step) */}
-                        <div className="p-3.5 rounded-2xl bg-gradient-to-b from-amber-500/10 via-slate-950/80 to-slate-900 border border-amber-500/25 text-center space-y-2.5 shadow-sm">
-                          <div className="flex items-center justify-between pb-1.5 border-b border-amber-500/20">
-                            <span className="text-[9px] font-black uppercase text-amber-500 tracking-wider flex items-center gap-1">
-                              <Crown className="w-3 h-3 text-amber-400 animate-bounce" /> Championship Podium
-                            </span>
-                            <span className="text-[8px] font-mono font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30">
+                      /* Tournament Prize Details & Sponsors - Text Details View */
+                      <div className="space-y-3 max-h-[22rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
+                        {/* 1. Tournament Prize Details & Sponsors (Text Details) */}
+                        <div className="p-3 rounded-2xl bg-gradient-to-b from-slate-900/90 via-slate-950 to-slate-900 border border-amber-500/30 space-y-2.5 shadow-sm">
+                          <div className="flex items-center justify-between pb-2 border-b border-amber-500/20">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm">🏆</span>
+                              <span className="text-[9.5px] font-black uppercase text-amber-400 tracking-wider">
+                                Tournament Prize Details & Sponsors
+                              </span>
+                            </div>
+                            <span className="text-[8px] font-mono font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-lg border border-amber-500/30">
                               Purse: ₹{totalPrizePurse}
                             </span>
                           </div>
 
-                          {/* 3-Step Visual Podium */}
-                          <div className="grid grid-cols-3 gap-2 items-end pt-1">
-                            {/* 2nd Place / Runner-Up */}
-                            <div className="p-2.5 rounded-xl bg-gradient-to-t from-slate-700/40 via-slate-800/60 to-slate-900 border border-slate-400/40 flex flex-col items-center justify-end min-h-[105px] shadow-sm">
-                              <span className="text-xl mb-1">🥈</span>
-                              <span className="px-1.5 py-0.2 rounded-full text-[7.5px] font-black uppercase bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-100 tracking-wider">
-                                Runner-Up
-                              </span>
-                              <h6 className="text-[10px] font-black text-slate-200 mt-1 truncate max-w-full">
-                                {podium2nd?.title || 'Runner-Up 2nd'}
-                              </h6>
-                              <div className="mt-1 font-mono font-black text-xs text-white">
-                                {podium2nd?.currencySymbol || '₹'}{podium2nd?.amount || '31,000'}
+                          {/* Text Cards for Main Prizes: 1st, 2nd, 3rd, Best Batsman, Best Bowler, MVP */}
+                          <div className="space-y-1.5">
+                            {/* 1st Prize */}
+                            <div className="p-2 rounded-xl bg-slate-950/90 border border-amber-500/40 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs">🥇</span>
+                                  <span className="text-[9.5px] font-black uppercase text-amber-300 truncate">
+                                    Prize: {podium1st?.title || '1st Prize / Champion'}
+                                  </span>
+                                </div>
+                                <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                  <span className="font-bold text-white">{podium1st?.personName || podium1st?.sponsorName || 'Honourable Sponsor'}</span>
+                                  {(podium1st?.personDesignation || podium1st?.sponsorDesignation) && (
+                                    <span className="text-slate-400 text-[7.5px]"> ({podium1st?.personDesignation || podium1st?.sponsorDesignation})</span>
+                                  )}
+                                </div>
                               </div>
-                              <span className="text-[7px] text-slate-400 mt-0.5 font-semibold">Trophy + Silver</span>
+                              <div className="text-right shrink-0">
+                                <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">
+                                  {podium1st?.currencySymbol || '₹'}{podium1st?.amount || '51,000'}
+                                </span>
+                              </div>
                             </div>
 
-                            {/* 1st Place / Champion */}
-                            <div className="p-3 rounded-2xl bg-gradient-to-t from-amber-600/30 via-amber-500/20 to-amber-950/80 border-2 border-amber-400/60 flex flex-col items-center justify-end min-h-[130px] shadow-[0_0_15px_rgba(245,158,11,0.25)] relative">
-                              <div className="absolute -top-3 w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xs shadow-md">
-                                👑
+                            {/* 2nd Prize */}
+                            <div className="p-2 rounded-xl bg-slate-950/90 border border-slate-700/60 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs">🥈</span>
+                                  <span className="text-[9.5px] font-black uppercase text-slate-200 truncate">
+                                    Prize: {podium2nd?.title || '2nd Prize / Runner-Up'}
+                                  </span>
+                                </div>
+                                <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                  <span className="font-bold text-white">{podium2nd?.personName || podium2nd?.sponsorName || 'Honourable Sponsor'}</span>
+                                  {(podium2nd?.personDesignation || podium2nd?.sponsorDesignation) && (
+                                    <span className="text-slate-400 text-[7.5px]"> ({podium2nd?.personDesignation || podium2nd?.sponsorDesignation})</span>
+                                  )}
+                                </div>
                               </div>
-                              <span className="text-2xl mb-1 animate-pulse">🏆</span>
-                              <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 tracking-wider shadow-xs">
-                                Champion 1st
-                              </span>
-                              <h6 className="text-[11px] font-black text-amber-200 mt-1 truncate max-w-full">
-                                {podium1st?.title || 'Grand Champion'}
-                              </h6>
-                              <div className="mt-1 font-mono font-black text-base text-amber-400">
-                                {podium1st?.currencySymbol || '₹'}{podium1st?.amount || '51,000'}
+                              <div className="text-right shrink-0">
+                                <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                <span className="font-mono font-black text-slate-200 text-xs sm:text-sm">
+                                  {podium2nd?.currencySymbol || '₹'}{podium2nd?.amount || '31,000'}
+                                </span>
                               </div>
-                              <span className="text-[7.5px] text-amber-300/90 mt-0.5 font-bold">Gold Trophy + Cash</span>
                             </div>
 
-                            {/* 3rd Place */}
-                            <div className="p-2 rounded-xl bg-gradient-to-t from-amber-900/30 via-slate-800/60 to-slate-900 border border-amber-700/40 flex flex-col items-center justify-end min-h-[95px] shadow-sm">
-                              <span className="text-lg mb-1">🥉</span>
-                              <span className="px-1.5 py-0.2 rounded-full text-[7.5px] font-black uppercase bg-amber-800/40 text-amber-400 tracking-wider">
-                                3rd Place
-                              </span>
-                              <h6 className="text-[9.5px] font-black text-slate-200 mt-1 truncate max-w-full">
-                                {podium3rd?.title || '3rd Position'}
-                              </h6>
-                              <div className="mt-1 font-mono font-black text-xs text-amber-300">
-                                {podium3rd?.currencySymbol || '₹'}{podium3rd?.amount || '11,000'}
+                            {/* 3rd Prize */}
+                            <div className="p-2 rounded-xl bg-slate-950/90 border border-amber-800/40 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs">🥉</span>
+                                  <span className="text-[9.5px] font-black uppercase text-amber-400 truncate">
+                                    Prize: {podium3rd?.title || '3rd Prize'}
+                                  </span>
+                                </div>
+                                <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                  <span className="font-bold text-white">{podium3rd?.personName || podium3rd?.sponsorName || 'Honourable Sponsor'}</span>
+                                  {(podium3rd?.personDesignation || podium3rd?.sponsorDesignation) && (
+                                    <span className="text-slate-400 text-[7.5px]"> ({podium3rd?.personDesignation || podium3rd?.sponsorDesignation})</span>
+                                  )}
+                                </div>
                               </div>
-                              <span className="text-[7px] text-slate-400 mt-0.5 font-semibold">Bronze Trophy</span>
+                              <div className="text-right shrink-0">
+                                <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                <span className="font-mono font-black text-amber-300 text-xs sm:text-sm">
+                                  {podium3rd?.currencySymbol || '₹'}{podium3rd?.amount || '11,000'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Best Batsman */}
+                            <div className="p-2 rounded-xl bg-slate-950/90 border border-amber-500/20 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs">🏏</span>
+                                  <span className="text-[9.5px] font-black uppercase text-amber-300 truncate">
+                                    Prize: {bestBatPrize?.title || 'Best Batsman'}
+                                  </span>
+                                </div>
+                                <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                  <span className="font-bold text-white">{bestBatPrize?.personName || bestBatPrize?.sponsorName || 'Tournament Patron'}</span>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">
+                                  {bestBatPrize?.currencySymbol || '₹'}{bestBatPrize?.amount || '3,000'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Best Bowler */}
+                            <div className="p-2 rounded-xl bg-slate-950/90 border border-cyan-500/20 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs">🎯</span>
+                                  <span className="text-[9.5px] font-black uppercase text-cyan-300 truncate">
+                                    Prize: {bestBowlPrize?.title || 'Best Bowler'}
+                                  </span>
+                                </div>
+                                <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                  <span className="font-bold text-white">{bestBowlPrize?.personName || bestBowlPrize?.sponsorName || 'Tournament Patron'}</span>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                <span className="font-mono font-black text-cyan-400 text-xs sm:text-sm">
+                                  {bestBowlPrize?.currencySymbol || '₹'}{bestBowlPrize?.amount || '3,000'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Player of the Match / Series MVP */}
+                            <div className="p-2 rounded-xl bg-slate-950/90 border border-purple-500/20 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs">⭐</span>
+                                  <span className="text-[9.5px] font-black uppercase text-purple-300 truncate">
+                                    Prize: {mosPrize?.title || 'Player of the Match / Series MVP'}
+                                  </span>
+                                </div>
+                                <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                  <span className="font-bold text-white">{mosPrize?.personName || mosPrize?.sponsorName || 'Tournament Patron'}</span>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                <span className="font-mono font-black text-purple-400 text-xs sm:text-sm">
+                                  {mosPrize?.currencySymbol || '₹'}{mosPrize?.amount || '5,000'}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -5900,11 +6012,14 @@ export const SpectatorScoreboardSection = ({
                               <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
                                 {mosPrize?.title || 'Man of the Series'}
                               </div>
+                              <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                Given by: <span className="font-semibold text-slate-700 dark:text-slate-300">{mosPrize?.personName || mosPrize?.sponsorName || 'Tournament Patron'}</span>
+                              </div>
                               <div className="mt-1 flex items-baseline justify-between text-xs">
                                 <span className="font-mono font-black text-purple-400">
                                   {mosPrize?.currencySymbol || '₹'}{mosPrize?.amount || '5,000'}
                                 </span>
-                                <span className="text-[7px] text-slate-400">Trophy + Cert</span>
+                                <span className="text-[7px] text-slate-400">Award</span>
                               </div>
                             </div>
 
@@ -5919,11 +6034,14 @@ export const SpectatorScoreboardSection = ({
                               <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
                                 {bestBatPrize?.title || 'Best Batsman (Orange Cap)'}
                               </div>
+                              <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                Given by: <span className="font-semibold text-slate-700 dark:text-slate-300">{bestBatPrize?.personName || bestBatPrize?.sponsorName || 'Tournament Patron'}</span>
+                              </div>
                               <div className="mt-1 flex items-baseline justify-between text-xs">
                                 <span className="font-mono font-black text-amber-400">
                                   {bestBatPrize?.currencySymbol || '₹'}{bestBatPrize?.amount || '3,000'}
                                 </span>
-                                <span className="text-[7px] text-slate-400">Silver Bat</span>
+                                <span className="text-[7px] text-slate-400">Award</span>
                               </div>
                             </div>
 
@@ -5938,11 +6056,14 @@ export const SpectatorScoreboardSection = ({
                               <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
                                 {bestBowlPrize?.title || 'Best Bowler (Purple Cap)'}
                               </div>
+                              <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                Given by: <span className="font-semibold text-slate-700 dark:text-slate-300">{bestBowlPrize?.personName || bestBowlPrize?.sponsorName || 'Tournament Patron'}</span>
+                              </div>
                               <div className="mt-1 flex items-baseline justify-between text-xs">
                                 <span className="font-mono font-black text-cyan-400">
                                   {bestBowlPrize?.currencySymbol || '₹'}{bestBowlPrize?.amount || '3,000'}
                                 </span>
-                                <span className="text-[7px] text-slate-400">Golden Ball</span>
+                                <span className="text-[7px] text-slate-400">Award</span>
                               </div>
                             </div>
 
@@ -5957,11 +6078,14 @@ export const SpectatorScoreboardSection = ({
                               <div className="font-bold text-[10px] text-slate-800 dark:text-slate-100 truncate">
                                 {maxSixPrize?.title || bestFieldPrize?.title || 'Super Striker / Best Fielder'}
                               </div>
+                              <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                Given by: <span className="font-semibold text-slate-700 dark:text-slate-300">{(maxSixPrize || bestFieldPrize)?.personName || (maxSixPrize || bestFieldPrize)?.sponsorName || 'Tournament Sponsor'}</span>
+                              </div>
                               <div className="mt-1 flex items-baseline justify-between text-xs">
                                 <span className="font-mono font-black text-emerald-400">
                                   {(maxSixPrize || bestFieldPrize)?.currencySymbol || '₹'}{(maxSixPrize || bestFieldPrize)?.amount || '2,000'}
                                 </span>
-                                <span className="text-[7px] text-slate-400">Shield</span>
+                                <span className="text-[7px] text-slate-400">Award</span>
                               </div>
                             </div>
                           </div>
@@ -5971,7 +6095,7 @@ export const SpectatorScoreboardSection = ({
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between pb-1 border-b border-slate-100 dark:border-slate-800">
                             <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
-                              Tournament Prize List ({tournamentPrizes.length} Categories)
+                              Complete Prize & Sponsor List ({tournamentPrizes.length} Categories)
                             </span>
                             <button
                               type="button"
@@ -5988,19 +6112,18 @@ export const SpectatorScoreboardSection = ({
                                 key={pz.id || idx}
                                 className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-850 flex items-center justify-between text-[10px]"
                               >
-                                <div className="flex items-center gap-1.5 min-w-0">
+                                <div className="flex items-center gap-1.5 min-w-0 flex-1">
                                   <span className="text-xs">
                                     {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🎖️'}
                                   </span>
-                                  <div className="min-w-0">
+                                  <div className="min-w-0 flex-1">
                                     <span className="font-bold text-slate-800 dark:text-slate-200 block truncate">
                                       {pz.title}
                                     </span>
-                                    {pz.subtitle && (
-                                      <span className="text-[8px] text-slate-400 block truncate">
-                                        {pz.subtitle}
-                                      </span>
-                                    )}
+                                    <span className="text-[8.5px] text-slate-500 dark:text-slate-400 block truncate">
+                                      Given by: <span className="font-semibold text-slate-700 dark:text-slate-300">{pz.personName || pz.sponsorName || 'Tournament Sponsor'}</span>
+                                      {(pz.personDesignation || pz.sponsorDesignation) && ` (${pz.personDesignation || pz.sponsorDesignation})`}
+                                    </span>
                                   </div>
                                 </div>
                                 <div className="text-right shrink-0 ml-2">
@@ -6008,7 +6131,7 @@ export const SpectatorScoreboardSection = ({
                                     {pz.currencySymbol || '₹'}{pz.amount}
                                   </span>
                                   <span className="text-[7.5px] text-slate-400 block font-semibold">
-                                    {pz.trophyIncluded ? 'Trophy + Cash' : 'Award'}
+                                    {pz.trophyIncluded ? 'Trophy + Cash' : 'Prize'}
                                   </span>
                                 </div>
                               </div>
@@ -6019,7 +6142,7 @@ export const SpectatorScoreboardSection = ({
                     ) : (
                       /* Live Ball-by-Ball Feed View */
                       <div className="space-y-2.5 max-h-[17.5rem] overflow-y-auto pr-1 scrollbar-thin flex-1">
-                        {/* Championship Podium Quick Ticker Banner */}
+                        {/* Tournament Prize Details Quick Ticker Banner */}
                         <div 
                           onClick={() => setSpectatorCommentaryCardTab('podium')}
                           className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-purple-500/10 to-emerald-500/15 border border-amber-500/30 hover:border-amber-400/60 cursor-pointer transition-all shadow-xs group"
@@ -6032,19 +6155,19 @@ export const SpectatorScoreboardSection = ({
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
-                                    Championship Podium & Individual Honors
+                                    Tournament Prize Details & Sponsors
                                   </span>
                                   <span className="text-[8px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 font-mono">
                                     ₹{totalPrizePurse} Purse
                                   </span>
                                 </div>
                                 <p className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate">
-                                  🥇 1st: ₹{podium1st?.amount || '51,000'} • 🥈 2nd: ₹{podium2nd?.amount || '31,000'} • ⭐ Series: ₹{mosPrize?.amount || '5,000'}
+                                  🥇 1st: ₹{podium1st?.amount || '51,000'} (by {podium1st?.personName || podium1st?.sponsorName || 'Sponsor'}) • 🥈 2nd: ₹{podium2nd?.amount || '31,000'} • 🏏 Best Batter: ₹{bestBatPrize?.amount || '3,000'} • 🎯 Best Bowler: ₹{bestBowlPrize?.amount || '3,000'}
                                 </p>
                               </div>
                             </div>
                             <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 group-hover:text-amber-500 flex items-center gap-0.5 shrink-0">
-                              Prize List →
+                              Prize Details →
                             </span>
                           </div>
                         </div>
@@ -6329,8 +6452,7 @@ export const SpectatorScoreboardSection = ({
                     { id: 'highlights', label: '✨ Highlights & Comm' },
                     ...(isTournamentMatch ? [{ id: 'points-table', label: '🏆 Points Table' }] : []),
                     { id: 'standing', label: isTournamentMatch ? '👥 Squads XI' : '👥 Squads & Teams' },
-                    { id: 'sponsors-prizes', label: '🎁 Sponsors & Prizes' },
-                    { id: 'media', label: '📺 News & Media' }
+                    { id: 'sponsors-prizes', label: '🎁 Sponsors & Prizes' }
                   ].map((tab) => (
                     <button
                       key={tab.id}
@@ -6609,6 +6731,114 @@ export const SpectatorScoreboardSection = ({
                         </div>
                       </div>
 
+                    </div>
+
+                    {/* Tournament Prize List Section (Placed above Match Equation Status) */}
+                    <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-sm space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-yellow-500/20 border border-amber-500/30 flex items-center justify-center text-xl shadow-xs shrink-0">
+                            🏆
+                          </div>
+                          <div>
+                            <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest block mb-0.5">
+                              Tournament Cash Prizes & Honors
+                            </span>
+                            <h4 className="text-base font-black text-slate-900 dark:text-white">
+                              Tournament Prize List
+                            </h4>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
+                            Total Purse: <strong className="font-black">₹{totalPrizePurse}</strong>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('sponsors-prizes')}
+                            className="px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 cursor-pointer flex items-center gap-1 transition-all shadow-xs"
+                            title="View all tournament sponsor & prize details"
+                          >
+                            <span>All Honors ({tournamentPrizes.length})</span>
+                            <span className="text-amber-500 font-bold">→</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Prize Cards Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {tournamentPrizes.map((prize, pIdx) => {
+                          const isFirst = prize.category === 'tournament_1st' || pIdx === 0;
+                          const isSecond = prize.category === 'tournament_2nd' || pIdx === 1;
+                          const isThird = prize.category === 'tournament_3rd' || pIdx === 2;
+                          const isManOfSeries = prize.category === 'man_of_series';
+                          const isBestBatsman = prize.category === 'best_batsman';
+                          const isBestBowler = prize.category === 'best_bowler';
+
+                          const emoji = isFirst ? '🥇' : isSecond ? '🥈' : isThird ? '🥉' : isManOfSeries ? '⭐' : isBestBatsman ? '🏏' : isBestBowler ? '🎯' : '🎁';
+                          const defaultCategoryName = isFirst ? 'Champion 1st' : isSecond ? 'Runner-Up 2nd' : isThird ? '3rd Prize' : isManOfSeries ? 'Series MVP' : isBestBatsman ? 'Best Batsman' : isBestBowler ? 'Best Bowler' : 'Honor';
+
+                          return (
+                            <div
+                              key={prize.id || `arena-prize-${pIdx}`}
+                              className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between shadow-xs hover:shadow-sm ${
+                                isFirst
+                                  ? 'bg-amber-500/10 border-amber-500/25 hover:border-amber-400/40'
+                                  : isSecond
+                                  ? 'bg-slate-100 dark:bg-slate-950 border-slate-200/60 dark:border-slate-800 hover:border-slate-300'
+                                  : isThird
+                                  ? 'bg-amber-500/5 border-amber-600/20 hover:border-amber-500/40'
+                                  : isManOfSeries
+                                  ? 'bg-purple-500/10 border-purple-500/20 hover:border-purple-400/40'
+                                  : isBestBatsman
+                                  ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-400/40'
+                                  : isBestBowler
+                                  ? 'bg-cyan-500/5 border-cyan-500/20 hover:border-cyan-400/40'
+                                  : 'bg-slate-50 dark:bg-slate-950/60 border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-start justify-between gap-2 mb-1.5">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-lg shrink-0">{emoji}</span>
+                                    <div className="min-w-0">
+                                      <span className={`text-[8px] font-black uppercase block truncate ${
+                                        isFirst ? 'text-amber-600 dark:text-amber-400' : isSecond ? 'text-slate-500 dark:text-slate-400' : isThird ? 'text-amber-700 dark:text-amber-500' : isManOfSeries ? 'text-purple-500' : isBestBatsman ? 'text-amber-500' : isBestBowler ? 'text-cyan-500' : 'text-slate-500'
+                                      }`}>
+                                        {prize.customBadge || defaultCategoryName}
+                                      </span>
+                                      <h5 className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                                        Prize: {prize.title}
+                                      </h5>
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                    <span className={`font-mono font-black text-sm ${
+                                      isFirst ? 'text-amber-500' : isSecond ? 'text-slate-700 dark:text-slate-200' : isThird ? 'text-amber-600 dark:text-amber-400' : isManOfSeries ? 'text-purple-400' : isBestBatsman ? 'text-amber-500' : isBestBowler ? 'text-cyan-500' : 'text-emerald-500'
+                                    }`}>
+                                      {prize.currencySymbol || '₹'}{prize.amount}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="pt-2 border-t border-slate-200/50 dark:border-slate-800/80 flex items-center justify-between text-[8.5px] mt-1">
+                                <span className="text-slate-400 font-semibold truncate mr-1">
+                                  Prize Owner / Given by:
+                                </span>
+                                <span className="font-bold text-slate-700 dark:text-slate-200 truncate">
+                                  {prize.personName || prize.sponsorName || 'Honourable Sponsor'}
+                                  {(prize.personDesignation || prize.sponsorDesignation) && (
+                                    <span className="text-slate-400 text-[7.5px] font-normal"> ({prize.personDesignation || prize.sponsorDesignation})</span>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* Match Equation Status widget (Repositioned here!) */}
@@ -7659,7 +7889,7 @@ export const SpectatorScoreboardSection = ({
                           </div>
                           <div>
                             <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest block mb-0.5">
-                              Championship Podium & Individual Honors
+                              Tournament Prize Details & Sponsors
                             </span>
                             <h4 className="text-base font-black text-slate-900 dark:text-white">
                               Tournament Prize List
@@ -7676,7 +7906,7 @@ export const SpectatorScoreboardSection = ({
                             onClick={() => setCommentaryLogPodiumOpen(!commentaryLogPodiumOpen)}
                             className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 cursor-pointer flex items-center gap-1.5 transition-all shadow-xs"
                           >
-                            <span>{commentaryLogPodiumOpen ? '▲ Collapse' : '▼ Expand Podium & Prizes'}</span>
+                            <span>{commentaryLogPodiumOpen ? '▲ Collapse' : '▼ Expand Prize Details'}</span>
                             <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[8px] font-mono">
                               {tournamentPrizes.length}
                             </span>
@@ -7684,102 +7914,219 @@ export const SpectatorScoreboardSection = ({
                         </div>
                       </div>
 
-                      {/* Always show a compact quick-bar; expand for full podium & honors grid */}
+                      {/* Always show a compact quick-bar; expand for full prize text details & honors */}
                       {!commentaryLogPodiumOpen ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                          {/* 1st Prize */}
                           <div 
                             onClick={() => setCommentaryLogPodiumOpen(true)}
-                            className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 hover:border-amber-400/40 cursor-pointer transition-all flex items-center justify-between"
+                            className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 hover:border-amber-400/40 cursor-pointer transition-all flex items-center justify-between"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span className="text-lg">🥇</span>
-                              <div>
-                                <span className="text-[8px] font-black uppercase text-amber-500 block">Champion 1st</span>
-                                <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{podium1st?.title || 'Tournament Winner'}</span>
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-amber-500 block truncate">Prize: {podium1st?.title || '1st Prize / Champion'}</span>
+                                <span className="text-[8.5px] text-slate-700 dark:text-slate-300 block truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner: </span>{podium1st?.personName || podium1st?.sponsorName || 'Honourable Sponsor'}
+                                </span>
                               </div>
                             </div>
-                            <span className="font-mono font-black text-sm text-amber-500">₹{podium1st?.amount || '51,000'}</span>
+                            <div className="text-right shrink-0 ml-2">
+                              <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                              <span className="font-mono font-black text-sm text-amber-500">₹{podium1st?.amount || '51,000'}</span>
+                            </div>
                           </div>
 
+                          {/* 2nd Prize */}
                           <div 
                             onClick={() => setCommentaryLogPodiumOpen(true)}
                             className="p-3 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800 hover:border-slate-300 cursor-pointer transition-all flex items-center justify-between"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span className="text-lg">🥈</span>
-                              <div>
-                                <span className="text-[8px] font-black uppercase text-slate-400 block">Runner-Up 2nd</span>
-                                <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{podium2nd?.title || 'Runner-Up'}</span>
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-slate-400 block truncate">Prize: {podium2nd?.title || '2nd Prize / Runner-Up'}</span>
+                                <span className="text-[8.5px] text-slate-700 dark:text-slate-300 block truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner: </span>{podium2nd?.personName || podium2nd?.sponsorName || 'Honourable Sponsor'}
+                                </span>
                               </div>
                             </div>
-                            <span className="font-mono font-black text-sm text-slate-700 dark:text-slate-200">₹{podium2nd?.amount || '31,000'}</span>
+                            <div className="text-right shrink-0 ml-2">
+                              <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                              <span className="font-mono font-black text-sm text-slate-700 dark:text-slate-200">₹{podium2nd?.amount || '31,000'}</span>
+                            </div>
                           </div>
 
+                          {/* 3rd Prize */}
+                          <div 
+                            onClick={() => setCommentaryLogPodiumOpen(true)}
+                            className="p-3 rounded-2xl bg-amber-500/10 border border-amber-600/20 hover:border-amber-500/40 cursor-pointer transition-all flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-lg">🥉</span>
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-amber-600 dark:text-amber-400 block truncate">Prize: {podium3rd?.title || '3rd Prize'}</span>
+                                <span className="text-[8.5px] text-slate-700 dark:text-slate-300 block truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner: </span>{podium3rd?.personName || podium3rd?.sponsorName || 'Honourable Sponsor'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 ml-2">
+                              <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                              <span className="font-mono font-black text-sm text-amber-600 dark:text-amber-400">₹{podium3rd?.amount || '11,000'}</span>
+                            </div>
+                          </div>
+
+                          {/* Best Batsman */}
+                          <div 
+                            onClick={() => setCommentaryLogPodiumOpen(true)}
+                            className="p-3 rounded-2xl bg-amber-500/5 border border-amber-500/20 hover:border-amber-400/40 cursor-pointer transition-all flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-lg">🏏</span>
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-amber-500 block truncate">Prize: {bestBatPrize?.title || 'Best Batsman'}</span>
+                                <span className="text-[8.5px] text-slate-700 dark:text-slate-300 block truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner: </span>{bestBatPrize?.personName || bestBatPrize?.sponsorName || 'Tournament Patron'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 ml-2">
+                              <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                              <span className="font-mono font-black text-sm text-amber-500">₹{bestBatPrize?.amount || '3,000'}</span>
+                            </div>
+                          </div>
+
+                          {/* Best Bowler */}
+                          <div 
+                            onClick={() => setCommentaryLogPodiumOpen(true)}
+                            className="p-3 rounded-2xl bg-cyan-500/5 border border-cyan-500/20 hover:border-cyan-400/40 cursor-pointer transition-all flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-lg">🎯</span>
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-cyan-500 block truncate">Prize: {bestBowlPrize?.title || 'Best Bowler'}</span>
+                                <span className="text-[8.5px] text-slate-700 dark:text-slate-300 block truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner: </span>{bestBowlPrize?.personName || bestBowlPrize?.sponsorName || 'Tournament Patron'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 ml-2">
+                              <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                              <span className="font-mono font-black text-sm text-cyan-500">₹{bestBowlPrize?.amount || '3,000'}</span>
+                            </div>
+                          </div>
+
+                          {/* Series MVP / Player of Match */}
                           <div 
                             onClick={() => setCommentaryLogPodiumOpen(true)}
                             className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/20 hover:border-purple-400/40 cursor-pointer transition-all flex items-center justify-between"
                           >
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
                               <span className="text-lg">⭐</span>
-                              <div>
-                                <span className="text-[8px] font-black uppercase text-purple-400 block">Series MVP</span>
-                                <span className="text-xs font-bold text-slate-800 dark:text-slate-100">{mosPrize?.title || 'Player of Tournament'}</span>
+                              <div className="min-w-0">
+                                <span className="text-[8px] font-black uppercase text-purple-400 block truncate">Prize: {mosPrize?.title || 'Player of Match / Series MVP'}</span>
+                                <span className="text-[8.5px] text-slate-700 dark:text-slate-300 block truncate">
+                                  <span className="text-slate-400 font-semibold">Prize Owner: </span>{mosPrize?.personName || mosPrize?.sponsorName || 'Tournament Patron'}
+                                </span>
                               </div>
                             </div>
-                            <span className="font-mono font-black text-sm text-purple-400">₹{mosPrize?.amount || '5,000'}</span>
+                            <div className="text-right shrink-0 ml-2">
+                              <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                              <span className="font-mono font-black text-sm text-purple-400">₹{mosPrize?.amount || '5,000'}</span>
+                            </div>
                           </div>
                         </div>
                       ) : (
                         <div className="space-y-4 pt-1">
-                          {/* 3-Step Olympic Championship Podium */}
-                          <div className="p-4 rounded-2xl bg-gradient-to-b from-amber-500/10 via-slate-950/80 to-slate-900 border border-amber-500/25">
-                            <div className="grid grid-cols-3 gap-2 sm:gap-4 items-end">
-                              {/* 2nd Place */}
-                              <div className="p-3 rounded-2xl bg-gradient-to-t from-slate-700/40 via-slate-800/60 to-slate-900 border border-slate-400/40 text-center min-h-[120px] flex flex-col items-center justify-end shadow-sm">
-                                <span className="text-2xl mb-1">🥈</span>
-                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-100 tracking-wider">
-                                  Runner-Up
+                          {/* Tournament Prize Details & Sponsors (Text Details - No Podium) */}
+                          <div className="p-4 rounded-2xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-amber-500/30 space-y-2.5">
+                            <div className="flex items-center justify-between pb-2 border-b border-amber-500/20">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base">🏆</span>
+                                <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider">
+                                  Tournament Prize & Sponsor Details
                                 </span>
-                                <h6 className="text-[11px] font-black text-slate-200 mt-1 truncate max-w-full">
-                                  {podium2nd?.title || 'Runner-Up 2nd'}
-                                </h6>
-                                <div className="mt-1 font-mono font-black text-sm text-white">
-                                  {podium2nd?.currencySymbol || '₹'}{podium2nd?.amount || '31,000'}
+                              </div>
+                              <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-lg border border-amber-500/30">
+                                Purse: ₹{totalPrizePurse}
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {/* 1st Prize */}
+                              <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm">🥇</span>
+                                    <span className="text-[10px] font-black uppercase text-amber-300 truncate">
+                                      Prize: {podium1st?.title || '1st Prize / Champion'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[9px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{podium1st?.personName || podium1st?.sponsorName || 'Honourable Sponsor'}</span>
+                                    {(podium1st?.personDesignation || podium1st?.sponsorDesignation) && (
+                                      <span className="text-slate-400 text-[8px]"> ({podium1st?.personDesignation || podium1st?.sponsorDesignation})</span>
+                                    )}
+                                  </div>
                                 </div>
-                                <span className="text-[7.5px] text-slate-400 mt-0.5 font-semibold">Trophy + Silver</span>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7.5px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-amber-400 text-sm">
+                                    {podium1st?.currencySymbol || '₹'}{podium1st?.amount || '51,000'}
+                                  </span>
+                                </div>
                               </div>
 
-                              {/* 1st Place */}
-                              <div className="p-3 sm:p-4 rounded-3xl bg-gradient-to-t from-amber-600/30 via-amber-500/20 to-amber-950/80 border-2 border-amber-400/60 text-center min-h-[150px] flex flex-col items-center justify-end shadow-[0_0_20px_rgba(245,158,11,0.3)] relative">
-                                <div className="absolute -top-3 w-7 h-7 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-sm shadow-md">
-                                  👑
+                              {/* 2nd Prize */}
+                              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-700/60 flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm">🥈</span>
+                                    <span className="text-[10px] font-black uppercase text-slate-200 truncate">
+                                      Prize: {podium2nd?.title || '2nd Prize / Runner-Up'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[9px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{podium2nd?.personName || podium2nd?.sponsorName || 'Honourable Sponsor'}</span>
+                                    {(podium2nd?.personDesignation || podium2nd?.sponsorDesignation) && (
+                                      <span className="text-slate-400 text-[8px]"> ({podium2nd?.personDesignation || podium2nd?.sponsorDesignation})</span>
+                                    )}
+                                  </div>
                                 </div>
-                                <span className="text-3xl mb-1 animate-pulse">🏆</span>
-                                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 tracking-wider shadow-xs">
-                                  Champion 1st
-                                </span>
-                                <h6 className="text-xs font-black text-amber-200 mt-1 truncate max-w-full">
-                                  {podium1st?.title || 'Tournament Winner'}
-                                </h6>
-                                <div className="mt-1 font-mono font-black text-lg text-amber-400">
-                                  {podium1st?.currencySymbol || '₹'}{podium1st?.amount || '51,000'}
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7.5px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-slate-200 text-sm">
+                                    {podium2nd?.currencySymbol || '₹'}{podium2nd?.amount || '31,000'}
+                                  </span>
                                 </div>
-                                <span className="text-[8px] text-amber-300/90 mt-0.5 font-bold">Gold Trophy + Cash</span>
                               </div>
 
-                              {/* 3rd Place */}
-                              <div className="p-3 rounded-2xl bg-gradient-to-t from-amber-900/30 via-slate-800/60 to-slate-900 border border-amber-700/40 text-center min-h-[105px] flex flex-col items-center justify-end shadow-sm">
-                                <span className="text-xl mb-1">🥉</span>
-                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-amber-800/40 text-amber-400 tracking-wider">
-                                  3rd Place
-                                </span>
-                                <h6 className="text-[10px] font-black text-slate-200 mt-1 truncate max-w-full">
-                                  {podium3rd?.title || '3rd Position'}
-                                </h6>
-                                <div className="mt-1 font-mono font-black text-sm text-amber-300">
-                                  {podium3rd?.currencySymbol || '₹'}{podium3rd?.amount || '11,000'}
+                              {/* 3rd Prize */}
+                              <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-800/40 flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-sm">🥉</span>
+                                    <span className="text-[10px] font-black uppercase text-amber-400 truncate">
+                                      Prize: {podium3rd?.title || '3rd Prize'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[9px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{podium3rd?.personName || podium3rd?.sponsorName || 'Honourable Sponsor'}</span>
+                                    {(podium3rd?.personDesignation || podium3rd?.sponsorDesignation) && (
+                                      <span className="text-slate-400 text-[8px]"> ({podium3rd?.personDesignation || podium3rd?.sponsorDesignation})</span>
+                                    )}
+                                  </div>
                                 </div>
-                                <span className="text-[7.5px] text-slate-400 mt-0.5 font-semibold">Bronze Trophy</span>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7.5px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-amber-300 text-sm">
+                                    {podium3rd?.currencySymbol || '₹'}{podium3rd?.amount || '11,000'}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -7795,6 +8142,9 @@ export const SpectatorScoreboardSection = ({
                                 <span className="text-lg block mb-0.5">⭐</span>
                                 <span className="text-[8px] font-bold text-purple-400 uppercase block">Series MVP</span>
                                 <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{mosPrize?.title || 'Player of Tournament'}</div>
+                                <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                  Owner: {mosPrize?.personName || mosPrize?.sponsorName || 'Tournament Patron'}
+                                </div>
                                 <div className="font-mono font-black text-xs text-purple-400 mt-1">{mosPrize?.currencySymbol || '₹'}{mosPrize?.amount || '5,000'}</div>
                               </div>
 
@@ -7803,6 +8153,9 @@ export const SpectatorScoreboardSection = ({
                                 <span className="text-lg block mb-0.5">🏏</span>
                                 <span className="text-[8px] font-bold text-amber-400 uppercase block">Best Batter</span>
                                 <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{bestBatPrize?.title || 'Best Batsman'}</div>
+                                <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                  Owner: {bestBatPrize?.personName || bestBatPrize?.sponsorName || 'Tournament Patron'}
+                                </div>
                                 <div className="font-mono font-black text-xs text-amber-400 mt-1">{bestBatPrize?.currencySymbol || '₹'}{bestBatPrize?.amount || '3,000'}</div>
                               </div>
 
@@ -7811,6 +8164,9 @@ export const SpectatorScoreboardSection = ({
                                 <span className="text-lg block mb-0.5">🎯</span>
                                 <span className="text-[8px] font-bold text-cyan-400 uppercase block">Best Bowler</span>
                                 <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{bestBowlPrize?.title || 'Best Bowler'}</div>
+                                <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                  Owner: {bestBowlPrize?.personName || bestBowlPrize?.sponsorName || 'Tournament Patron'}
+                                </div>
                                 <div className="font-mono font-black text-xs text-cyan-400 mt-1">{bestBowlPrize?.currencySymbol || '₹'}{bestBowlPrize?.amount || '3,000'}</div>
                               </div>
 
@@ -7819,6 +8175,9 @@ export const SpectatorScoreboardSection = ({
                                 <span className="text-lg block mb-0.5">{maxSixPrize ? '🚀' : '🧤'}</span>
                                 <span className="text-[8px] font-bold text-emerald-400 uppercase block">{maxSixPrize ? 'Max Sixes' : 'Best Fielder'}</span>
                                 <div className="text-[11px] font-black text-slate-900 dark:text-slate-100 truncate">{(maxSixPrize || bestFieldPrize)?.title || 'Super Striker'}</div>
+                                <div className="text-[8px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                                  Owner: {(maxSixPrize || bestFieldPrize)?.personName || (maxSixPrize || bestFieldPrize)?.sponsorName || 'Tournament Sponsor'}
+                                </div>
                                 <div className="font-mono font-black text-xs text-emerald-400 mt-1">{(maxSixPrize || bestFieldPrize)?.currencySymbol || '₹'}{(maxSixPrize || bestFieldPrize)?.amount || '2,000'}</div>
                               </div>
                             </div>
@@ -7846,20 +8205,20 @@ export const SpectatorScoreboardSection = ({
                                   key={p.id || idx}
                                   className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs"
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
                                     <span className="text-sm">
                                       {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '🎖️'}
                                     </span>
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                       <div className="font-bold text-slate-800 dark:text-slate-100 truncate">{p.title}</div>
-                                      {p.subtitle && (
-                                        <div className="text-[8.5px] text-slate-400 truncate">{p.subtitle}</div>
-                                      )}
+                                      <div className="text-[8.5px] text-slate-500 dark:text-slate-400 truncate">
+                                        Given by: <span className="font-semibold text-slate-700 dark:text-slate-300">{p.personName || p.sponsorName || 'Tournament Sponsor'}</span>
+                                      </div>
                                     </div>
                                   </div>
                                   <div className="text-right shrink-0 ml-2">
                                     <div className="font-mono font-black text-amber-500">{p.currencySymbol || '₹'}{p.amount}</div>
-                                    <div className="text-[7.5px] text-slate-400">{p.trophyIncluded ? 'Trophy + Cash' : 'Award'}</div>
+                                    <div className="text-[7.5px] text-slate-400">{p.trophyIncluded ? 'Trophy + Cash' : 'Prize'}</div>
                                   </div>
                                 </div>
                               ))}
@@ -8718,7 +9077,7 @@ export const SpectatorScoreboardSection = ({
                       <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
                         <div>
                           <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest block">
-                            Championship Podium & Individual Honors
+                            Tournament Cash Prizes & Individual Honors
                           </span>
                           <h4 className="text-lg font-black text-slate-900 dark:text-white">
                             Tournament Prize List
@@ -8992,87 +9351,6 @@ export const SpectatorScoreboardSection = ({
                       <span className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-950 text-xs font-black uppercase tracking-wider shrink-0 shadow-sm">
                         Official Tournament Registry
                       </span>
-                    </div>
-
-                  </div>
-                )}
-
-                {/* ===================== TAB 6: CRICKET NEWS & VIDEOS DESK ===================== */}
-                {activeTab === 'media' && (
-                  <div className="space-y-6 animate-fade-in">
-
-                    {/* Action Match Highlights Simulated Videos Deck */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      
-                      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-                        <div className="pb-2 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
-                          <h4 className="text-xs font-black uppercase tracking-wider text-slate-650 dark:text-slate-300">Live Match Videos Desk</h4>
-                          <span className="text-[9px] font-mono text-slate-400">CLIPS FEED</span>
-                        </div>
-
-                        <div className="space-y-4.5">
-                          {[
-                            { title: "Spectacular 6! Over boundary cleared with power play style", duration: "1:24 min", event: "Batting Range Highlights" },
-                            { title: "Clean Bowled Yorker! Middle stump flying in speed spell", duration: "0:45 min", event: "Spell Highlights" },
-                            { title: `${selectedMatch.teamA} dressing room pre-match planning thoughts`, duration: "4:15 min", event: "Interview" },
-                            { title: "Strategic boundary index and field setup commentary analysis", duration: "2:50 min", event: "Strategic Highlights" }
-                          ].map((vid, vidIdx) => (
-                            <div 
-                              key={vidIdx}
-                              className="group p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 hover:bg-emerald-500/5 transition-all flex items-center gap-3.5 cursor-pointer border border-transparent hover:border-emerald-500/10"
-                            >
-                              <div className="w-16 h-12 rounded-xl bg-slate-900 dark:bg-slate-850 shrink-0 flex items-center justify-center relative overflow-hidden text-emerald-400 border border-white/5 shadow">
-                                <span className="text-xs">▶</span>
-                                <span className="absolute bottom-1 right-1 bg-black/75 px-1 py-0.2 rounded text-[7px] font-mono text-white font-semibold">{vid.duration}</span>
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500 block mb-0.5">{vid.event}</span>
-                                <h5 className="text-xs font-black text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-500 transition-colors">{vid.title}</h5>
-                                <p className="text-[9px] text-slate-400 mt-0.5 font-sans">Simulated on-field stream footage reel</p>
-                                {vidIdx === 1 && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      showToast("📥 HD Highlight Reels compiling... Your package download has initiated successfully!");
-                                    }}
-                                    className="mt-2.5 py-1.5 px-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-widest cursor-pointer border-none transition-transform hover:scale-[1.03] flex items-center gap-1.5 shadow"
-                                    type="button"
-                                  >
-                                    <span>Download Match Highlight Reels</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Cricket News desk bulletins */}
-                      <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
-                        <div className="pb-2 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center">
-                          <h4 className="text-xs font-black uppercase tracking-wider text-slate-650 dark:text-slate-305">Cricket News desk bulletins</h4>
-                          <span className="text-[9px] font-mono text-slate-405">COMMUNICATIONS</span>
-                        </div>
-
-                        <div className="space-y-4">
-                          {[
-                            { title: "Live Stadium Weather Desk: Clear skies, moderate wind flow favoring seamers", time: "10 mins ago" },
-                            { title: "Pitch Analysis from Curators: Slightly damp ground, spins might dominate over subsequent overs", time: "40 mins ago" },
-                            { title: "Match Tactics Report: Teams opting for shorter run focus on boundary margins", time: "1 hour ago" },
-                            { title: "Key Fitness news: Match selectors confirm squad components complete fit", time: "2 hours ago" }
-                          ].map((news, newsIdx) => (
-                            <div key={newsIdx} className="p-3 bg-slate-50/50 dark:bg-slate-950/40 rounded-xl space-y-1 border border-slate-100 dark:border-slate-850">
-                              <div className="flex justify-between text-[8px] font-bold text-slate-400">
-                                <span className="uppercase tracking-widest text-emerald-500">NEWS FEED BULLETIN</span>
-                                <span className="font-mono">{news.time}</span>
-                              </div>
-                              <strong className="text-xs font-black text-slate-800 dark:text-slate-200 block">{news.title}</strong>
-                            </div>
-                          ))}
-                        </div>
-
-                      </div>
-
                     </div>
 
                   </div>
@@ -9533,6 +9811,18 @@ export const SpectatorScoreboardSection = ({
             autoDownloadFormat={certificateDownloadFormat}
           />
         )}
+
+        {/* Floating Quick Action Button: Scoreboard Management (Always visible on screen) */}
+        <div className="fixed bottom-5 right-5 z-40 print:hidden">
+          <button
+            onClick={() => navigate(selectedMatch ? `/live/cricket-scoreboard?matchId=${selectedMatch.id}` : '/live/cricket-scoreboard')}
+            className="px-4 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-2xl flex items-center gap-2 cursor-pointer border-2 border-emerald-400/40 transition-all hover:scale-105 active:scale-95 group"
+            title="Open Cricket Scoreboard Management Console"
+          >
+            <ShieldCheck size={16} className="text-amber-300 group-hover:rotate-12 transition-transform" />
+            <span>Scoreboard Management</span>
+          </button>
+        </div>
 
       </div>
     </section>

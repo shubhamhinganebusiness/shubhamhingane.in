@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import cors from "cors";
+import compression from "compression";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -273,6 +274,9 @@ async function generateContentWithFallback(
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // High-performance gzip/deflate compression for all API and static responses
+  app.use(compression());
 
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
@@ -1761,6 +1765,402 @@ function cleanServerUndefined(obj: any): any {
     } catch (err: any) {
       console.error("[Cricket API] Error saving document via proxy:", err);
       res.status(500).json({ error: err.message || "Failed to save document on server" });
+    }
+  });
+
+  // Heuristic cricket voice command parser for fallback
+  function heuristicCricketVoiceParser(raw: string, lang = "mr-IN") {
+    let text = (raw || "").toLowerCase().trim();
+
+    // Replace fielding direction "midwicket" with safe token so it doesn't trigger "wicket"
+    text = text.replace(/mid[\s-]?wicket/g, "mid_direction");
+
+    // 0. Visual Overlays & TV Graphics (Voice-Activated Broadcast Displays)
+    // Clear/Hide Overlay
+    if (
+      text.includes('hide overlay') || text.includes('close overlay') || text.includes('dismiss overlay') ||
+      text.includes('clear overlay') || text.includes('clear graphics') || text.includes('remove overlay') ||
+      text.includes('स्क्रीन साफ') || text.includes('ग्राफिक्स हटवा') || text.includes('ओवरले बंद') ||
+      text.includes('ओवरले हटाओ') || text.includes('ओवरले हटवा') || text.includes('स्क्रीन क्लियर')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'none',
+        confidence: 0.98,
+        explanation: 'Dismiss Live Broadcast Graphic Overlay'
+      };
+    }
+
+    // Team vs Team Logo & Matchup Overlay
+    if (
+      text.includes('team vs team') || text.includes('team versus team') || text.includes('vs logo') ||
+      text.includes('versus logo') || text.includes('vs overlay') || text.includes('team logo') ||
+      text.includes('match card') || text.includes('matchup') || text.includes('clash') ||
+      text.includes('टीम विरुद्ध टीम') || text.includes('दोन्ही टीमचा लोगो') || text.includes('टीम व्हर्सेस टीम') ||
+      text.includes('टीम बनाम टीम') || text.includes('दोनों टीम का लोगो') || text.includes('टीम वर्सेस टीम') ||
+      (text.includes('logo') && (text.includes('team') || text.includes('show'))) ||
+      (text.includes('लोगो') && (text.includes('दाखवा') || text.includes('दिखाओ') || text.includes('टीम')))
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'team_vs_team',
+        confidence: 0.98,
+        explanation: 'Show Team VS Team Logo & Matchup Overlay'
+      };
+    }
+
+    // Both Teams Squad List / Playing 11 Overlay
+    if (
+      text.includes('squad list') || text.includes('squad') || text.includes('squads') ||
+      text.includes('playing 11') || text.includes('playing xi') || text.includes('lineup') || text.includes('lineups') ||
+      text.includes('स्क्वॉड') || text.includes('प्लेईंग ११') || text.includes('प्लेइंग इलेव्हन') || text.includes('प्लेइंग 11') ||
+      text.includes('खेळाडूंची यादी') || text.includes('दोनों टीम की स्क्वाड') || text.includes('दोन्ही टीमची स्क्वॉड') ||
+      text.includes('खिलाड़ियों की सूची') || text.includes('टीम लिस्ट')
+    ) {
+      const isTeamB = text.includes('team b') || text.includes('टीम b') || text.includes('दुसरी टीम') || text.includes('दूसरी टीम');
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: isTeamB ? 'squad_b' : 'squad_a',
+        confidence: 0.98,
+        explanation: isTeamB ? 'Show Team B Squad List Overlay' : 'Show Both Teams Squad List Overlay'
+      };
+    }
+
+    // Field Position Overlay
+    if (
+      text.includes('field position') || text.includes('fielding position') || text.includes('fielding setup') ||
+      text.includes('फील्डिंग पोझिशन') || text.includes('फील्डिंग सेट') || text.includes('फील्डिंग दिखाओ') || text.includes('फील्डिंग दाखवा')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'field_positions',
+        confidence: 0.96,
+        explanation: 'Show Field Positions TV Overlay'
+      };
+    }
+
+    // Batting Summary Overlay
+    if (
+      text.includes('batting summary') || text.includes('batting scorecard') ||
+      text.includes('बॅटिंग सारांश') || text.includes('बैटिंग समरी') || text.includes('बॅटिंग कार्ड')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'batting_summary',
+        confidence: 0.96,
+        explanation: 'Show Batting Summary Overlay'
+      };
+    }
+
+    // Bowling Summary Overlay
+    if (
+      text.includes('bowling summary') || text.includes('bowling scorecard') ||
+      text.includes('बॉलिंग सारांश') || text.includes('बॉलिंग समरी') || text.includes('बॉलिंग कार्ड')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'bowling_summary',
+        confidence: 0.96,
+        explanation: 'Show Bowling Summary Overlay'
+      };
+    }
+
+    // Tournament Logo Overlay
+    if (
+      text.includes('tournament logo') || text.includes('trophy logo') ||
+      text.includes('स्पर्धा लोगो') || text.includes('टूर्नामेंट लोगो')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'tournament_logo',
+        confidence: 0.96,
+        explanation: 'Show Tournament Logo Overlay'
+      };
+    }
+
+    // 1. Undo
+    if (text.includes('undo') || text.includes('अनडू') || text.includes('मागे') || text.includes('वापस') || text.includes('रद्द')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'undo',
+        confidence: 0.95,
+        explanation: 'Undo previous ball'
+      };
+    }
+
+    // 2. Sixes (6) - check before general wickets to allow "six over midwicket"
+    if (
+      text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
+      text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
+      text.includes('सिक्स') || text.includes('maximum') || text === '6'
+    ) {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 6, confidence: 0.96, explanation: 'SIX! 6 Runs' };
+    }
+
+    // 3. Fours (4) - check before general wickets to allow "four through midwicket"
+    if (
+      text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
+      text.includes('चार') || text.includes('फोर') || text.includes('boundary') || text === '4'
+    ) {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 4, confidence: 0.96, explanation: 'FOUR! 4 Runs' };
+    }
+
+    // 4. Wide
+    if (text.includes('wide') || text.includes('वाईड') || text.includes('व्हाईड') || text.includes('वाइड')) {
+      let extraRuns = 0;
+      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
+      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) extraRuns = 1;
+      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) extraRuns = 2;
+      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
+
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'wide',
+        extraRuns,
+        confidence: 0.93,
+        explanation: extraRuns > 0 ? `Wide + ${extraRuns} run(s)` : 'Wide Ball (+1)'
+      };
+    }
+
+    // 5. No Ball
+    if (text.includes('no ball') || text.includes('noball') || text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल') || text.includes('free hit') || text.includes('फ्री हिट')) {
+      let extraRuns = 0;
+      if (text.includes('6') || text.includes('six') || text.includes('सहा') || text.includes('छक्का') || text.includes('षटकार')) extraRuns = 6;
+      else if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
+      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) extraRuns = 1;
+      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) extraRuns = 2;
+      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
+
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'noball',
+        extraRuns,
+        confidence: 0.93,
+        explanation: extraRuns > 0 ? `No Ball + ${extraRuns} run(s) [Free Hit next]` : 'No Ball (+1) [Free Hit next]'
+      };
+    }
+
+    // 6. Genuine Wickets
+    if (
+      /\b(out|wicket|bowled|caught|lbw|stumped|dismissed)\b/.test(text) || 
+      text.includes('बाद') || text.includes('आउट') || text.includes('बोल्ड') ||
+      text.includes('झेल') || text.includes('कैच') || text.includes('रन आउट') ||
+      text.includes('run out') || text.includes('दांडी') || text.includes('पायचीत') ||
+      text.includes('विकेट') || text.includes('क्लीन बोल्ड')
+    ) {
+      let wicketType = 'caught';
+      if (text.includes('bold') || text.includes('bowled') || text.includes('बोल्ड') || text.includes('दांडी')) wicketType = 'bowled';
+      else if (text.includes('run out') || text.includes('रन आउट')) wicketType = 'run_out';
+      else if (text.includes('stump') || text.includes('स्टंप')) wicketType = 'stumped';
+      else if (text.includes('lbw') || text.includes('पायचीत')) wicketType = 'lbw';
+      else if (text.includes('hit wicket') || text.includes('हिट')) wicketType = 'hit_wicket';
+
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'wicket',
+        wicketType,
+        confidence: 0.95,
+        explanation: `Wicket (${wicketType.toUpperCase()}) recorded`
+      };
+    }
+
+    // 7. Swap batsmen / strike rotate
+    if (text.includes('swap') || text.includes('स्ट्राइक बदला') || text.includes('स्ट्राइक चेंज') || text.includes('strike') || text.includes('रोटेट')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'swap_batsmen',
+        confidence: 0.9,
+        explanation: 'Swap striker & non-striker'
+      };
+    }
+
+    // 8. Leg Bye / Bye
+    if (text.includes('leg bye') || text.includes('legbye') || text.includes('लेग बाय') || text.includes('लेगबाई')) {
+      let runs = 1;
+      if (text.includes('4') || text.includes('four') || text.includes('चार')) runs = 4;
+      else if (text.includes('2') || text.includes('two') || text.includes('दोन')) runs = 2;
+      return { rawTranscript: raw, detectedLang: lang, intent: 'legbye', runs, confidence: 0.9, explanation: `Leg Bye +${runs}` };
+    }
+    if (text.includes('bye') || text.includes('बाय') || text.includes('बाई')) {
+      let runs = 1;
+      if (text.includes('4') || text.includes('four') || text.includes('चार')) runs = 4;
+      else if (text.includes('2') || text.includes('two') || text.includes('दोन')) runs = 2;
+      return { rawTranscript: raw, detectedLang: lang, intent: 'bye', runs, confidence: 0.9, explanation: `Bye +${runs}` };
+    }
+
+    // 7. Dot Ball
+    if (
+      text.includes('dot') || text.includes('डॉट') || text.includes('निर्धाव') || 
+      text.includes('शून्य') || text.includes('zero') || text.includes('no run') || 
+      text.includes('खाली') || text === '0'
+    ) {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'dot', runs: 0, confidence: 0.95, explanation: 'Dot Ball (0 runs)' };
+    }
+
+    // 8. Sixes (6)
+    if (
+      text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
+      text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
+      text.includes('सिक्स') || text.includes('maximum') || text === '6'
+    ) {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 6, confidence: 0.96, explanation: 'SIX! 6 Runs' };
+    }
+
+    // 9. Fours (4)
+    if (
+      text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
+      text.includes('चार') || text.includes('फोर') || text.includes('boundary') || text === '4'
+    ) {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 4, confidence: 0.96, explanation: 'FOUR! 4 Runs' };
+    }
+
+    // 10. Singles & small runs (1, 2, 3)
+    if (text.includes('one') || text.includes('single') || text.includes('एक') || text.includes('सिंगल') || text === '1') {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 1, confidence: 0.92, explanation: 'Single (1 run)' };
+    }
+    if (text.includes('two') || text.includes('double') || text.includes('दोन') || text.includes('दो') || text.includes('डबल') || text === '2') {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 2, confidence: 0.92, explanation: 'Two runs (2)' };
+    }
+    if (text.includes('three') || text.includes('triple') || text.includes('तीन') || text === '3') {
+      return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 3, confidence: 0.92, explanation: 'Three runs (3)' };
+    }
+
+    return {
+      rawTranscript: raw,
+      detectedLang: lang,
+      intent: 'unknown',
+      confidence: 0.2,
+      explanation: `Could not determine scoring action from: "${raw}". Speak: 1, 2, 4, 6, Dot, Wide, or Out.`
+    };
+  }
+
+  // AI Voice-Assisted Cricket Scoring Parser Endpoint
+  app.post("/api/cricket/parse-voice-score", async (req, res) => {
+    try {
+      const { transcript, language = "mr-IN", strikerName, bowlerName } = req.body || {};
+      if (!transcript || typeof transcript !== "string") {
+        return res.status(400).json({ error: "transcript is required" });
+      }
+
+      const cleanText = transcript.trim();
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        return res.json({
+          ...heuristicCricketVoiceParser(cleanText, language),
+          source: "heuristic_no_key"
+        });
+      }
+
+      try {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build'
+            }
+          }
+        });
+
+        const prompt = `You are a specialized Gully Cricket Scoring and Broadcast AI Assistant.
+A cricket scorer spoke a commentary phrase or voice command in Marathi, Hindi, or English.
+Spoken phrase: "${cleanText}"
+Context:
+- Current striker: "${strikerName || 'Batsman'}"
+- Current bowler: "${bowlerName || 'Bowler'}"
+- Language code: "${language}"
+
+Determine the exact cricket scoring event or broadcast overlay request and return ONLY a single JSON object with these fields:
+{
+  "intent": "runs" | "dot" | "wide" | "noball" | "wicket" | "bye" | "legbye" | "swap_batsmen" | "undo" | "overlay" | "unknown",
+  "runs": number (0 to 6),
+  "extraRuns": number (0 for normal wide/noball, or extra runs taken e.g. 1 if wide+1, 4 if wide+4, 6 if noball+6),
+  "wicketType": "bowled" | "caught" | "run_out" | "lbw" | "stumped" | "hit_wicket" | null,
+  "overlayType": "team_vs_team" | "squad_a" | "squad_b" | "field_positions" | "batting_summary" | "bowling_summary" | "tournament_logo" | "toss_result" | "none" | null,
+  "confidence": number,
+  "explanation": "short friendly summary in English"
+}
+
+Important Broadcast Overlay Rules:
+- "show the team vs team logo", "show team vs team", "टीम विरुद्ध टीम लोगो दाखवा", "टीम वर्सेस टीम लोगो दिखाओ", "versus logo" -> intent: "overlay", overlayType: "team_vs_team", explanation: "Show Team vs Team Logo Overlay"
+- "show the both team squad list", "show both squads", "show squad list", "दोन्ही टीमची स्क्वॉड दाखवा", "दोनों टीम की स्क्वाड दिखाओ", "playing 11" -> intent: "overlay", overlayType: "squad_a", explanation: "Show Team Squad List Overlay"
+- "show team b squad" -> intent: "overlay", overlayType: "squad_b", explanation: "Show Team B Squad List Overlay"
+- "show field position", "फील्डिंग दाखवा" -> intent: "overlay", overlayType: "field_positions", explanation: "Show Field Positions Overlay"
+- "show batting summary", "बॅटिंग सारांश दाखवा" -> intent: "overlay", overlayType: "batting_summary", explanation: "Show Batting Summary Overlay"
+- "show bowling summary", "बॉलिंग सारांश दाखवा" -> intent: "overlay", overlayType: "bowling_summary", explanation: "Show Bowling Summary Overlay"
+- "show tournament logo", "स्पर्धा लोगो दाखवा" -> intent: "overlay", overlayType: "tournament_logo", explanation: "Show Tournament Logo Overlay"
+- "hide overlay", "close overlay", "clear graphics", "ओवरले बंद करा", "स्क्रीन साफ करा" -> intent: "overlay", overlayType: "none", explanation: "Dismiss Live Graphic Overlay"
+
+Scoring Rules:
+- "चौकार", "चार धावा", "चार रन", "कव्हर ड्राईव्ह चार", "four runs", "boundary" -> intent: "runs", runs: 4
+- "षटकार", "सहा धावा", "सहा रन", "सिक्स", "छक्का", "six", "maximum" -> intent: "runs", runs: 6
+- "एक धाव", "एक रन", "सिंगल", "single", "one run" -> intent: "runs", runs: 1
+- "दोन धावा", "दोन रन", "दो रन", "two runs", "double" -> intent: "runs", runs: 2
+- "तीन धावा", "तीन रन", "three runs" -> intent: "runs", runs: 3
+- "डॉट बॉल", "निर्धाव चेंडू", "डॉट", "शून्य रन", "dot ball", "no run" -> intent: "dot", runs: 0
+- "वाईड", "वाईड बॉल", "वाइड गेंद", "wide" -> intent: "wide", extraRuns: 0
+- "वाईड आणि एक", "wide plus 1" -> intent: "wide", extraRuns: 1
+- "वाईड चौकार", "wide plus four" -> intent: "wide", extraRuns: 4
+- "नो बॉल", "नोबॉल", "no ball", "free hit" -> intent: "noball", extraRuns: 0
+- "नो बॉल चौकार", "no ball plus four" -> intent: "noball", extraRuns: 4
+- "नो बॉल षटकार", "no ball plus six" -> intent: "noball", extraRuns: 6
+- "विकेट", "बाद", "आउट", "बोल्ड", "कॅच", "झेल", "दांडी गुल", "पायचीत", "wicket", "bowled", "caught out" -> intent: "wicket"
+- "बाय", "bye" -> intent: "bye", runs: 1
+- "लेग बाय", "leg bye" -> intent: "legbye", runs: 1
+- "स्ट्राइक बदला", "स्ट्राइक चेंज", "रोटेट स्ट्राइक", "swap strike", "strike change" -> intent: "swap_batsmen"
+- "मागे घ्या", "अनडू", "वापस", "undo last ball" -> intent: "undo"
+
+Output ONLY the JSON object without markdown fences.`;
+
+        const response = await generateContentWithFallback(ai, {
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: {
+            temperature: 0.1,
+            maxOutputTokens: 250,
+          },
+        });
+
+        const rawText = (response.text || "").trim();
+        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          return res.json({
+            rawTranscript: cleanText,
+            detectedLang: language,
+            ...parsed,
+            source: "gemini_ai"
+          });
+        }
+      } catch (geminiErr: any) {
+        console.warn("[Voice AI Scorer] Gemini fallback to heuristic:", geminiErr.message || geminiErr);
+      }
+
+      return res.json({
+        ...heuristicCricketVoiceParser(cleanText, language),
+        source: "heuristic_fallback"
+      });
+    } catch (err: any) {
+      console.error("[Voice AI Scorer] Error in voice score endpoint:", err);
+      res.status(500).json({ error: "Failed to parse voice score command" });
     }
   });
 

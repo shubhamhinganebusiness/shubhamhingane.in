@@ -75,6 +75,7 @@ export const mandalTranslations = {
     events: {
       title: 'दहा दिवसीय उत्सव वेळापत्रक व महाआरती',
       dailyAarti: 'दैनंदिन आरती वेळापत्रक',
+      upcomingFestivals: 'आगामी उत्सव व कार्यक्रम',
       bookSlot: 'आरती यजमानपद / पूजा स्लॉट बुक करा',
       devoteeName: 'यजमानाचे नाव',
       gotra: 'गोत्र',
@@ -105,7 +106,14 @@ export const mandalTranslations = {
       exportCsv: 'CSV अहवाल',
       printAudit: 'ऑडिट स्टेटमेंट प्रिंट करा',
       incomeBreakdown: 'उत्पन्न वर्गवारी विश्लेषण',
-      expenseBreakdown: 'खर्च वर्गवारी विश्लेषण'
+      expenseBreakdown: 'खर्च वर्गवारी विश्लेषण',
+      downloadAudit: 'ऑडिट शीट डाऊनलोड',
+      categoryBreakdown: 'वर्गवारी विश्लेषण',
+      topDonors: 'प्रमुख देणगीदार'
+    },
+    pandalMap: {
+      title: 'पंडाल परिसर नकाशा',
+      crowdMonitor: 'मंडप विभाग, रांग नियोजन आणि गर्दी नियंत्रण व्यवस्था'
     }
   },
   hi: {
@@ -184,6 +192,7 @@ export const mandalTranslations = {
     events: {
       title: '१० दिवसीय उत्सव समय-सारिणी व महाआरती',
       dailyAarti: 'दैनिक आरती समय',
+      upcomingFestivals: 'आगामी उत्सव व कार्यक्रम',
       bookSlot: 'आरती यजमान / पूजा स्लॉट बुक करें',
       devoteeName: 'यजमान का नाम',
       gotra: 'गोत्र',
@@ -214,7 +223,14 @@ export const mandalTranslations = {
       exportCsv: 'CSV रिपोर्ट',
       printAudit: 'ऑडिट स्टेटमेंट प्रिंट',
       incomeBreakdown: 'आय श्रेणी विश्लेषण',
-      expenseBreakdown: 'व्यय श्रेणी विश्लेषण'
+      expenseBreakdown: 'व्यय श्रेणी विश्लेषण',
+      downloadAudit: 'ऑडिट शीट डाउनलोड',
+      categoryBreakdown: 'श्रेणी विश्लेषण',
+      topDonors: 'प्रमुख दानदाता'
+    },
+    pandalMap: {
+      title: 'पंडाल परिसर नक्शा',
+      crowdMonitor: 'मंडप अनुभाग, कतार योजना और भीड़ नियंत्रण प्रणाली'
     }
   },
   en: {
@@ -293,6 +309,7 @@ export const mandalTranslations = {
     events: {
       title: '10-Day Festival Timeline & Aarti Schedule',
       dailyAarti: 'Daily Aarti Schedule',
+      upcomingFestivals: 'Upcoming Festivals & Programs',
       bookSlot: 'Book Aarti Yajman / Puja Slot',
       devoteeName: 'Yajman Full Name',
       gotra: 'Gotra',
@@ -323,7 +340,14 @@ export const mandalTranslations = {
       exportCsv: 'Export CSV Ledger',
       printAudit: 'Print Audit Statement',
       incomeBreakdown: 'Income Category Breakdown',
-      expenseBreakdown: 'Expense Category Breakdown'
+      expenseBreakdown: 'Expense Category Breakdown',
+      downloadAudit: 'Download Audit Sheet',
+      categoryBreakdown: 'Category Breakdown',
+      topDonors: 'Top Donors'
+    },
+    pandalMap: {
+      title: 'Pandal Layout Map',
+      crowdMonitor: 'Pandal zones, queue management and live crowd monitor'
     }
   }
 };

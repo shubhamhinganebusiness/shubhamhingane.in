@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import { LogIn as LoginIcon, ShieldCheck as ShieldIcon } from 'lucide-react';
+import { LogIn as LoginIcon, ShieldCheck, ShieldCheck as ShieldIcon } from 'lucide-react';
 
 // Firestore and Realtime Database imports
 import { 
@@ -1563,7 +1563,7 @@ export const CricketScoreboard: React.FC = () => {
 
   // Extra Runs modal states
   const [showExtraRunsModal, setShowExtraRunsModal] = useState(false);
-  const [extraRunsBallType, setExtraRunsBallType] = useState<'wide' | 'noball' | null>(null);
+  const [extraRunsBallType, setExtraRunsBallType] = useState<'wide' | 'noball' | 'bye' | 'legbye' | null>(null);
   const [bowlerSelectedForOver, setBowlerSelectedForOver] = useState<number>(-1);
 
   // Audio simulation trigger
@@ -8512,6 +8512,17 @@ export const CricketScoreboard: React.FC = () => {
             <span className="text-xs sm:text-sm font-black tracking-widest text-white uppercase shrink-0">
               GULLY<span className="text-amber-400 italic">SCORE</span>
             </span>
+            <button
+              type="button"
+              onClick={() => {
+                showNotification('Scoreboard Management console is active. Live scoring and TV graphics in sync.', 'info');
+              }}
+              className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0 cursor-pointer hover:bg-emerald-500/30 transition-all shadow-xs"
+              title="Cricket Scoreboard Management Console"
+            >
+              <ShieldCheck size={11} className="text-amber-300" />
+              <span>Scoreboard Management</span>
+            </button>
             
             {saveStatus && (
               <button
@@ -8585,43 +8596,6 @@ export const CricketScoreboard: React.FC = () => {
                 {/* Offline-First Background Sync Status Badge */}
                 <OfflineSyncStatusBadge className="shrink-0" />
 
-                {/* Captain Teams & Squads Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowTeamModal(true)}
-                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white font-extrabold border border-emerald-500/30 rounded-lg sm:rounded-xl text-[10px] uppercase tracking-wider cursor-pointer flex items-center gap-1.5 transition-all shrink-0"
-                  title="View Captain Squads & Teams List (Auto-populated in Batting Dropdowns)"
-                >
-                  <Users size={12} className="text-emerald-400" />
-                  <span className="hidden sm:inline">Captain Teams</span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 font-mono text-[9px] font-black">
-                    {savedTeams.length}
-                  </span>
-                  {savedTeams.some(t => t.status === 'squad_submitted' || (t.players && t.players.length > 0)) && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  )}
-                </button>
-
-                {/* Live Tournament Orange & Purple Cap Leaderboard */}
-                <button
-                  onClick={() => setShowLeaderboardModal(true)}
-                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500 hover:to-orange-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 shadow-xs"
-                  title="Live Tournament Leaderboards (Orange Cap & Purple Cap)"
-                >
-                  <Trophy size={12} className="text-amber-400" />
-                  <span className="hidden sm:inline">Caps</span>
-                </button>
-
-                {/* Local Match & Over Sponsors Manager */}
-                <button
-                  onClick={() => setShowSponsorModal(true)}
-                  className="h-8 sm:h-9 px-1.5 sm:px-2.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/30 rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 shadow-xs"
-                  title="Manage Ground & Live Stream Sponsors"
-                >
-                  <Award size={12} className="text-emerald-400" />
-                  <span className="hidden sm:inline">Sponsors</span>
-                </button>
-
                 {/* Tournament Prize Money Manager (Above Scorebug: Best Batsman, Best Bowler, Man of the Series, 4th Prize) */}
                 <button
                   onClick={() => setShowPrizeModal(true)}
@@ -8651,23 +8625,6 @@ export const CricketScoreboard: React.FC = () => {
                   {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) && (
                     <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping" />
                   )}
-                </button>
-
-                <button
-                  onClick={handleExportMatchPDF}
-                  className="h-8 sm:h-9 px-1.5 sm:px-3 bg-slate-800 hover:bg-slate-750 text-slate-200 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-0.5 transition-all text-white shrink-0"
-                  title="Export PDF Report"
-                >
-                  <FileDown size={12} />
-                  <span className="hidden md:inline">PDF</span>
-                </button>
-
-                <button
-                  onClick={() => setSoundEnabled(prev => !prev)}
-                  className="h-8 w-8 sm:h-9 sm:w-9 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-200 border-none rounded-lg sm:rounded-xl cursor-pointer transition-all shrink-0"
-                  title={soundEnabled ? "Mute Audio" : "Unmute Audio"}
-                >
-                  {soundEnabled ? <Volume2 size={13} className="text-emerald-450" /> : <VolumeX size={13} className="text-rose-450" />}
                 </button>
 
             <button
@@ -8715,14 +8672,6 @@ export const CricketScoreboard: React.FC = () => {
                 <span className="inline sm:hidden">End</span>
               </button>
             )}
-
-            <button
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="h-8 w-8 sm:h-9 sm:w-9 bg-slate-800 text-slate-300 rounded-lg sm:rounded-xl flex items-center justify-center border-none cursor-pointer hover:bg-slate-700 shrink-0"
-              title="Toggle sound"
-            >
-              {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-            </button>
 
             <button
               onClick={async () => {
@@ -9124,7 +9073,7 @@ export const CricketScoreboard: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="flex-1 overflow-y-auto lg:overflow-hidden min-h-0 p-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto min-h-0 p-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 custom-scrollbar">
           
           {/* COLUMN 1: Score overview, Last 5 action logs, Live Commentary Stream */}
           <div className={`flex flex-col gap-2 min-h-0 overflow-hidden ${
@@ -11908,7 +11857,7 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           {/* COLUMN 2: Crease Batsmen, Bowlers and Tactile Scoring Panels - Optimized for 100% Single-Screen Laptop View */}
-          <div className={`flex flex-col gap-1.5 min-h-0 overflow-y-auto lg:overflow-visible custom-scrollbar ${
+          <div className={`flex flex-col gap-1.5 min-h-0 overflow-y-auto custom-scrollbar ${
             activeMobileTab === 'scorer' ? 'flex' : 'hidden lg:flex'
           } lg:col-span-5 pb-1 lg:pb-0`}>
             
@@ -12693,10 +12642,33 @@ export const CricketScoreboard: React.FC = () => {
               onSwapBatsmen={() => {
                 handleSwapStriker();
               }}
+              onTriggerOverlay={(overlayType) => {
+                if (overlayType === 'none' || overlayType === 'clear') {
+                  updateOverlayProp({
+                    activeGraphic: 'none',
+                    customBanner: 'none',
+                    customBannerText: '',
+                    customMilestone: null
+                  });
+                  showNotification('Voice Command: Cleared all broadcast overlays.', 'info');
+                } else {
+                  updateOverlayProp({ activeGraphic: overlayType });
+                  showNotification(`Voice Command: Showing ${overlayType.replace(/_/g, ' ').toUpperCase()} overlay!`, 'success');
+                }
+              }}
+              onDismissOverlay={() => {
+                updateOverlayProp({
+                  activeGraphic: 'none',
+                  customBanner: 'none',
+                  customBannerText: '',
+                  customMilestone: null
+                });
+                showNotification('Voice Command: Dismissed broadcast overlay.', 'info');
+              }}
             />
 
-            {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions */}
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-2 flex flex-col justify-between relative overflow-visible min-h-0 shadow-lg select-none">
+            {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions - Sticky and always visible on laptop screens */}
+            <div className="shrink-0 sticky bottom-0 z-30 bg-slate-900/98 backdrop-blur-md border border-slate-750 rounded-xl p-2 flex flex-col justify-between relative overflow-visible min-h-0 shadow-2xl select-none mt-auto">
               
               {/* Overlay padlock cover */}
               {isScoringDisabled && (
@@ -12865,11 +12837,41 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-1.5 flex-1 flex flex-col justify-between">
+              <div className="space-y-1 sm:space-y-1.5 flex-1 flex flex-col justify-between">
                 
-                {/* RUN CHOOTER CHANNELS (0,1,2,3,4,6) */}
+                {/* RUN CHANNELS (0,1,2,3,4,6) */}
                 <div className="space-y-0.5">
-                  <span className="text-[7.5px] font-black text-amber-400 uppercase tracking-widest block mb-0.5 leading-none font-sans">BALL OUTCOME RUN CHANNELS (TAP MARKS LOGS)</span>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[7.5px] font-black text-amber-400 uppercase tracking-widest block leading-none font-sans">
+                      BALL OUTCOME RUN CHANNELS
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={isScoringDisabled}
+                        onClick={() => {
+                          setExtraRunsBallType('bye');
+                          setShowExtraRunsModal(true);
+                        }}
+                        className="px-2 py-0.5 bg-fuchsia-800 hover:bg-fuchsia-700 text-white text-[8px] font-black rounded uppercase cursor-pointer border border-fuchsia-400 shadow-xs active:scale-95 transition-all"
+                        title="Byes - Runs scored without bat hitting ball"
+                      >
+                        Byes (B)
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isScoringDisabled}
+                        onClick={() => {
+                          setExtraRunsBallType('legbye');
+                          setShowExtraRunsModal(true);
+                        }}
+                        className="px-2 py-0.5 bg-indigo-700 hover:bg-indigo-600 text-white text-[8px] font-black rounded uppercase cursor-pointer border border-indigo-400 shadow-xs active:scale-95 transition-all"
+                        title="Leg Byes - Runs scored off batter's body/pads"
+                      >
+                        Leg Byes (LB)
+                      </button>
+                    </div>
+                  </div>
                   <div className="grid grid-cols-6 gap-1 font-black">
                     {[0, 1, 2, 3, 4, 6].map((rCount) => {
                       let buttonStyle = 'bg-slate-800 text-white hover:bg-slate-750 active:scale-95';
@@ -12895,10 +12897,10 @@ export const CricketScoreboard: React.FC = () => {
                               handleScoreEvent({ type: 'runs', val: rCount });
                             }
                           }}
-                          className={`h-9 sm:h-9.5 w-full flex flex-col items-center justify-center rounded-xl font-mono transition-transform border-none font-black text-xs cursor-pointer ${buttonStyle}`}
+                          className={`h-8 sm:h-8.5 w-full flex flex-col items-center justify-center rounded-xl font-mono transition-transform border-none font-black text-xs cursor-pointer ${buttonStyle}`}
                         >
                           <span className="leading-none text-sm sm:text-base font-black">{rCount}</span>
-                          <span className="text-[6.5px] font-sans font-black uppercase opacity-70 mt-0.5">
+                          <span className="text-[6px] font-sans font-black uppercase opacity-70 mt-0.5">
                             {rCount === 4 ? 'FOUR' : rCount === 6 ? 'SIX' : rCount === 0 ? 'DOT' : 'RUN'}
                           </span>
                         </button>
@@ -12907,92 +12909,75 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* EXTRAS CHOOSE: Wide, No Ball & Quick Wicket */}
-                <div className="grid grid-cols-3 gap-1 font-bold">
-                  <button
-                    disabled={isScoringDisabled}
-                    onClick={() => {
-                      setExtraRunsBallType('wide');
-                      setShowExtraRunsModal(true);
-                    }}
-                    className="h-8 sm:h-8.5 flex flex-col items-center justify-center bg-purple-950/90 border border-purple-800/45 hover:bg-purple-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
-                  >
-                    <span className="leading-none font-extrabold">+1 WIDE</span>
-                    <span className="text-[6px] text-purple-300 font-semibold mt-0.5 truncate max-w-full px-0.5">Re-bowls</span>
-                  </button>
-                  <button
-                    disabled={isScoringDisabled}
-                    onClick={() => {
-                      setExtraRunsBallType('noball');
-                      setShowExtraRunsModal(true);
-                    }}
-                    className="h-8 sm:h-8.5 flex flex-col items-center justify-center bg-amber-950/90 border border-amber-800/45 hover:bg-amber-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs"
-                  >
-                    <span className="leading-none font-extrabold">+1 NO BALL</span>
-                    <span className="text-[6px] text-amber-300 font-semibold mt-0.5 truncate max-w-full px-0.5">Free hit</span>
-                  </button>
-                  <button
-                    disabled={isScoringDisabled}
-                    id="btn-quick-wicket"
-                    onClick={() => openWicketModal('striker')}
-                    className="h-8 sm:h-8.5 flex flex-col items-center justify-center bg-rose-600 hover:bg-rose-500 border border-rose-400/50 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow"
-                  >
-                    <span className="leading-none font-extrabold flex items-center gap-1">
-                      <AlertCircle size={10} /> 🔴 WICKET
-                    </span>
-                    <span className="text-[6px] text-rose-100 font-semibold mt-0.5">Dismiss Out</span>
-                  </button>
-                </div>
-
-                {/* BYES AND LEGBYES */}
-                <div className="bg-slate-950 p-1 rounded-xl border border-slate-850 space-y-0.5">
-                  <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block leading-none">EXTRAS BYES & LEGBYES (TEAM ADDS RUNS, BYPASSES BATSMAN STATS)</span>
-                  <div className="grid grid-cols-2 gap-1.5 font-bold">
-                    <div>
-                      <span className="text-[6.5px] font-black text-purple-400 uppercase block mb-0.5">BYE RUNS</span>
-                      <div className="flex gap-1 justify-between">
-                        {[1, 2, 4].map((r) => (
-                          <button
-                            key={r}
-                            disabled={isScoringDisabled}
-                            onClick={() => handleScoreEvent({ type: 'bye', val: r })}
-                            className="flex-1 h-7 bg-purple-900/10 hover:bg-purple-900/30 text-purple-300 border border-purple-800 text-[8.5px] font-black uppercase rounded-lg cursor-pointer"
-                          >
-                            +{r}B
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-[6.5px] font-black text-indigo-400 uppercase block mb-0.5">LEG-BYE RUNS</span>
-                      <div className="flex gap-1 justify-between">
-                        {[1, 2, 4].map((r) => (
-                          <button
-                            key={r}
-                            disabled={isScoringDisabled}
-                            onClick={() => handleScoreEvent({ type: 'legbye', val: r })}
-                            className="flex-1 h-7 bg-indigo-900/10 hover:bg-indigo-900/30 text-indigo-300 border border-indigo-800 text-[8.5px] font-black uppercase rounded-lg cursor-pointer"
-                          >
-                            +{r}L
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                {/* EXTRAS & BYES CHOOSE: Wide, No Ball, Byes, Leg Byes (Always visible in 4 columns on all screens) */}
+                <div className="space-y-0.5">
+                  <div className="grid grid-cols-4 gap-1 sm:gap-1.5 font-bold">
+                    <button
+                      disabled={isScoringDisabled}
+                      id="btn-cockpit-wide"
+                      onClick={() => {
+                        setExtraRunsBallType('wide');
+                        setShowExtraRunsModal(true);
+                      }}
+                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-purple-950/90 border border-purple-600/60 hover:bg-purple-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow-xs px-1"
+                      title="Wide Ball (+1 extra run, re-bowls)"
+                    >
+                      <span className="leading-none font-black text-purple-200 text-[10px] sm:text-xs">+1 WIDE</span>
+                      <span className="text-[6.5px] text-purple-300 font-semibold mt-0.5 truncate max-w-full">Re-bowls</span>
+                    </button>
+                    <button
+                      disabled={isScoringDisabled}
+                      id="btn-cockpit-noball"
+                      onClick={() => {
+                        setExtraRunsBallType('noball');
+                        setShowExtraRunsModal(true);
+                      }}
+                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-amber-950/90 border border-amber-600/60 hover:bg-amber-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow-xs px-1"
+                      title="No Ball (+1 extra run, Free Hit)"
+                    >
+                      <span className="leading-none font-black text-amber-200 text-[10px] sm:text-xs">+1 NO BALL</span>
+                      <span className="text-[6.5px] text-amber-300 font-semibold mt-0.5 truncate max-w-full">Free hit</span>
+                    </button>
+                    <button
+                      disabled={isScoringDisabled}
+                      id="btn-cockpit-byes"
+                      onClick={() => {
+                        setExtraRunsBallType('bye');
+                        setShowExtraRunsModal(true);
+                      }}
+                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-fuchsia-800 hover:bg-fuchsia-700 border-2 border-fuchsia-400 text-white rounded-xl font-black cursor-pointer transition-all active:scale-95 text-xs shadow-md px-1"
+                      title="Byes (B) - Runs scored without bat hitting ball"
+                    >
+                      <span className="leading-none font-black text-white text-[10px] sm:text-xs">BYES (B)</span>
+                      <span className="text-[6.5px] text-fuchsia-100 font-semibold mt-0.5 truncate max-w-full">Select runs</span>
+                    </button>
+                    <button
+                      disabled={isScoringDisabled}
+                      id="btn-cockpit-legbyes"
+                      onClick={() => {
+                        setExtraRunsBallType('legbye');
+                        setShowExtraRunsModal(true);
+                      }}
+                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-indigo-700 hover:bg-indigo-600 border-2 border-indigo-300 text-white rounded-xl font-black cursor-pointer transition-all active:scale-95 text-xs shadow-md px-1"
+                      title="Leg Byes (LB) - Runs scored off batter's body/pads"
+                    >
+                      <span className="leading-none font-black text-white text-[10px] sm:text-xs">LEG BYES (LB)</span>
+                      <span className="text-[6.5px] text-indigo-100 font-semibold mt-0.5 truncate max-w-full">Off pads</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* RED TACTILE BUTTON: Dismissal wicket tracker */}
-                <div className="pt-0">
-                  <button
-                    disabled={isScoringDisabled}
-                    id="btn-wicket"
-                    onClick={() => openWicketModal('striker')}
-                    className="h-8.5 sm:h-9 w-full flex items-center justify-center bg-rose-600 hover:bg-rose-500 rounded-xl font-black text-xs uppercase tracking-wider text-white gap-2 transition-all cursor-pointer border-none animate-pulse active:scale-95 shadow-lg"
-                  >
-                    <AlertCircle size={13} />
-                    🔴 DISMISS / WICKET (OUT RECONCILER)
-                  </button>
-                </div>
+                {/* DISMISS BATSMAN (WICKET) - Full width high-visibility button */}
+                <button
+                  disabled={isScoringDisabled}
+                  id="btn-quick-wicket"
+                  onClick={() => openWicketModal('striker')}
+                  className="h-8 sm:h-8.5 w-full flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-500 border border-rose-400/50 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow-md"
+                  title="Dismiss Batsman (Bowled, Caught, Run Out, LBW, Stumped, etc.)"
+                >
+                  <AlertCircle size={12} className="animate-pulse text-white shrink-0" />
+                  <span className="font-black tracking-wider uppercase leading-none">🔴 DISMISS BATSMAN (WICKET)</span>
+                </button>
 
               </div>
             </div>
@@ -13301,7 +13286,7 @@ export const CricketScoreboard: React.FC = () => {
                               : 'text-amber-400 hover:text-amber-300 bg-amber-500/10'
                           }`}
                         >
-                          <span>🏆 Podium & Prizes</span>
+                          <span>🏆 Prize Details</span>
                         </button>
                       </div>
 
@@ -13332,7 +13317,7 @@ export const CricketScoreboard: React.FC = () => {
                       return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />;
                     })()}
 
-                    {/* Podium & Honors in Commentary Desk */}
+                    {/* Prize Details & Sponsor Owners in AI Commentary Desk (Text details only - no podium) */}
                     {(() => {
                       const tId = match.tournamentId;
                       const tourPrizes = tId ? getTournamentPrizesByTournamentId(tId) : null;
@@ -13342,72 +13327,199 @@ export const CricketScoreboard: React.FC = () => {
                       const p1 = prizesList.find(p => p.category === 'tournament_1st') || prizesList[0];
                       const p2 = prizesList.find(p => p.category === 'tournament_2nd') || (prizesList[1]?.id !== p1?.id ? prizesList[1] : undefined);
                       const p3 = prizesList.find(p => p.category === 'tournament_3rd') || (prizesList[2]?.id !== p1?.id && prizesList[2]?.id !== p2?.id ? prizesList[2] : undefined);
-                      const mos = prizesList.find(p => p.category === 'man_of_series' || (p.title || '').toLowerCase().includes('series') || (p.title || '').toLowerCase().includes('tournament'));
+                      const mos = prizesList.find(p => p.category === 'man_of_series' || (p.title || '').toLowerCase().includes('series') || (p.title || '').toLowerCase().includes('tournament') || (p.title || '').toLowerCase().includes('match'));
                       const bBat = prizesList.find(p => p.category === 'best_batsman' || (p.title || '').toLowerCase().includes('batsman') || (p.title || '').toLowerCase().includes('batter'));
                       const bBowl = prizesList.find(p => p.category === 'best_bowler' || (p.title || '').toLowerCase().includes('bowler'));
 
                       if (commentaryDeskSubTab === 'podium') {
                         return (
-                          <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 scrollbar-thin max-h-[300px]">
-                            {/* 3-Step Podium */}
-                            <div className="p-3 rounded-2xl bg-gradient-to-b from-amber-500/10 via-slate-950 to-slate-900 border border-amber-500/30 text-center">
-                              <span className="text-[9px] font-black uppercase tracking-wider text-amber-400 block mb-2">
-                                👑 Championship Podium
-                              </span>
-                              <div className="grid grid-cols-3 gap-1.5 items-end">
-                                <div className="p-2 rounded-xl bg-slate-800/80 border border-slate-600/40 text-center">
-                                  <span className="text-base">🥈</span>
-                                  <span className="text-[7px] font-black uppercase text-slate-300 block">2nd Place</span>
-                                  <div className="font-bold text-[9px] text-slate-100 truncate">{p2?.title || 'Runner-Up'}</div>
-                                  <div className="font-mono font-black text-xs text-slate-200">{p2?.currencySymbol || '₹'}{p2?.amount || '31,000'}</div>
-                                </div>
-                                <div className="p-2.5 rounded-xl bg-amber-500/20 border-2 border-amber-400/60 text-center">
-                                  <span className="text-xl">🏆</span>
-                                  <span className="text-[7.5px] font-black uppercase text-amber-300 block">Champion 1st</span>
-                                  <div className="font-bold text-[10px] text-amber-200 truncate">{p1?.title || 'Champion'}</div>
-                                  <div className="font-mono font-black text-sm text-amber-400">{p1?.currencySymbol || '₹'}{p1?.amount || '51,000'}</div>
-                                </div>
-                                <div className="p-2 rounded-xl bg-amber-900/20 border border-amber-700/40 text-center">
-                                  <span className="text-base">🥉</span>
-                                  <span className="text-[7px] font-black uppercase text-amber-500 block">3rd Place</span>
-                                  <div className="font-bold text-[9px] text-slate-100 truncate">{p3?.title || '3rd Place'}</div>
-                                  <div className="font-mono font-black text-xs text-amber-300">{p3?.currencySymbol || '₹'}{p3?.amount || '11,000'}</div>
+                          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin max-h-[300px]">
+                            {/* Header Summary */}
+                            <div className="p-2.5 rounded-xl bg-slate-900 border border-amber-500/30 flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-base">🏆</span>
+                                <div>
+                                  <span className="text-[9px] font-black uppercase tracking-wider text-amber-400 block leading-tight">
+                                    Prize & Sponsor Details
+                                  </span>
+                                  <span className="text-[7.5px] text-slate-400 block">
+                                    Prize given, owner name & amount details
+                                  </span>
                                 </div>
                               </div>
+                              <span className="text-[8px] font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                                {prizesList.length} Categories
+                              </span>
                             </div>
 
-                            {/* Individual Honors */}
-                            <div className="grid grid-cols-3 gap-1.5 text-center">
-                              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
-                                <span className="text-xs">⭐</span>
-                                <span className="text-[7px] font-bold text-purple-300 uppercase block">Series MVP</span>
-                                <div className="font-mono font-black text-[10px] text-purple-400">{mos?.currencySymbol || '₹'}{mos?.amount || '5,000'}</div>
-                              </div>
-                              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20">
-                                <span className="text-xs">🏏</span>
-                                <span className="text-[7px] font-bold text-amber-300 uppercase block">Best Batter</span>
-                                <div className="font-mono font-black text-[10px] text-amber-400">{bBat?.currencySymbol || '₹'}{bBat?.amount || '3,000'}</div>
-                              </div>
-                              <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20">
-                                <span className="text-xs">🎯</span>
-                                <span className="text-[7px] font-bold text-cyan-300 uppercase block">Best Bowler</span>
-                                <div className="font-mono font-black text-[10px] text-cyan-400">{bBowl?.currencySymbol || '₹'}{bBowl?.amount || '3,000'}</div>
-                              </div>
-                            </div>
-
-                            {/* Tournament Prize List */}
-                            <div className="space-y-1">
-                              <span className="text-[8px] font-black uppercase text-slate-400 block px-1">
-                                Complete Tournament Prize List ({prizesList.length})
-                              </span>
-                              <div className="space-y-1 max-h-36 overflow-y-auto pr-1 scrollbar-thin">
-                                {prizesList.map((pz, idx) => (
-                                  <div key={pz.id || idx} className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between text-[9px]">
-                                    <span className="text-slate-200 font-bold truncate">{pz.title}</span>
-                                    <span className="font-mono font-black text-amber-400">{pz.currencySymbol || '₹'}{pz.amount}</span>
+                            {/* Prize Text Cards: 1st, 2nd, 3rd, Best Batsman, Best Bowler, Player of the Match */}
+                            <div className="space-y-1.5">
+                              {/* 1st Prize */}
+                              <div className="p-2 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs">🥇</span>
+                                    <span className="text-[9.5px] font-black uppercase text-amber-300 truncate">
+                                      Prize: {p1?.title || '1st Prize / Champion'}
+                                    </span>
                                   </div>
-                                ))}
+                                  <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{p1?.personName || p1?.sponsorName || 'Honourable Sponsor'}</span>
+                                    {(p1?.personDesignation || p1?.sponsorDesignation) && (
+                                      <span className="text-slate-400 text-[7.5px]"> ({p1?.personDesignation || p1?.sponsorDesignation})</span>
+                                    )}
+                                  </div>
+                                  {p1?.tagline && (
+                                    <div className="text-[7.5px] text-amber-400/80 truncate">{p1.tagline}</div>
+                                  )}
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">
+                                    {p1?.currencySymbol || '₹'}{p1?.amount || '51,000'}
+                                  </span>
+                                </div>
                               </div>
+
+                              {/* 2nd Prize */}
+                              <div className="p-2 rounded-xl bg-slate-950 border border-slate-700/60 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs">🥈</span>
+                                    <span className="text-[9.5px] font-black uppercase text-slate-200 truncate">
+                                      Prize: {p2?.title || '2nd Prize / Runner-Up'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{p2?.personName || p2?.sponsorName || 'Honourable Sponsor'}</span>
+                                    {(p2?.personDesignation || p2?.sponsorDesignation) && (
+                                      <span className="text-slate-400 text-[7.5px]"> ({p2?.personDesignation || p2?.sponsorDesignation})</span>
+                                    )}
+                                  </div>
+                                  {p2?.tagline && (
+                                    <div className="text-[7.5px] text-slate-400 truncate">{p2.tagline}</div>
+                                  )}
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-slate-200 text-xs sm:text-sm">
+                                    {p2?.currencySymbol || '₹'}{p2?.amount || '31,000'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* 3rd Prize */}
+                              <div className="p-2 rounded-xl bg-slate-950 border border-amber-800/40 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs">🥉</span>
+                                    <span className="text-[9.5px] font-black uppercase text-amber-400 truncate">
+                                      Prize: {p3?.title || '3rd Prize'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{p3?.personName || p3?.sponsorName || 'Honourable Sponsor'}</span>
+                                    {(p3?.personDesignation || p3?.sponsorDesignation) && (
+                                      <span className="text-slate-400 text-[7.5px]"> ({p3?.personDesignation || p3?.sponsorDesignation})</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-amber-300 text-xs sm:text-sm">
+                                    {p3?.currencySymbol || '₹'}{p3?.amount || '11,000'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Best Batsman */}
+                              <div className="p-2 rounded-xl bg-slate-950 border border-amber-500/20 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs">🏏</span>
+                                    <span className="text-[9.5px] font-black uppercase text-amber-300 truncate">
+                                      Prize: {bBat?.title || 'Best Batsman'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{bBat?.personName || bBat?.sponsorName || 'Tournament Patron'}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">
+                                    {bBat?.currencySymbol || '₹'}{bBat?.amount || '3,000'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Best Bowler */}
+                              <div className="p-2 rounded-xl bg-slate-950 border border-cyan-500/20 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs">🎯</span>
+                                    <span className="text-[9.5px] font-black uppercase text-cyan-300 truncate">
+                                      Prize: {bBowl?.title || 'Best Bowler'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{bBowl?.personName || bBowl?.sponsorName || 'Tournament Patron'}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-cyan-400 text-xs sm:text-sm">
+                                    {bBowl?.currencySymbol || '₹'}{bBowl?.amount || '3,000'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Player of the Match / Series MVP */}
+                              <div className="p-2 rounded-xl bg-slate-950 border border-purple-500/20 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs">⭐</span>
+                                    <span className="text-[9.5px] font-black uppercase text-purple-300 truncate">
+                                      Prize: {mos?.title || 'Player of the Match / Series MVP'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                    <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                    <span className="font-bold text-white">{mos?.personName || mos?.sponsorName || 'Tournament Patron'}</span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                  <span className="font-mono font-black text-purple-400 text-xs sm:text-sm">
+                                    {mos?.currencySymbol || '₹'}{mos?.amount || '5,000'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Remaining Custom Prizes */}
+                              {prizesList.filter(p => p.id !== p1?.id && p.id !== p2?.id && p.id !== p3?.id && p.id !== bBat?.id && p.id !== bBowl?.id && p.id !== mos?.id).map((pz, idx) => (
+                                <div key={pz.id || idx} className="p-2 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs">🎖️</span>
+                                      <span className="text-[9.5px] font-black uppercase text-slate-200 truncate">Prize: {pz.title}</span>
+                                    </div>
+                                    <div className="text-[8.5px] text-slate-200 mt-0.5 truncate">
+                                      <span className="text-slate-400 font-semibold">Prize Owner / Given by: </span>
+                                      <span className="font-bold text-white">{pz.personName || pz.sponsorName || 'Tournament Sponsor'}</span>
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="text-[7px] text-slate-400 block font-semibold uppercase">Prize Amount</span>
+                                    <span className="font-mono font-black text-amber-400 text-xs sm:text-sm">{pz.currencySymbol || '₹'}{pz.amount}</span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         );
@@ -13420,9 +13532,9 @@ export const CricketScoreboard: React.FC = () => {
                         >
                           <span className="flex items-center gap-1 font-bold">
                             <span>🏆</span>
-                            <span>Championship Podium & Individual Honors ({prizesList.length})</span>
+                            <span>Tournament Prize Details & Sponsors ({prizesList.length})</span>
                           </span>
-                          <span className="font-bold underline text-amber-400">View Prize List →</span>
+                          <span className="font-bold underline text-amber-400">View Prize Details →</span>
                         </div>
                       );
                     })()}
@@ -14436,87 +14548,149 @@ export const CricketScoreboard: React.FC = () => {
                 className="bg-slate-900 rounded-3xl border border-slate-800 max-w-sm w-full p-5 shadow-2xl relative z-20 text-white space-y-3 font-sans"
               >
                 <div className="text-center">
-                  <span className="px-2.5 py-0.5 bg-amber-500/10 text-amber-305 rounded-full font-black text-[8px] uppercase tracking-widest">
-                    Match Event Trigger - {extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}
+                  <span className={`px-2.5 py-0.5 rounded-full font-black text-[8px] uppercase tracking-widest ${
+                    extraRunsBallType === 'wide' ? 'bg-purple-500/10 text-purple-300' :
+                    extraRunsBallType === 'noball' ? 'bg-amber-500/10 text-amber-300' :
+                    extraRunsBallType === 'bye' ? 'bg-purple-500/10 text-purple-300' :
+                    'bg-indigo-500/10 text-indigo-300'
+                  }`}>
+                    Match Event Trigger - {
+                      extraRunsBallType === 'wide' ? 'Wide' :
+                      extraRunsBallType === 'noball' ? 'No Ball' :
+                      extraRunsBallType === 'bye' ? 'Byes (B)' :
+                      'Leg Byes (LB)'
+                    }
                   </span>
                   <h3 className="text-base font-black uppercase tracking-tight text-white mt-1">
-                    Runs Off {extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}
+                    {extraRunsBallType === 'bye' ? 'Runs Off Byes' :
+                     extraRunsBallType === 'legbye' ? 'Runs Off Leg Byes' :
+                     `Runs Off ${extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}`}
                   </h3>
                   <p className="text-[9px] text-slate-400 mt-0.5 leading-tight font-bold">
-                    Select additional runs completed by batsmen off this ball.
+                    {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye')
+                      ? 'Legal ball counts. Runs added to team extras (bypasses batsman statistics).'
+                      : 'Select additional runs completed by batsmen off this ball.'}
                   </p>
                 </div>
 
                 <div className="space-y-3 font-bold text-xs">
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => {
-                        handleScoreEvent({ type: extraRunsBallType, val: 0 });
-                        setShowExtraRunsModal(false);
-                      }}
-                      className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                    >
-                      <span>0 Additional Runs</span>
-                      <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd Total' : '1 Nb Total'})</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        handleScoreEvent({ type: extraRunsBallType, val: 1 });
-                        setShowExtraRunsModal(false);
-                      }}
-                      className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                    >
-                      <span>1 Additional Run</span>
-                      <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 1 Runs to Bat' : '1 Nb + 1 Runs to Bat'})</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        handleScoreEvent({ type: extraRunsBallType, val: 2 });
-                        setShowExtraRunsModal(false);
-                      }}
-                      className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                    >
-                      <span>2 Additional Runs</span>
-                      <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 2 Runs to Bat' : '1 Nb + 2 Runs to Bat'})</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        handleScoreEvent({ type: extraRunsBallType, val: 3 });
-                        setShowExtraRunsModal(false);
-                      }}
-                      className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                    >
-                      <span>3 Additional Runs</span>
-                      <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 3 Runs to Bat' : '1 Nb + 3 Runs to Bat'})</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        handleScoreEvent({ type: extraRunsBallType, val: 4 });
-                        setShowExtraRunsModal(false);
-                      }}
-                      className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center col-span-2"
-                    >
-                      <span>4 Runs (Boundary)</span>
-                      <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 4 Runs to Bat' : '1 Nb + 4 Runs to Bat'})</span>
-                    </button>
-
-                    {extraRunsBallType === 'noball' && (
+                  {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye') ? (
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => {
-                          handleScoreEvent({ type: 'noball', val: 6 });
+                          handleScoreEvent({ type: extraRunsBallType, val: 1 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>1 {extraRunsBallType === 'bye' ? 'Bye' : 'Leg-Bye'} Run</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">(+1 to Extras & Rotate Strike)</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 2 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>2 {extraRunsBallType === 'bye' ? 'Byes' : 'Leg-Byes'}</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">(+2 Runs to Extras)</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 3 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>3 {extraRunsBallType === 'bye' ? 'Byes' : 'Leg-Byes'}</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">(+3 to Extras & Rotate Strike)</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 4 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>4 {extraRunsBallType === 'bye' ? 'Byes' : 'Leg-Byes'} (Boundary)</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">(+4 Runs to Extras)</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 0 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>0 Additional Runs</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd Total' : '1 Nb Total'})</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 1 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>1 Additional Run</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 1 Runs to Bat' : '1 Nb + 1 Runs to Bat'})</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 2 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>2 Additional Runs</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 2 Runs to Bat' : '1 Nb + 2 Runs to Bat'})</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 3 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                      >
+                        <span>3 Additional Runs</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 3 Runs to Bat' : '1 Nb + 3 Runs to Bat'})</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: extraRunsBallType, val: 4 });
                           setShowExtraRunsModal(false);
                         }}
                         className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center col-span-2"
                       >
-                        <span>6 Runs (Maximum!)</span>
-                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">(1 Nb + 6 Runs to Bat)</span>
+                        <span>4 Runs (Boundary)</span>
+                        <span className="text-[7.5px] font-medium opacity-50 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 4 Runs to Bat' : '1 Nb + 4 Runs to Bat'})</span>
                       </button>
-                    )}
-                  </div>
+
+                      {extraRunsBallType === 'noball' && (
+                        <button
+                          onClick={() => {
+                            handleScoreEvent({ type: 'noball', val: 6 });
+                            setShowExtraRunsModal(false);
+                          }}
+                          className="py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-205 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center col-span-2"
+                        >
+                          <span>6 Runs (Maximum!)</span>
+                          <span className="text-[7.5px] font-medium opacity-50 mt-0.5">(1 Nb + 6 Runs to Bat)</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -22710,7 +22884,7 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
 
                 {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) - Optimized for Laptop Single Screen */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-2.5 sm:p-3 rounded-xl border border-white/5 space-y-2 lg:space-y-1.5 overflow-y-auto lg:overflow-visible custom-scrollbar">
+                <div className="lg:col-span-4 bg-slate-950/40 p-2.5 sm:p-3 rounded-xl border border-white/5 space-y-2 lg:space-y-1.5 overflow-y-auto custom-scrollbar">
                   {isSpectator ? (
                     <div className="h-full flex flex-col justify-between space-y-4">
                       <div className="space-y-2">
@@ -22909,6 +23083,29 @@ export const CricketScoreboard: React.FC = () => {
                             onSwapBatsmen={() => {
                               handleSwapStriker();
                             }}
+                            onTriggerOverlay={(overlayType) => {
+                              if (overlayType === 'none' || overlayType === 'clear') {
+                                updateOverlayProp({
+                                  activeGraphic: 'none',
+                                  customBanner: 'none',
+                                  customBannerText: '',
+                                  customMilestone: null
+                                });
+                                showNotification('Voice Command: Cleared all broadcast overlays.', 'info');
+                              } else {
+                                updateOverlayProp({ activeGraphic: overlayType });
+                                showNotification(`Voice Command: Showing ${overlayType.replace(/_/g, ' ').toUpperCase()} overlay!`, 'success');
+                              }
+                            }}
+                            onDismissOverlay={() => {
+                              updateOverlayProp({
+                                activeGraphic: 'none',
+                                customBanner: 'none',
+                                customBannerText: '',
+                                customMilestone: null
+                              });
+                              showNotification('Voice Command: Dismissed broadcast overlay.', 'info');
+                            }}
                           />
 
                           {/* Control buttons block */}
@@ -22939,22 +23136,48 @@ export const CricketScoreboard: React.FC = () => {
                         </>
                       )}
 
-                      {/* Extras quick selections (Wide and No Ball) */}
-                      <div className="grid grid-cols-2 gap-1 font-bold">
+                      {/* Extras and Byes quick selections (Wide, No Ball, Byes, Leg Byes - Always 4 cols for laptop screen) */}
+                      <div className="grid grid-cols-4 gap-1 sm:gap-1.5 font-bold">
                         <button
                           onClick={() => handleScoreEvent({ type: 'wide', val: 0 })}
-                          className="py-1.5 bg-slate-800 hover:bg-slate-750 text-white hover:text-emerald-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
+                          className="py-1.5 bg-purple-900/90 hover:bg-purple-800 border border-purple-600/60 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer flex flex-col items-center justify-center shadow-xs active:scale-95 px-1"
+                          title="Wide ball (+1 extra run)"
                         >
-                          <span>Wide</span>
-                          <span className="text-emerald-400 font-mono font-black">+1</span>
+                          <span className="leading-none text-purple-100 font-black">+1 WIDE</span>
+                          <span className="text-[6.5px] text-purple-300 font-semibold mt-0.5">Re-bowls</span>
                         </button>
 
                         <button
                           onClick={() => handleScoreEvent({ type: 'noball', val: 0 })}
-                          className="py-1.5 bg-slate-800 hover:bg-slate-750 text-white hover:text-amber-400 text-[10px] font-extrabold rounded-xl uppercase transition-all cursor-pointer border-none flex justify-between px-2 items-center"
+                          className="py-1.5 bg-amber-900/90 hover:bg-amber-800 border border-amber-600/60 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer flex flex-col items-center justify-center shadow-xs active:scale-95 px-1"
+                          title="No ball (+1 extra run)"
                         >
-                          <span>No ball</span>
-                          <span className="text-amber-400 font-mono font-black">+1</span>
+                          <span className="leading-none text-amber-200 font-black">+1 NO BALL</span>
+                          <span className="text-[6.5px] text-amber-300 font-semibold mt-0.5">Free hit</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setExtraRunsBallType('bye');
+                            setShowExtraRunsModal(true);
+                          }}
+                          className="py-1.5 bg-fuchsia-800 hover:bg-fuchsia-700 border-2 border-fuchsia-400 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer flex flex-col items-center justify-center shadow-md active:scale-95 px-1"
+                          title="Byes (Runs without bat)"
+                        >
+                          <span className="leading-none text-white font-black">BYES (B)</span>
+                          <span className="text-[6.5px] text-fuchsia-100 font-semibold mt-0.5">Select runs</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setExtraRunsBallType('legbye');
+                            setShowExtraRunsModal(true);
+                          }}
+                          className="py-1.5 bg-indigo-700 hover:bg-indigo-600 border-2 border-indigo-300 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer flex flex-col items-center justify-center shadow-md active:scale-95 px-1"
+                          title="Leg Byes (Runs off pads)"
+                        >
+                          <span className="leading-none text-white font-black">LEG BYES</span>
+                          <span className="text-[6.5px] text-indigo-100 font-semibold mt-0.5">Off pads</span>
                         </button>
                       </div>
 
@@ -22980,39 +23203,6 @@ export const CricketScoreboard: React.FC = () => {
                       >
                         🔴 <span>DISMISS BATSMAN (WICKET)</span>
                       </button>
-
-                      {/* Byes / Leg-byes quick controls */}
-                      <div className="grid grid-cols-2 gap-1.5 bg-slate-900 border border-white/5 p-1.5 rounded-xl font-bold">
-                        <div>
-                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Byes</span>
-                          <div className="flex gap-1 animate-none">
-                            {[1, 2, 4].map(r => (
-                              <button
-                                key={r}
-                                onClick={() => handleScoreEvent({ type: 'bye', val: r })}
-                                className="flex-1 py-0.5 bg-slate-800 hover:bg-slate-705 text-white text-[8.5px] font-extrabold border-none rounded cursor-pointer"
-                              >
-                                B{r}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span className="text-[7px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Leg-byes</span>
-                          <div className="flex gap-1 animate-none">
-                            {[1, 2, 4].map(r => (
-                              <button
-                                key={r}
-                                onClick={() => handleScoreEvent({ type: 'legbye', val: r })}
-                                className="flex-1 py-0.5 bg-slate-800 hover:bg-slate-705 text-white text-[8.5px] font-extrabold border-none rounded cursor-pointer"
-                              >
-                                L{r}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
 
                       {/* ADD PLAYER CREATION QUICK ROSTER OPERATIONS WITH CAPTAIN SQUAD SUPPORT */}
                       <div className="p-2.5 bg-slate-900 border border-white/5 rounded-xl space-y-2 font-bold">
@@ -23628,87 +23818,149 @@ export const CricketScoreboard: React.FC = () => {
               className="bg-white dark:bg-slate-900 rounded-[2.5rem] border border-slate-100 dark:border-slate-800 max-w-sm w-full p-6 shadow-2xl relative z-20 overflow-hidden"
             >
               <div className="text-center mb-4">
-                <span className="px-3 py-1 bg-amber-500/10 text-amber-500 rounded-full font-black text-[9px] uppercase tracking-widest">
-                  Match Event Trigger - {extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}
+                <span className={`px-3 py-1 rounded-full font-black text-[9px] uppercase tracking-widest ${
+                  extraRunsBallType === 'wide' ? 'bg-purple-500/10 text-purple-400' :
+                  extraRunsBallType === 'noball' ? 'bg-amber-500/10 text-amber-500' :
+                  extraRunsBallType === 'bye' ? 'bg-purple-500/10 text-purple-400' :
+                  'bg-indigo-500/10 text-indigo-400'
+                }`}>
+                  Match Event Trigger - {
+                    extraRunsBallType === 'wide' ? 'Wide Ball' :
+                    extraRunsBallType === 'noball' ? 'No Ball' :
+                    extraRunsBallType === 'bye' ? 'Byes (B)' :
+                    'Leg Byes (LB)'
+                  }
                 </span>
                 <h3 className="text-base font-black uppercase tracking-tight text-slate-800 dark:text-white mt-1.5">
-                  Runs Off {extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}
+                  {extraRunsBallType === 'bye' ? 'Runs Off Byes' :
+                   extraRunsBallType === 'legbye' ? 'Runs Off Leg Byes' :
+                   `Runs Off ${extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}`}
                 </h3>
                 <p className="text-[10px] text-slate-450 mt-1 dark:text-slate-400">
-                  Select extra runs <strong>run by the batsmen</strong> on this delivery.
+                  {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye')
+                    ? 'Legal delivery counted. Runs added to team extras (bypasses batsman stats).'
+                    : 'Select extra runs run by the batsmen on this delivery.'}
                 </p>
               </div>
 
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    onClick={() => {
-                      handleScoreEvent({ type: extraRunsBallType, val: 0 });
-                      setShowExtraRunsModal(false);
-                    }}
-                    className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                  >
-                    <span>0 Additional Runs</span>
-                    <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd Total' : '1 Nb Total'})</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      handleScoreEvent({ type: extraRunsBallType, val: 1 });
-                      setShowExtraRunsModal(false);
-                    }}
-                    className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                  >
-                    <span>1 Additional Run</span>
-                    <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 1 Run to Bat' : '1 Nb + 1 Run to Bat'})</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      handleScoreEvent({ type: extraRunsBallType, val: 2 });
-                      setShowExtraRunsModal(false);
-                    }}
-                    className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                  >
-                    <span>2 Additional Runs</span>
-                    <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 2 Runs to Bat' : '1 Nb + 2 Runs to Bat'})</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      handleScoreEvent({ type: extraRunsBallType, val: 3 });
-                      setShowExtraRunsModal(false);
-                    }}
-                    className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
-                  >
-                    <span>3 Additional Runs</span>
-                    <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 3 Runs to Bat' : '1 Nb + 3 Runs to Bat'})</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      handleScoreEvent({ type: extraRunsBallType, val: 4 });
-                      setShowExtraRunsModal(false);
-                    }}
-                    className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center col-span-2"
-                  >
-                    <span>4 Runs (Boundary)</span>
-                    <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 4 Runs to Bat' : '1 Nb + 4 Runs to Bat'})</span>
-                  </button>
-                  
-                  {extraRunsBallType === 'noball' && (
+                {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye') ? (
+                  <div className="grid grid-cols-2 gap-2.5">
                     <button
                       onClick={() => {
-                        handleScoreEvent({ type: 'noball', val: 6 });
+                        handleScoreEvent({ type: extraRunsBallType, val: 1 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>1 {extraRunsBallType === 'bye' ? 'Bye' : 'Leg-Bye'} Run</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">(+1 to Extras & Rotate Strike)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 2 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>2 {extraRunsBallType === 'bye' ? 'Byes' : 'Leg-Byes'}</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">(+2 Runs to Extras)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 3 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>3 {extraRunsBallType === 'bye' ? 'Byes' : 'Leg-Byes'}</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">(+3 to Extras & Rotate Strike)</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 4 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>4 {extraRunsBallType === 'bye' ? 'Byes' : 'Leg-Byes'} (Boundary)</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">(+4 Runs to Extras)</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 0 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>0 Additional Runs</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd Total' : '1 Nb Total'})</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 1 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>1 Additional Run</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 1 Run to Bat' : '1 Nb + 1 Run to Bat'})</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 2 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>2 Additional Runs</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 2 Runs to Bat' : '1 Nb + 2 Runs to Bat'})</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 3 });
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center"
+                    >
+                      <span>3 Additional Runs</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 3 Runs to Bat' : '1 Nb + 3 Runs to Bat'})</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        handleScoreEvent({ type: extraRunsBallType, val: 4 });
                         setShowExtraRunsModal(false);
                       }}
                       className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center col-span-2"
                     >
-                      <span>6 Runs (Maximum!)</span>
-                      <span className="text-[8px] font-medium opacity-60 mt-0.5">(1 Nb + 6 Runs to Bat)</span>
+                      <span>4 Runs (Boundary)</span>
+                      <span className="text-[8px] font-medium opacity-60 mt-0.5">({extraRunsBallType === 'wide' ? '1 Wd + 4 Runs to Bat' : '1 Nb + 4 Runs to Bat'})</span>
                     </button>
-                  )}
-                </div>
+                    
+                    {extraRunsBallType === 'noball' && (
+                      <button
+                        onClick={() => {
+                          handleScoreEvent({ type: 'noball', val: 6 });
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex flex-col items-center justify-center col-span-2"
+                      >
+                        <span>6 Runs (Maximum!)</span>
+                        <span className="text-[8px] font-medium opacity-60 mt-0.5">(1 Nb + 6 Runs to Bat)</span>
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <button
                   type="button"

@@ -381,17 +381,15 @@ export const HeroCricketLiveScore: React.FC = () => {
               </div>
             )}
 
-            {isScoreManager && (
-              <button
-                type="button"
-                onClick={() => navigate('/live/cricket-scoreboard')}
-                className="px-2.5 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-black uppercase tracking-wider border border-emerald-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
-                title="Scorekeeper Management Console"
-              >
-                <Shield size={11} className="text-emerald-400" />
-                <span>Scorer Hub</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => navigate('/live/cricket-scoreboard')}
+              className="px-2.5 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-black uppercase tracking-wider border border-emerald-500/40 flex items-center gap-1.5 cursor-pointer transition-all shadow-sm"
+              title="Open Cricket Scoreboard Management Console"
+            >
+              <Shield size={11} className="text-emerald-400" />
+              <span>Scoreboard Management</span>
+            </button>
           </div>
         </div>
 
@@ -514,8 +512,8 @@ export const HeroCricketLiveScore: React.FC = () => {
             </div>
           )}
 
-          {/* Modern Action Button: Direct to Homepage Spectator Scoreboard Section */}
-          <div className="pt-2">
+          {/* Modern Action Buttons: Direct to Homepage Spectator Scoreboard Section & Scoreboard Management */}
+          <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               id="hero-view-detail-scoreboard-btn"
               type="button"
@@ -523,11 +521,24 @@ export const HeroCricketLiveScore: React.FC = () => {
                 e.stopPropagation();
                 handleOpenDetailScoreboard(activeMatch?.id);
               }}
-              className="w-full py-3 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.01] active:scale-[0.99] cursor-pointer border-none"
+              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-500/20 active:scale-[0.99] cursor-pointer border-none"
               title="View full detailed scorecard in the Spectator Scoreboard Section"
             >
               <span>View Detail Scoreboard</span>
-              <ArrowRight size={15} className="group-hover:translate-x-1 transition-transform" />
+              <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+            </button>
+            <button
+              id="hero-open-management-btn"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(activeMatch?.id ? `/live/cricket-scoreboard?matchId=${activeMatch.id}` : '/live/cricket-scoreboard');
+              }}
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-[0.99] cursor-pointer"
+              title="Open Cricket Scoreboard Management Console"
+            >
+              <Shield size={14} className="text-amber-400" />
+              <span>Scoreboard Management</span>
             </button>
           </div>
         </div>

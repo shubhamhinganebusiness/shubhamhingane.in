@@ -20,7 +20,7 @@ import { MessExpenseTracker } from './MessExpenseTracker';
 import { MessPosSystem } from './MessPosSystem';
 
 export const MessOwnerDashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, role, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [messConfig, setMessConfig] = useState<any>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -35,7 +35,7 @@ export const MessOwnerDashboard: React.FC = () => {
     try {
       // Find mess config using the user's mobile/tenantId
       // Ensure we hit the right collection and ID
-      const mobile = user?.mobile || user?.email?.split('@')[0];
+      const mobile = (user as any)?.mobile || user?.phoneNumber || user?.email?.split('@')[0];
       if (!mobile) return;
       
       const docSnap = await getDoc(doc(db, 'mess_owners', mobile));
@@ -47,10 +47,11 @@ export const MessOwnerDashboard: React.FC = () => {
         });
       } else {
         // Create default config if missing to ensure tenantId exists
+        const userName = user?.displayName || (user as any)?.name || 'Owner';
         const defaultConfig = {
-          messName: user.name + "'s Mess",
+          messName: userName + "'s Mess",
           tenantId: mobile,
-          ownerName: user.name,
+          ownerName: userName,
           mobile: mobile
         };
         setMessConfig(defaultConfig);
@@ -154,8 +155,8 @@ export const MessOwnerDashboard: React.FC = () => {
               </button>
               <div className="flex items-center gap-4 pl-4 border-l border-gray-100">
                 <div className="text-right hidden sm:block">
-                  <p className="text-sm font-black text-gray-900 uppercase tracking-tight">{user.name}</p>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{user.role}</p>
+                  <p className="text-sm font-black text-gray-900 uppercase tracking-tight">{user?.displayName || (user as any)?.name || 'Mess Owner'}</p>
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{role || 'MESS OWNER'}</p>
                 </div>
                 <div className="w-12 h-12 bg-gray-200 rounded-2xl"></div>
               </div>

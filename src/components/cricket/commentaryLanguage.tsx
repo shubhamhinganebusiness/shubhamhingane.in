@@ -1695,13 +1695,70 @@ export function createMatchCompleteSponsorCommentary(
 ): CommentaryWithTranslations {
   const winTeam = winner && winner !== 'Tie' ? winner : 'The winners';
   const tHdr = tournamentName ? `🏆 [${tournamentName}] ` : '🏆 ';
-  const topPrize = prizes?.[0];
-  const topPrizeTitle = topPrize?.title || '1st Prize / Champion Trophy';
-  const topSponsor = topPrize?.personName || topPrize?.sponsorName || 'Tournament Committee';
 
-  const en = `${tHdr}🎉 MATCH FINALE & AWARDS CEREMONY: Congratulations to ${winTeam}! The grand presentation ceremony is about to begin. ${topPrizeTitle} will be presented courtesy of ${topSponsor}.`;
-  const hi = `${tHdr}🎉 मैच समापन एवं पुरस्कार वितरण: ${winTeam} को हार्दिक बधाई! भव्य पुरस्कार वितरण समारोह शुरू होने जा रहा है. ${topPrizeTitle} - सौजन्य: ${topSponsor}.`;
-  const mr = `${tHdr}🎉 सामना समाप्ती व भव्य बक्षीस वितरण: ${winTeam} संघाचे अभिनंदन! भव्य बक्षीस वितरण सोहळा सुरू होत आहे. ${topPrizeTitle} - सौजन्य: ${topSponsor}.`;
+  // Format text details for prizes: Which prize is given, Prize owner name, Prize amount
+  const pList = Array.isArray(prizes) ? prizes : [];
+  const p1 = pList.find(p => p.category === 'tournament_1st') || pList[0];
+  const p2 = pList.find(p => p.category === 'tournament_2nd') || (pList[1]?.id !== p1?.id ? pList[1] : undefined);
+  const p3 = pList.find(p => p.category === 'tournament_3rd') || (pList[2]?.id !== p1?.id && pList[2]?.id !== p2?.id ? pList[2] : undefined);
+  const mos = pList.find(p => p.category === 'man_of_series' || (p.title || '').toLowerCase().includes('series') || (p.title || '').toLowerCase().includes('match') || (p.title || '').toLowerCase().includes('tournament'));
+  const bBat = pList.find(p => p.category === 'best_batsman' || (p.title || '').toLowerCase().includes('batsman') || (p.title || '').toLowerCase().includes('batter'));
+  const bBowl = pList.find(p => p.category === 'best_bowler' || (p.title || '').toLowerCase().includes('bowler'));
+
+  const prizeDetailsEn: string[] = [];
+  const prizeDetailsHi: string[] = [];
+  const prizeDetailsMr: string[] = [];
+
+  if (p1) {
+    const owner = p1.personName || p1.sponsorName || 'Honourable Sponsor';
+    const amt = `${p1.currencySymbol || '₹'}${p1.amount || '51,000'}`;
+    prizeDetailsEn.push(`• 1st Prize (${p1.title || 'Champion'}): ${amt} | Given by: ${owner}`);
+    prizeDetailsHi.push(`• प्रथम पुरस्कार (${p1.title || 'विजेता'}): ${amt} | प्रायोजक: ${owner}`);
+    prizeDetailsMr.push(`• १ले बक्षीस (${p1.title || 'विजेता'}): ${amt} | सौजन्य: ${owner}`);
+  }
+  if (p2) {
+    const owner = p2.personName || p2.sponsorName || 'Honourable Sponsor';
+    const amt = `${p2.currencySymbol || '₹'}${p2.amount || '31,000'}`;
+    prizeDetailsEn.push(`• 2nd Prize (${p2.title || 'Runner-Up'}): ${amt} | Given by: ${owner}`);
+    prizeDetailsHi.push(`• द्वितीय पुरस्कार (${p2.title || 'उपविजेता'}): ${amt} | प्रायोजक: ${owner}`);
+    prizeDetailsMr.push(`• २रे बक्षीस (${p2.title || 'उपविजेता'}): ${amt} | सौजन्य: ${owner}`);
+  }
+  if (p3) {
+    const owner = p3.personName || p3.sponsorName || 'Honourable Sponsor';
+    const amt = `${p3.currencySymbol || '₹'}${p3.amount || '11,000'}`;
+    prizeDetailsEn.push(`• 3rd Prize (${p3.title || '3rd Place'}): ${amt} | Given by: ${owner}`);
+    prizeDetailsHi.push(`• तृतीय पुरस्कार (${p3.title || 'तृतीय क्रमांक'}): ${amt} | प्रायोजक: ${owner}`);
+    prizeDetailsMr.push(`• ३रे बक्षीस (${p3.title || '३रे स्थान'}): ${amt} | सौजन्य: ${owner}`);
+  }
+  if (bBat) {
+    const owner = bBat.personName || bBat.sponsorName || 'Tournament Patron';
+    const amt = `${bBat.currencySymbol || '₹'}${bBat.amount || '3,000'}`;
+    prizeDetailsEn.push(`• Best Batsman (${bBat.title || 'Best Batsman'}): ${amt} | Given by: ${owner}`);
+    prizeDetailsHi.push(`• उत्कृष्ट फलंदाज (${bBat.title || 'बेस्ट बैट्समैन'}): ${amt} | प्रायोजक: ${owner}`);
+    prizeDetailsMr.push(`• उत्कृष्ट फलंदाज (${bBat.title || 'उत्कृष्ट फलंदाज'}): ${amt} | सौजन्य: ${owner}`);
+  }
+  if (bBowl) {
+    const owner = bBowl.personName || bBowl.sponsorName || 'Tournament Patron';
+    const amt = `${bBowl.currencySymbol || '₹'}${bBowl.amount || '3,000'}`;
+    prizeDetailsEn.push(`• Best Bowler (${bBowl.title || 'Best Bowler'}): ${amt} | Given by: ${owner}`);
+    prizeDetailsHi.push(`• उत्कृष्ट गोलंदाज (${bBowl.title || 'बेस्ट बॉलर'}): ${amt} | प्रायोजक: ${owner}`);
+    prizeDetailsMr.push(`• उत्कृष्ट गोलंदाज (${bBowl.title || 'उत्कृष्ट गोलंदाज'}): ${amt} | सौजन्य: ${owner}`);
+  }
+  if (mos) {
+    const owner = mos.personName || mos.sponsorName || 'Tournament Patron';
+    const amt = `${mos.currencySymbol || '₹'}${mos.amount || '5,000'}`;
+    prizeDetailsEn.push(`• Player of the Match / Series MVP (${mos.title || 'Player of the Match'}): ${amt} | Given by: ${owner}`);
+    prizeDetailsHi.push(`• प्लेयर ऑफ द मैच / मालिकावीर (${mos.title || 'मैन ऑफ द मैच'}): ${amt} | प्रायोजक: ${owner}`);
+    prizeDetailsMr.push(`• सामनावीर / मालिकावीर (${mos.title || 'सामनावीर'}): ${amt} | सौजन्य: ${owner}`);
+  }
+
+  const enSummary = prizeDetailsEn.length > 0 ? `\n\n🎁 PRIZE AWARDS & SPONSOR DETAILS:\n${prizeDetailsEn.join('\n')}` : '';
+  const hiSummary = prizeDetailsHi.length > 0 ? `\n\n🎁 पुरस्कार एवं प्रायोजक विवरण:\n${prizeDetailsHi.join('\n')}` : '';
+  const mrSummary = prizeDetailsMr.length > 0 ? `\n\n🎁 पारितोषिक व प्रायोजक तपशील:\n${prizeDetailsMr.join('\n')}` : '';
+
+  const en = `${tHdr}🎉 MATCH FINALE & AWARDS CEREMONY: Congratulations to ${winTeam}! The grand presentation ceremony is about to begin.${enSummary}`;
+  const hi = `${tHdr}🎉 मैच समापन एवं पुरस्कार वितरण: ${winTeam} को हार्दिक बधाई! भव्य पुरस्कार वितरण समारोह शुरू होने जा रहा है.${hiSummary}`;
+  const mr = `${tHdr}🎉 सामना समाप्ती व भव्य बक्षीस वितरण: ${winTeam} संघाचे अभिनंदन! भव्य बक्षीस वितरण सोहळा सुरू होत आहे.${mrSummary}`;
 
   return {
     id: `comm-match-complete-sponsor-${Date.now()}`,

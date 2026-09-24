@@ -22,13 +22,15 @@ interface MilestoneRetainerManagerProps {
   totalAmount: number;
   billDate: string;
   onChange: (updated: PaymentMilestone[]) => void;
+  onSyncAdvance?: (paidAdvance: number) => void;
 }
 
 export const MilestoneRetainerManager: React.FC<MilestoneRetainerManagerProps> = ({
   milestones = [],
   totalAmount,
   billDate,
-  onChange
+  onChange,
+  onSyncAdvance
 }) => {
   const safeMilestones = Array.isArray(milestones) ? milestones : [];
 

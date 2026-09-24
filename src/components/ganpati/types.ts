@@ -400,6 +400,9 @@ export interface AartiEvent {
   id: string;
   titleMr: string;
   titleEn: string;
+  nameMr?: string;
+  nameEn?: string;
+  priest?: string;
   time: string;
   type: 'Kakad Aarti' | 'Madhyahna Aarti' | 'Sandhya Aarti' | 'Shej Aarti' | 'Special Maha Aarti' | 'Cultural Event';
   descriptionMr: string;
@@ -422,6 +425,8 @@ export interface MandalEvent {
   location: string;
   chiefGuest?: string;
   description: string;
+  descriptionMr?: string;
+  descriptionEn?: string;
 }
 
 export interface MannatWish {

@@ -66,7 +66,7 @@ export const PendingVarganiView: React.FC<PendingVarganiViewProps> = ({
     const totalExpected = entries.reduce((sum, e) => sum + (Number(e.expectedAmount) || 0), 0);
     const totalCollected = entries.reduce((sum, e) => sum + (Number(e.collectedAmount) || 0), 0);
     const pendingCount = entries.filter(e => e.status === 'Pending' || e.status === 'FollowUp').length;
-    const collectedCount = entries.filter(e => e.status === 'Collected').length;
+    const collectedCount = entries.filter(e => e.status === 'Paid').length;
 
     return {
       totalEntries,
@@ -175,7 +175,7 @@ export const PendingVarganiView: React.FC<PendingVarganiViewProps> = ({
       'प्रकार': e.targetType,
       'अपेक्षित वर्गणी (₹)': e.expectedAmount,
       'जमा वर्गणी (₹)': e.collectedAmount,
-      'स्थिती': e.status === 'Collected' ? 'जमा झाली (Paid)' : e.status === 'FollowUp' ? 'पाठपुरावा चालू' : 'प्रलंबित (Pending)',
+      'स्थिती': e.status === 'Paid' ? 'जमा झाली (Paid)' : e.status === 'FollowUp' ? 'पाठपुरावा चालू' : 'प्रलंबित (Pending)',
       'नियुक्त कार्यकर्ता': e.assignedVolunteer || '-',
       'शेवटचा पाठपुरावा': e.lastFollowUpDate || '-',
       'शेरा': e.notes || '-'
@@ -388,7 +388,7 @@ export const PendingVarganiView: React.FC<PendingVarganiViewProps> = ({
 
                   {/* Status Badge */}
                   <td className="py-3 px-4">
-                    {entry.status === 'Collected' ? (
+                    {entry.status === 'Paid' ? (
                       <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 rounded-full text-[10px] font-black flex items-center gap-1 w-fit">
                         <CheckCircle2 size={11} /> जमा झाली (Paid)
                       </span>
@@ -431,7 +431,7 @@ export const PendingVarganiView: React.FC<PendingVarganiViewProps> = ({
                       </button>
 
                       {/* Collect & Issue Pavati */}
-                      {entry.status !== 'Collected' ? (
+                      {entry.status !== 'Paid' ? (
                         <button
                           onClick={() => onCollectAndIssueReceipt(entry)}
                           className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black flex items-center gap-1 transition-all shadow-sm"

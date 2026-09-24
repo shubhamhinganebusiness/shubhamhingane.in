@@ -6,10 +6,11 @@ export type VoiceLanguage = 'mr-IN' | 'hi-IN' | 'en-IN';
 export interface VoiceScoreCommandResult {
   rawTranscript: string;
   detectedLang: VoiceLanguage;
-  intent: 'runs' | 'dot' | 'wide' | 'noball' | 'wicket' | 'bye' | 'legbye' | 'undo' | 'swap_batsmen' | 'unknown';
+  intent: 'runs' | 'dot' | 'wide' | 'noball' | 'wicket' | 'bye' | 'legbye' | 'undo' | 'swap_batsmen' | 'overlay' | 'unknown';
   runs?: number;
   extraRuns?: number;
   wicketType?: 'bowled' | 'caught' | 'run_out' | 'lbw' | 'stumped' | 'hit_wicket';
+  overlayType?: 'team_vs_team' | 'squad_a' | 'squad_b' | 'squad_both' | 'field_positions' | 'batting_summary' | 'bowling_summary' | 'tournament_logo' | 'toss_result' | 'none';
   confidence: number;
   explanation: string;
 }
@@ -24,13 +25,15 @@ interface VoiceAssistedScorerProps {
   onScoreWicket: (wicketType?: string) => void;
   onUndo?: () => void;
   onSwapBatsmen?: () => void;
+  onTriggerOverlay?: (overlayType: string) => void;
+  onDismissOverlay?: () => void;
   strikerName?: string;
   bowlerName?: string;
 }
 
 export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   disabled = false,
-  defaultCollapsed = true,
+  defaultCollapsed = false,
   onScoreRuns,
   onScoreDot,
   onScoreExtra,
@@ -38,11 +41,14 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   onScoreWicket,
   onUndo,
   onSwapBatsmen,
+  onTriggerOverlay,
+  onDismissOverlay,
   strikerName,
   bowlerName
 }) => {
   const [isExpanded, setIsExpanded] = useState(!defaultCollapsed);
   const [isListening, setIsListening] = useState(false);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [selectedLang, setSelectedLang] = useState<VoiceLanguage>('mr-IN');
   const [liveTranscript, setLiveTranscript] = useState('');
   const [lastDetected, setLastDetected] = useState<VoiceScoreCommandResult | null>(null);
@@ -56,6 +62,25 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   const isManuallyStoppedRef = useRef<boolean>(false);
   const audioFeedbackRef = useRef(audioFeedback);
   audioFeedbackRef.current = audioFeedback;
+
+  // Sound chime via Web Audio API for instantaneous ear feedback
+  const playChime = useCallback((frequency = 600, duration = 0.12) => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+      gain.gain.setValueAtTime(0.06, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch {}
+  }, []);
 
   // Speak sound feedback using Web Speech Synthesis
   const speakFeedback = useCallback((text: string, lang: VoiceLanguage) => {
@@ -72,27 +97,216 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     }
   }, []);
 
-  // Multi-lingual cricket intent parser
+  // Multi-lingual cricket intent parser (Instant 0ms latency for common phrases)
   const parseCricketCommand = useCallback((raw: string, lang: VoiceLanguage): VoiceScoreCommandResult => {
-    const text = raw.toLowerCase().trim();
+    let text = raw.toLowerCase().trim();
+    // Replace fielding direction "midwicket" with safe token so it doesn't trigger "wicket"
+    text = text.replace(/mid[\s-]?wicket/g, 'mid_direction');
 
-    // 1. WICKET COMMANDS
-    // Marathi: विकेट, बाद, आउट, बोल्ड, झेल, रन आउट
-    // Hindi: विकेट, आउट, बोल्ड, कैच, रन आउट
+    // 0. BROADCAST OVERLAYS & GRAPHICS VIA VOICE COMMAND
+    // Dismiss/Hide/Clear Overlay
+    if (
+      text.includes('hide overlay') || text.includes('close overlay') || text.includes('dismiss overlay') ||
+      text.includes('clear overlay') || text.includes('clear graphics') || text.includes('remove overlay') ||
+      text.includes('स्क्रीन साफ') || text.includes('ग्राफिक्स हटवा') || text.includes('ओवरले बंद') ||
+      text.includes('ओवरले हटाओ') || text.includes('ओवरले हटवा') || text.includes('स्क्रीन क्लियर') ||
+      text.includes('hide graphics') || text.includes('stop overlay')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'none',
+        confidence: 0.99,
+        explanation: 'Dismiss Live Broadcast Overlay'
+      };
+    }
+
+    // Team vs Team Logo & Matchup Card Overlay
+    if (
+      text.includes('team vs team') || text.includes('team versus team') || text.includes('vs logo') ||
+      text.includes('versus logo') || text.includes('vs overlay') || text.includes('team logo') ||
+      text.includes('match card') || text.includes('matchup') || text.includes('clash') ||
+      text.includes('टीम विरुद्ध टीम') || text.includes('दोन्ही टीमचा लोगो') || text.includes('टीम व्हर्सेस टीम') ||
+      text.includes('टीम बनाम टीम') || text.includes('दोनों टीम का लोगो') || text.includes('टीम वर्सेस टीम') ||
+      (text.includes('logo') && (text.includes('team') || text.includes('show'))) ||
+      (text.includes('लोगो') && (text.includes('दाखवा') || text.includes('दिखाओ') || text.includes('टीम')))
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'team_vs_team',
+        confidence: 0.99,
+        explanation: 'Show Team VS Team Logo & Matchup Overlay'
+      };
+    }
+
+    // Squad List (Both Teams Squad List / Playing 11)
+    if (
+      text.includes('squad list') || text.includes('squad') || text.includes('squads') ||
+      text.includes('playing 11') || text.includes('playing xi') || text.includes('lineup') || text.includes('lineups') ||
+      text.includes('स्क्वॉड') || text.includes('प्लेईंग ११') || text.includes('प्लेइंग इलेव्हन') || text.includes('प्लेइंग 11') ||
+      text.includes('खेळाडूंची यादी') || text.includes('दोनों टीम की स्क्वाड') || text.includes('दोन्ही टीमची स्क्वॉड') ||
+      text.includes('खिलाड़ियों की सूची') || text.includes('टीम लिस्ट') || text.includes('सगळे खेळाडू')
+    ) {
+      const isTeamB = text.includes('team b') || text.includes('टीम b') || text.includes('दुसरी टीम') || text.includes('दूसरी टीम');
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: isTeamB ? 'squad_b' : 'squad_a',
+        confidence: 0.99,
+        explanation: isTeamB ? 'Show Team B Squad List Overlay' : 'Show Both Teams Squad List Overlay'
+      };
+    }
+
+    // Field Position Overlay
+    if (
+      text.includes('field position') || text.includes('fielding position') || text.includes('fielding setup') ||
+      text.includes('फील्डिंग पोझिशन') || text.includes('फील्डिंग सेट') || text.includes('फील्डिंग दिखाओ') || text.includes('फील्डिंग दाखवा')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'field_positions',
+        confidence: 0.98,
+        explanation: 'Show Field Positions TV Overlay'
+      };
+    }
+
+    // Batting Summary Overlay
+    if (
+      text.includes('batting summary') || text.includes('batting scorecard') ||
+      text.includes('बॅटिंग सारांश') || text.includes('बैटिंग समरी') || text.includes('बॅटिंग कार्ड')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'batting_summary',
+        confidence: 0.98,
+        explanation: 'Show Batting Summary Overlay'
+      };
+    }
+
+    // Bowling Summary Overlay
+    if (
+      text.includes('bowling summary') || text.includes('bowling scorecard') ||
+      text.includes('बॉलिंग सारांश') || text.includes('बॉलिंग समरी') || text.includes('बॉलिंग कार्ड')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'bowling_summary',
+        confidence: 0.98,
+        explanation: 'Show Bowling Summary Overlay'
+      };
+    }
+
+    // Tournament Logo Overlay
+    if (
+      text.includes('tournament logo') || text.includes('trophy logo') ||
+      text.includes('स्पर्धा लोगो') || text.includes('टूर्नामेंट लोगो')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'tournament_logo',
+        confidence: 0.98,
+        explanation: 'Show Tournament Logo Overlay'
+      };
+    }
+
+    // Toss Result Overlay
+    if (
+      text.includes('toss result') || text.includes('toss report') ||
+      text.includes('टॉस रिझल्ट') || text.includes('टॉस रिजल्ट') || (text.includes('टॉस') && (text.includes('दाखवा') || text.includes('दिखाओ')))
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'overlay',
+        overlayType: 'toss_result',
+        confidence: 0.98,
+        explanation: 'Show Toss Result Overlay'
+      };
+    }
+
+    // 1. UNDO COMMAND
+    // Marathi/Hindi/English: अनडू, मागे घे, वापस, undo, revert, cancel last ball
+    if (
+      text.includes('undo') || text.includes('अनडू') || text.includes('मागे') || 
+      text.includes('वापस') || text.includes('cancel ball') || text.includes('रद्द') ||
+      text.includes('शेवटचा बॉल मागे')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'undo',
+        confidence: 0.95,
+        explanation: 'Undo previous ball'
+      };
+    }
+
+    // 2. BOUNDARY RUNS: SIX (6)
+    // Marathi: षटकार, सिक्स, सहा रन, सहा धावा, छक्का, विशाल षटकार, गगनचुंबी
+    // Hindi: छक्का, सिक्स, छह रन, छह
+    // English: six, maximum, out of ground, sixer
+    if (
+      text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
+      text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
+      text.includes('सिक्स') || text.includes('maximum') || text === '6' || text.includes('गगनचुंबी')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'runs',
+        runs: 6,
+        confidence: 0.95,
+        explanation: 'SIX! 6 Runs'
+      };
+    }
+
+    // 3. BOUNDARY RUNS: FOUR (4)
+    // Marathi: चौकार, चार रन, चार धावा, कडक चौकार, फोर, बाउंड्री
+    // Hindi: चौका, चार रन, चौकार
+    // English: four, boundary, four runs
+    if (
+      text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
+      text.includes('चार') || text.includes('फोर') || text.includes('boundary') || 
+      text.includes('बाउंड्री') || text === '4'
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'runs',
+        runs: 4,
+        confidence: 0.95,
+        explanation: 'FOUR! 4 Runs'
+      };
+    }
+
+    // 4. WICKET COMMANDS
+    // Marathi: विकेट, बाद, आउट, बोल्ड, झेल, रन आउट, दांडी गुल, पायचीत
+    // Hindi: विकेट, आउट, बोल्ड, कैच, रन आउट, एलबीडब्ल्यू
     // English: wicket, out, bowled, caught, run out, stumped, lbw, dismissed
     if (
-      text.includes('wicket') || text.includes('out') || text.includes('विक') || 
+      /\b(out|wicket|bowled|caught|lbw|stumped|dismissed)\b/.test(text) || 
       text.includes('बाद') || text.includes('आउट') || text.includes('बोल्ड') ||
-      text.includes('bowled') || text.includes('caught') || text.includes('catch') || 
       text.includes('झेल') || text.includes('कैच') || text.includes('stump') || 
       text.includes('रन आउट') || text.includes('run out') || text.includes('lbw') ||
-      text.includes('क्लीन बोल्ड')
+      text.includes('दांडी') || text.includes('पायचीत') || text.includes('क्लीन बोल्ड') ||
+      text.includes('विकेट')
     ) {
       let wicketType: VoiceScoreCommandResult['wicketType'] = 'caught';
-      if (text.includes('bold') || text.includes('bowled') || text.includes('बोल्ड')) wicketType = 'bowled';
+      if (text.includes('bold') || text.includes('bowled') || text.includes('बोल्ड') || text.includes('दांडी')) wicketType = 'bowled';
       else if (text.includes('run out') || text.includes('रन आउट')) wicketType = 'run_out';
       else if (text.includes('stump') || text.includes('स्टंप')) wicketType = 'stumped';
-      else if (text.includes('lbw') || text.includes('एलपीडब्ल्यू')) wicketType = 'lbw';
+      else if (text.includes('lbw') || text.includes('एलपीडब्ल्यू') || text.includes('पायचीत')) wicketType = 'lbw';
       else if (text.includes('hit wicket') || text.includes('हिट')) wicketType = 'hit_wicket';
 
       return {
@@ -105,25 +319,10 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // 2. UNDO COMMAND
-    // Marathi/Hindi/English: अनडू, मागे घे, वापस, undo, revert, cancel last ball
-    if (
-      text.includes('undo') || text.includes('अनडू') || text.includes('मागे') || 
-      text.includes('वापस') || text.includes('cancel ball') || text.includes('रद्द')
-    ) {
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'undo',
-        confidence: 0.9,
-        explanation: 'Undo previous ball'
-      };
-    }
-
     // 3. STRIKE ROTATION / SWAP BATSMEN
     if (
       text.includes('swap') || text.includes('स्ट्राइक बदला') || text.includes('स्ट्राइक चेंज') || 
-      text.includes('strike change') || text.includes('rotate strike')
+      text.includes('strike change') || text.includes('rotate strike') || text.includes('स्ट्राइक')
     ) {
       return {
         rawTranscript: raw,
@@ -140,7 +339,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     // English: wide, wide ball, wide plus one, wide four
     if (text.includes('wide') || text.includes('वाईड') || text.includes('व्हाईड') || text.includes('वाइड')) {
       let extraRuns = 0;
-      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका')) extraRuns = 4;
+      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
       else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single') || text.includes('सिंगल')) extraRuns = 1;
       else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो') || text.includes('double')) extraRuns = 2;
       else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
@@ -156,10 +355,10 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     }
 
     // 5. NO BALL COMMANDS (No ball, No ball + 4, No ball + 6, Free Hit)
-    // Marathi: नो बॉल, नोबॉल, नो बॉल चौकार, नो बॉल षटकार
-    // Hindi: नो बॉल, नोबाल, नो बॉल चार, नो बॉल छक्का
-    // English: no ball, no-ball, noball, no ball four, no ball six
-    if (text.includes('no ball') || text.includes('noball') || text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल')) {
+    // Marathi: नो बॉल, नोबॉल, नो बॉल चौकार, नो बॉल षटकार, फ्री हिट
+    // Hindi: नो बॉल, नोबाल, नो बॉल चार, नो बॉल छक्का, फ्री हिट
+    // English: no ball, no-ball, noball, no ball four, no ball six, free hit
+    if (text.includes('no ball') || text.includes('noball') || text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल') || text.includes('free hit') || text.includes('फ्री हिट')) {
       let extraRuns = 0;
       if (text.includes('6') || text.includes('six') || text.includes('सहा') || text.includes('छक्का') || text.includes('षटकार')) extraRuns = 6;
       else if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
@@ -228,13 +427,13 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     }
 
     // 8. BOUNDARY RUNS: SIX (6)
-    // Marathi: षटकार, सिक्स, सहा रन, छक्का
-    // Hindi: छक्का, सिक्स, छह रन
+    // Marathi: षटकार, सिक्स, सहा रन, सहा धावा, छक्का, विशाल षटकार, गगनचुंबी
+    // Hindi: छक्का, सिक्स, छह रन, छह
     // English: six, maximum, out of ground, sixer
     if (
       text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
       text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
-      text.includes('सिक्स') || text.includes('maximum') || text === '6'
+      text.includes('सिक्स') || text.includes('maximum') || text === '6' || text.includes('गगनचुंबी')
     ) {
       return {
         rawTranscript: raw,
@@ -247,12 +446,13 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     }
 
     // 9. BOUNDARY RUNS: FOUR (4)
-    // Marathi: चौकार, चार रन, फोर
+    // Marathi: चौकार, चार रन, चार धावा, कडक चौकार, फोर, बाउंड्री
     // Hindi: चौका, चार रन, चौकार
     // English: four, boundary, four runs
     if (
       text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
-      text.includes('चार') || text.includes('फोर') || text.includes('boundary') || text === '4'
+      text.includes('चार') || text.includes('फोर') || text.includes('boundary') || 
+      text.includes('बाउंड्री') || text === '4'
     ) {
       return {
         rawTranscript: raw,
@@ -318,6 +518,40 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       explanation: `Could not understand: "${raw}". Speak: 1, 2, 4, 6, Dot, Wide, or Out.`
     };
   }, []);
+
+  // Gemini AI Assistant parser for conversational or complex instructions
+  const parseWithAI = useCallback(async (transcript: string, lang: VoiceLanguage): Promise<VoiceScoreCommandResult> => {
+    setIsAiProcessing(true);
+    try {
+      const resp = await fetch('/api/cricket/parse-voice-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript,
+          language: lang,
+          strikerName,
+          bowlerName
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.intent && data.intent !== 'unknown') {
+          return data;
+        }
+      }
+    } catch (err) {
+      console.warn('[Voice AI] Error parsing with server:', err);
+    } finally {
+      setIsAiProcessing(false);
+    }
+    return {
+      rawTranscript: transcript,
+      detectedLang: lang,
+      intent: 'unknown',
+      confidence: 0.1,
+      explanation: `Could not determine action for: "${transcript}". Speak: 4, 6, Dot, or Out.`
+    };
+  }, [strikerName, bowlerName]);
 
   // Execute recognized cricket command
   const executeCommand = useCallback((res: VoiceScoreCommandResult) => {
@@ -392,11 +626,40 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
         }
         break;
 
+      case 'overlay':
+        if (res.overlayType === 'none' || res.overlayType === 'clear') {
+          if (onDismissOverlay) {
+            onDismissOverlay();
+          } else if (onTriggerOverlay) {
+            onTriggerOverlay('none');
+          }
+          const clearMsg = selectedLang === 'mr-IN' ? 'स्क्रीनवरील ओवरले बंद केला' : selectedLang === 'hi-IN' ? 'ओवरले हटा दिया गया' : 'Broadcast overlay dismissed';
+          speakFeedback(clearMsg, selectedLang);
+          setStatusMessage('🧹 Broadcast overlay dismissed');
+        } else if (res.overlayType === 'team_vs_team') {
+          if (onTriggerOverlay) onTriggerOverlay('team_vs_team');
+          const msg = selectedLang === 'mr-IN' ? 'टीम विरुद्ध टीम लोगो ओवरले सुरू केला' : selectedLang === 'hi-IN' ? 'टीम बनाम टीम लोगो ओवरले शुरू किया' : 'Team vs Team logo overlay live on air';
+          speakFeedback(msg, selectedLang);
+          setStatusMessage('⚔️ Team VS Team Logo & Matchup Overlay LIVE ON AIR!');
+        } else if (res.overlayType === 'squad_a' || res.overlayType === 'squad_b' || res.overlayType === 'squad_both') {
+          const squadType = res.overlayType === 'squad_b' ? 'squad_b' : 'squad_a';
+          if (onTriggerOverlay) onTriggerOverlay(squadType);
+          const msg = selectedLang === 'mr-IN' ? 'दोन्ही टीमची स्क्वॉड लिस्ट ओवरले सुरू केला' : selectedLang === 'hi-IN' ? 'दोनों टीमों की स्क्वाड लिस्ट ओवरले शुरू किया' : 'Team squad list overlay live on air';
+          speakFeedback(msg, selectedLang);
+          setStatusMessage('📋 Both Teams Squad List Overlay LIVE ON AIR!');
+        } else if (res.overlayType) {
+          if (onTriggerOverlay) onTriggerOverlay(res.overlayType);
+          const msg = selectedLang === 'mr-IN' ? 'टीव्ही ग्राफिक्स सुरू केले' : selectedLang === 'hi-IN' ? 'टीवी ग्राफिक्स शुरू किया' : 'Broadcast graphic triggered';
+          speakFeedback(msg, selectedLang);
+          setStatusMessage(`📺 ${res.explanation || 'Broadcast Graphic Overlay triggered'}`);
+        }
+        break;
+
       default:
         setStatusMessage(`⚠️ Not recognized: "${res.rawTranscript}". Try saying: "चार रन", "छक्का", "Dot", or "Wicket".`);
         break;
     }
-  }, [selectedLang, onScoreDot, onScoreRuns, onScoreExtra, onScoreByes, onScoreWicket, onUndo, onSwapBatsmen, speakFeedback]);
+  }, [selectedLang, onScoreDot, onScoreRuns, onScoreExtra, onScoreByes, onScoreWicket, onUndo, onSwapBatsmen, onTriggerOverlay, onDismissOverlay, speakFeedback]);
 
   // Initialize and handle Speech Recognition
   const startListening = useCallback(() => {
@@ -424,6 +687,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
 
       recognition.onstart = () => {
         setIsListening(true);
+        playChime(520, 0.1);
         setStatusMessage(
           selectedLang === 'mr-IN'
             ? '🎙️ ऐकत आहे... (उदा. "चार रन", "डॉट", "सिक्स", "विकेट")'
@@ -450,10 +714,21 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
         setLiveTranscript(activeText);
 
         if (final && final.trim().length > 0) {
-          const result = parseCricketCommand(final, selectedLang);
-          executeCommand(result);
+          const localResult = parseCricketCommand(final, selectedLang);
+          if (localResult.intent !== 'unknown') {
+            playChime(880, 0.14);
+            executeCommand(localResult);
+          } else {
+            setStatusMessage(`🤖 AI Assistant analyzing: "${final}"...`);
+            parseWithAI(final, selectedLang).then((aiResult) => {
+              if (aiResult.intent !== 'unknown') {
+                playChime(880, 0.14);
+              }
+              executeCommand(aiResult);
+            });
+          }
           // clear transcript after a short display
-          setTimeout(() => setLiveTranscript(''), 2000);
+          setTimeout(() => setLiveTranscript(''), 2500);
         }
       };
 
@@ -733,7 +1008,14 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
 
         {/* Live Audio / Recognized Action Display */}
         <div className="flex-1 min-w-0 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-2 flex flex-col justify-center min-h-[48px]">
-          {liveTranscript ? (
+          {isAiProcessing ? (
+            <div className="flex items-center gap-1.5 truncate">
+              <Sparkles size={14} className="text-amber-400 animate-spin shrink-0" />
+              <p className="text-xs font-mono text-amber-300 font-black animate-pulse truncate">
+                🤖 AI analyzing instruction with Gemini...
+              </p>
+            </div>
+          ) : liveTranscript ? (
             <div className="flex items-center gap-1.5 truncate">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
               <p className="text-xs font-mono text-emerald-300 font-black truncate">
@@ -771,6 +1053,9 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
           Try saying:
         </span>
         {[
+          { label: selectedLang === 'mr-IN' ? '⚔️ टीम vs टीम लोगो' : selectedLang === 'hi-IN' ? '⚔️ टीम vs टीम लोगो' : '⚔️ Team vs Team Logo', cmd: 'show the team vs team logo', isOverlay: true },
+          { label: selectedLang === 'mr-IN' ? '📋 दोन्ही टीम स्क्वॉड' : selectedLang === 'hi-IN' ? '📋 दोनों टीम स्क्वाड' : '📋 Both Squads', cmd: 'show the both team squad list', isOverlay: true },
+          { label: selectedLang === 'mr-IN' ? '🧹 ओवरले बंद' : selectedLang === 'hi-IN' ? '🧹 ओवरले हटाओ' : '🧹 Clear Overlay', cmd: 'hide overlay', isOverlay: true },
           { label: selectedLang === 'mr-IN' ? 'डॉट बॉल' : selectedLang === 'hi-IN' ? 'डॉट' : 'Dot', cmd: 'dot' },
           { label: selectedLang === 'mr-IN' ? 'एक रन' : selectedLang === 'hi-IN' ? 'सिंगल' : 'Single', cmd: '1 run' },
           { label: selectedLang === 'mr-IN' ? 'दोन रन' : selectedLang === 'hi-IN' ? 'डबल' : 'Two runs', cmd: '2 runs' },
@@ -787,7 +1072,11 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
               const res = parseCricketCommand(item.cmd, selectedLang);
               executeCommand(res);
             }}
-            className="px-2 py-0.5 bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white rounded-lg text-[9px] font-bold shrink-0 transition-colors border border-slate-700/60 cursor-pointer"
+            className={`px-2 py-0.5 rounded-lg text-[9px] font-bold shrink-0 transition-colors border cursor-pointer ${
+              item.isOverlay
+                ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 hover:text-rose-200 border-rose-500/30'
+                : 'bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700/60'
+            }`}
           >
             {item.label}
           </button>
@@ -808,7 +1097,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
                     Voice-Activated Cricket Scorer Commands
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Supports Marathi, Hindi, and English regional cricket commentary terms
+                    Supports Scoring, Match Events, and TV Broadcast Overlays in Marathi, Hindi, and English
                   </p>
                 </div>
               </div>
@@ -823,6 +1112,36 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
 
             {/* Command Table by Category */}
             <div className="space-y-3 text-xs">
+              {/* TV Broadcast Graphic Overlays */}
+              <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-rose-950/40 p-3 rounded-xl border border-rose-500/30 shadow-md">
+                <div className="font-black text-rose-400 text-xs mb-1.5 flex items-center gap-1.5">
+                  <span>📺 Voice-Activated Broadcast Overlays (टीव्ही ग्राफिक्स ओवरले)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">⚔️ Team vs Team Logo & Match Card</strong>
+                    <span className="text-rose-300 block font-mono text-[10px] mt-0.5">"show team vs team logo"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "टीम विरुद्ध टीम लोगो दाखवा" / "दोन्ही टीमचा लोगो दाखवा"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "टीम बनाम टीम लोगो दिखाओ" / "मैच कार्ड दिखाओ"</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">📋 Both Teams Squad List / Playing 11</strong>
+                    <span className="text-rose-300 block font-mono text-[10px] mt-0.5">"show the both team squad list"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "दोन्ही टीमची स्क्वॉड लिस्ट दाखवा" / "प्लेईंग ११ दाखवा"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "दोनों टीम की स्क्वाड लिस्ट दिखाओ" / "खिलाड़ियों की सूची दिखाओ"</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">🎯 Field Positions Overlay</strong>
+                    <span className="text-cyan-300 block font-mono text-[10px] mt-0.5">"show field position"</span>
+                    <span className="text-slate-400 block text-[10.5px]">"फील्डिंग पोझिशन दाखवा" / "फील्डिंग दिखाओ"</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">🧹 Dismiss / Hide Overlay</strong>
+                    <span className="text-emerald-300 block font-mono text-[10px] mt-0.5">"hide overlay" / "clear graphics"</span>
+                    <span className="text-slate-400 block text-[10.5px]">"स्क्रीन साफ करा" / "ओवरले बंद करा" / "ओवरले हटाओ"</span>
+                  </div>
+                </div>
+              </div>
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
                 <div className="font-black text-amber-400 text-xs mb-1.5 flex items-center gap-1.5">
                   <span>🏏 Run Scoring (धावा)</span>
