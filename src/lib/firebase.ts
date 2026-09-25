@@ -35,13 +35,19 @@ try {
 if (typeof window !== 'undefined') {
   const origConsoleError = console.error;
   console.error = function (...args: any[]) {
-    const raw = args.map(a => (typeof a === 'string' ? a : (a?.message || ''))).join(' ');
+    const raw = args.map(a => {
+      if (typeof a === 'string') return a;
+      if (a instanceof Error) return `${a.name}: ${a.message} ${a.stack || ''}`;
+      try { return JSON.stringify(a); } catch { return String(a || ''); }
+    }).join(' ');
+
     if (
       raw.includes('GrpcConnection RPC') ||
       raw.includes('RST_STREAM') ||
       raw.includes('RESOURCE_EXHAUSTED') ||
       raw.includes('resource-exhausted') ||
       raw.includes('Quota exceeded') ||
+      raw.includes('Quota limit exceeded') ||
       raw.includes('Disconnecting idle stream') ||
       (raw.includes('@firebase/firestore') && (raw.includes('Code: 13') || raw.includes('Code: 8') || raw.includes('Code: 1')))
     ) {
@@ -49,12 +55,13 @@ if (typeof window !== 'undefined') {
         raw.includes('RESOURCE_EXHAUSTED') ||
         raw.includes('resource-exhausted') ||
         raw.includes('Quota exceeded') ||
+        raw.includes('Quota limit exceeded') ||
         raw.includes('Code: 8')
       ) {
-        try { recordFirestoreQuotaExhaustion(5); } catch {}
+        try { recordFirestoreQuotaExhaustion(360); } catch {}
       }
       // Suppress transient WebChannel HTTP/2 transport reconnection logs and quota status from bubbling to error monitors
-      console.info('[Firestore Stream Status]', ...args);
+      console.warn('[Firestore Stream Guard] Handled quota/stream status safely:', raw);
       return;
     }
     origConsoleError.apply(console, args);
@@ -70,14 +77,18 @@ if (typeof window !== 'undefined') {
        msg.includes('RESOURCE_EXHAUSTED') ||
        msg.includes('resource-exhausted') ||
        msg.includes('Quota exceeded') ||
+       msg.includes('Quota limit exceeded') ||
+       msg.includes('Code: 8') ||
        msg.includes('Disconnecting idle stream'))
     ) {
       if (
         msg.includes('RESOURCE_EXHAUSTED') ||
         msg.includes('resource-exhausted') ||
-        msg.includes('Quota exceeded')
+        msg.includes('Quota exceeded') ||
+        msg.includes('Quota limit exceeded') ||
+        msg.includes('Code: 8')
       ) {
-        try { recordFirestoreQuotaExhaustion(5); } catch {}
+        try { recordFirestoreQuotaExhaustion(360); } catch {}
       }
       console.warn('[Firestore SDK Guard] Intercepted internal assertion/transport error:', msg);
       event.preventDefault();
@@ -96,14 +107,18 @@ if (typeof window !== 'undefined') {
        msg.includes('RESOURCE_EXHAUSTED') ||
        msg.includes('resource-exhausted') ||
        msg.includes('Quota exceeded') ||
+       msg.includes('Quota limit exceeded') ||
+       msg.includes('Code: 8') ||
        msg.includes('Disconnecting idle stream'))
     ) {
       if (
         msg.includes('RESOURCE_EXHAUSTED') ||
         msg.includes('resource-exhausted') ||
-        msg.includes('Quota exceeded')
+        msg.includes('Quota exceeded') ||
+        msg.includes('Quota limit exceeded') ||
+        msg.includes('Code: 8')
       ) {
-        try { recordFirestoreQuotaExhaustion(5); } catch {}
+        try { recordFirestoreQuotaExhaustion(360); } catch {}
       }
       console.warn('[Firestore SDK Guard] Intercepted internal assertion/transport rejection:', msg);
       event.preventDefault();
@@ -634,6 +649,16 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
   const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
   const collectionName = docPath.split('/')[0] || '';
 
+  // If daily Firestore quota is already exhausted, do NOT call client setDoc to avoid GrpcConnection RPC stream crash
+  if (isFirestoreQuotaExhausted()) {
+    if (isCricketMatch && docId) {
+      await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => {});
+    } else if (collectionName && docId) {
+      await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => {});
+    }
+    return;
+  }
+
   // Quick 3.5s timeout for client write before invoking resilient server proxy
   const timeoutMs = 3500;
   let clientTimedOut = false;
@@ -649,7 +674,12 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
     ]);
   } catch (error: any) {
     if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(2);
+      recordFirestoreQuotaExhaustion(360);
+      if (isCricketMatch && docId) {
+        await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => {});
+      } else if (collectionName && docId) {
+        await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => {});
+      }
       return;
     }
 
@@ -714,6 +744,16 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
  * Safe write wrapper for updateDoc that writes reliably with a timeout guard
  */
 export async function safeUpdateDoc(docRef: any, ...args: any[]) {
+  if (isFirestoreQuotaExhausted()) {
+    const docPath = docRef?.path || '';
+    const docId = docRef?.id || '';
+    const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
+    if (isCricketMatch && docId && args.length === 1 && typeof args[0] === 'object') {
+      await saveMatchViaServerProxy(docId, args[0]).catch(() => {});
+    }
+    return;
+  }
+
   const timeoutMs = 20000;
   try {
     const writePromise = (updateDoc as any)(docRef, ...args);
@@ -723,7 +763,7 @@ export async function safeUpdateDoc(docRef: any, ...args: any[]) {
     ]);
   } catch (error: any) {
     if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(2);
+      recordFirestoreQuotaExhaustion(360);
       return;
     }
 
@@ -755,18 +795,21 @@ export async function safeUpdateDoc(docRef: any, ...args: any[]) {
  * Safe write wrapper for deleteDoc that writes reliably with a timeout guard
  */
 export async function safeDeleteDoc(docRef: any) {
+  if (isFirestoreQuotaExhausted()) {
+    return;
+  }
   try {
     const writePromise = deleteDoc(docRef);
     await Promise.race([
       writePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore delete timeout')), 20000))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore delete timeout')), 10000))
     ]);
-  } catch (error) {
+  } catch (error: any) {
     if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(2);
+      recordFirestoreQuotaExhaustion(360);
       return;
     }
-    throw error;
+    console.warn('[safeDeleteDoc note]:', error);
   }
 }
 

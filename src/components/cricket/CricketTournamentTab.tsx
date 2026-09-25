@@ -17,7 +17,7 @@ const GULLY_RULES_PRESETS = [
   'No LBW dismissal',
   'Free Hit on No-Ball'
 ];
-import { db, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion } from '../../lib/firebase';
+import { db, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion, safeSetDoc } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc, updateDoc, collection, onSnapshot } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -115,7 +115,7 @@ interface Tournament {
   customOvers?: number;
   logo?: string;
   customRules?: string;
-  type: 'league' | 'knockout' | 'group-stage' | 'double-elimination';
+  type: 'league' | 'knockout' | 'group-stage' | 'double-elimination' | 'one-half';
   startDate: string;
   status: 'setup' | 'active' | 'completed';
   teams: TournamentTeam[];
@@ -592,9 +592,9 @@ export const CricketTournamentTab: React.FC<{
     }
     if (isFirestoreQuotaExhausted()) return;
     validTournaments.forEach((t) => {
-      setDoc(doc(db, 'cricket_tournaments', t.id), t).catch((err) => {
+      safeSetDoc(doc(db, 'cricket_tournaments', t.id), t).catch((err) => {
         if (isQuotaError(err)) {
-          recordFirestoreQuotaExhaustion(60);
+          recordFirestoreQuotaExhaustion(360);
           console.warn("Firestore quota limit reached. Tournaments safely kept in local storage.");
         } else {
           console.warn("Failed to backup tournament to Firestore:", err);
@@ -4381,12 +4381,13 @@ export const CricketTournamentTab: React.FC<{
                 <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1.5">
                   Tournament Structure
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {[
                     { id: 'league', title: 'League', sub: 'Round Robin' },
                     { id: 'knockout', title: 'Knockout', sub: 'Bracket' },
                     { id: 'group-stage', title: 'Groups', sub: '+ Playoffs' },
-                    { id: 'double-elimination', title: 'Double Elim', sub: 'Upper/Lower' }
+                    { id: 'double-elimination', title: 'Double Elim', sub: 'Upper/Lower' },
+                    { id: 'one-half', title: 'One-Half 32', sub: '4 Grps • 5 Days' }
                   ].map((st) => (
                     <button
                       key={st.id}
@@ -5953,12 +5954,13 @@ export const CricketTournamentTab: React.FC<{
                 <label className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block mb-1.5">
                   Tournament Structure
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                   {[
                     { id: 'league', title: 'League', sub: 'Round Robin' },
                     { id: 'knockout', title: 'Knockout', sub: 'Bracket' },
                     { id: 'group-stage', title: 'Groups', sub: '+ Playoffs' },
-                    { id: 'double-elimination', title: 'Double Elim', sub: 'Upper/Lower' }
+                    { id: 'double-elimination', title: 'Double Elim', sub: 'Upper/Lower' },
+                    { id: 'one-half', title: 'One-Half 32', sub: '4 Grps • 5 Days' }
                   ].map((st) => (
                     <button
                       key={st.id}

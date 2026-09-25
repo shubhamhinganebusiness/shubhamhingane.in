@@ -61,16 +61,17 @@ export interface BallDelivery {
  */
 export async function recordBallDelivery(matchId: string, delivery: BallDelivery): Promise<void> {
   if (!matchId || !delivery || !delivery.id) return;
+  if (isFirestoreQuotaExhausted()) return;
   const path = `cricket_matches/${matchId}/deliveries/${delivery.id}`;
   try {
     const ballRef = doc(db, 'cricket_matches', matchId, 'deliveries', delivery.id);
-    await setDoc(ballRef, {
+    await safeSetDoc(ballRef, {
       ...delivery,
       serverTime: serverTimestamp()
     });
   } catch (error) {
     if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(2);
+      recordFirestoreQuotaExhaustion(360);
       return;
     }
     // Sub-collection delivery logging is best-effort and non-fatal so live scoring is never blocked
@@ -262,15 +263,16 @@ export function extractLiveSummary(match: MatchState): MatchLiveSummary | null {
  */
 export async function publishLiveSummary(summary: MatchLiveSummary): Promise<void> {
   if (!summary || !summary.matchId) return;
+  if (isFirestoreQuotaExhausted()) return;
   try {
     const summaryRef = doc(db, 'cricket_live_summaries', summary.matchId);
-    await setDoc(summaryRef, {
+    await safeSetDoc(summaryRef, {
       ...summary,
       updatedAt: Date.now()
     }, { merge: true });
   } catch (error) {
     if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(2);
+      recordFirestoreQuotaExhaustion(360);
       return;
     }
     console.warn('[cricketDb] publishLiveSummary note:', error);

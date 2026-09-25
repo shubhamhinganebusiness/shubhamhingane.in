@@ -37,6 +37,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ConfettiCanvas } from './ConfettiCanvas';
 import { CricketTournamentTab } from './CricketTournamentTab';
+import { OneHalfTournamentSuite } from './OneHalfTournamentSuite';
 import { DLSCalculatorModal } from './DLSCalculatorModal';
 import { liveFanOutClient } from './modules/LiveFanOutClient';
 import { SpinCoinModal, SpinCoinResult } from './SpinCoinModal';
@@ -952,8 +953,23 @@ export const CricketScoreboard: React.FC = () => {
     }
   });
 
-  // Section Navigation: Quick Scorer vs Tournament Suite
-  const [activeSection, setActiveSection] = useState<'scorer' | 'tournaments'>('scorer');
+  // Section Navigation: Quick Scorer vs Tournament Suite vs One-Half Tournament
+  const [activeSection, setActiveSection] = useState<'scorer' | 'tournaments' | 'one-half'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const p = new URLSearchParams(window.location.search);
+        if (
+          p.get('action') === 'one_half_tournament' ||
+          p.get('tab') === 'one_half' ||
+          p.get('mode') === 'spectator' ||
+          p.get('tourId')?.startsWith('one_half')
+        ) {
+          return 'one-half';
+        }
+      } catch (_) {}
+    }
+    return 'scorer';
+  });
   
   // Ref to hold a callback trigger for tournament matches
   const tournamentCallbackRef = useRef<((result: any) => void) | null>(null);
@@ -15948,7 +15964,30 @@ export const CricketScoreboard: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <Trophy size={16} className="text-amber-500 animate-bounce" /> Tournaments
                 </div>
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full" />
+                {activeSection === 'tournaments' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full" />
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setActiveSection('one-half');
+                  playSoundEffect('click');
+                }}
+                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                  activeSection === 'one-half'
+                    ? 'text-amber-500 dark:text-amber-400 font-black'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Flame size={16} className="text-rose-500 animate-pulse" /> One-Half 32
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
+                    5 Days
+                  </span>
+                </div>
+                {activeSection === 'one-half' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-full" />
+                )}
               </button>
             </div>
           </div>
@@ -16127,6 +16166,174 @@ export const CricketScoreboard: React.FC = () => {
         </main>
 
         {/* Shared Modals: Tournament Caps, Sponsor Management & Player Cards */}
+        {renderSharedOverlays()}
+      </div>
+    );
+  }
+
+  if (activeSection === 'one-half') {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 font-sans">
+        <header className="bg-gradient-to-r from-amber-700 via-rose-800 to-indigo-950 text-white shadow-md border-b border-amber-800">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-amber-600 rounded-xl shadow-inner">
+                <Flame className="text-white animate-pulse" size={24} />
+              </div>
+              <div>
+                <h1 className="text-lg sm:text-2xl font-black uppercase tracking-tight flex items-center gap-2">
+                  GULLY<span className="text-amber-300 italic">SCORE</span>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full">
+                    One-Half 32
+                  </span>
+                </h1>
+                <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest hidden sm:block">
+                  32 Teams • 4 Groups • 5 Days Knockout Championship
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all cursor-pointer border-none"
+                title="Toggle theme mode"
+              >
+                {darkMode ? <Sun size={18} className="text-amber-300" /> : <Moon size={18} />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSection('scorer');
+                  playSoundEffect('click');
+                }}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition-all border-none"
+              >
+                <BarChart3 size={14} />
+                <span>Quick Scorer</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSection('tournaments');
+                  playSoundEffect('click');
+                }}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition-all border-none"
+              >
+                <Trophy size={14} />
+                <span>Tournaments</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Section Switcher Tabs */}
+          <div className="flex justify-center border-b border-slate-200 dark:border-slate-800 mb-8 pb-1 font-sans">
+            <div className="flex gap-4">
+              <button
+                onClick={() => {
+                  setActiveSection('scorer');
+                  playSoundEffect('click');
+                }}
+                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                  activeSection === 'scorer'
+                    ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <BarChart3 size={16} /> Quick Scorer
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveSection('tournaments');
+                  playSoundEffect('click');
+                }}
+                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                  activeSection === 'tournaments'
+                    ? 'text-emerald-600 dark:text-emerald-400 font-black'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Trophy size={16} className="text-amber-500" /> Tournaments
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveSection('one-half');
+                  playSoundEffect('click');
+                }}
+                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                  activeSection === 'one-half'
+                    ? 'text-amber-500 dark:text-amber-400 font-black'
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Flame size={16} className="text-rose-500 animate-pulse" /> One-Half 32
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
+                    5 Days
+                  </span>
+                </div>
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-full" />
+              </button>
+            </div>
+          </div>
+
+          <OneHalfTournamentSuite
+            onStartLiveScore={(config) => {
+              setTeamA(config.teamA);
+              setTeamB(config.teamB);
+              setOversLimit(config.overs);
+              setTournamentName(config.tournamentName);
+              setGroundName(config.groundName);
+              setSeriesName(config.seriesName || config.tournamentName);
+
+              const newLiveMatch: MatchState = {
+                id: `live_${Date.now()}`,
+                teamA: config.teamA,
+                teamB: config.teamB,
+                oversLimit: config.overs,
+                tossWinner: config.teamA,
+                tossChoice: 'bat',
+                currentInningsNum: 1,
+                innings1: null,
+                innings2: null,
+                status: 'setup',
+                date: new Date().toISOString().split('T')[0],
+                freeHitNext: false,
+                tournamentId: config.tournamentId,
+                tournamentMatchId: config.matchId,
+                tournamentName: config.tournamentName,
+                groundName: config.groundName,
+                seriesName: config.seriesName || config.tournamentName,
+                teamASquad: (config as any).teamASquad,
+                teamBSquad: (config as any).teamBSquad,
+                teamACaptain: (config as any).teamACaptain,
+                teamBCaptain: (config as any).teamBCaptain,
+                createdBy: user?.email || user?.uid || 'anonymous'
+              };
+
+              setMatch(newLiveMatch);
+              try {
+                localStorage.setItem('cricket_active_match', JSON.stringify(newLiveMatch));
+              } catch (_) {}
+
+              tournamentCallbackRef.current = config.onSave;
+              setActiveSection('scorer');
+              showNotification(`⚡ Live Scorer ready for One-Half Tournament: ${config.teamA} vs ${config.teamB}!`, 'success');
+            }}
+            onClose={() => setActiveSection('scorer')}
+          />
+        </main>
+
         {renderSharedOverlays()}
       </div>
     );
@@ -16326,6 +16533,27 @@ export const CricketScoreboard: React.FC = () => {
               </div>
               {activeSection === 'tournaments' && (
                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full font-sans" />
+              )}
+            </button>
+            <button
+              onClick={() => {
+                setActiveSection('one-half');
+                playSoundEffect('click');
+              }}
+              className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                activeSection === 'one-half'
+                  ? 'text-amber-500 dark:text-amber-400 font-extrabold pb-3'
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Flame size={16} className="text-rose-500 animate-pulse" /> One-Half 32
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
+                  5 Days
+                </span>
+              </div>
+              {activeSection === 'one-half' && (
+                <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-full font-sans" />
               )}
             </button>
           </div>
@@ -17810,6 +18038,39 @@ export const CricketScoreboard: React.FC = () => {
             </div>
 
             <div className="space-y-6">
+              {/* ⚡ One-Half 32 Tournament Quick Setup Banner */}
+              <div className="bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/15 p-4 sm:p-5 rounded-3xl border border-amber-500/30 space-y-3 shadow-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-wider">
+                        ⚡ 32-Team Format
+                      </span>
+                      <h3 className="text-xs sm:text-sm font-black uppercase text-amber-500 dark:text-amber-400 tracking-wider flex items-center gap-1.5">
+                        <Flame size={15} className="text-rose-500" />
+                        One-Half Tournament Setup (4 Groups • 5 Days)
+                      </h3>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-300 font-medium">
+                      City special 5-day tournament: 8 teams knockout per day (Day 1 to 4) ➔ 4 qualifiers clash on Day 5 for 1st, 2nd, 3rd & 4th prizes!
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSection('one-half');
+                        playSoundEffect('click');
+                      }}
+                      className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-lg hover:shadow-amber-500/20 transition-all flex items-center gap-1.5 border-none active:scale-95"
+                    >
+                      <Trophy size={14} className="text-amber-200" />
+                      <span>One-Half 32 Tournament Bracket ➔</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Presets and Team Management Section */}
               <div className="bg-slate-50 dark:bg-slate-950 p-4 sm:p-5 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-4 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200 dark:border-slate-800/80">

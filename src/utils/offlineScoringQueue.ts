@@ -1,6 +1,6 @@
 import { openDB, IDBPDatabase } from 'idb';
 import { doc } from 'firebase/firestore';
-import { db, safeSetDoc, syncScoreToRealtimeDB } from '../lib/firebase';
+import { db, safeSetDoc, syncScoreToRealtimeDB, isFirestoreQuotaExhausted } from '../lib/firebase';
 import { sanitizeForFirestore } from '../components/cricket/cricketStorage';
 
 export interface QueuedBallEvent {
@@ -200,7 +200,7 @@ export async function enqueueMatchBallSave(
  * Flush all pending offline balls to Firebase
  */
 export async function flushOfflineQueue(): Promise<{ success: number; failed: number }> {
-  if (currentState.isSyncing) {
+  if (currentState.isSyncing || isFirestoreQuotaExhausted()) {
     return { success: 0, failed: 0 };
   }
 
@@ -382,7 +382,7 @@ if (typeof window !== 'undefined') {
 
   // Periodic background check every 20 seconds
   setInterval(async () => {
-    if (navigator.onLine) {
+    if (navigator.onLine && !isFirestoreQuotaExhausted()) {
       const items = await getAllQueuedItems();
       const hasPending = items.some((it) => it.status === 'pending' || it.status === 'failed');
       if (hasPending && !currentState.isSyncing) {
