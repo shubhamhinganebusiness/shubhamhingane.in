@@ -1768,6 +1768,47 @@ function cleanServerUndefined(obj: any): any {
     }
   });
 
+  // Generic server-side document get endpoint for cricket collections (cross-device resilience)
+  app.get("/api/cricket/get-doc", async (req, res) => {
+    try {
+      const collectionName = req.query.collectionName as string;
+      const docId = req.query.docId as string;
+      if (!collectionName || !docId) {
+        return res.status(400).json({ error: "collectionName and docId query params are required" });
+      }
+
+      const allowedCollections = [
+        "cricket_matches", 
+        "cricket_tournaments", 
+        "cricket_teams", 
+        "cricket_players", 
+        "cricket_sponsors", 
+        "cricket_live_summaries", 
+        "cricket_deleted_matches",
+        "score_managers"
+      ];
+      if (!allowedCollections.includes(collectionName)) {
+        return res.status(403).json({ error: `Collection ${collectionName} not authorized` });
+      }
+
+      const db = await getFirebaseDb();
+      if (!db) {
+        return res.status(503).json({ error: "Database not available" });
+      }
+
+      const { doc, getDoc } = await import("firebase/firestore");
+      const targetDocRef = doc(db, collectionName, docId);
+      const snap = await getDoc(targetDocRef);
+      if (snap.exists()) {
+        return res.json({ success: true, data: snap.data() });
+      }
+      return res.status(404).json({ error: "Document not found" });
+    } catch (err: any) {
+      console.error("[Cricket API] Error reading document via proxy:", err);
+      res.status(500).json({ error: err.message || "Failed to read document on server" });
+    }
+  });
+
   // Heuristic cricket voice command parser for fallback
   function heuristicCricketVoiceParser(raw: string, lang = "mr-IN") {
     let text = (raw || "").toLowerCase().trim();

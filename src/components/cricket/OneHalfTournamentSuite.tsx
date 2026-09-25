@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy, Flame, Users, Calendar, MapPin, Zap, Check, CheckCircle2,
@@ -29,6 +29,10 @@ import {
   CaptainSquadSubmissionModal,
   ManualMatchupModal
 } from './OneHalfTeamManager';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { db, safeSetDoc, safeGetDoc, isFirestoreQuotaExhausted, syncOneHalfTournamentToRealtimeDB, subscribeToRealtimeDBOneHalfTournament } from '../../lib/firebase';
+
+export const ACTIVE_CLOUD_TOUR_ID = 'one_half_active_championship';
 
 export interface OneHalfPlayer {
   id: string;
@@ -321,6 +325,7 @@ export const createInitialOneHalfTournament = (customName?: string): OneHalfTour
     overs: 8,
     ballType: 'Tennis / Gully Ball',
     createdAt: new Date().toISOString(),
+    updatedAt: Date.now(),
     startDate,
     defaultSlotDurationMins: 75,
     prize1st: '₹51,000 + Trophy 🏆',
@@ -432,20 +437,112 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   const [selectedTeamForEdit, setSelectedTeamForEdit] = useState<OneHalfTeam | null>(null);
   const [newTeamNameInput, setNewTeamNameInput] = useState('');
   const [notification, setNotification] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing'>('synced');
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(tournament.lastCloudSyncTime || null);
 
-  // Check URL query parameters for direct captain squad submission links
+  // Check URL query parameters and sync latest cloud state on mount (cross-device & hosting online)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
         const params = new URLSearchParams(window.location.search);
         const action = params.get('action');
         const teamId = params.get('teamId');
+        const tourIdParam = params.get('tourId');
 
         if (action === 'submit_squad' && teamId) {
           setSelectedTeamIdForPage(teamId);
           setViewMode('teams');
         }
+
+        // Automatic resilient background fetch from cloud on load (cross-laptop synchronization)
+        const targetDocId = tourIdParam || ACTIVE_CLOUD_TOUR_ID;
+        safeGetDoc('cricket_tournaments', targetDocId).then((cloudData: OneHalfTournamentState | null) => {
+          if (cloudData && cloudData.matches && cloudData.teams) {
+            setTournament((prev) => {
+              const cloudTime = cloudData.updatedAt || 0;
+              const localTime = prev.updatedAt || 0;
+              if (cloudTime >= localTime) {
+                return cloudData;
+              }
+              return prev;
+            });
+            setSyncStatus('synced');
+            if (cloudData.lastCloudSyncTime) {
+              setLastSyncedAt(cloudData.lastCloudSyncTime);
+            }
+          } else if (tournament.id && tournament.id !== targetDocId) {
+            safeGetDoc('cricket_tournaments', tournament.id).then((instData: OneHalfTournamentState | null) => {
+              if (instData && instData.matches && instData.teams) {
+                setTournament(instData);
+                setSyncStatus('synced');
+                if (instData.lastCloudSyncTime) {
+                  setLastSyncedAt(instData.lastCloudSyncTime);
+                }
+              }
+            }).catch(() => {});
+          }
+        }).catch(() => {});
       } catch (_) {}
+    }
+  }, []);
+
+  // Real-time automatic background subscription to online cloud updates (Dual Realtime Database & Firestore)
+  useEffect(() => {
+    // 1. Subscribe to Firebase Realtime Database
+    const unsubRtdb = subscribeToRealtimeDBOneHalfTournament((rtdbData) => {
+      if (rtdbData && rtdbData.matches && rtdbData.teams) {
+        setTournament((prev) => {
+          const cloudTime = rtdbData.updatedAt || 0;
+          const localTime = prev.updatedAt || 0;
+          if (cloudTime > localTime) {
+            return rtdbData;
+          }
+          return prev;
+        });
+        setSyncStatus('synced');
+        if (rtdbData.lastCloudSyncTime) {
+          setLastSyncedAt(rtdbData.lastCloudSyncTime);
+        }
+      }
+    });
+
+    if (isFirestoreQuotaExhausted()) {
+      return () => {
+        unsubRtdb();
+      };
+    }
+
+    try {
+      const activeRef = doc(db, 'cricket_tournaments', ACTIVE_CLOUD_TOUR_ID);
+      const unsubscribe = onSnapshot(activeRef, (snap) => {
+        if (snap.exists()) {
+          const cloudData = snap.data() as OneHalfTournamentState;
+          if (cloudData && cloudData.matches && cloudData.teams) {
+            setTournament((prev) => {
+              const cloudTime = cloudData.updatedAt || 0;
+              const localTime = prev.updatedAt || 0;
+              // Silently sync if another device updated with a newer timestamp
+              if (cloudTime > localTime) {
+                return cloudData;
+              }
+              return prev;
+            });
+            setSyncStatus('synced');
+            if (cloudData.lastCloudSyncTime) {
+              setLastSyncedAt(cloudData.lastCloudSyncTime);
+            }
+          }
+        }
+      }, () => {});
+
+      return () => {
+        unsubRtdb();
+        unsubscribe();
+      };
+    } catch (_) {
+      return () => {
+        unsubRtdb();
+      };
     }
   }, []);
 
@@ -576,11 +673,51 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
     showToast(`Status updated to ${newStatus}`);
   };
 
-  // Save to localStorage
+  // 1. Immediately persist to localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
     } catch (_) {}
+  }, [tournament]);
+
+  // 2. Automatic Debounced Background Cloud Sync (Cross-Device & Online Hosting)
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    setSyncStatus('syncing');
+    const timer = setTimeout(async () => {
+      try {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const payload: OneHalfTournamentState = {
+          ...tournament,
+          updatedAt: Date.now(),
+          lastCloudSyncTime: timeStr
+        };
+
+        const activeRef = doc(db, 'cricket_tournaments', ACTIVE_CLOUD_TOUR_ID);
+        await safeSetDoc(activeRef, payload, { merge: true });
+
+        if (tournament.id && tournament.id !== ACTIVE_CLOUD_TOUR_ID) {
+          const customRef = doc(db, 'cricket_tournaments', tournament.id);
+          await safeSetDoc(customRef, payload, { merge: true });
+        }
+
+        // Dual-Engine push to Firebase Realtime Database
+        await syncOneHalfTournamentToRealtimeDB(payload);
+
+        setSyncStatus('synced');
+        setLastSyncedAt(timeStr);
+      } catch (err) {
+        console.warn('[OneHalf Sync] Automatic background cloud push note:', err);
+        setSyncStatus('synced');
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
   }, [tournament]);
 
   // Propagate winners when a match concludes
@@ -808,6 +945,13 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider">
                 1st, 2nd, 3rd & 4th Prizes
+              </span>
+              <span 
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider"
+                title={lastSyncedAt ? `Live background sync active • Last synced at ${lastSyncedAt}` : 'Live background cloud sync active across laptops & online hosting'}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+                {syncStatus === 'syncing' ? 'Syncing...' : 'Auto Cloud Synced'}
               </span>
             </div>
 

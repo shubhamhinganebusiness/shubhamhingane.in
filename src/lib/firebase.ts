@@ -302,6 +302,39 @@ export async function removeMatchFromRealtimeDB(matchId: string): Promise<void> 
 }
 
 /**
+ * Synchronize One-Half Tournament state to Firebase Realtime Database
+ */
+export async function syncOneHalfTournamentToRealtimeDB(tournamentData: any): Promise<void> {
+  if (!tournamentData || !rtdb) return;
+  try {
+    const tourRef = rtdbRef(rtdb, 'cricket_one_half_tournament');
+    await rtdbSet(tourRef, tournamentData);
+  } catch (err) {
+    console.warn('[Realtime Database] One-Half tournament push note:', err);
+  }
+}
+
+/**
+ * Subscribe to One-Half Tournament state in Firebase Realtime Database
+ */
+export function subscribeToRealtimeDBOneHalfTournament(onUpdate: (data: any) => void): () => void {
+  if (!rtdb) return () => {};
+  try {
+    const tourRef = rtdbRef(rtdb, 'cricket_one_half_tournament');
+    return rtdbOnValue(tourRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const val = snapshot.val();
+        if (val) onUpdate(val);
+      }
+    }, (error) => {
+      console.warn('[Realtime Database] One-Half tournament listener note:', error);
+    });
+  } catch (e) {
+    return () => {};
+  }
+}
+
+/**
  * Subscribe to the cricket_deleted_matches Firestore collection for real-time deletion synchronization
  */
 export function subscribeToDeletedMatches(onDeleted: (deletedIds: string[]) => void): () => void {
@@ -738,6 +771,50 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
 
     throw error;
   }
+}
+
+/**
+ * Safe read wrapper that reads from Firestore with timeout and automatic fallback to server proxy
+ */
+export async function safeGetDoc(collectionName: string, docId: string): Promise<any | null> {
+  if (typeof window === 'undefined' || !collectionName || !docId) return null;
+
+  // 1. If daily Firestore quota is exhausted on client, fetch directly via server proxy
+  if (isFirestoreQuotaExhausted()) {
+    try {
+      const res = await fetch(`/api/cricket/get-doc?collectionName=${encodeURIComponent(collectionName)}&docId=${encodeURIComponent(docId)}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || null;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // 2. Try client Firestore with 3.5s timeout
+  try {
+    const { doc, getDoc } = await import('firebase/firestore');
+    const docRef = doc(db, collectionName, docId);
+    const snapPromise = getDoc(docRef);
+    const snap = await Promise.race([
+      snapPromise,
+      new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Firestore read timeout')), 3500))
+    ]);
+    if (snap && snap.exists()) {
+      return snap.data();
+    }
+  } catch (err) {
+    // If client fetch fails or times out, try server proxy
+    try {
+      const res = await fetch(`/api/cricket/get-doc?collectionName=${encodeURIComponent(collectionName)}&docId=${encodeURIComponent(docId)}`);
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || null;
+      }
+    } catch (_) {}
+  }
+
+  return null;
 }
 
 /**
