@@ -1,7 +1,10 @@
 {
   "name": "Remix shubhamhingane.in (MAin Website)",
   "description": "Comprehensive multi-tenant platform featuring Google Sheets and Google Forms workspace integrations, Dairy milk collection, and Agro Shop inventory & billing management.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

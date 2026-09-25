@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Mic, MicOff, Volume2, Sparkles, AlertCircle, HelpCircle, Check, X, Globe, Radio, ChevronDown, ChevronUp } from 'lucide-react';
+import { 
+  Mic, MicOff, Volume2, Sparkles, AlertCircle, HelpCircle, Check, X, 
+  Globe, Radio, ChevronDown, ChevronUp, ShieldAlert, ExternalLink, 
+  Keyboard, RefreshCw 
+} from 'lucide-react';
 
 export type VoiceLanguage = 'mr-IN' | 'hi-IN' | 'en-IN';
 
@@ -101,11 +105,59 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   const [continuousMode, setContinuousMode] = useState(false);
   const [audioFeedback, setAudioFeedback] = useState(true);
   const [supported, setSupported] = useState(true);
+  const [micPermissionBlocked, setMicPermissionBlocked] = useState(false);
+  const [textCommandInput, setTextCommandInput] = useState('');
 
   const recognitionRef = useRef<any>(null);
   const isManuallyStoppedRef = useRef<boolean>(false);
   const audioFeedbackRef = useRef(audioFeedback);
   audioFeedbackRef.current = audioFeedback;
+
+  // Monitor microphone permission state from browser Permissions API if available
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: 'microphone' as PermissionName })
+        .then((permissionStatus) => {
+          if (permissionStatus.state === 'denied') {
+            setMicPermissionBlocked(true);
+          } else if (permissionStatus.state === 'granted') {
+            setMicPermissionBlocked(false);
+          }
+          permissionStatus.onchange = () => {
+            if (permissionStatus.state === 'denied') {
+              setMicPermissionBlocked(true);
+            } else if (permissionStatus.state === 'granted') {
+              setMicPermissionBlocked(false);
+              setStatusMessage('Microphone access enabled! Tap to speak.');
+            }
+          };
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  // Explicit helper to trigger the browser's native microphone permission prompt via getUserMedia
+  const requestMicPermission = useCallback(async (): Promise<boolean> => {
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        setMicPermissionBlocked(false);
+        setStatusMessage('✅ Microphone access granted! You can now speak cricket scores.');
+        return true;
+      } catch (err: any) {
+        console.warn('getUserMedia audio permission request rejected/error:', err);
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.name === 'SecurityError') {
+          setMicPermissionBlocked(true);
+          setStatusMessage('Microphone permission blocked. Please allow microphone in browser URL settings.');
+        } else {
+          setStatusMessage('Microphone notice: ' + (err.message || 'Check connection'));
+        }
+        return false;
+      }
+    }
+    return true;
+  }, []);
 
   // Sound chime via Web Audio API for instantaneous ear feedback
   const playChime = useCallback((frequency = 600, duration = 0.12) => {
@@ -1212,7 +1264,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   ]);
 
   // Initialize and handle Speech Recognition
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     if (disabled) return;
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -1222,9 +1274,28 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       return;
     }
 
+    // Proactively request / verify microphone permission via getUserMedia to trigger the browser prompt if needed
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        setMicPermissionBlocked(false);
+      } catch (permErr: any) {
+        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError' || permErr.name === 'SecurityError') {
+          setMicPermissionBlocked(true);
+          setIsExpanded(true);
+          setStatusMessage('Microphone permission blocked. Please allow microphone in browser URL settings or type commands below.');
+          setIsListening(false);
+          return;
+        }
+      }
+    }
+
     try {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch {}
       }
 
       const recognition = new SpeechRecognition();
@@ -1237,6 +1308,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
 
       recognition.onstart = () => {
         setIsListening(true);
+        setMicPermissionBlocked(false);
         playChime(520, 0.1);
         setStatusMessage(
           selectedLang === 'mr-IN'
@@ -1285,7 +1357,9 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       recognition.onerror = (event: any) => {
         console.debug('Speech recognition error:', event.error);
         if (event.error === 'not-allowed') {
-          setStatusMessage('Microphone permission blocked. Please allow microphone access in browser settings.');
+          setMicPermissionBlocked(true);
+          setIsExpanded(true);
+          setStatusMessage('Microphone permission blocked. Please allow microphone in browser settings or use Quick Type below.');
           setIsListening(false);
         } else if (event.error === 'no-speech') {
           // keep waiting in continuous mode
@@ -1316,9 +1390,13 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     } catch (err: any) {
       console.warn('Failed to start voice recognition:', err);
       setIsListening(false);
+      if (err.name === 'NotAllowedError' || (err.message && err.message.toLowerCase().includes('not allowed'))) {
+        setMicPermissionBlocked(true);
+        setIsExpanded(true);
+      }
       setStatusMessage('Could not start voice service: ' + (err.message || 'Check microphone'));
     }
-  }, [disabled, selectedLang, continuousMode, parseCricketCommand, executeCommand]);
+  }, [disabled, selectedLang, continuousMode, parseCricketCommand, executeCommand, parseWithAI, playChime]);
 
   const stopListening = useCallback(() => {
     isManuallyStoppedRef.current = true;
@@ -1356,24 +1434,44 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
     return (
       <div className="w-full bg-slate-900/90 border border-amber-500/20 rounded-xl px-2 py-1 shadow-md flex items-center justify-between gap-1.5 shrink-0 select-none">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <button
-            type="button"
-            id="btn-voice-mic-trigger"
-            disabled={disabled || !supported}
-            onClick={isListening ? stopListening : startListening}
-            className={`h-6.5 px-2 rounded-lg font-black text-[9px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow border shrink-0 active:scale-95 ${
-              isListening
-                ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
-                : 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
-            }`}
-            title={isListening ? 'Click to Stop Voice' : 'Click to Speak (e.g. "4", "Wide", "Out")'}
-          >
-            {isListening ? <MicOff size={11} className="animate-spin" /> : <Mic size={11} />}
-            <span>{isListening ? 'Mic ON' : '🎙️ Voice'}</span>
-          </button>
+          {micPermissionBlocked ? (
+            <button
+              type="button"
+              id="btn-voice-mic-trigger"
+              onClick={() => setIsExpanded(true)}
+              className="h-6.5 px-2 rounded-lg font-black text-[9px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow border shrink-0 bg-rose-900/90 hover:bg-rose-800 text-rose-200 border-rose-500 animate-pulse active:scale-95"
+              title="Microphone permission is blocked in browser. Click to see how to enable."
+            >
+              <ShieldAlert size={11} className="text-rose-400" />
+              <span>Mic Blocked (Fix)</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              id="btn-voice-mic-trigger"
+              disabled={disabled || !supported}
+              onClick={isListening ? stopListening : startListening}
+              className={`h-6.5 px-2 rounded-lg font-black text-[9px] uppercase tracking-wider flex items-center gap-1 transition-all cursor-pointer shadow border shrink-0 active:scale-95 ${
+                isListening
+                  ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
+              }`}
+              aria-label={isListening ? 'Click to Stop Voice' : 'Voice Assisted Scorer'}
+            >
+              {isListening ? <MicOff size={11} className="animate-spin" /> : <Mic size={11} />}
+              <span>{isListening ? 'Mic ON' : '🎙️ Voice'}</span>
+            </button>
+          )}
           
           <div className="text-[9px] text-slate-300 truncate font-medium flex-1 min-w-0">
-            {liveTranscript ? (
+            {micPermissionBlocked ? (
+              <span 
+                onClick={() => setIsExpanded(true)}
+                className="text-rose-400 font-bold truncate block cursor-pointer hover:underline"
+              >
+                ⚠️ Mic permission blocked in browser. Click here to unblock.
+              </span>
+            ) : liveTranscript ? (
               <strong className="text-amber-300 font-mono">"{liveTranscript}"</strong>
             ) : statusMessage ? (
               <span className="text-emerald-400 font-bold truncate block">{statusMessage}</span>
@@ -1596,6 +1694,117 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
           )}
         </div>
       </div>
+
+      {/* Microphone Permission Blocked Guidance & Resolution Box */}
+      {micPermissionBlocked && (
+        <div className="mt-2.5 p-3 rounded-xl bg-gradient-to-br from-rose-950/90 via-slate-900 to-rose-950/70 border border-rose-500/50 text-white shadow-xl space-y-2.5 animate-fadeIn">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 text-rose-300 font-black text-xs">
+              <ShieldAlert size={16} className="text-rose-400 shrink-0 animate-bounce" />
+              <span>Microphone Permission Blocked</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMicPermissionBlocked(false)}
+              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition cursor-pointer"
+              title="Dismiss warning"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          
+          <p className="text-[11px] text-slate-300 leading-relaxed">
+            Your browser or device has blocked microphone access for this website. Follow these 2 easy steps to unblock:
+          </p>
+
+          <div className="text-[10.5px] text-slate-200 bg-slate-950/90 p-2.5 rounded-lg border border-slate-800 space-y-1.5 font-medium">
+            <div className="flex items-start gap-1.5">
+              <span className="text-amber-400 font-bold shrink-0">1.</span>
+              <span>Click the <strong>Lock 🔒</strong> or <strong>Tune / Settings ⚙️</strong> icon in your browser URL bar (top left corner of the address bar).</span>
+            </div>
+            <div className="flex items-start gap-1.5">
+              <span className="text-amber-400 font-bold shrink-0">2.</span>
+              <span>Find <strong>Microphone</strong> and switch it from <em>Block</em> to <strong className="text-emerald-400">Allow</strong>.</span>
+            </div>
+            <div className="flex items-start gap-1.5">
+              <span className="text-amber-400 font-bold shrink-0">3.</span>
+              <span>Click <strong>"Grant / Re-test Microphone"</strong> below to start speaking.</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            <button
+              type="button"
+              onClick={async () => {
+                const ok = await requestMicPermission();
+                if (ok) {
+                  startListening();
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow cursor-pointer transition-all active:scale-95 border border-emerald-400"
+            >
+              <RefreshCw size={13} />
+              <span>Grant / Re-test Microphone</span>
+            </button>
+
+            <a
+              href={window.location.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow cursor-pointer transition-all active:scale-95 no-underline border border-indigo-400"
+            >
+              <ExternalLink size={13} />
+              <span>Open in Dedicated Tab</span>
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Command Text Input Bar (Keyboard alternative for silent / noisy / blocked environments) */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!textCommandInput.trim()) return;
+          const input = textCommandInput.trim();
+          setTextCommandInput('');
+          const localResult = parseCricketCommand(input, selectedLang);
+          if (localResult.intent !== 'unknown') {
+            playChime(880, 0.14);
+            executeCommand(localResult);
+          } else {
+            setStatusMessage(`🤖 AI Assistant analyzing: "${input}"...`);
+            parseWithAI(input, selectedLang).then((aiResult) => {
+              if (aiResult.intent !== 'unknown') playChime(880, 0.14);
+              executeCommand(aiResult);
+            });
+          }
+        }}
+        className="mt-2.5 flex items-center gap-1.5"
+      >
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={textCommandInput}
+            onChange={(e) => setTextCommandInput(e.target.value)}
+            placeholder={
+              selectedLang === 'mr-IN'
+                ? '⌨️ किंवा कमांड टाईप करा (उदा. "चार रन", "डॉट", "सिक्स", "विकेट", "वाईड")'
+                : selectedLang === 'hi-IN'
+                ? '⌨️ या कमांड टाइप करें (उदा. "चार रन", "डॉट गेंद", "छक्का", "आउट", "वाइड")'
+                : '⌨️ Or type command (e.g. "4 runs", "dot", "six", "wicket", "wide 4")'
+            }
+            className="w-full bg-slate-950/90 border border-slate-750 focus:border-amber-400 text-white text-xs rounded-xl px-3 py-1.5 placeholder:text-slate-500 outline-none transition-colors"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={!textCommandInput.trim()}
+          className="h-8 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-95 disabled:opacity-40 text-slate-950 text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all flex items-center gap-1 shrink-0"
+        >
+          <Keyboard size={13} />
+          <span>Apply</span>
+        </button>
+      </form>
 
       {/* Quick Voice Chips (Clickable fallback & prompt cheat triggers) */}
       <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
