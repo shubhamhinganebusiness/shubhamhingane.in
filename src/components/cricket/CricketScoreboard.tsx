@@ -4628,6 +4628,68 @@ export const CricketScoreboard: React.FC = () => {
     playSoundEffect('click');
   };
 
+  // AI Voice-Activated Controls: Add/Set Batsmen, Bowlers, and Opening Pairs hands-free
+  const handleVoiceSetBatsman = (playerName: string, role: 'striker' | 'non-striker' | 'new_batsman') => {
+    if (!playerName || !playerName.trim()) return;
+    const cleanName = cleanPlayerName(playerName.trim());
+    if (!cleanName) return;
+
+    // 1. If Wicket Modal is open, automatically populate new incoming batsman
+    if (showWicketModal) {
+      setNewBatsmanName(cleanName);
+      showNotification(`🎙️ Voice Scorer: Set incoming batsman to "${cleanName}"`, 'success');
+      playSoundEffect('click');
+      return;
+    }
+
+    // 2. Normal crease assignment / switch
+    if (role === 'striker') {
+      handleSelectOrSwapBatsman(cleanName, 'striker');
+    } else if (role === 'non-striker') {
+      handleSelectOrSwapBatsman(cleanName, 'non-striker');
+    } else {
+      // 'new_batsman' - if current striker hasn't faced a ball, replace them; otherwise swap/add
+      handleSelectOrSwapBatsman(cleanName, 'striker');
+    }
+  };
+
+  const handleVoiceSetBowler = (playerName: string) => {
+    if (!playerName || !playerName.trim() || !currentInnings) return;
+    const cleanName = cleanPlayerName(playerName.trim());
+    if (!cleanName) return;
+
+    // Check if over just finished (e.g. 6 legal balls bowled, awaiting new bowler)
+    const isOverBoundary = currentInnings.ballsBowled > 0 && currentInnings.ballsBowled % 6 === 0;
+    const isAwaitingNewBowler = bowlerSelectedForOver !== Math.floor(currentInnings.ballsBowled / 6);
+
+    if (isOverBoundary || isAwaitingNewBowler) {
+      const existingIdx = currentInnings.bowlers.findIndex(
+        b => cleanPlayerName(b.name).toLowerCase() === cleanName.toLowerCase()
+      );
+      if (existingIdx !== -1) {
+        handleSelectNewBowlerForOver(existingIdx);
+        showNotification(`🎙️ Voice: Over ${Math.floor(currentInnings.ballsBowled / 6) + 1} bowler selected: "${cleanName}"`, 'success');
+      } else {
+        handleAddNewBowlerAndProgress(cleanName);
+        showNotification(`🎙️ Voice: Added & started Over with new bowler "${cleanName}"`, 'success');
+      }
+      return;
+    }
+
+    // Mid-over bowling change or innings opening bowler
+    handleSelectOrAddNewBowler(cleanName);
+  };
+
+  const handleVoiceSetOpeners = (strikerName: string, nonStrikerName: string) => {
+    const cStriker = cleanPlayerName(strikerName.trim());
+    const cNonStriker = cleanPlayerName(nonStrikerName.trim());
+    if (!cStriker || !cNonStriker || !currentInnings) return;
+
+    handleSelectOrSwapBatsman(cStriker, 'striker');
+    handleSelectOrSwapBatsman(cNonStriker, 'non-striker');
+    showNotification(`🎙️ Voice Scorer: Set opening pair "${cStriker}" & "${cNonStriker}"`, 'success');
+  };
+
   const handleAddPenaltyRuns = (runsToAdd: number) => {
     if (!currentInnings) return;
     pushStateToUndoStack(match);
@@ -12625,8 +12687,11 @@ export const CricketScoreboard: React.FC = () => {
               }}
               onScoreExtra={(type, extraRuns) => {
                 if (type === 'wide') {
+                  if (extraRuns === 4) setActiveAnimation('four');
                   handleScoreEvent({ type: 'wide', val: extraRuns });
                 } else if (type === 'noball') {
+                  if (extraRuns === 6) setActiveAnimation('six');
+                  else if (extraRuns === 4) setActiveAnimation('four');
                   handleScoreEvent({ type: 'noball', val: extraRuns });
                 }
               }}
@@ -12640,8 +12705,13 @@ export const CricketScoreboard: React.FC = () => {
                 handleUndoLastBall();
               }}
               onSwapBatsmen={() => {
-                handleSwapStriker();
+                handleSwapStrikers();
               }}
+              onSetBatsman={handleVoiceSetBatsman}
+              onSetBowler={handleVoiceSetBowler}
+              onSetOpeners={handleVoiceSetOpeners}
+              isWicketModalOpen={showWicketModal}
+              isOverComplete={Boolean(currentInnings && currentInnings.ballsBowled > 0 && currentInnings.ballsBowled % 6 === 0 && bowlerSelectedForOver !== Math.floor(currentInnings.ballsBowled / 6))}
               onTriggerOverlay={(overlayType) => {
                 if (overlayType === 'none' || overlayType === 'clear') {
                   updateOverlayProp({
@@ -23066,8 +23136,11 @@ export const CricketScoreboard: React.FC = () => {
                             }}
                             onScoreExtra={(type, extraRuns) => {
                               if (type === 'wide') {
+                                if (extraRuns === 4) setActiveAnimation('four');
                                 handleScoreEvent({ type: 'wide', val: extraRuns });
                               } else if (type === 'noball') {
+                                if (extraRuns === 6) setActiveAnimation('six');
+                                else if (extraRuns === 4) setActiveAnimation('four');
                                 handleScoreEvent({ type: 'noball', val: extraRuns });
                               }
                             }}
@@ -23081,8 +23154,13 @@ export const CricketScoreboard: React.FC = () => {
                               handleUndoLastBall();
                             }}
                             onSwapBatsmen={() => {
-                              handleSwapStriker();
+                              handleSwapStrikers();
                             }}
+                            onSetBatsman={handleVoiceSetBatsman}
+                            onSetBowler={handleVoiceSetBowler}
+                            onSetOpeners={handleVoiceSetOpeners}
+                            isWicketModalOpen={showWicketModal}
+                            isOverComplete={Boolean(currentInnings && currentInnings.ballsBowled > 0 && currentInnings.ballsBowled % 6 === 0 && bowlerSelectedForOver !== Math.floor(currentInnings.ballsBowled / 6))}
                             onTriggerOverlay={(overlayType) => {
                               if (overlayType === 'none' || overlayType === 'clear') {
                                 updateOverlayProp({

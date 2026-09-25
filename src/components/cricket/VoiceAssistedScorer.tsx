@@ -6,11 +6,35 @@ export type VoiceLanguage = 'mr-IN' | 'hi-IN' | 'en-IN';
 export interface VoiceScoreCommandResult {
   rawTranscript: string;
   detectedLang: VoiceLanguage;
-  intent: 'runs' | 'dot' | 'wide' | 'noball' | 'wicket' | 'bye' | 'legbye' | 'undo' | 'swap_batsmen' | 'overlay' | 'unknown';
+  intent: 
+    | 'runs' 
+    | 'dot' 
+    | 'wide' 
+    | 'noball' 
+    | 'wicket' 
+    | 'bye' 
+    | 'legbye' 
+    | 'undo' 
+    | 'swap_batsmen' 
+    | 'overlay' 
+    | 'set_batsman' 
+    | 'set_bowler' 
+    | 'set_openers' 
+    | 'declare_innings'
+    | 'end_match'
+    | 'open_modal'
+    | 'add_penalty'
+    | 'free_hit'
+    | 'unknown';
   runs?: number;
   extraRuns?: number;
   wicketType?: 'bowled' | 'caught' | 'run_out' | 'lbw' | 'stumped' | 'hit_wicket';
   overlayType?: 'team_vs_team' | 'squad_a' | 'squad_b' | 'squad_both' | 'field_positions' | 'batting_summary' | 'bowling_summary' | 'tournament_logo' | 'toss_result' | 'none';
+  modalType?: 'toss' | 'dls' | 'field_positions' | 'awards' | 'sponsors' | 'prizes' | 'scorecard' | 'share' | 'dream_team' | 'playoff' | 'edit_match' | 'slider_admin';
+  penaltyRuns?: number;
+  playerName?: string;
+  nonStrikerName?: string;
+  batsmanRole?: 'striker' | 'non-striker' | 'new_batsman';
   confidence: number;
   explanation: string;
 }
@@ -27,6 +51,16 @@ interface VoiceAssistedScorerProps {
   onSwapBatsmen?: () => void;
   onTriggerOverlay?: (overlayType: string) => void;
   onDismissOverlay?: () => void;
+  onSetBatsman?: (name: string, role: 'striker' | 'non-striker' | 'new_batsman') => void;
+  onSetBowler?: (name: string) => void;
+  onSetOpeners?: (strikerName: string, nonStrikerName: string) => void;
+  onDeclareInnings?: () => void;
+  onEndMatch?: () => void;
+  onOpenModal?: (modalType: 'toss' | 'dls' | 'field_positions' | 'awards' | 'sponsors' | 'prizes' | 'scorecard' | 'share' | 'dream_team' | 'playoff' | 'edit_match' | 'slider_admin') => void;
+  onAddPenalty?: (runs: number) => void;
+  onToggleFreeHit?: () => void;
+  isWicketModalOpen?: boolean;
+  isOverComplete?: boolean;
   strikerName?: string;
   bowlerName?: string;
 }
@@ -43,6 +77,16 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
   onSwapBatsmen,
   onTriggerOverlay,
   onDismissOverlay,
+  onSetBatsman,
+  onSetBowler,
+  onSetOpeners,
+  onDeclareInnings,
+  onEndMatch,
+  onOpenModal,
+  onAddPenalty,
+  onToggleFreeHit,
+  isWicketModalOpen = false,
+  isOverComplete = false,
   strikerName,
   bowlerName
 }) => {
@@ -120,6 +164,106 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
         confidence: 0.99,
         explanation: 'Dismiss Live Broadcast Overlay'
       };
+    }
+
+    // Helper: Clean up extracted player names
+    const cleanSpokenName = (nameStr: string): string => {
+      if (!nameStr) return '';
+      let cleaned = nameStr.trim();
+      cleaned = cleaned.replace(/[.,?!:;]+$/, '').trim();
+      cleaned = cleaned.replace(/\s+(आहे|आहेत|येईल|आणा|द्या|करा|खेळेल|खेळतोय|है|हैं|आएगा|लाओ|दो|करेगा|खेलेगा|please|now|is|here|come)$/i, '').trim();
+      cleaned = cleaned.replace(/^(नाव|नाम|name|named)\s+/i, '').trim();
+      if (/^[a-zA-Z\s]+$/.test(cleaned)) {
+        cleaned = cleaned.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      }
+      return cleaned;
+    };
+
+    // A. OPENING PAIR DETECTION (Match start / Innings start)
+    const openersMatch = text.match(/(?:opening\s+pair|openers?|सलामी\s+जोडी(?:दार)?|ओपनर(?:्स)?|सलामी\s+बल्लेबाज)\s+([^\s,]+(?:\s+[^\s,]+)?)\s+(?:and|&|आणि|और|व)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (openersMatch) {
+      const p1 = cleanSpokenName(openersMatch[1]);
+      const p2 = cleanSpokenName(openersMatch[2]);
+      if (p1 && p2) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_openers',
+          playerName: p1,
+          nonStrikerName: p2,
+          confidence: 0.98,
+          explanation: `Set Openers: ${p1} & ${p2}`
+        };
+      }
+    }
+
+    // B. NON-STRIKER BATSMAN
+    const nonStrikerMatch = text.match(/(?:non[\s-]?striker|नॉन[\s-]?स्ट्रायकर|नॉन[\s-]?स्ट्राइकर|दुसरा\s+बॅट्समन|दूसरा\s+बल्लेबाज)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (nonStrikerMatch) {
+      const p = cleanSpokenName(nonStrikerMatch[1]);
+      if (p && !['change', 'swap', 'बदला', 'बदलो'].includes(p.toLowerCase())) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_batsman',
+          batsmanRole: 'non-striker',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `Set Non-Striker: ${p}`
+        };
+      }
+    }
+
+    // C. STRIKER BATSMAN
+    const strikerMatch = text.match(/(?:striker|स्ट्रायकर|स्ट्राइकर)\s+(?:बॅट्समन\s+|बल्लेबाज\s+)?([^\s,]+(?:\s+[^\s,]+)?)/i) ||
+      text.match(/([^\s,]+(?:\s+[^\s,]+)?)\s+(?:on\s+strike|स्ट्राइकवर|स्ट्राइक\s+पर)/i);
+    if (strikerMatch) {
+      const p = cleanSpokenName(strikerMatch[1]);
+      if (p && !['change', 'swap', 'बदला', 'बदलो', 'rotate'].includes(p.toLowerCase())) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_batsman',
+          batsmanRole: 'striker',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `Set Striker: ${p}`
+        };
+      }
+    }
+
+    // D. NEW BATSMAN / NEXT BATSMAN (After wicket fall or anytime)
+    const newBatsmanMatch = text.match(/(?:new\s+batsman|next\s+batsman|incoming\s+batsman|नवीन\s+बॅट्समन|नवीन\s+फलंदाज|पुढचा\s+फलंदाज|पुढचा\s+बॅट्समन|नया\s+बल्लेबाज|अगला\s+बल्लेबाज|नया\s+बैट्समैन)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (newBatsmanMatch) {
+      const p = cleanSpokenName(newBatsmanMatch[1]);
+      if (p) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_batsman',
+          batsmanRole: 'new_batsman',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `New Batsman: ${p}`
+        };
+      }
+    }
+
+    // E. NEW BOWLER / NEXT BOWLER / CHANGE BOWLER (Over finish / Inning start / Match start)
+    const bowlerMatch = text.match(/(?:new\s+bowler|next\s+bowler|change\s+bowler|opening\s+bowler|bowler|नवीन\s+बॉलर|पुढचा\s+बॉलर|बॉलर\s+बदला|बॉलर\s+बदलो|पहिला\s+बॉलर|नवीन\s+गोलंदाज|पुढचा\s+गोलंदाज|गोलंदाज|बॉलर|नया\s+गेंदबाज|अगला\s+गेंदबाज|गेंदबाज|पहला\s+गेंदबाज)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (bowlerMatch) {
+      const p = cleanSpokenName(bowlerMatch[1]);
+      const disallowedWords = ['name', 'change', 'बदला', 'बदलो', 'दाखवा', 'दिखाओ', 'कार्ड', 'समरी', 'summary', 'list', 'यादी', 'summary'];
+      if (p && !disallowedWords.includes(p.toLowerCase())) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_bowler',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `Bowler: ${p}`
+        };
+      }
     }
 
     // Team vs Team Logo & Matchup Card Overlay
@@ -236,6 +380,212 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
+    // SCOREBOARD MANAGER OPERATIONS: DECLARE INNINGS
+    if (
+      text.includes('declare innings') || text.includes('declare inning') || text.includes('declaration') ||
+      text.includes('डाव घोषित') || text.includes('डाव संपवा') || text.includes('डाव डिक्लेअर') ||
+      text.includes('पारी घोषित') || text.includes('पारी समाप्त') || text.includes('इनिंग्स डिक्लेअर') ||
+      text.includes('innings declared') || text.includes('declare the innings')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'declare_innings',
+        confidence: 0.99,
+        explanation: 'Declare Innings / Transition to Next Innings'
+      };
+    }
+
+    // SCOREBOARD MANAGER OPERATIONS: END / FINISH MATCH
+    if (
+      text.includes('end match') || text.includes('finish match') || text.includes('complete match') ||
+      text.includes('सामना समाप्त') || text.includes('मॅच संपली') || text.includes('सामना संपवा') ||
+      text.includes('मैच समाप्त') || text.includes('मैच खत्म') || text.includes('conclude match')
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'end_match',
+        confidence: 0.99,
+        explanation: 'Conclude & End Cricket Match'
+      };
+    }
+
+    // SCOREBOARD MANAGER OPERATIONS: PENALTY RUNS (e.g. "penalty 5 runs", "५ रन पेनल्टी", "5 penalty")
+    const penaltyMatch = text.match(/(?:penalty|पेनल्टी|दंड)\s+(\d+)/i) || text.match(/(\d+)\s+(?:runs?\s+)?(?:penalty|पेनल्टी|दंड)/i);
+    if (penaltyMatch) {
+      const pRuns = parseInt(penaltyMatch[1], 10);
+      if (!isNaN(pRuns) && pRuns > 0 && pRuns <= 20) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'add_penalty',
+          penaltyRuns: pRuns,
+          confidence: 0.98,
+          explanation: `Award +${pRuns} Penalty Runs`
+        };
+      }
+    }
+
+    // SCOREBOARD MANAGER OPERATIONS: TOGGLE FREE HIT
+    if (
+      text.includes('toggle free hit') || text.includes('set free hit') || text.includes('फ्री हिट चालू') ||
+      text.includes('फ्री हिट लावा') || text.includes('फ्री हिट लगाओ') || (text.includes('फ्री हिट') && !text.includes('नो बॉल') && !text.includes('नोबॉल'))
+    ) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'free_hit',
+        confidence: 0.98,
+        explanation: 'Toggle Free Hit Delivery Status'
+      };
+    }
+
+    // SCOREBOARD MANAGER OPERATIONS: OPEN MODALS & STUDIOS
+    // 1. Digital Toss Coin Flip
+    if (text.includes('open toss') || text.includes('toss modal') || text.includes('spin coin') || text.includes('टॉस करा') || text.includes('नाणेफेक') || text.includes('सिक्का उछालो')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'toss',
+        confidence: 0.98,
+        explanation: 'Open Digital Toss & Coin Flip Studio'
+      };
+    }
+
+    // 2. DLS Calculator Modal
+    if (text.includes('dls') || text.includes('duckworth') || text.includes('पाऊस नियम') || text.includes('डीएलएस') || text.includes('डकवर्थ')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'dls',
+        confidence: 0.98,
+        explanation: 'Open DLS Rain Calculator'
+      };
+    }
+
+    // 3. Field Position Manager Modal
+    if (text.includes('open field position') || text.includes('fielding positions modal') || text.includes('फील्डिंग मॅनेजर') || text.includes('फील्डिंग सेटअप उघडा')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'field_positions',
+        confidence: 0.98,
+        explanation: 'Open Field Positions & Radar Manager'
+      };
+    }
+
+    // 4. Awards & Certificate Studio
+    if (text.includes('open awards') || text.includes('award modal') || text.includes('certificate studio') || text.includes('पारितोषिक') || text.includes('प्रमाणपत्र') || text.includes('अवॉर्ड्स')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'awards',
+        confidence: 0.98,
+        explanation: 'Open Match Awards & Certificate Studio'
+      };
+    }
+
+    // 5. Sponsors Manager
+    if (text.includes('open sponsor') || text.includes('sponsor manager') || text.includes('प्रायोजक') || text.includes('स्पॉन्सर')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'sponsors',
+        confidence: 0.98,
+        explanation: 'Open Sponsor Banner Manager'
+      };
+    }
+
+    // 6. Prize Money Manager
+    if (text.includes('open prize') || text.includes('prize money') || text.includes('बक्षीस') || text.includes('इनाम')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'prizes',
+        confidence: 0.98,
+        explanation: 'Open Tournament Prize Money Desk'
+      };
+    }
+
+    // 7. Full Scorecard Modal
+    if (text.includes('full scorecard') || text.includes('open scorecard') || text.includes('संपूर्ण धावफलक') || text.includes('पूरा स्कोरकार्ड') || text.includes('स्कोअरकार्ड दाखवा')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'scorecard',
+        confidence: 0.98,
+        explanation: 'Open Match Scorecard Breakdown'
+      };
+    }
+
+    // 8. Public Share Modal
+    if (text.includes('share match') || text.includes('public share') || text.includes('शेअर मॅच') || text.includes('मैच शेयर')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'share',
+        confidence: 0.98,
+        explanation: 'Open Public Match Share & Live Link Desk'
+      };
+    }
+
+    // 9. Dream Team Calculator Modal
+    if (text.includes('dream team') || text.includes('ड्रीम टीम') || text.includes('बेस्ट ११')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'dream_team',
+        confidence: 0.98,
+        explanation: 'Open Tournament Dream Team XI'
+      };
+    }
+
+    // 10. Playoff Scenarios Modal
+    if (text.includes('playoff') || text.includes('प्लेऑफ') || text.includes('सेमीफायनल समीकरण')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'playoff',
+        confidence: 0.98,
+        explanation: 'Open Playoff Qualifications Simulator'
+      };
+    }
+
+    // 11. Edit Match Details Modal
+    if (text.includes('edit match') || text.includes('मॅच एडिट') || text.includes('मैच एडिट') || text.includes('change overs limit') || text.includes('edit ground')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'edit_match',
+        confidence: 0.98,
+        explanation: 'Open Edit Live Match Parameters'
+      };
+    }
+
+    // 12. Spectator Slider Images Admin
+    if (text.includes('spectator slider') || text.includes('slider admin') || text.includes('फोटो स्लाइडर') || text.includes('स्लाइडर फोटो')) {
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'open_modal',
+        modalType: 'slider_admin',
+        confidence: 0.98,
+        explanation: 'Open Spectator Photo Slider Studio'
+      };
+    }
+
     // 1. UNDO COMMAND
     // Marathi/Hindi/English: अनडू, मागे घे, वापस, undo, revert, cancel last ball
     if (
@@ -252,48 +602,158 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // 2. BOUNDARY RUNS: SIX (6)
-    // Marathi: षटकार, सिक्स, सहा रन, सहा धावा, छक्का, विशाल षटकार, गगनचुंबी
-    // Hindi: छक्का, सिक्स, छह रन, छह
-    // English: six, maximum, out of ground, sixer
+    // 2. STRIKE ROTATION / SWAP BATSMEN
     if (
-      text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
-      text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
-      text.includes('सिक्स') || text.includes('maximum') || text === '6' || text.includes('गगनचुंबी')
+      text.includes('swap') || text.includes('स्ट्राइक बदला') || text.includes('स्ट्राइक चेंज') || 
+      text.includes('strike change') || text.includes('rotate strike') || text.includes('स्ट्राइक')
     ) {
       return {
         rawTranscript: raw,
         detectedLang: lang,
-        intent: 'runs',
-        runs: 6,
-        confidence: 0.95,
-        explanation: 'SIX! 6 Runs'
+        intent: 'swap_batsmen',
+        confidence: 0.9,
+        explanation: 'Swap Striker & Non-Striker'
       };
     }
 
-    // 3. BOUNDARY RUNS: FOUR (4)
-    // Marathi: चौकार, चार रन, चार धावा, कडक चौकार, फोर, बाउंड्री
-    // Hindi: चौका, चार रन, चौकार
-    // English: four, boundary, four runs
-    if (
-      text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
-      text.includes('चार') || text.includes('फोर') || text.includes('boundary') || 
-      text.includes('बाउंड्री') || text === '4'
-    ) {
+    // =========================================================================
+    // 3. COMPOUND CALLS: NO-BALL + BOUNDARY / RUNS (Free Hit Next)
+    // Checked BEFORE plain boundary 6/4 to prevent masking compound deliveries!
+    // Examples: "no ball four", "नो बॉल चौकार", "नो बॉल षटकार", "no ball 6", "no ball single"
+    // =========================================================================
+    const isNoBallKeyword = (
+      text.includes('no ball') || text.includes('noball') || text.includes('no-ball') ||
+      text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल') || 
+      text.includes('free hit') || text.includes('फ्री हिट')
+    );
+    if (isNoBallKeyword) {
+      let extraRuns = 0;
+      if (
+        text.includes('6') || text.includes('six') || text.includes('sixer') || 
+        text.includes('सहा') || text.includes('छक्का') || text.includes('षटकार') || 
+        text.includes('सिक्स') || text.includes('maximum') || text.includes('गगनचुंबी')
+      ) {
+        extraRuns = 6;
+      } else if (
+        text.includes('4') || text.includes('four') || text.includes('चार') || 
+        text.includes('चौका') || text.includes('चौकार') || text.includes('फोर') || 
+        text.includes('boundary') || text.includes('बाउंड्री')
+      ) {
+        extraRuns = 4;
+      } else if (text.includes('3') || text.includes('three') || text.includes('triple') || text.includes('तीन')) {
+        extraRuns = 3;
+      } else if (text.includes('2') || text.includes('two') || text.includes('double') || text.includes('दोन') || text.includes('दो')) {
+        extraRuns = 2;
+      } else if (text.includes('1') || text.includes('one') || text.includes('single') || text.includes('एक') || text.includes('सिंगल')) {
+        extraRuns = 1;
+      }
+
+      const totalRuns = 1 + extraRuns;
       return {
         rawTranscript: raw,
         detectedLang: lang,
-        intent: 'runs',
-        runs: 4,
-        confidence: 0.95,
-        explanation: 'FOUR! 4 Runs'
+        intent: 'noball',
+        extraRuns,
+        confidence: 0.98,
+        explanation: extraRuns > 0 
+          ? `No Ball + ${extraRuns} run(s) [Total +${totalRuns} runs, Free Hit next]` 
+          : 'No Ball (+1) [Free Hit next]'
       };
     }
 
-    // 4. WICKET COMMANDS
-    // Marathi: विकेट, बाद, आउट, बोल्ड, झेल, रन आउट, दांडी गुल, पायचीत
-    // Hindi: विकेट, आउट, बोल्ड, कैच, रन आउट, एलबीडब्ल्यू
-    // English: wicket, out, bowled, caught, run out, stumped, lbw, dismissed
+    // =========================================================================
+    // 4. COMPOUND CALLS: WIDE BALL + BOUNDARY / RUNS / STUMPING
+    // Checked BEFORE plain boundary 6/4 to prevent masking compound deliveries!
+    // Examples: "wide four", "वाईड चौकार", "wide plus two", "वाईड १ रन", "wide stumping"
+    // =========================================================================
+    const isWideKeyword = (
+      text.includes('wide') || text.includes('वाईड') || text.includes('व्हाईड') || text.includes('वाइड')
+    );
+    if (isWideKeyword) {
+      // Check for wide + stumping
+      if (text.includes('stump') || text.includes('स्टंप')) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'wide',
+          extraRuns: 0,
+          wicketType: 'stumped',
+          confidence: 0.98,
+          explanation: 'Wide Delivery + STUMPED OUT'
+        };
+      }
+
+      let extraRuns = 0;
+      if (
+        text.includes('4') || text.includes('four') || text.includes('चार') || 
+        text.includes('चौका') || text.includes('चौकार') || text.includes('फोर') || 
+        text.includes('boundary') || text.includes('बाउंड्री')
+      ) {
+        extraRuns = 4;
+      } else if (text.includes('3') || text.includes('three') || text.includes('triple') || text.includes('तीन')) {
+        extraRuns = 3;
+      } else if (text.includes('2') || text.includes('two') || text.includes('double') || text.includes('दोन') || text.includes('दो')) {
+        extraRuns = 2;
+      } else if (text.includes('1') || text.includes('one') || text.includes('single') || text.includes('एक') || text.includes('सिंगल')) {
+        extraRuns = 1;
+      }
+
+      const totalWideRuns = 1 + extraRuns;
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'wide',
+        extraRuns,
+        confidence: 0.98,
+        explanation: extraRuns > 0 
+          ? `Wide + ${extraRuns} run(s) [Total +${totalWideRuns} runs]` 
+          : 'Wide Ball (+1)'
+      };
+    }
+
+    // =========================================================================
+    // 5. COMPOUND CALLS: BYE / LEG-BYE + BOUNDARY / RUNS
+    // =========================================================================
+    const isLegByeKeyword = (
+      text.includes('leg bye') || text.includes('legbye') || text.includes('लेग बाय') || 
+      text.includes('लेगबाई') || text.includes('लेग बाई')
+    );
+    if (isLegByeKeyword) {
+      let runs = 1;
+      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार') || text.includes('boundary') || text.includes('बाउंड्री')) runs = 4;
+      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) runs = 2;
+      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) runs = 3;
+      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) runs = 1;
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'legbye',
+        runs,
+        confidence: 0.95,
+        explanation: `Leg-Bye +${runs}`
+      };
+    }
+
+    const isByeKeyword = text.includes('bye') || text.includes('बाय') || text.includes('बाई');
+    if (isByeKeyword) {
+      let runs = 1;
+      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार') || text.includes('boundary') || text.includes('बाउंड्री')) runs = 4;
+      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) runs = 2;
+      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) runs = 3;
+      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) runs = 1;
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'bye',
+        runs,
+        confidence: 0.95,
+        explanation: `Bye +${runs}`
+      };
+    }
+
+    // =========================================================================
+    // 6. WICKET COMMANDS
+    // =========================================================================
     if (
       /\b(out|wicket|bowled|caught|lbw|stumped|dismissed)\b/.test(text) || 
       text.includes('बाद') || text.includes('आउट') || text.includes('बोल्ड') ||
@@ -319,98 +779,9 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // 3. STRIKE ROTATION / SWAP BATSMEN
-    if (
-      text.includes('swap') || text.includes('स्ट्राइक बदला') || text.includes('स्ट्राइक चेंज') || 
-      text.includes('strike change') || text.includes('rotate strike') || text.includes('स्ट्राइक')
-    ) {
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'swap_batsmen',
-        confidence: 0.9,
-        explanation: 'Swap Striker & Non-Striker'
-      };
-    }
-
-    // 4. WIDE BALL COMMANDS (Wide, Wide + 1, Wide + 4, etc.)
-    // Marathi: वाईड, व्हाईड, वाईड बॉल, वाईड आणि एक, वाईड चौकार
-    // Hindi: वाइड, वाइड बॉल, वाइड एक रन, वाइड चार
-    // English: wide, wide ball, wide plus one, wide four
-    if (text.includes('wide') || text.includes('वाईड') || text.includes('व्हाईड') || text.includes('वाइड')) {
-      let extraRuns = 0;
-      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
-      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single') || text.includes('सिंगल')) extraRuns = 1;
-      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो') || text.includes('double')) extraRuns = 2;
-      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
-
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'wide',
-        extraRuns,
-        confidence: 0.92,
-        explanation: extraRuns > 0 ? `Wide + ${extraRuns} run(s)` : 'Wide Ball (+1)'
-      };
-    }
-
-    // 5. NO BALL COMMANDS (No ball, No ball + 4, No ball + 6, Free Hit)
-    // Marathi: नो बॉल, नोबॉल, नो बॉल चौकार, नो बॉल षटकार, फ्री हिट
-    // Hindi: नो बॉल, नोबाल, नो बॉल चार, नो बॉल छक्का, फ्री हिट
-    // English: no ball, no-ball, noball, no ball four, no ball six, free hit
-    if (text.includes('no ball') || text.includes('noball') || text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल') || text.includes('free hit') || text.includes('फ्री हिट')) {
-      let extraRuns = 0;
-      if (text.includes('6') || text.includes('six') || text.includes('सहा') || text.includes('छक्का') || text.includes('षटकार')) extraRuns = 6;
-      else if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
-      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single') || text.includes('सिंगल')) extraRuns = 1;
-      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) extraRuns = 2;
-      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
-
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'noball',
-        extraRuns,
-        confidence: 0.92,
-        explanation: extraRuns > 0 ? `No Ball + ${extraRuns} run(s) [Free Hit]` : 'No Ball (+1) [Free Hit]'
-      };
-    }
-
-    // 6. BYE / LEG-BYE COMMANDS
-    if (text.includes('leg bye') || text.includes('legbye') || text.includes('लेग बाय') || text.includes('लेगबाई')) {
-      let runs = 1;
-      if (text.includes('4') || text.includes('four') || text.includes('चार')) runs = 4;
-      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) runs = 2;
-      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) runs = 3;
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'legbye',
-        runs,
-        confidence: 0.9,
-        explanation: `Leg-Bye +${runs}`
-      };
-    }
-
-    if (text.includes('bye') || text.includes('बाय') || text.includes('बाई')) {
-      let runs = 1;
-      if (text.includes('4') || text.includes('four') || text.includes('चार')) runs = 4;
-      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) runs = 2;
-      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) runs = 3;
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'bye',
-        runs,
-        confidence: 0.9,
-        explanation: `Bye +${runs}`
-      };
-    }
-
+    // =========================================================================
     // 7. DOT BALL COMMANDS
-    // Marathi: डॉट, निर्धाव, शून्य, काही नाही, डॉट बॉल
-    // Hindi: डॉट, खाली, शून्य, डॉट बॉल
-    // English: dot, dot ball, zero, no run, defense
+    // =========================================================================
     if (
       text.includes('dot') || text.includes('डॉट') || text.includes('निर्धाव') || 
       text.includes('शून्य') || text.includes('zero') || text.includes('no run') || 
@@ -426,10 +797,9 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // 8. BOUNDARY RUNS: SIX (6)
-    // Marathi: षटकार, सिक्स, सहा रन, सहा धावा, छक्का, विशाल षटकार, गगनचुंबी
-    // Hindi: छक्का, सिक्स, छह रन, छह
-    // English: six, maximum, out of ground, sixer
+    // =========================================================================
+    // 8. PLAIN BOUNDARY RUNS: SIX (6)
+    // =========================================================================
     if (
       text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
       text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
@@ -445,10 +815,9 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // 9. BOUNDARY RUNS: FOUR (4)
-    // Marathi: चौकार, चार रन, चार धावा, कडक चौकार, फोर, बाउंड्री
-    // Hindi: चौका, चार रन, चौकार
-    // English: four, boundary, four runs
+    // =========================================================================
+    // 9. PLAIN BOUNDARY RUNS: FOUR (4)
+    // =========================================================================
     if (
       text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
       text.includes('चार') || text.includes('फोर') || text.includes('boundary') || 
@@ -464,8 +833,9 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // 10. SINGLE & RUN CHECKS (1, 2, 3)
-    // Single / 1
+    // =========================================================================
+    // 10. PLAIN RUNS: 1, 2, 3
+    // =========================================================================
     if (
       text.includes('one') || text.includes('single') || text.includes('एक') || 
       text.includes('सिंगल') || text === '1'
@@ -480,7 +850,6 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // Double / 2
     if (
       text.includes('two') || text.includes('double') || text.includes('दोन') || 
       text.includes('दो') || text.includes('डबल') || text === '2'
@@ -495,7 +864,6 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
       };
     }
 
-    // Three / 3
     if (
       text.includes('three') || text.includes('triple') || text.includes('तीन') || 
       text.includes('ट्रिपल') || text === '3'
@@ -582,14 +950,48 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
 
       case 'wide':
         onScoreExtra('wide', res.extraRuns || 0);
-        speakFeedback(selectedLang === 'mr-IN' ? 'वाईड बॉल' : selectedLang === 'hi-IN' ? 'वाइड गेंद' : 'Wide ball', selectedLang);
-        setStatusMessage(`✅ Wide Ball (+${1 + (res.extraRuns || 0)} total) recorded!`);
+        if (res.wicketType === 'stumped') {
+          onScoreWicket('stumped');
+          const stMsg = selectedLang === 'mr-IN'
+            ? 'वाईड बॉल आणि स्टंपिंग बाद!'
+            : selectedLang === 'hi-IN'
+            ? 'वाइड गेंद और स्टंप आउट!'
+            : 'Wide ball and stumped out!';
+          speakFeedback(stMsg, selectedLang);
+          setStatusMessage('🔴 Wide Ball (+1) + STUMPED OUT!');
+        } else if (res.extraRuns && res.extraRuns > 0) {
+          const totalWide = 1 + res.extraRuns;
+          const msg = selectedLang === 'mr-IN'
+            ? `वाईड प्लस ${res.extraRuns === 4 ? 'चौकार' : `${res.extraRuns} धावा`}, एकूण ${totalWide} धावा`
+            : selectedLang === 'hi-IN'
+            ? `वाइड और ${res.extraRuns === 4 ? 'चौका' : `${res.extraRuns} रन`}, कुल ${totalWide} रन`
+            : `Wide plus ${res.extraRuns === 4 ? 'four' : `${res.extraRuns} runs`}, ${totalWide} runs total`;
+          speakFeedback(msg, selectedLang);
+          setStatusMessage(`✅ Wide Ball + ${res.extraRuns} Runs (+${totalWide} total) recorded!`);
+        } else {
+          speakFeedback(selectedLang === 'mr-IN' ? 'वाईड बॉल' : selectedLang === 'hi-IN' ? 'वाइड गेंद' : 'Wide ball', selectedLang);
+          setStatusMessage('✅ Wide Ball (+1) recorded!');
+        }
         break;
 
       case 'noball':
         onScoreExtra('noball', res.extraRuns || 0);
-        speakFeedback(selectedLang === 'mr-IN' ? 'नो बॉल, पुढची फ्री हिट' : selectedLang === 'hi-IN' ? 'नो बॉल, फ्री हिट' : 'No ball, free hit next', selectedLang);
-        setStatusMessage(`✅ No Ball (+${1 + (res.extraRuns || 0)}) recorded with Free Hit!`);
+        if (res.extraRuns && res.extraRuns > 0) {
+          const totalNb = 1 + res.extraRuns;
+          const batLabelMr = res.extraRuns === 6 ? 'षटकार' : res.extraRuns === 4 ? 'चौकार' : `${res.extraRuns} धावा`;
+          const batLabelHi = res.extraRuns === 6 ? 'छक्का' : res.extraRuns === 4 ? 'चौका' : `${res.extraRuns} रन`;
+          const batLabelEn = res.extraRuns === 6 ? 'six' : res.extraRuns === 4 ? 'four' : `${res.extraRuns} runs`;
+          const msg = selectedLang === 'mr-IN'
+            ? `नो बॉल वर ${batLabelMr}! एकूण ${totalNb} धावा, पुढची फ्री हिट`
+            : selectedLang === 'hi-IN'
+            ? `नो बॉल पर ${batLabelHi}! कुल ${totalNb} रन, अगली गेंद फ्री हिट`
+            : `No ball and ${batLabelEn}! Total ${totalNb} runs, Free Hit next`;
+          speakFeedback(msg, selectedLang);
+          setStatusMessage(`✅ No Ball + ${res.extraRuns} Runs (+${totalNb} total) recorded with Free Hit!`);
+        } else {
+          speakFeedback(selectedLang === 'mr-IN' ? 'नो बॉल, पुढची फ्री हिट' : selectedLang === 'hi-IN' ? 'नो बॉल, फ्री हिट' : 'No ball, free hit next', selectedLang);
+          setStatusMessage('✅ No Ball (+1) recorded with Free Hit!');
+        }
         break;
 
       case 'bye':
@@ -655,11 +1057,159 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
         }
         break;
 
+      case 'set_openers':
+        if (res.playerName && res.nonStrikerName) {
+          if (onSetOpeners) {
+            onSetOpeners(res.playerName, res.nonStrikerName);
+          } else if (onSetBatsman) {
+            onSetBatsman(res.playerName, 'striker');
+            onSetBatsman(res.nonStrikerName, 'non-striker');
+          }
+          const msg = selectedLang === 'mr-IN'
+            ? `सलामी जोडी ${res.playerName} आणि ${res.nonStrikerName}`
+            : selectedLang === 'hi-IN'
+            ? `सलामी जोड़ी ${res.playerName} और ${res.nonStrikerName}`
+            : `Opening pair ${res.playerName} and ${res.nonStrikerName}`;
+          speakFeedback(msg, selectedLang);
+          setStatusMessage(`👑 Opening pair: ${res.playerName} & ${res.nonStrikerName}`);
+        }
+        break;
+
+      case 'set_batsman':
+        if (res.playerName) {
+          const role = res.batsmanRole || 'new_batsman';
+          if (onSetBatsman) {
+            onSetBatsman(res.playerName, role);
+          }
+          const roleTitle = role === 'striker' ? 'Striker' : role === 'non-striker' ? 'Non-Striker' : 'New Batsman';
+          const speechMap: Record<string, { mr: string; hi: string; en: string }> = {
+            striker: { mr: `स्ट्रायकर ${res.playerName}`, hi: `स्ट्राइकर ${res.playerName}`, en: `Striker ${res.playerName}` },
+            'non-striker': { mr: `नॉन स्ट्रायकर ${res.playerName}`, hi: `नॉन स्ट्राइकर ${res.playerName}`, en: `Non-striker ${res.playerName}` },
+            new_batsman: { mr: `नवीन फलंदाज ${res.playerName} क्रीजवर`, hi: `नए बल्लेबाज ${res.playerName} क्रीज पर`, en: `New batsman ${res.playerName}` }
+          };
+          const speech = speechMap[role]?.[selectedLang === 'mr-IN' ? 'mr' : selectedLang === 'hi-IN' ? 'hi' : 'en'] || `${roleTitle} ${res.playerName}`;
+          speakFeedback(speech, selectedLang);
+          setStatusMessage(`🏏 ${roleTitle} set to "${res.playerName}"`);
+        }
+        break;
+
+      case 'set_bowler':
+        if (res.playerName) {
+          if (onSetBowler) {
+            onSetBowler(res.playerName);
+          }
+          const isOverFin = isOverComplete;
+          const speech = selectedLang === 'mr-IN'
+            ? (isOverFin ? `नवीन ओव्हर बॉलर ${res.playerName}` : `नवीन बॉलर ${res.playerName}`)
+            : selectedLang === 'hi-IN'
+            ? (isOverFin ? `नए ओवर के गेंदबाज ${res.playerName}` : `नए गेंदबाज ${res.playerName}`)
+            : (isOverFin ? `New over bowler ${res.playerName}` : `Bowler ${res.playerName}`);
+          speakFeedback(speech, selectedLang);
+          setStatusMessage(`🎯 Bowler set to "${res.playerName}"`);
+        }
+        break;
+
+      case 'declare_innings':
+        if (onDeclareInnings) {
+          onDeclareInnings();
+          const speech = selectedLang === 'mr-IN' 
+            ? 'डाव घोषित केला, दुसरी इनिंग्स सुरू' 
+            : selectedLang === 'hi-IN' 
+            ? 'पारी घोषित की गई, दूसरी पारी शुरू' 
+            : 'Innings declared successfully';
+          speakFeedback(speech, selectedLang);
+          setStatusMessage('🏁 Innings declared by Score Manager');
+        }
+        break;
+
+      case 'end_match':
+        if (onEndMatch) {
+          onEndMatch();
+          const speech = selectedLang === 'mr-IN' 
+            ? 'सामना समाप्त, निकाल नोंदवला' 
+            : selectedLang === 'hi-IN' 
+            ? 'मैच समाप्त, परिणाम दर्ज किया गया' 
+            : 'Match concluded and recorded in history';
+          speakFeedback(speech, selectedLang);
+          setStatusMessage('🏆 Match concluded by Score Manager');
+        }
+        break;
+
+      case 'add_penalty':
+        if (onAddPenalty && res.penaltyRuns) {
+          onAddPenalty(res.penaltyRuns);
+          const speech = selectedLang === 'mr-IN' 
+            ? `${res.penaltyRuns} धावा पेनल्टी जोडल्या` 
+            : selectedLang === 'hi-IN' 
+            ? `${res.penaltyRuns} रन पेनल्टी जोड़ी गई` 
+            : `${res.penaltyRuns} penalty runs awarded`;
+          speakFeedback(speech, selectedLang);
+          setStatusMessage(`⚖️ +${res.penaltyRuns} Penalty Runs added to score`);
+        }
+        break;
+
+      case 'free_hit':
+        if (onToggleFreeHit) {
+          onToggleFreeHit();
+          const speech = selectedLang === 'mr-IN' 
+            ? 'फ्री हिट डिलिव्हरी लागू केली' 
+            : selectedLang === 'hi-IN' 
+            ? 'फ्री हिट गेंद सक्रिय' 
+            : 'Free hit activated';
+          speakFeedback(speech, selectedLang);
+          setStatusMessage('⚡ Free Hit Delivery Activated!');
+        }
+        break;
+
+      case 'open_modal':
+        if (onOpenModal && res.modalType) {
+          onOpenModal(res.modalType);
+          const modalNames: Record<string, { mr: string; hi: string; en: string }> = {
+            toss: { mr: 'नाणेफेक टॉस सुरू केला', hi: 'सिक्का उछाल टॉस शुरू', en: 'Digital Toss studio opened' },
+            dls: { mr: 'डकवर्थ लुईस पाऊस कॅल्क्युलेटर उघडला', hi: 'डीएलएस कैलकुलेटर खुला', en: 'DLS Rain Calculator opened' },
+            field_positions: { mr: 'फील्डिंग पोझिशन्स रडार उघडला', hi: 'फील्डिंग सेटअप खुला', en: 'Field Position Manager opened' },
+            awards: { mr: 'सामना पारितोषिक व प्रमाणपत्र स्टुडिओ उघडला', hi: 'पुरस्कार व प्रमाणपत्र स्टूडियो खुला', en: 'Awards & Certificate Studio opened' },
+            sponsors: { mr: 'प्रायोजक बॅनर मॅनेजर उघडला', hi: 'प्रायोजक मैनेजर खुला', en: 'Sponsor Banner Manager opened' },
+            prizes: { mr: 'बक्षीस रक्कम मॅनेजर उघडला', hi: 'इनाम राशि मैनेजर खुला', en: 'Prize Money Manager opened' },
+            scorecard: { mr: 'संपूर्ण स्कोअरकार्ड उघडले', hi: 'पूरा स्कोरकार्ड खुला', en: 'Full Match Scorecard opened' },
+            share: { mr: 'मॅच शेअर लिंक उघडली', hi: 'मैच शेयर विंडो खुली', en: 'Public Match Share opened' },
+            dream_team: { mr: 'ड्रीम टीम ११ उघडली', hi: 'ड्रीम टीम ११ खुली', en: 'Dream Team XI opened' },
+            playoff: { mr: 'प्लेऑफ समीकरण कॅल्क्युलेटर उघडला', hi: 'प्लेऑफ कैलकुलेटर खुला', en: 'Playoff Scenarios opened' },
+            edit_match: { mr: 'मॅच तपशील बदल उघडले', hi: 'मैच संपादन खुला', en: 'Edit Match Parameters opened' },
+            slider_admin: { mr: 'फोटो स्लाइडर स्टुडिओ उघडला', hi: 'फोटो स्लाइडर स्टूडियो खुला', en: 'Spectator Photo Slider Studio opened' }
+          };
+          const speech = modalNames[res.modalType]?.[selectedLang === 'mr-IN' ? 'mr' : selectedLang === 'hi-IN' ? 'hi' : 'en'] || `${res.modalType} opened`;
+          speakFeedback(speech, selectedLang);
+          setStatusMessage(`📂 Opened: ${res.explanation}`);
+        }
+        break;
+
       default:
         setStatusMessage(`⚠️ Not recognized: "${res.rawTranscript}". Try saying: "चार रन", "छक्का", "Dot", or "Wicket".`);
         break;
     }
-  }, [selectedLang, onScoreDot, onScoreRuns, onScoreExtra, onScoreByes, onScoreWicket, onUndo, onSwapBatsmen, onTriggerOverlay, onDismissOverlay, speakFeedback]);
+  }, [
+    selectedLang,
+    onScoreDot,
+    onScoreRuns,
+    onScoreExtra,
+    onScoreByes,
+    onScoreWicket,
+    onUndo,
+    onSwapBatsmen,
+    onTriggerOverlay,
+    onDismissOverlay,
+    onSetBatsman,
+    onSetBowler,
+    onSetOpeners,
+    onDeclareInnings,
+    onEndMatch,
+    onOpenModal,
+    onAddPenalty,
+    onToggleFreeHit,
+    isOverComplete,
+    speakFeedback
+  ]);
 
   // Initialize and handle Speech Recognition
   const startListening = useCallback(() => {
@@ -1053,6 +1603,13 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
           Try saying:
         </span>
         {[
+          { label: selectedLang === 'mr-IN' ? '👑 ओपनर: रोहित & विराट' : selectedLang === 'hi-IN' ? '👑 ओपनर: रोहित & विराट' : '👑 Openers: Rohit & Virat', cmd: selectedLang === 'mr-IN' ? 'ओपनर रोहित आणि विराट' : selectedLang === 'hi-IN' ? 'सलामी बल्लेबाज रोहित और विराट' : 'openers Rohit and Virat' },
+          { label: selectedLang === 'mr-IN' ? '🏏 नवीन बॅट्समन: राहुल' : selectedLang === 'hi-IN' ? '🏏 नया बल्लेबाज: राहुल' : '🏏 New Bat: Rahul', cmd: selectedLang === 'mr-IN' ? 'नवीन बॅट्समन राहुल' : selectedLang === 'hi-IN' ? 'नया बल्लेबाज राहुल' : 'new batsman Rahul' },
+          { label: selectedLang === 'mr-IN' ? '🎯 नवीन बॉलर: बुमराह' : selectedLang === 'hi-IN' ? '🎯 नया गेंदबाज: बुमराह' : '🎯 Bowler: Bumrah', cmd: selectedLang === 'mr-IN' ? 'नवीन बॉलर बुमराह' : selectedLang === 'hi-IN' ? 'नया गेंदबाज बुमराह' : 'new bowler Bumrah' },
+          { label: selectedLang === 'mr-IN' ? '🚨 नो बॉल चौकार' : selectedLang === 'hi-IN' ? '🚨 नो बॉल चौका' : '🚨 No Ball 4', cmd: selectedLang === 'mr-IN' ? 'नो बॉल चौकार' : selectedLang === 'hi-IN' ? 'नो बॉल चौका' : 'no ball four', isCompound: true },
+          { label: selectedLang === 'mr-IN' ? '🚨 नो बॉल षटकार' : selectedLang === 'hi-IN' ? '🚨 नो बॉल छक्का' : '🚨 No Ball 6', cmd: selectedLang === 'mr-IN' ? 'नो बॉल षटकार' : selectedLang === 'hi-IN' ? 'नो बॉल छक्का' : 'no ball six', isCompound: true },
+          { label: selectedLang === 'mr-IN' ? '↔️ वाईड चौकार' : selectedLang === 'hi-IN' ? '↔️ वाइड चौका' : '↔️ Wide 4', cmd: selectedLang === 'mr-IN' ? 'वाईड चौकार' : selectedLang === 'hi-IN' ? 'वाइड चौका' : 'wide four', isCompound: true },
+          { label: selectedLang === 'mr-IN' ? '↔️ वाईड + १' : selectedLang === 'hi-IN' ? '↔️ वाइड + १' : '↔️ Wide + 1', cmd: selectedLang === 'mr-IN' ? 'वाईड आणि एक' : selectedLang === 'hi-IN' ? 'वाइड एक रन' : 'wide plus one', isCompound: true },
           { label: selectedLang === 'mr-IN' ? '⚔️ टीम vs टीम लोगो' : selectedLang === 'hi-IN' ? '⚔️ टीम vs टीम लोगो' : '⚔️ Team vs Team Logo', cmd: 'show the team vs team logo', isOverlay: true },
           { label: selectedLang === 'mr-IN' ? '📋 दोन्ही टीम स्क्वॉड' : selectedLang === 'hi-IN' ? '📋 दोनों टीम स्क्वाड' : '📋 Both Squads', cmd: 'show the both team squad list', isOverlay: true },
           { label: selectedLang === 'mr-IN' ? '🧹 ओवरले बंद' : selectedLang === 'hi-IN' ? '🧹 ओवरले हटाओ' : '🧹 Clear Overlay', cmd: 'hide overlay', isOverlay: true },
@@ -1075,6 +1632,8 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
             className={`px-2 py-0.5 rounded-lg text-[9px] font-bold shrink-0 transition-colors border cursor-pointer ${
               item.isOverlay
                 ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 hover:text-rose-200 border-rose-500/30'
+                : (item as any).isCompound
+                ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border-amber-500/30'
                 : 'bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700/60'
             }`}
           >
@@ -1182,22 +1741,45 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
                 </div>
               </div>
 
+              {/* Compound Calls Section */}
+              <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/40 p-3 rounded-xl border border-amber-500/40 shadow-md">
+                <div className="font-black text-amber-400 text-xs mb-1.5 flex items-center gap-1.5">
+                  <span>⚡ Compound Delivery Calls (No-Ball + Boundary / Wide + Runs)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 bg-slate-950/90 rounded-lg border border-amber-500/20">
+                    <strong className="text-white block flex items-center gap-1">🚨 No-Ball + Boundary / Runs (Free Hit Next)</strong>
+                    <span className="text-amber-300 block font-mono text-[10px] mt-0.5">"no ball four" | "no ball six" | "no ball single"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "नो बॉल चौकार" | "नो बॉल षटकार" | "नो बॉल वर चौकार"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "नो बॉल चौका" | "नो बॉल छक्का" | "नो बॉल पर चार रन"</span>
+                    <span className="text-emerald-400 block text-[9.5px] mt-1">✓ Adds 1 penalty + boundary to batsman + Free Hit!</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/90 rounded-lg border border-amber-500/20">
+                    <strong className="text-white block flex items-center gap-1">↔️ Wide + Boundary / Runs / Stumping</strong>
+                    <span className="text-amber-300 block font-mono text-[10px] mt-0.5">"wide four" | "wide plus one" | "wide stumping"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "वाईड चौकार" | "वाईड आणि एक" | "वाईड स्टंपिंग"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "वाइड चौका" | "वाइड एक रन" | "वाइड स्टंप"</span>
+                    <span className="text-emerald-400 block text-[9.5px] mt-1">✓ Adds 1 wide + extra runs (e.g., 5 total on wide four)!</span>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-850">
                 <div className="font-black text-purple-400 text-xs mb-1.5 flex items-center gap-1.5">
-                  <span>⚡ Extras: Wide & No-Ball (अवांतर)</span>
+                  <span>⚡ Standard Extras: Wide, No-Ball, Byes (अवांतर)</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
                   <div>
                     <strong className="text-white block">Marathi:</strong>
-                    <span className="text-slate-400">"वाईड", "वाईड आणि एक", "नो बॉल", "नो बॉल चौकार"</span>
+                    <span className="text-slate-400">"वाईड", "नो बॉल", "बाय", "लेग बाय"</span>
                   </div>
                   <div>
                     <strong className="text-white block">Hindi:</strong>
-                    <span className="text-slate-400">"वाइड", "वाइड एक रन", "नो बॉल", "नो बॉल छक्का"</span>
+                    <span className="text-slate-400">"वाइड", "नो बॉल", "बाई", "लेग बाई"</span>
                   </div>
                   <div>
                     <strong className="text-white block">English:</strong>
-                    <span className="text-slate-400">"Wide", "Wide plus one", "No ball", "No ball four"</span>
+                    <span className="text-slate-400">"Wide", "No ball", "Byes", "Leg byes"</span>
                   </div>
                 </div>
               </div>
@@ -1218,6 +1800,39 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
                   <div>
                     <strong className="text-white block">English:</strong>
                     <span className="text-slate-400">"Wicket", "Out", "Bowled", "Caught", "Run out"</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Batsmen, Openers & Bowler Changes */}
+              <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/40 p-3 rounded-xl border border-emerald-500/30 shadow-md">
+                <div className="font-black text-emerald-400 text-xs mb-1.5 flex items-center gap-1.5">
+                  <span>👥 Voice Player Management: Batsmen, Openers & Bowlers</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">👑 Opening Pair (Match / Innings Start)</strong>
+                    <span className="text-emerald-300 block font-mono text-[10px] mt-0.5">"openers Rohit and Virat"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "ओपनर रोहित आणि विराट" / "सलामी जोडी सचिन आणि सौरव"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "सलामी बल्लेबाज रोहित और विराट" / "ओपनर रोहित और विराट"</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">🏏 Striker & Non-Striker</strong>
+                    <span className="text-emerald-300 block font-mono text-[10px] mt-0.5">"striker Rohit" | "non-striker Virat"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "स्ट्रायकर रोहित" | "नॉन स्ट्रायकर विराट"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "स्ट्राइकर रोहित" | "नॉन स्ट्राइकर विराट"</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">⚡ After Wicket: Incoming Batsman</strong>
+                    <span className="text-amber-300 block font-mono text-[10px] mt-0.5">"new batsman Rahul" / "next batsman Surya"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "नवीन फलंदाज राहुल" / "नवीन बॅट्समन राहुल"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "नया बल्लेबाज राहुल" / "अगला बल्लेबाज राहुल"</span>
+                  </div>
+                  <div className="p-2 bg-slate-950/80 rounded-lg border border-slate-800">
+                    <strong className="text-white block flex items-center gap-1">🎯 Over Finish / Next Bowler / Change</strong>
+                    <span className="text-cyan-300 block font-mono text-[10px] mt-0.5">"new bowler Bumrah" / "change bowler Shami"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Marathi: "नवीन बॉलर बुमराह" / "पुढचा बॉलर शमी" / "गोलंदाज बुमराह"</span>
+                    <span className="text-slate-400 block text-[10.5px]">Hindi: "नया गेंदबाज बुमराह" / "अगला गेंदबाज शमी" / "बॉलर बदलो सिराज"</span>
                   </div>
                 </div>
               </div>

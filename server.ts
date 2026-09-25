@@ -1892,6 +1892,106 @@ function cleanServerUndefined(obj: any): any {
       };
     }
 
+    // Helper: Clean up extracted player names
+    const cleanSpokenName = (nameStr: string): string => {
+      if (!nameStr) return '';
+      let cleaned = nameStr.trim();
+      cleaned = cleaned.replace(/[.,?!:;]+$/, '').trim();
+      cleaned = cleaned.replace(/\s+(आहे|आहेत|येईल|आणा|द्या|करा|खेळेल|खेळतोय|है|हैं|आएगा|लाओ|दो|करेगा|खेलेगा|please|now|is|here|come)$/i, '').trim();
+      cleaned = cleaned.replace(/^(नाव|नाम|name|named)\s+/i, '').trim();
+      if (/^[a-zA-Z\s]+$/.test(cleaned)) {
+        cleaned = cleaned.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+      }
+      return cleaned;
+    };
+
+    // Opening Pair Detection
+    const openersMatch = text.match(/(?:opening\s+pair|openers?|सलामी\s+जोडी(?:दार)?|ओपनर(?:्स)?|सलामी\s+बल्लेबाज)\s+([^\s,]+(?:\s+[^\s,]+)?)\s+(?:and|&|आणि|और|व)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (openersMatch) {
+      const p1 = cleanSpokenName(openersMatch[1]);
+      const p2 = cleanSpokenName(openersMatch[2]);
+      if (p1 && p2) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_openers',
+          playerName: p1,
+          nonStrikerName: p2,
+          confidence: 0.98,
+          explanation: `Set Openers: ${p1} & ${p2}`
+        };
+      }
+    }
+
+    // Non-Striker Batsman
+    const nonStrikerMatch = text.match(/(?:non[\s-]?striker|नॉन[\s-]?स्ट्रायकर|नॉन[\s-]?स्ट्राइकर|दुसरा\s+बॅट्समन|दूसरा\s+बल्लेबाज)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (nonStrikerMatch) {
+      const p = cleanSpokenName(nonStrikerMatch[1]);
+      if (p && !['change', 'swap', 'बदला', 'बदलो'].includes(p.toLowerCase())) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_batsman',
+          batsmanRole: 'non-striker',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `Set Non-Striker: ${p}`
+        };
+      }
+    }
+
+    // Striker Batsman
+    const strikerMatch = text.match(/(?:striker|स्ट्रायकर|स्ट्राइकर)\s+(?:बॅट्समन\s+|बल्लेबाज\s+)?([^\s,]+(?:\s+[^\s,]+)?)/i) ||
+      text.match(/([^\s,]+(?:\s+[^\s,]+)?)\s+(?:on\s+strike|स्ट्राइकवर|स्ट्राइक\s+पर)/i);
+    if (strikerMatch) {
+      const p = cleanSpokenName(strikerMatch[1]);
+      if (p && !['change', 'swap', 'बदला', 'बदलो', 'rotate'].includes(p.toLowerCase())) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_batsman',
+          batsmanRole: 'striker',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `Set Striker: ${p}`
+        };
+      }
+    }
+
+    // New Batsman / Next Batsman (Wicket fall or change)
+    const newBatsmanMatch = text.match(/(?:new\s+batsman|next\s+batsman|incoming\s+batsman|नवीन\s+बॅट्समन|नवीन\s+फलंदाज|पुढचा\s+फलंदाज|पुढचा\s+बॅट्समन|नया\s+बल्लेबाज|अगला\s+बल्लेबाज|नया\s+बैट्समैन)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (newBatsmanMatch) {
+      const p = cleanSpokenName(newBatsmanMatch[1]);
+      if (p) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_batsman',
+          batsmanRole: 'new_batsman',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `New Batsman: ${p}`
+        };
+      }
+    }
+
+    // New Bowler / Next Bowler / Change Bowler
+    const bowlerMatch = text.match(/(?:new\s+bowler|next\s+bowler|change\s+bowler|opening\s+bowler|bowler|नवीन\s+बॉलर|पुढचा\s+बॉलर|बॉलर\s+बदला|बॉलर\s+बदलो|पहिला\s+बॉलर|नवीन\s+गोलंदाज|पुढचा\s+गोलंदाज|गोलंदाज|बॉलर|नया\s+गेंदबाज|अगला\s+गेंदबाज|गेंदबाज|पहला\s+गेंदबाज)\s+([^\s,]+(?:\s+[^\s,]+)?)/i);
+    if (bowlerMatch) {
+      const p = cleanSpokenName(bowlerMatch[1]);
+      const disallowedWords = ['name', 'change', 'बदला', 'बदलो', 'दाखवा', 'दिखाओ', 'कार्ड', 'समरी', 'summary', 'list', 'यादी'];
+      if (p && !disallowedWords.includes(p.toLowerCase())) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'set_bowler',
+          playerName: p,
+          confidence: 0.96,
+          explanation: `Bowler: ${p}`
+        };
+      }
+    }
+
     // 1. Undo
     if (text.includes('undo') || text.includes('अनडू') || text.includes('मागे') || text.includes('वापस') || text.includes('रद्द')) {
       return {
@@ -1903,7 +2003,93 @@ function cleanServerUndefined(obj: any): any {
       };
     }
 
-    // 2. Sixes (6) - check before general wickets to allow "six over midwicket"
+    // =========================================================================
+    // 2. COMPOUND CALLS: NO BALL + BOUNDARY / RUNS (Free Hit next)
+    // Checked BEFORE plain boundary to prevent masking!
+    // =========================================================================
+    if (
+      text.includes('no ball') || text.includes('noball') || text.includes('no-ball') ||
+      text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल') || 
+      text.includes('free hit') || text.includes('फ्री हिट')
+    ) {
+      let extraRuns = 0;
+      if (
+        text.includes('6') || text.includes('six') || text.includes('sixer') || 
+        text.includes('सहा') || text.includes('छक्का') || text.includes('षटकार') || 
+        text.includes('सिक्स') || text.includes('maximum')
+      ) {
+        extraRuns = 6;
+      } else if (
+        text.includes('4') || text.includes('four') || text.includes('चार') || 
+        text.includes('चौका') || text.includes('चौकार') || text.includes('फोर') || 
+        text.includes('boundary') || text.includes('बाउंड्री')
+      ) {
+        extraRuns = 4;
+      } else if (text.includes('3') || text.includes('three') || text.includes('तीन')) {
+        extraRuns = 3;
+      } else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) {
+        extraRuns = 2;
+      } else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) {
+        extraRuns = 1;
+      }
+
+      const totalRuns = 1 + extraRuns;
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'noball',
+        extraRuns,
+        confidence: 0.98,
+        explanation: extraRuns > 0 ? `No Ball + ${extraRuns} run(s) [Total +${totalRuns} runs, Free Hit next]` : 'No Ball (+1) [Free Hit next]'
+      };
+    }
+
+    // =========================================================================
+    // 3. COMPOUND CALLS: WIDE + BOUNDARY / RUNS / STUMPED
+    // Checked BEFORE plain boundary to prevent masking!
+    // =========================================================================
+    if (text.includes('wide') || text.includes('वाईड') || text.includes('व्हाईड') || text.includes('वाइड')) {
+      if (text.includes('stump') || text.includes('स्टंप')) {
+        return {
+          rawTranscript: raw,
+          detectedLang: lang,
+          intent: 'wide',
+          extraRuns: 0,
+          wicketType: 'stumped',
+          confidence: 0.98,
+          explanation: 'Wide Delivery + STUMPED OUT'
+        };
+      }
+
+      let extraRuns = 0;
+      if (
+        text.includes('4') || text.includes('four') || text.includes('चार') || 
+        text.includes('चौका') || text.includes('चौकार') || text.includes('फोर') || 
+        text.includes('boundary') || text.includes('बाउंड्री')
+      ) {
+        extraRuns = 4;
+      } else if (text.includes('3') || text.includes('three') || text.includes('तीन')) {
+        extraRuns = 3;
+      } else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) {
+        extraRuns = 2;
+      } else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) {
+        extraRuns = 1;
+      }
+
+      const totalWide = 1 + extraRuns;
+      return {
+        rawTranscript: raw,
+        detectedLang: lang,
+        intent: 'wide',
+        extraRuns,
+        confidence: 0.98,
+        explanation: extraRuns > 0 ? `Wide + ${extraRuns} run(s) [Total +${totalWide} runs]` : 'Wide Ball (+1)'
+      };
+    }
+
+    // =========================================================================
+    // 4. Plain Sixes (6)
+    // =========================================================================
     if (
       text.includes('six') || text.includes('sixer') || text.includes('षटकार') || 
       text.includes('छक्का') || text.includes('सहा') || text.includes('छह') || 
@@ -1912,49 +2098,14 @@ function cleanServerUndefined(obj: any): any {
       return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 6, confidence: 0.96, explanation: 'SIX! 6 Runs' };
     }
 
-    // 3. Fours (4) - check before general wickets to allow "four through midwicket"
+    // =========================================================================
+    // 5. Plain Fours (4)
+    // =========================================================================
     if (
       text.includes('four') || text.includes('चौकार') || text.includes('चौका') || 
       text.includes('चार') || text.includes('फोर') || text.includes('boundary') || text === '4'
     ) {
       return { rawTranscript: raw, detectedLang: lang, intent: 'runs', runs: 4, confidence: 0.96, explanation: 'FOUR! 4 Runs' };
-    }
-
-    // 4. Wide
-    if (text.includes('wide') || text.includes('वाईड') || text.includes('व्हाईड') || text.includes('वाइड')) {
-      let extraRuns = 0;
-      if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
-      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) extraRuns = 1;
-      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) extraRuns = 2;
-      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
-
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'wide',
-        extraRuns,
-        confidence: 0.93,
-        explanation: extraRuns > 0 ? `Wide + ${extraRuns} run(s)` : 'Wide Ball (+1)'
-      };
-    }
-
-    // 5. No Ball
-    if (text.includes('no ball') || text.includes('noball') || text.includes('नो बॉल') || text.includes('नोबॉल') || text.includes('नो बाल') || text.includes('free hit') || text.includes('फ्री हिट')) {
-      let extraRuns = 0;
-      if (text.includes('6') || text.includes('six') || text.includes('सहा') || text.includes('छक्का') || text.includes('षटकार')) extraRuns = 6;
-      else if (text.includes('4') || text.includes('four') || text.includes('चार') || text.includes('चौका') || text.includes('चौकार')) extraRuns = 4;
-      else if (text.includes('1') || text.includes('one') || text.includes('एक') || text.includes('single')) extraRuns = 1;
-      else if (text.includes('2') || text.includes('two') || text.includes('दोन') || text.includes('दो')) extraRuns = 2;
-      else if (text.includes('3') || text.includes('three') || text.includes('तीन')) extraRuns = 3;
-
-      return {
-        rawTranscript: raw,
-        detectedLang: lang,
-        intent: 'noball',
-        extraRuns,
-        confidence: 0.93,
-        explanation: extraRuns > 0 ? `No Ball + ${extraRuns} run(s) [Free Hit next]` : 'No Ball (+1) [Free Hit next]'
-      };
     }
 
     // 6. Genuine Wickets
@@ -2089,16 +2240,26 @@ Context:
 - Current bowler: "${bowlerName || 'Bowler'}"
 - Language code: "${language}"
 
-Determine the exact cricket scoring event or broadcast overlay request and return ONLY a single JSON object with these fields:
+Determine the exact cricket scoring event, player selection, or broadcast overlay request and return ONLY a single JSON object with these fields:
 {
-  "intent": "runs" | "dot" | "wide" | "noball" | "wicket" | "bye" | "legbye" | "swap_batsmen" | "undo" | "overlay" | "unknown",
+  "intent": "runs" | "dot" | "wide" | "noball" | "wicket" | "bye" | "legbye" | "swap_batsmen" | "undo" | "overlay" | "set_batsman" | "set_bowler" | "set_openers" | "unknown",
   "runs": number (0 to 6),
   "extraRuns": number (0 for normal wide/noball, or extra runs taken e.g. 1 if wide+1, 4 if wide+4, 6 if noball+6),
   "wicketType": "bowled" | "caught" | "run_out" | "lbw" | "stumped" | "hit_wicket" | null,
   "overlayType": "team_vs_team" | "squad_a" | "squad_b" | "field_positions" | "batting_summary" | "bowling_summary" | "tournament_logo" | "toss_result" | "none" | null,
+  "playerName": string | null,
+  "batsmanRole": "striker" | "non-striker" | "new_batsman" | null,
+  "nonStrikerName": string | null,
   "confidence": number,
   "explanation": "short friendly summary in English"
 }
+
+Player & Team Management Rules:
+- "openers Rohit and Virat", "सलामी जोडी सचिन आणि सौरव", "ओपनर रोहित और विराट" -> intent: "set_openers", playerName: "Rohit", nonStrikerName: "Virat", explanation: "Set Opening Pair: Rohit & Virat"
+- "striker Rohit", "बॅट्समन रोहित", "स्ट्रायकर रोहित", "स्ट्राइकर रोहित" -> intent: "set_batsman", batsmanRole: "striker", playerName: "Rohit", explanation: "Set Striker: Rohit"
+- "non striker Virat", "नॉन स्ट्रायकर विराट", "नॉन स्ट्राइकर विराट" -> intent: "set_batsman", batsmanRole: "non-striker", playerName: "Virat", explanation: "Set Non-Striker: Virat"
+- "new batsman Rahul", "next batsman Rahul", "नवीन फलंदाज राहुल", "नया बल्लेबाज राहुल" -> intent: "set_batsman", batsmanRole: "new_batsman", playerName: "Rahul", explanation: "Set Incoming Batsman: Rahul"
+- "new bowler Bumrah", "next bowler Shami", "change bowler Bumrah", "नवीन बॉलर बुमराह", "नया गेंदबाज बुमराह", "पुढचा बॉलर शमी" -> intent: "set_bowler", playerName: "Bumrah", explanation: "Set Bowler: Bumrah"
 
 Important Broadcast Overlay Rules:
 - "show the team vs team logo", "show team vs team", "टीम विरुद्ध टीम लोगो दाखवा", "टीम वर्सेस टीम लोगो दिखाओ", "versus logo" -> intent: "overlay", overlayType: "team_vs_team", explanation: "Show Team vs Team Logo Overlay"
