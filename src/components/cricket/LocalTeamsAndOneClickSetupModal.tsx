@@ -292,10 +292,11 @@ export const LocalTeamsAndOneClickSetupModal: React.FC<LocalTeamsAndOneClickSetu
     return (tournament.teams || []).some(t => t.name.trim().toLowerCase() === name.trim().toLowerCase());
   };
 
-  // Generate shareable Captain Squad Submission Link
+  // Generate shareable Captain Squad Submission Link matching React HashRouter
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
-  const squadSubmissionUrl = `${currentOrigin}${currentPath}?action=submit_squad&tour_id=${tournament.id}&team_id=${selectedTeamForLink}&tour_name=${encodeURIComponent(tournament.name)}`;
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname.replace(/\/index\.html$/, '') : '';
+  const cleanBasePath = currentPath.endsWith('/') ? currentPath.slice(0, -1) : currentPath;
+  const squadSubmissionUrl = `${currentOrigin}${cleanBasePath}/#/cricket-captain-squad/${encodeURIComponent(selectedTeamForLink)}?tourId=${encodeURIComponent(tournament.id)}&tour_name=${encodeURIComponent(tournament.name)}`;
 
   const handleCopyLink = () => {
     if (navigator.clipboard) {

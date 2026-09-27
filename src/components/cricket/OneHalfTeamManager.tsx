@@ -200,14 +200,24 @@ export const generateDefault15Squad = (teamName: string, captainName?: string): 
   });
 };
 
+// Generate direct captain squad submission URL matching React HashRouter
+export const getOneHalfCaptainSquadUrl = (
+  teamId: string,
+  tournamentId: string
+): string => {
+  if (typeof window === 'undefined') return `https://shubhamhingane.in/#/cricket-captain-squad/${teamId}`;
+  const origin = window.location.origin;
+  const cleanPath = window.location.pathname.replace(/\/index\.html$/, '');
+  const basePath = cleanPath.endsWith('/') ? cleanPath.slice(0, -1) : cleanPath;
+  return `${origin}${basePath}/#/cricket-captain-squad/${encodeURIComponent(teamId)}?tourId=${encodeURIComponent(tournamentId)}&tourType=one_half`;
+};
+
 // Generate captain squad submission WhatsApp text
 export const generateCaptainSubmissionWhatsAppUrl = (
   team: OneHalfTeam,
   tournament: OneHalfTournamentState
 ): string => {
-  const currentUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${window.location.pathname}?action=submit_squad&teamId=${team.id}&tourId=${tournament.id}`
-    : 'https://cricket-score.live';
+  const currentUrl = getOneHalfCaptainSquadUrl(team.id, tournament.id);
 
   const scheduledMatch = tournament.matches.find(
     m => (m.teamA === team.name || m.teamB === team.name) && m.round === 'round1'
@@ -400,12 +410,44 @@ export const TeamDedicatedPageView: React.FC<TeamDedicatedPageViewProps> = ({
 
   const shareWhatsAppUrl = generateCaptainSubmissionWhatsAppUrl(team, tournament);
 
-  const handleCopySubmissionLink = () => {
-    const url = typeof window !== 'undefined'
-      ? `${window.location.origin}${window.location.pathname}?action=submit_squad&teamId=${team.id}&tourId=${tournament.id}`
-      : 'https://cricket-score.live';
-    navigator.clipboard?.writeText(url);
-    showToast('✓ Squad submission link copied to clipboard!');
+  const handleCopySubmissionLink = async () => {
+    const url = getOneHalfCaptainSquadUrl(team.id, tournament.id);
+
+    // Pre-cache team info so captain portal loads team name & roster immediately
+    try {
+      const teamDocPayload = {
+        id: team.id,
+        name: team.name,
+        captainName: team.captain || '',
+        captainPhone: team.captainPhone || '',
+        logo: team.logo || '',
+        group: team.group,
+        tournamentId: tournament.id,
+        status: team.squadSubmitted ? 'squad_submitted' : 'pending_squad',
+        players: (team.squad || []).map(p => `${p.name}${p.isCaptain ? ' (C)' : ''}${p.isViceCaptain ? ' (VC)' : ''}${p.isWicketKeeper ? ' (WK)' : ''}`),
+        squadDetails: (team.squad || []).map(p => ({
+          id: p.id,
+          name: p.name,
+          role: (p.role?.toLowerCase().replace(/[^a-z]/g, '') as any) || 'allrounder',
+          isCaptain: Boolean(p.isCaptain),
+          isViceCaptain: Boolean(p.isViceCaptain),
+          isWicketkeeper: Boolean(p.isWicketKeeper),
+          jerseyNumber: `${p.jerseyNumber || ''}`,
+          mobileNumber: p.mobileNumber || p.phone || '',
+          photo: p.photo || ''
+        })),
+        updatedAt: Date.now()
+      };
+      localStorage.setItem(`cricket_team_${team.id}`, JSON.stringify(teamDocPayload));
+      if (!isFirestoreQuotaExhausted()) {
+        safeSetDoc(doc(db, 'cricket_teams', team.id), teamDocPayload, { merge: true }).catch(() => {});
+      }
+    } catch (_) {}
+
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+    }
+    showToast('✓ Squad submission portal link copied to clipboard!');
   };
 
   return (

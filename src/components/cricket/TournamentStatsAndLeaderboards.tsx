@@ -502,11 +502,11 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
         foursInInning: foursInInn,
         foursInInningDetails,
         longestInningBalls: longestBalls,
-        longestInningDetails,
+        longestInningDetails: longestDetails,
         fastestThirtyBalls: fastest30,
-        fastestThirtyDetails,
+        fastestThirtyDetails: fastest30Details,
         fastestFiftyBalls: fastest50,
-        fastestFiftyDetails,
+        fastestFiftyDetails: fastest50Details,
         rawPlayerStats: p
       };
     });

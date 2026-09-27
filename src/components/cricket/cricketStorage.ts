@@ -699,23 +699,36 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
           // If validRemoteIds was passed (from a successful Firestore snapshot):
           if (validRemoteIds !== undefined) {
             // Never prune or mark deleted if it is an official tournament match
-            if (item.tournamentId || (item as any).isTournamentMatch || String(item.id).startsWith('tour_')) {
+            if (
+              item.tournamentId || 
+              (item as any).isTournamentMatch || 
+              String(item.id).startsWith('tour_') || 
+              String(item.id).startsWith('one_half_') ||
+              String(item.id).startsWith('live_')
+            ) {
               return true;
             }
+
+            // Never prune or delete an active live match being scored
+            if (item.status === 'live' || item.status === 'setup') {
+              return true;
+            }
+
             if (!validRemoteIds.has(item.id)) {
-              // Check if it is a brand-new purely offline local draft (< 60s old and never synced)
+              // Check if it is a brand-new match or offline local match (< 15 mins old)
               const ageMs = Date.now() - (item.updatedAt || item.createdAt || 0);
-              const isFreshOfflineDraft = !item.syncedWithFirestore && ageMs < 60000 && item.status === 'draft';
-              if (!isFreshOfflineDraft) {
-                // Was deleted remotely on another device (e.g. laptop)
-                markMatchDeleted(item.id);
-                setTimeout(() => {
-                  try {
-                    window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: item.id } }));
-                  } catch (_) {}
-                }, 0);
-                return false;
+              const isFresh = ageMs < 900000; // 15 minutes grace window
+              if (isFresh) {
+                return true;
               }
+              // Only if it was an old record that was truly deleted on remote database
+              markMatchDeleted(item.id);
+              setTimeout(() => {
+                try {
+                  window.dispatchEvent(new CustomEvent('cricket_match_deleted', { detail: { id: item.id } }));
+                } catch (_) {}
+              }, 0);
+              return false;
             }
           }
 
@@ -739,9 +752,18 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
         ) {
           shouldPurgeActive = true;
         } else if (validRemoteIds !== undefined && !validRemoteIds.has(active.id)) {
+          // Never purge active match if it's currently live, setup, or is a tournament match, or updated recently
+          const isTournament = !!(
+            active.tournamentId || 
+            (active as any).isTournamentMatch || 
+            String(active.id).startsWith('tour_') || 
+            String(active.id).startsWith('one_half_') ||
+            String(active.id).startsWith('live_')
+          );
+          const isLive = active.status === 'live' || active.status === 'setup';
           const ageMs = Date.now() - (active.updatedAt || active.createdAt || 0);
-          const isFreshOfflineDraft = !active.syncedWithFirestore && ageMs < 60000 && active.status === 'draft';
-          if (!isFreshOfflineDraft) {
+          const isFresh = ageMs < 900000;
+          if (!isTournament && !isLive && !isFresh) {
             shouldPurgeActive = true;
             markMatchDeleted(active.id);
             setTimeout(() => {

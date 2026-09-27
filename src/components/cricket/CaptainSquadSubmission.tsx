@@ -20,10 +20,17 @@ import {
   Crown,
   Shirt,
   X,
-  Upload
+  Upload,
+  Copy,
+  Check,
+  ClipboardPaste,
+  Trophy,
+  MapPin,
+  RefreshCw,
+  FileText
 } from 'lucide-react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db, isFirestoreQuotaExhausted, safeSetDoc as setDoc } from '../../lib/firebase';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore';
+import { db, isFirestoreQuotaExhausted, safeSetDoc as setDoc, syncOneHalfTournamentToRealtimeDB } from '../../lib/firebase';
 import { uploadImageToStorage, STORAGE_FOLDERS } from '../../utils/imageUpload';
 
 export interface SquadPlayerItem {
@@ -51,6 +58,8 @@ export interface CricketTeamData {
   createdAt: string;
   updatedAt?: number;
   managerId?: string;
+  tournamentId?: string;
+  group?: number;
 }
 
 const DEFAULT_ROLES: Array<{ key: SquadPlayerItem['role']; label: string; icon: string }> = [
@@ -102,7 +111,8 @@ const compressImageFile = (file: File, maxDim = 320, quality = 0.85): Promise<st
 export const CaptainSquadSubmission: React.FC = () => {
   const params = useParams<{ teamId?: string }>();
   const [searchParams] = useSearchParams();
-  const teamId = params.teamId || searchParams.get('teamId') || '';
+  const teamId = params.teamId || searchParams.get('teamId') || searchParams.get('team_id') || '';
+  const tourId = searchParams.get('tourId') || searchParams.get('tour_id') || 'one_half_active_championship';
 
   const [, setLoading] = useState<boolean>(true);
   const [teamData, setTeamData] = useState<CricketTeamData | null>(null);
@@ -111,41 +121,72 @@ export const CaptainSquadSubmission: React.FC = () => {
   const [captainName, setCaptainName] = useState<string>('');
   const [captainPhone, setCaptainPhone] = useState<string>('');
   const [squad, setSquad] = useState<SquadPlayerItem[]>([]);
+  const [tournamentInfo, setTournamentInfo] = useState<{ id: string; name: string; groundName?: string; group?: number } | null>(null);
 
   // Submission state
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitted, setSubmitted] = useState<boolean>(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
+  // WhatsApp bulk paste modal
+  const [showPasteModal, setShowPasteModal] = useState<boolean>(false);
+  const [pasteText, setPasteText] = useState<string>('');
+  const [copiedSquad, setCopiedSquad] = useState<boolean>(false);
+
   // Logo file input ref
   const teamLogoInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize 11 empty slots if creating fresh
-  const initEmptySquad = (count = 11, initialCaptain = ''): SquadPlayerItem[] => {
+  // Initialize 15 empty slots (Playing 11 + 4 Substitutes)
+  const initEmptySquad = (count = 15, initialCaptain = ''): SquadPlayerItem[] => {
     return Array.from({ length: count }, (_, idx) => ({
       id: `player-${Date.now()}-${idx}`,
       name: idx === 0 ? initialCaptain : '',
-      role: idx < 5 ? 'batsman' : idx === 5 ? 'wicketkeeper' : idx < 8 ? 'allrounder' : 'bowler',
+      role: idx === 2 ? 'wicketkeeper' : idx < 5 ? 'batsman' : idx < 9 ? 'allrounder' : 'bowler',
       isCaptain: idx === 0,
       isViceCaptain: idx === 1,
-      isWicketkeeper: idx === 5,
+      isWicketkeeper: idx === 2,
       jerseyNumber: `${idx + 1}`,
       mobileNumber: '',
       photo: ''
     }));
   };
 
-  // Load team data from Firestore or local fallback
+  // Helper to load One Half Tournament context from local storage or cloud
+  const getTourTeamFallback = (tId: string) => {
+    try {
+      const raw = localStorage.getItem('one_half_active_championship_tournament');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.teams)) {
+          const found = parsed.teams.find((t: any) => t.id === tId || t.name?.toLowerCase() === tId?.toLowerCase());
+          if (found) {
+            setTournamentInfo({
+              id: parsed.id || tourId,
+              name: parsed.name || 'ONE HALF CHAMPIONSHIP',
+              groundName: parsed.groundName,
+              group: found.group
+            });
+            return found;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  };
+
+  // Load team data from Firestore, One Half Tournament cache, or local fallback
   useEffect(() => {
     if (!teamId) {
       // Manual team entry mode
       setTeamName('My Cricket Team');
-      setSquad(initEmptySquad(11));
+      setSquad(initEmptySquad(15));
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    const tourFallback = getTourTeamFallback(teamId);
+
     const docRef = doc(db, 'cricket_teams', teamId);
 
     const unsub = onSnapshot(docRef, (docSnap) => {
@@ -153,35 +194,42 @@ export const CaptainSquadSubmission: React.FC = () => {
       if (docSnap.exists()) {
         const data = docSnap.data() as CricketTeamData;
         setTeamData(data);
-        setTeamName(data.name || 'Cricket Team');
-        setTeamLogo(data.logo || '');
-        const loadedCaptainName = data.captainName || '';
+        setTeamName(data.name || tourFallback?.name || 'Cricket Team');
+        setTeamLogo(data.logo || tourFallback?.logo || '');
+        const loadedCaptainName = data.captainName || tourFallback?.captain || '';
         setCaptainName(loadedCaptainName);
-        setCaptainPhone(data.captainPhone || '');
+        setCaptainPhone(data.captainPhone || tourFallback?.captainPhone || '');
+
+        if (tourFallback?.group || data.group) {
+          setTournamentInfo(prev => ({
+            id: prev?.id || tourId,
+            name: prev?.name || 'ONE HALF CHAMPIONSHIP',
+            groundName: prev?.groundName,
+            group: data.group || tourFallback?.group || prev?.group
+          }));
+        }
 
         if (data.squadDetails && data.squadDetails.length > 0) {
-          // Ensure captain name is populated if empty in squad
-          const enrichedSquad = data.squadDetails.map((p, idx) => {
-            if (p.isCaptain && !p.name && loadedCaptainName) {
-              return { ...p, name: loadedCaptainName };
-            }
-            if (idx === 0 && !data.squadDetails?.some(s => s.isCaptain)) {
-              return { ...p, isCaptain: true, name: p.name || loadedCaptainName };
-            }
-            return p;
-          });
-          setSquad(enrichedSquad);
+          let currentSquad = [...data.squadDetails];
+          if (currentSquad.length < 15) {
+            const extra = initEmptySquad(15 - currentSquad.length).map((p, i) => ({
+              ...p,
+              id: `player-extra-${Date.now()}-${i}`,
+              jerseyNumber: `${currentSquad.length + i + 1}`
+            }));
+            currentSquad = [...currentSquad, ...extra];
+          }
+          setSquad(currentSquad);
         } else if (data.players && data.players.length > 0) {
-          // Convert existing string array to rich squad
           const converted: SquadPlayerItem[] = data.players.map((name, idx) => {
             const cleanName = name.replace(/\s*\([CcVvWwKk/]+\)/g, '').trim();
             const isC = name.toLowerCase().includes('(c)') || idx === 0;
             const isVC = name.toLowerCase().includes('(vc)') || idx === 1;
-            const isWK = name.toLowerCase().includes('(wk)') || name.toLowerCase().includes('keeper');
+            const isWK = name.toLowerCase().includes('(wk)') || name.toLowerCase().includes('keeper') || idx === 2;
             return {
               id: `p-${idx}`,
               name: (isC && !cleanName && loadedCaptainName) ? loadedCaptainName : cleanName,
-              role: isWK ? 'wicketkeeper' : idx < 5 ? 'batsman' : idx < 8 ? 'allrounder' : 'bowler',
+              role: isWK ? 'wicketkeeper' : idx < 5 ? 'batsman' : idx < 9 ? 'allrounder' : 'bowler',
               isCaptain: isC,
               isViceCaptain: isVC,
               isWicketkeeper: isWK,
@@ -190,43 +238,113 @@ export const CaptainSquadSubmission: React.FC = () => {
               photo: ''
             };
           });
-          setSquad(converted);
+          if (converted.length < 15) {
+            const extra = initEmptySquad(15 - converted.length).map((p, i) => ({
+              ...p,
+              id: `player-extra-${Date.now()}-${i}`,
+              jerseyNumber: `${converted.length + i + 1}`
+            }));
+            setSquad([...converted, ...extra]);
+          } else {
+            setSquad(converted);
+          }
+        } else if (tourFallback && tourFallback.squad && tourFallback.squad.length > 0) {
+          setSquad(tourFallback.squad.map((p: any, idx: number) => ({
+            id: p.id || `p-${idx}`,
+            name: p.name || '',
+            role: (p.role?.toLowerCase().replace(/[^a-z]/g, '') as any) || (idx === 2 ? 'wicketkeeper' : idx < 5 ? 'batsman' : idx < 9 ? 'allrounder' : 'bowler'),
+            isCaptain: Boolean(p.isCaptain || (idx === 0 && !tourFallback.squad.some((s: any) => s.isCaptain))),
+            isViceCaptain: Boolean(p.isViceCaptain || idx === 1),
+            isWicketkeeper: Boolean(p.isWicketKeeper || p.role?.toLowerCase().includes('keeper') || idx === 2),
+            jerseyNumber: `${p.jerseyNumber || idx + 1}`,
+            mobileNumber: p.mobileNumber || p.phone || (p.isCaptain ? tourFallback.captainPhone : ''),
+            photo: p.photo || ''
+          })));
         } else {
-          setSquad(initEmptySquad(11, loadedCaptainName));
+          setSquad(initEmptySquad(15, loadedCaptainName));
         }
 
         if (data.status === 'squad_submitted') {
           setSubmitted(true);
         }
       } else {
-        // Doc doesn't exist yet, init fresh
-        setTeamName('New Team');
-        setSquad(initEmptySquad(11));
+        // Document not yet created in cricket_teams: check One Half Tournament fallback
+        if (tourFallback) {
+          setTeamName(tourFallback.name || 'Cricket Team');
+          setTeamLogo(tourFallback.logo || '');
+          setCaptainName(tourFallback.captain || '');
+          setCaptainPhone(tourFallback.captainPhone || '');
+          if (tourFallback.squad && tourFallback.squad.length > 0) {
+            setSquad(tourFallback.squad.map((p: any, idx: number) => ({
+              id: p.id || `p-${idx}`,
+              name: p.name || '',
+              role: (p.role?.toLowerCase().replace(/[^a-z]/g, '') as any) || (idx === 2 ? 'wicketkeeper' : idx < 5 ? 'batsman' : idx < 9 ? 'allrounder' : 'bowler'),
+              isCaptain: Boolean(p.isCaptain || (idx === 0 && !tourFallback.squad.some((s: any) => s.isCaptain))),
+              isViceCaptain: Boolean(p.isViceCaptain || idx === 1),
+              isWicketkeeper: Boolean(p.isWicketKeeper || p.role?.toLowerCase().includes('keeper') || idx === 2),
+              jerseyNumber: `${p.jerseyNumber || idx + 1}`,
+              mobileNumber: p.mobileNumber || p.phone || (p.isCaptain ? tourFallback.captainPhone : ''),
+              photo: p.photo || ''
+            })));
+          } else {
+            setSquad(initEmptySquad(15, tourFallback.captain || ''));
+          }
+          if (tourFallback.squadSubmitted) {
+            setSubmitted(true);
+          }
+        } else {
+          // Check local storage team
+          try {
+            const local = localStorage.getItem(`cricket_team_${teamId}`);
+            if (local) {
+              const parsed = JSON.parse(local);
+              setTeamData(parsed);
+              setTeamName(parsed.name || 'Cricket Team');
+              setTeamLogo(parsed.logo || '');
+              setCaptainName(parsed.captainName || '');
+              setCaptainPhone(parsed.captainPhone || '');
+              if (parsed.squadDetails) setSquad(parsed.squadDetails);
+              else setSquad(initEmptySquad(15));
+            } else {
+              setTeamName('Cricket Team');
+              setSquad(initEmptySquad(15));
+            }
+          } catch {
+            setTeamName('Cricket Team');
+            setSquad(initEmptySquad(15));
+          }
+        }
       }
     }, (err) => {
       console.warn('Error listening to team squad doc:', err);
       setLoading(false);
-      // Local fallback
-      try {
-        const local = localStorage.getItem(`cricket_team_${teamId}`);
-        if (local) {
-          const parsed = JSON.parse(local);
-          setTeamData(parsed);
-          setTeamName(parsed.name || 'Cricket Team');
-          setTeamLogo(parsed.logo || '');
-          setCaptainName(parsed.captainName || '');
-          setCaptainPhone(parsed.captainPhone || '');
-          if (parsed.squadDetails) setSquad(parsed.squadDetails);
+      if (tourFallback) {
+        setTeamName(tourFallback.name || 'Cricket Team');
+        setTeamLogo(tourFallback.logo || '');
+        setCaptainName(tourFallback.captain || '');
+        setCaptainPhone(tourFallback.captainPhone || '');
+        if (tourFallback.squad && tourFallback.squad.length > 0) {
+          setSquad(tourFallback.squad.map((p: any, idx: number) => ({
+            id: p.id || `p-${idx}`,
+            name: p.name || '',
+            role: (p.role?.toLowerCase().replace(/[^a-z]/g, '') as any) || 'allrounder',
+            isCaptain: Boolean(p.isCaptain),
+            isViceCaptain: Boolean(p.isViceCaptain),
+            isWicketkeeper: Boolean(p.isWicketKeeper),
+            jerseyNumber: `${p.jerseyNumber || idx + 1}`,
+            mobileNumber: p.mobileNumber || p.phone || '',
+            photo: p.photo || ''
+          })));
         } else {
-          setSquad(initEmptySquad(11));
+          setSquad(initEmptySquad(15, tourFallback.captain || ''));
         }
-      } catch {
-        setSquad(initEmptySquad(11));
+      } else {
+        setSquad(initEmptySquad(15));
       }
     });
 
     return () => unsub();
-  }, [teamId]);
+  }, [teamId, tourId]);
 
   // AUTOMATIC SYNC: When user updates Captain Name in the top form,
   // automatically update the captain player's name in the squad!
@@ -411,7 +529,141 @@ export const CaptainSquadSubmission: React.FC = () => {
     }
   };
 
-  // Submit squad to Firestore
+  // Parse WhatsApp roster pasted by captain
+  const handleParseWhatsAppRoster = () => {
+    if (!pasteText.trim()) return;
+
+    const lines = pasteText
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+
+    if (lines.length === 0) return;
+
+    const updatedSquad = [...squad];
+    let playerIdx = 0;
+
+    for (let i = 0; i < lines.length && playerIdx < 15; i++) {
+      let line = lines[i];
+      if (/^(squad|players|team|roster|playing|bench|subs|official)/i.test(line) && !/\d/.test(line)) {
+        continue;
+      }
+
+      line = line.replace(/^[\d]+[\.\)\-\:\s]+/, '').trim();
+      if (!line) continue;
+
+      const isC = line.toLowerCase().includes('(c)') || (!line.toLowerCase().includes('(vc)') && playerIdx === 0);
+      const isVC = line.toLowerCase().includes('(vc)') || playerIdx === 1;
+      const isWK = line.toLowerCase().includes('(wk)') || line.toLowerCase().includes('keeper') || line.toLowerCase().includes('wk') || playerIdx === 2;
+
+      let cleanName = line
+        .replace(/\((C|c|VC|vc|WK|wk|Wk)\)/gi, '')
+        .replace(/🧤|👑|⭐|⚡|🏏|🎯/g, '')
+        .trim();
+
+      if (!cleanName) continue;
+
+      let role: SquadPlayerItem['role'] = 'allrounder';
+      if (isWK) role = 'wicketkeeper';
+      else if (playerIdx < 5) role = 'batsman';
+      else if (playerIdx >= 8 && playerIdx < 12) role = 'bowler';
+
+      if (updatedSquad[playerIdx]) {
+        updatedSquad[playerIdx] = {
+          ...updatedSquad[playerIdx],
+          name: cleanName,
+          role,
+          isCaptain: isC,
+          isViceCaptain: isVC && !isC,
+          isWicketkeeper: isWK
+        };
+      } else {
+        updatedSquad.push({
+          id: `player-${Date.now()}-${playerIdx}`,
+          name: cleanName,
+          role,
+          isCaptain: isC,
+          isViceCaptain: isVC && !isC,
+          isWicketkeeper: isWK,
+          jerseyNumber: `${playerIdx + 1}`,
+          mobileNumber: isC ? captainPhone : '',
+          photo: ''
+        });
+      }
+
+      if (isC && cleanName) {
+        setCaptainName(cleanName);
+      }
+      playerIdx++;
+    }
+
+    setSquad(updatedSquad);
+    setShowPasteModal(false);
+    setPasteText('');
+    setFeedbackMsg({ text: `✓ Successfully parsed ${playerIdx} players from WhatsApp roster!`, type: 'success' });
+  };
+
+  // 1-Click Auto-Fill 15 Local Players
+  const handleAutoFillSampleSquad = () => {
+    const sampleNames = [
+      captainName || 'Captain Leader',
+      'Rohit Patil',
+      'Swapnil Jadhav',
+      'Kunal More',
+      'Prathamesh Shinde',
+      'Ajinkya Deshmukh',
+      'Tejas Sawant',
+      'Siddhesh Gaikwad',
+      'Akshay Kadam',
+      'Omkar Bhosale',
+      'Sagar Chavan',
+      'Aditya Thorat',
+      'Sanket Pawar',
+      'Nikhil Mane',
+      'Suraj Salunkhe'
+    ];
+    const roles: Array<SquadPlayerItem['role']> = [
+      'batsman', 'batsman', 'wicketkeeper', 'allrounder', 'allrounder',
+      'batsman', 'allrounder', 'bowler', 'bowler', 'bowler', 'bowler',
+      'batsman', 'bowler', 'allrounder', 'wicketkeeper'
+    ];
+
+    setSquad(sampleNames.map((name, idx) => ({
+      id: `player-auto-${Date.now()}-${idx}`,
+      name,
+      role: roles[idx] || 'allrounder',
+      isCaptain: idx === 0,
+      isViceCaptain: idx === 1,
+      isWicketkeeper: idx === 2,
+      jerseyNumber: `${idx + 1}`,
+      mobileNumber: idx === 0 ? captainPhone : '',
+      photo: squad[idx]?.photo || ''
+    })));
+    setCaptainName(sampleNames[0]);
+    setFeedbackMsg({ text: '✓ 15 local player names auto-filled! You can edit any player.', type: 'success' });
+  };
+
+  // Copy full squad summary for WhatsApp proof
+  const handleCopySquadSummary = () => {
+    const validPlayers = squad.filter(p => p.name.trim().length > 0);
+    const text = `🏏 *${teamName} — Official 15-Player Squad*\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏆 Tournament: ${tournamentInfo?.name || 'ONE HALF CHAMPIONSHIP'}\n` +
+      (tournamentInfo?.group ? `⚔️ Group ${tournamentInfo.group} (Day ${tournamentInfo.group})\n` : '') +
+      `👤 Captain: ${captainName || 'Captain'}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `*Playing XI:*\n` +
+      validPlayers.slice(0, 11).map((p, i) => `${i + 1}. ${p.name}${p.isCaptain ? ' (C)' : ''}${p.isViceCaptain ? ' (VC)' : ''}${p.isWicketkeeper ? ' (WK)' : ''} [${p.role}]`).join('\n') +
+      (validPlayers.length > 11 ? `\n\n*Substitutes / Bench:*\n` + validPlayers.slice(11).map((p, i) => `${i + 12}. ${p.name}${p.isCaptain ? ' (C)' : ''}${p.isViceCaptain ? ' (VC)' : ''}${p.isWicketkeeper ? ' (WK)' : ''} [${p.role}]`).join('\n') : '');
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedSquad(true);
+      setTimeout(() => setCopiedSquad(false), 3000);
+      setFeedbackMsg({ text: '✓ Squad copied to clipboard! Ready to share on WhatsApp.', type: 'success' });
+    }
+  };
+
+  // Submit squad to Firestore and One Half Tournament state
   const handleSubmitSquad = async () => {
     const validPlayers = squad.filter(p => p.name.trim().length > 0);
 
@@ -456,22 +708,89 @@ export const CaptainSquadSubmission: React.FC = () => {
       status: 'squad_submitted',
       createdAt: teamData?.createdAt || new Date().toISOString(),
       updatedAt: Date.now(),
-      managerId: teamData?.managerId || 'default'
+      managerId: teamData?.managerId || 'default',
+      tournamentId: tournamentInfo?.id || tourId,
+      group: tournamentInfo?.group
     };
 
     try {
       if (!isFirestoreQuotaExhausted()) {
         await setDoc(doc(db, 'cricket_teams', activeTeamId), payload, { merge: true });
       }
-      // Always store locally as fallback
       localStorage.setItem(`cricket_team_${activeTeamId}`, JSON.stringify(payload));
+
+      // Synchronize with One Half Tournament State
+      const targetTourId = tourId || 'one_half_active_championship';
+      try {
+        let tourData: any = null;
+        const localTourRaw = localStorage.getItem('one_half_active_championship_tournament');
+        if (localTourRaw) {
+          try { tourData = JSON.parse(localTourRaw); } catch (_) {}
+        }
+
+        if (!isFirestoreQuotaExhausted()) {
+          try {
+            const tourSnap = await getDoc(doc(db, 'cricket_tournaments', targetTourId));
+            if (tourSnap.exists()) {
+              tourData = tourSnap.data();
+            }
+          } catch (e) {
+            console.warn('Tournament snap check note:', e);
+          }
+        }
+
+        if (tourData && Array.isArray(tourData.teams)) {
+          const teamIdx = tourData.teams.findIndex(
+            (t: any) => t.id === activeTeamId || t.name?.toLowerCase() === teamName.trim().toLowerCase()
+          );
+
+          if (teamIdx !== -1) {
+            const mappedSquad = validPlayers.map((p, idx) => ({
+              id: p.id || `p_${activeTeamId}_${idx}`,
+              name: p.name.trim(),
+              role: p.role === 'wicketkeeper' ? 'Wicket-Keeper' : p.role === 'batsman' ? 'Batsman' : p.role === 'bowler' ? 'Bowler' : 'All-Rounder',
+              jerseyNumber: p.jerseyNumber || `${idx + 1}`,
+              isCaptain: Boolean(p.isCaptain),
+              isViceCaptain: Boolean(p.isViceCaptain),
+              isWicketKeeper: Boolean(p.isWicketkeeper),
+              mobileNumber: p.mobileNumber || (p.isCaptain ? captainPhone.trim() : ''),
+              phone: p.mobileNumber || (p.isCaptain ? captainPhone.trim() : ''),
+              photo: p.photo || ''
+            }));
+
+            const updatedTeam = {
+              ...tourData.teams[teamIdx],
+              name: teamName.trim(),
+              logo: teamLogo.trim() || tourData.teams[teamIdx].logo,
+              captain: captainName.trim() || captainPlayer?.name || tourData.teams[teamIdx].captain,
+              captainPhone: captainPhone.trim() || tourData.teams[teamIdx].captainPhone,
+              squad: mappedSquad,
+              squadSubmitted: true,
+              squadSubmittedAt: new Date().toISOString()
+            };
+
+            tourData.teams[teamIdx] = updatedTeam;
+            tourData.updatedAt = Date.now();
+            tourData.lastCloudSyncTime = new Date().toISOString();
+
+            localStorage.setItem('one_half_active_championship_tournament', JSON.stringify(tourData));
+            window.dispatchEvent(new CustomEvent('one_half_tournament_updated', { detail: tourData }));
+
+            if (!isFirestoreQuotaExhausted()) {
+              await setDoc(doc(db, 'cricket_tournaments', targetTourId), tourData, { merge: true });
+              await syncOneHalfTournamentToRealtimeDB(tourData);
+            }
+          }
+        }
+      } catch (tourSyncErr) {
+        console.warn('Tournament sync note:', tourSyncErr);
+      }
 
       setSubmitted(true);
       setSubmitting(false);
-      setFeedbackMsg({ text: 'Squad submitted successfully to the Score Manager!', type: 'success' });
+      setFeedbackMsg({ text: '✓ 15-Player Squad submitted successfully to the Score Manager & Tournament!', type: 'success' });
     } catch (err) {
       console.warn('Error saving captain squad:', err);
-      // Local fallback
       localStorage.setItem(`cricket_team_${activeTeamId}`, JSON.stringify(payload));
       setSubmitted(true);
       setSubmitting(false);
@@ -507,6 +826,27 @@ export const CaptainSquadSubmission: React.FC = () => {
           <div className="absolute -bottom-10 -left-10 w-48 h-48 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
           <div className="relative z-10">
+            {/* Tournament & Group Indicator Badge */}
+            {tournamentInfo && (
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-black text-[10px] uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
+                  <Trophy size={12} className="text-amber-400" />
+                  {tournamentInfo.name}
+                </span>
+                {tournamentInfo.group && (
+                  <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full font-black text-[10px] uppercase tracking-wider">
+                    Group {tournamentInfo.group} (Day {tournamentInfo.group} Qualifier)
+                  </span>
+                )}
+                {tournamentInfo.groundName && (
+                  <span className="px-3 py-1 bg-slate-800 text-slate-300 border border-slate-700 rounded-full font-bold text-[10px] flex items-center gap-1">
+                    <MapPin size={11} className="text-slate-400" />
+                    {tournamentInfo.groundName}
+                  </span>
+                )}
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
               <span className="px-3.5 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-full font-black text-[10px] uppercase tracking-widest flex items-center gap-1.5">
                 <Users size={13} /> Official Match Squad Entry
@@ -543,7 +883,7 @@ export const CaptainSquadSubmission: React.FC = () => {
                   {teamName || 'Submit Team Squad'}
                 </h1>
                 <p className="text-slate-400 text-xs sm:text-sm max-w-xl font-medium leading-relaxed">
-                  Enter your team details, logo, and 11 to 15 player roster. Photos, jersey numbers, and captain badges sync live to the official Gully Score match scorecard.
+                  Enter your team details, logo, and 15-player match roster (Playing 11 + 4 Substitutes). Syncs live to the score manager and match scorecard in real-time.
                 </p>
               </div>
             </div>
@@ -587,11 +927,19 @@ export const CaptainSquadSubmission: React.FC = () => {
               <div>
                 <h3 className="text-base font-black uppercase text-emerald-400">Squad Submitted & Ready!</h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  The score manager can now load <span className="text-white font-bold">{teamName}</span> into the match scorecard in 1-click.
+                  The score manager has received <span className="text-white font-bold">{teamName}</span> ({validCount} players). Verified for match scoreboard and ground toss.
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handleCopySquadSummary}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[11px] uppercase tracking-wider rounded-xl flex items-center justify-center gap-1.5 border-none cursor-pointer transition-all shadow-md active:scale-95"
+              >
+                {copiedSquad ? <Check size={13} /> : <Copy size={13} />}
+                {copiedSquad ? 'Copied to Clipboard!' : 'Copy Squad to WhatsApp'}
+              </button>
               <button
                 type="button"
                 onClick={() => setSubmitted(false)}
@@ -713,14 +1061,34 @@ export const CaptainSquadSubmission: React.FC = () => {
             <div>
               <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
                 <Users size={16} className="text-emerald-400" />
-                15-Player Squad Roster ({squad.length} / 15)
+                15-Player Squad Roster ({validCount} / 15 Filled)
               </h3>
               <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                Set Player Profile Photos, Names, Jersey #, Mobile #, and roles.
+                Slots 1–11: Official Playing XI • Slots 12–15: Bench / Substitutes
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowPasteModal(true)}
+                className="px-3 py-1.5 bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 rounded-xl text-[10.5px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-xs"
+                title="Paste 15 player names directly from WhatsApp"
+              >
+                <ClipboardPaste size={12} className="text-emerald-400" />
+                <span>Paste WhatsApp Roster</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAutoFillSampleSquad}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl text-[10.5px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                title="Auto-fill 15 player slots with standard roster"
+              >
+                <Sparkles size={12} className="text-amber-400" />
+                <span>Auto-Fill 15</span>
+              </button>
+
               <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-3 py-1 rounded-xl border border-slate-750">
                 Captain: <strong className="text-amber-400">{captainName || 'Not Set'}</strong>
               </span>
@@ -733,14 +1101,32 @@ export const CaptainSquadSubmission: React.FC = () => {
               const isCap = player.isCaptain;
 
               return (
-                <div
-                  key={player.id || idx}
-                  className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-3 ${
-                    isCap
-                      ? 'bg-gradient-to-r from-amber-950/30 via-slate-900/95 to-slate-900 border-amber-500/40 shadow-md ring-1 ring-amber-500/20'
-                      : 'bg-slate-900/90 hover:bg-slate-900 border-slate-800'
-                  }`}
-                >
+                <React.Fragment key={player.id || idx}>
+                  {idx === 0 && (
+                    <div className="flex items-center gap-2 pt-1 pb-1">
+                      <span className="px-3 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-black text-[10px] uppercase tracking-wider flex items-center gap-1.5">
+                        🏏 Official Playing XI Lineup (Slots 1 to 11)
+                      </span>
+                      <div className="flex-1 h-px bg-slate-800" />
+                    </div>
+                  )}
+
+                  {idx === 11 && (
+                    <div className="flex items-center gap-2 pt-4 pb-1">
+                      <span className="px-3 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/25 font-black text-[10px] uppercase tracking-wider flex items-center gap-1.5">
+                        🧤 Bench & Substitutes (Slots 12 to 15)
+                      </span>
+                      <div className="flex-1 h-px bg-slate-800" />
+                    </div>
+                  )}
+
+                  <div
+                    className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-3 ${
+                      isCap
+                        ? 'bg-gradient-to-r from-amber-950/30 via-slate-900/95 to-slate-900 border-amber-500/40 shadow-md ring-1 ring-amber-500/20'
+                        : 'bg-slate-900/90 hover:bg-slate-900 border-slate-800'
+                    }`}
+                  >
                   {/* Top line indicator if captain */}
                   {isCap && (
                     <div className="flex items-center justify-between pb-1.5 border-b border-amber-500/20">
@@ -917,53 +1303,119 @@ export const CaptainSquadSubmission: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Add Slot Button (Max 15) */}
-          {squad.length < 15 && (
-            <button
-              type="button"
-              onClick={handleAddPlayer}
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 border-2 border-dashed border-slate-750 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all"
-            >
-              <Plus size={14} /> Add Player Slot ({squad.length} / 15)
-            </button>
-          )}
-
-          {/* Submit CTA Card */}
-          <div className="pt-4 border-t border-slate-750 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-xs text-slate-400">
-              {validCount < 11 ? (
-                <span className="text-amber-400 flex items-center gap-1 font-bold">
-                  <AlertCircle size={13} /> {11 - validCount} more player{11 - validCount > 1 ? 's' : ''} needed for a standard Playing XI (11 players).
-                </span>
-              ) : (
-                <span className="text-emerald-400 flex items-center gap-1 font-bold">
-                  <CheckCircle2 size={13} /> {validCount} players verified! Ready to submit to Score Manager.
-                </span>
-              )}
-            </div>
-
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={handleSubmitSquad}
-              className="w-full sm:w-auto px-8 py-3.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-lg hover:shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 border-none"
-            >
-              {submitting ? (
-                <>Saving Squad...</>
-              ) : (
-                <>
-                  <Send size={14} /> Submit Squad to Score Manager
-                </>
-              )}
-            </button>
-          </div>
+              </React.Fragment>
+            );
+          })}
         </div>
 
+        {/* Add Slot Button (Max 15) */}
+        {squad.length < 15 && (
+          <button
+            type="button"
+            onClick={handleAddPlayer}
+            className="w-full py-3 bg-slate-900 hover:bg-slate-800 border-2 border-dashed border-slate-750 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all"
+          >
+            <Plus size={14} /> Add Player Slot ({squad.length} / 15)
+          </button>
+        )}
+
+        {/* Submit CTA Card */}
+        <div className="pt-4 border-t border-slate-750 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-xs text-slate-400">
+            {validCount < 11 ? (
+              <span className="text-amber-400 flex items-center gap-1 font-bold">
+                <AlertCircle size={13} /> {11 - validCount} more player{11 - validCount > 1 ? 's' : ''} needed for a standard Playing XI (11 players).
+              </span>
+            ) : (
+              <span className="text-emerald-400 flex items-center gap-1 font-bold">
+                <CheckCircle2 size={13} /> {validCount} players verified! Ready to submit to Score Manager.
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={handleSubmitSquad}
+            className="w-full sm:w-auto px-8 py-3.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-lg hover:shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 border-none"
+          >
+            {submitting ? (
+              <>Saving Squad...</>
+            ) : (
+              <>
+                <Send size={14} /> Submit Squad to Score Manager
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* WhatsApp Roster Bulk Paste Modal */}
+      <AnimatePresence>
+        {showPasteModal && (
+          <div className="fixed inset-0 z-[400] p-4 bg-slate-950/85 backdrop-blur-md flex items-center justify-center">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-slate-900 border border-slate-750 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <ClipboardPaste size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black uppercase text-white tracking-wide">
+                      Paste WhatsApp Roster
+                    </h4>
+                    <p className="text-[10px] text-slate-400">
+                      Paste your 15-player list from WhatsApp. Format: 1. Name (C), 2. Name (VC), 3. Name (WK)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPasteModal(false)}
+                  className="p-1 text-slate-400 hover:text-white border-none bg-transparent cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div>
+                <textarea
+                  rows={8}
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder="1. Rohit Sharma (C)&#10;2. Shubman Gill (VC)&#10;3. Rishabh Pant (WK)&#10;4. Virat Kohli&#10;5. Suryakumar Yadav&#10;6. Hardik Pandya&#10;7. Ravindra Jadeja&#10;8. Jasprit Bumrah&#10;9. Mohammed Shami&#10;10. Kuldeep Yadav&#10;11. Mohammed Siraj&#10;12. Axar Patel&#10;13. Arshdeep Singh&#10;14. Sanju Samson&#10;15. Yashasvi Jaiswal"
+                  className="w-full bg-slate-950 border border-slate-750 rounded-2xl p-3.5 text-xs text-white placeholder-slate-600 outline-none focus:border-emerald-500 font-mono leading-relaxed resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPasteModal(false)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase tracking-wider rounded-xl border border-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleParseWhatsAppRoster}
+                  disabled={!pasteText.trim()}
+                  className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl border-none cursor-pointer flex items-center gap-1.5 shadow-lg"
+                >
+                  <Check size={14} /> Parse & Apply Roster
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
-  );
+  </div>
+);
 };

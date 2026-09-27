@@ -157,7 +157,7 @@ export const TeamSquadImageOverlay: React.FC<TeamSquadImageOverlayProps> = ({
 
   // Tournament branding
   const tournamentName = match.tournamentName || (match as any)?.seriesName || 'STAR TV PREMIER LEAGUE 2026';
-  const tournamentLogo = match.tournamentLogo;
+  const tournamentLogo = (match as any).tournamentLogo;
   const matchStage = match.status === 'completed'
     ? 'FINAL RESULT'
     : match.innings2
@@ -174,7 +174,7 @@ export const TeamSquadImageOverlay: React.FC<TeamSquadImageOverlayProps> = ({
 
   // Build complete 11-player squad roster with photos, avatars, and roles
   const squadPlayers = useMemo<SquadPlayerItem[]>(() => {
-    const explicitSquad = isTeamA ? match.teamASquad : match.teamBSquad;
+    const explicitSquad: any[] = (isTeamA ? match.teamASquad : match.teamBSquad) || [];
     const captainName = (isTeamA ? match.teamACaptain : match.teamBCaptain) || '';
     const wkName = (isTeamA ? match.teamAWicketKeeper : match.teamBWicketKeeper) || '';
 
@@ -182,23 +182,23 @@ export const TeamSquadImageOverlay: React.FC<TeamSquadImageOverlayProps> = ({
     const addedNames = new Set<string>();
 
     if (explicitSquad && explicitSquad.length > 0) {
-      explicitSquad.forEach((p, idx) => {
-        const rawName = typeof p === 'string' ? p : (p.name || `Player ${idx + 1}`);
+      explicitSquad.forEach((p: any, idx: number) => {
+        const rawName = typeof p === 'string' ? p : (p?.name || `Player ${idx + 1}`);
         const cleanName = rawName.replace(/\s*\((c|wk|c\/wk|captain)\)/gi, '').trim();
         const lowerName = cleanName.toLowerCase();
 
         if (!addedNames.has(lowerName)) {
           addedNames.add(lowerName);
 
-          const isCap = typeof p === 'object' && p.isCaptain !== undefined
+          const isCap = typeof p === 'object' && p !== null && p.isCaptain !== undefined
             ? Boolean(p.isCaptain)
             : (captainName ? lowerName.includes(captainName.toLowerCase()) : idx === 0 || /\(c\)/i.test(rawName));
 
-          const isWk = typeof p === 'object' && p.isWicketkeeper !== undefined
+          const isWk = typeof p === 'object' && p !== null && p.isWicketkeeper !== undefined
             ? Boolean(p.isWicketkeeper)
             : (wkName ? lowerName.includes(wkName.toLowerCase()) : /\(wk\)/i.test(rawName));
 
-          const photo = typeof p === 'object' && p.photo
+          const photo = typeof p === 'object' && p !== null && p.photo
             ? p.photo
             : (match.playerPhotos?.[lowerName] || match.playerPhotos?.[rawName.toLowerCase()]);
 

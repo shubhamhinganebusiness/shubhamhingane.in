@@ -242,6 +242,24 @@ function normalizeGullyTournament(raw: any): Tournament | null {
   };
 }
 
+export const deduplicateTournaments = <T extends { id?: string }>(list: T[]): T[] => {
+  if (!Array.isArray(list)) return [];
+  const map = new Map<string, T>();
+  for (const t of list) {
+    if (!t) continue;
+    const tid = String(t.id || '').trim();
+    if (!tid || isTournamentDeleted(tid)) continue;
+    if (!map.has(tid)) {
+      map.set(tid, t);
+    } else {
+      const prev = map.get(tid)!;
+      const isNewer = ((t as any).updatedAt || 0) >= ((prev as any).updatedAt || 0);
+      map.set(tid, isNewer ? { ...prev, ...t } : { ...t, ...prev });
+    }
+  }
+  return Array.from(map.values());
+};
+
 export const CricketTournamentTab: React.FC<{
   onStartLiveScore?: (
     teamAOrConfig: string | TournamentLiveScoreConfig,
@@ -265,9 +283,10 @@ export const CricketTournamentTab: React.FC<{
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed
+          const normalized = parsed
             .map((t: any) => normalizeGullyTournament(t))
             .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id));
+          return deduplicateTournaments(normalized);
         }
       }
       return [];
@@ -698,11 +717,10 @@ export const CricketTournamentTab: React.FC<{
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            setTournaments(
-              parsed
-                .map((t: any) => normalizeGullyTournament(t))
-                .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id))
-            );
+            const normalized = parsed
+              .map((t: any) => normalizeGullyTournament(t))
+              .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id));
+            setTournaments(deduplicateTournaments(normalized));
           }
         }
       } catch (e) {
@@ -721,9 +739,11 @@ export const CricketTournamentTab: React.FC<{
 
   // Persistence side-effect - saves locally to localStorage without triggering an infinite Firestore write loop
   useEffect(() => {
-    const validTournaments = tournaments
-      .map((t) => normalizeGullyTournament(t))
-      .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id));
+    const validTournaments = deduplicateTournaments(
+      tournaments
+        .map((t) => normalizeGullyTournament(t))
+        .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id))
+    );
     try {
       localStorage.setItem('gully_tournaments_v1', JSON.stringify(validTournaments));
     } catch (e) {
@@ -2220,8 +2240,8 @@ export const CricketTournamentTab: React.FC<{
               className="px-5 py-3 h-12 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-bold text-xs uppercase text-slate-700 dark:text-slate-200 tracking-wider shadow-inner outline-none min-w-[200px]"
             >
               <option value="">-- No Active Tournament --</option>
-              {tournaments.map(t => (
-                <option key={t.id} value={t.id}>{t.name} ({t.format})</option>
+              {tournaments.map((t, idx) => (
+                <option key={`${t.id || 'tour'}-${idx}`} value={t.id}>{t.name} ({t.format})</option>
               ))}
             </select>
           </div>
@@ -2299,9 +2319,9 @@ export const CricketTournamentTab: React.FC<{
             <div className="pt-8 border-t border-slate-100 dark:border-slate-900/60 w-full max-w-xs mx-auto">
               <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest block mb-4">Saved Championships</span>
               <div className="space-y-2">
-                {tournaments.map(t => (
+                {tournaments.map((t, idx) => (
                   <div 
-                    key={t.id}
+                    key={`${t.id || 'tour'}-${idx}`}
                     className="flex items-center justify-between p-3.5 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl hover:border-emerald-300 dark:hover:border-emerald-900 transition-all text-left"
                   >
                     <div>
@@ -3118,8 +3138,8 @@ export const CricketTournamentTab: React.FC<{
                         className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl px-2.5 py-1.5 outline-none cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-all max-w-[180px] truncate"
                       >
                         <option value="all">All Teams</option>
-                        {(activeTournament.teams || []).map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
+                        {(activeTournament.teams || []).map((t, idx) => (
+                          <option key={`${t.id || 'team'}-${idx}`} value={t.id}>{t.name}</option>
                         ))}
                       </select>
                     </div>

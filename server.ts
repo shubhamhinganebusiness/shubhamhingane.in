@@ -67,11 +67,26 @@ function getServerLocalDb(): Record<string, Record<string, any>> {
   return serverLocalDbCache;
 }
 
+let flushDbTimer: NodeJS.Timeout | null = null;
+let isFlushingDb = false;
+let pendingFlush = false;
+
 function flushServerLocalDb(): void {
   if (!serverLocalDbCache) return;
-  try {
-    fs.writeFileSync(SERVER_LOCAL_DB_FILE, JSON.stringify(serverLocalDbCache), "utf-8");
-  } catch (_) {}
+  pendingFlush = true;
+  if (flushDbTimer) return;
+  flushDbTimer = setTimeout(() => {
+    flushDbTimer = null;
+    if (isFlushingDb || !pendingFlush || !serverLocalDbCache) return;
+    pendingFlush = false;
+    isFlushingDb = true;
+    fs.writeFile(SERVER_LOCAL_DB_FILE, JSON.stringify(serverLocalDbCache), "utf-8", () => {
+      isFlushingDb = false;
+      if (pendingFlush) {
+        flushServerLocalDb();
+      }
+    });
+  }, 100);
 }
 
 // Real-time Server-Sent Events (SSE) clients for instant cross-device cricket score & tournament sync
@@ -1724,7 +1739,7 @@ function cleanServerUndefined(obj: any): any {
 
       const cleaned = cleanServerUndefined(matchData || {});
       const prunedPayload = pruneServerMatchPayload(cleaned, 800000);
-      prunedPayload.updatedAt = Date.now();
+      prunedPayload.updatedAt = Number(matchData?.updatedAt) || Date.now();
 
       const savedDoc = saveToServerLocalDb("cricket_matches", matchId, prunedPayload, true);
 

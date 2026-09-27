@@ -58,6 +58,7 @@ import {
 } from './modules/commentaryLanguage';
 import { SpectatorImageSlider } from './SpectatorImageSlider';
 import { ActiveLiveMatchBannerSlider } from './ActiveLiveMatchBannerSlider';
+import { LiveMatchMetadataTicker } from './LiveMatchMetadataTicker';
 import { useSpectatorSliderImages } from './useSpectatorSliderImages';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
 import { computeFighterOfTheMatch, extractSquadPlayersForCertificates } from '../../utils/certificateVerification';
@@ -405,8 +406,8 @@ const computePointsTable = (teams: any[], matches: any[]) => {
   (matches || []).forEach(m => {
     if (!isMatchFinished(m) || isKnockoutStage(m.stage)) return;
     
-    const tA = table[m.teamAId] || Object.values(table).find(t => t.name.toLowerCase().trim() === (m.teamAName || '').toLowerCase().trim());
-    const tB = table[m.teamBId] || Object.values(table).find(t => t.name.toLowerCase().trim() === (m.teamBName || '').toLowerCase().trim());
+    const tA = table[m.teamAId] || Object.values(table).find(t => t.name.toLowerCase().trim() === (m.teamAName || m.teamA || '').toLowerCase().trim());
+    const tB = table[m.teamBId] || Object.values(table).find(t => t.name.toLowerCase().trim() === (m.teamBName || m.teamB || '').toLowerCase().trim());
 
     if (!tA || !tB) return;
 
@@ -1704,8 +1705,10 @@ export const SpectatorScoreboardSection = ({
         const synthId = m.id && String(m.id).startsWith('tour_') ? m.id : `tour_${t.id}_${m.id}`;
         if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
 
-        const teamAObj = t.teams?.find((tm: any) => tm.id === m.teamAId || tm.name === m.teamAName);
-        const teamBObj = t.teams?.find((tm: any) => tm.id === m.teamBId || tm.name === m.teamBName);
+        const nameA = m.teamAName || m.teamA || 'Team A';
+        const nameB = m.teamBName || m.teamB || 'Team B';
+        const teamAObj = t.teams?.find((tm: any) => tm.id === m.teamAId || tm.name === nameA);
+        const teamBObj = t.teams?.find((tm: any) => tm.id === m.teamBId || tm.name === nameB);
 
         const parseRunsWickets = (sc: string) => {
           if (!sc) return { runs: 0, wickets: 0 };
@@ -1727,7 +1730,7 @@ export const SpectatorScoreboardSection = ({
         const oversLimit = t.customOvers || (t.format === 'T20' ? 20 : (t.format === 'ODI' ? 50 : 10));
 
         const potmName = m.manOfTheMatch || '';
-        const winner = m.winner || (m.winnerId === m.teamAId ? m.teamAName : (m.winnerId === m.teamBId ? m.teamBName : ''));
+        const winner = m.winner || (m.winnerId === m.teamAId ? nameA : (m.winnerId === m.teamBId ? nameB : ''));
         const winReason = m.winReason || (winner ? `${winner} won the match` : 'Match Completed');
 
         const synth: MatchState = {
@@ -1736,8 +1739,8 @@ export const SpectatorScoreboardSection = ({
           tournamentMatchId: m.id,
           tournamentName: t.name,
           tournamentLogo: t.bannerUrl || t.logo || null,
-          teamA: m.teamAName,
-          teamB: m.teamBName,
+          teamA: nameA,
+          teamB: nameB,
           teamAId: m.teamAId,
           teamBId: m.teamBId,
           teamALogo: teamAObj?.logo || null,
@@ -1759,8 +1762,8 @@ export const SpectatorScoreboardSection = ({
             points: 50
           } : undefined,
           innings1: {
-            battingTeam: m.teamAName,
-            bowlingTeam: m.teamBName,
+            battingTeam: nameA,
+            bowlingTeam: nameB,
             runs: scA.runs,
             wickets: scA.wickets,
             overs: oversLimit,
@@ -1784,8 +1787,8 @@ export const SpectatorScoreboardSection = ({
             fallOfWickets: []
           },
           innings2: {
-            battingTeam: m.teamBName,
-            bowlingTeam: m.teamAName,
+            battingTeam: nameB,
+            bowlingTeam: nameA,
             runs: scB.runs,
             wickets: scB.wickets,
             overs: oversLimit,
@@ -1826,23 +1829,43 @@ export const SpectatorScoreboardSection = ({
 
   // Listen to cricket tournaments in real-time
   useEffect(() => {
+    const deduplicateTournaments = (tourList: any[]): any[] => {
+      if (!Array.isArray(tourList)) return [];
+      const map = new Map<string, any>();
+      for (const t of tourList) {
+        if (!t) continue;
+        const tid = String(t.id || '').trim();
+        if (!tid || isTournamentDeleted(tid)) continue;
+        if (!map.has(tid)) {
+          map.set(tid, t);
+        } else {
+          const prev = map.get(tid);
+          const isNewer = (t.updatedAt || 0) >= (prev.updatedAt || 0);
+          map.set(tid, isNewer ? { ...prev, ...t } : { ...t, ...prev });
+        }
+      }
+      return Array.from(map.values());
+    };
+
     // Initial local read
     try {
       const saved = localStorage.getItem('gully_tournaments_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setTournaments(parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id)));
+          setTournaments(deduplicateTournaments(parsed));
         }
       }
     } catch (_) {}
 
     const unsub = onSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
       const list: any[] = [];
+      const snapSeenIds = new Set<string>();
       snap.forEach((doc) => {
         const data = doc.data();
         const tid = data?.id || doc.id;
-        if (!isTournamentDeleted(tid)) {
+        if (tid && !isTournamentDeleted(tid) && !snapSeenIds.has(tid)) {
+          snapSeenIds.add(tid);
           list.push({ ...data, id: tid });
         }
       });
@@ -1854,7 +1877,7 @@ export const SpectatorScoreboardSection = ({
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            localList = parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+            localList = deduplicateTournaments(parsed);
           }
         }
       } catch (_) {}
@@ -1897,7 +1920,7 @@ export const SpectatorScoreboardSection = ({
         }
       });
 
-      const validTournaments = merged.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+      const validTournaments = deduplicateTournaments(merged);
       setTournaments(validTournaments);
     }, (err) => {
       console.warn("Warning subscribing to cricket_tournaments:", err);
@@ -1909,7 +1932,7 @@ export const SpectatorScoreboardSection = ({
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            setTournaments(parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id)));
+            setTournaments(deduplicateTournaments(parsed));
           }
         }
       } catch (e) {
@@ -3921,7 +3944,7 @@ export const SpectatorScoreboardSection = ({
                           className="flex gap-3.5 sm:gap-6 overflow-x-auto pb-3 sm:pb-4 pt-1 snap-x snap-mandatory scroll-smooth scrollbar-none touch-auto"
                           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch', touchAction: 'pan-x pan-y' }}
                         >
-                          {liveMatches.map((m) => {
+                          {liveMatches.map((m, mIdx) => {
                             const currentInnings = m.currentInningsNum === 1 ? m.innings1 : (m.innings2 || m.innings1);
 
                             const isTeamABatting1 = m.innings1 && m.innings1.battingTeam && m.innings1.battingTeam.toLowerCase().trim() === (m.teamA || '').toLowerCase().trim();
@@ -3984,7 +4007,7 @@ export const SpectatorScoreboardSection = ({
 
                             return (
                               <div 
-                                key={m.id}
+                                key={`${m.id || 'live'}-${mIdx}`}
                                 onClick={() => selectMatch(m.id)}
                                 style={{ touchAction: 'pan-x pan-y' }}
                                 className="snap-start shrink-0 w-[calc(100vw-4.5rem)] max-w-[340px] sm:w-[370px] md:w-[390px] bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 hover:border-emerald-500/35 rounded-2xl sm:rounded-[2rem] p-4 sm:p-6 shadow-lg hover:shadow-[0_20px_40px_rgba(0,0,0,0.55),0_0_20px_rgba(16,185,129,0.12)] hover:translate-y-[-3px] transition-all duration-300 cursor-pointer relative overflow-hidden text-white flex flex-col justify-between group touch-auto"
@@ -4055,22 +4078,9 @@ export const SpectatorScoreboardSection = ({
                                     </div>
                                   </div>
 
-                                  {/* Live Match Metadata Panel */}
-                                  <div className="mb-3 sm:mb-4 grid grid-cols-2 gap-1.5 sm:gap-2 text-[9px] sm:text-[10px] p-2.5 sm:p-3 rounded-xl sm:rounded-[1.25rem] bg-slate-950/60 border border-white/5 text-left leading-tight text-slate-400 font-sans">
-                                    <div className="col-span-2 border-b border-white/[0.04] pb-1.5 mb-0.5 text-slate-300 flex items-center justify-between gap-1.5">
-                                      <span className="text-[9px] sm:text-[10px] truncate" title={m.tossWinner ? `Toss: ${m.tossWinner} won & opted to ${m.tossChoice === 'bat' ? 'bat' : 'bowl'}` : 'Toss: Not tossed yet'}>
-                                        🪙 <strong>Toss:</strong> {m.tossWinner ? `${m.tossWinner} won & ${m.tossChoice === 'bat' ? 'bat' : 'bowl'}` : 'Not tossed yet'}
-                                      </span>
-                                    </div>
-                                    <div className="truncate">
-                                      🏆 <strong>Tour:</strong> {m.tournamentName || 'Friendly Cup'}
-                                    </div>
-                                    <div className="truncate">
-                                      🏏 <strong>Series:</strong> {m.seriesName || 'Bilateral Series'}
-                                    </div>
-                                    <div className="col-span-2 truncate">
-                                      📍 <strong>Ground:</strong> {m.groundName || m.venue || m.ground || 'Gully Ground'}
-                                    </div>
+                                  {/* Live Match Rotating Text Slider (Toss, Series, Ground, Umpires, Commentator, Scorer) */}
+                                  <div className="mb-3 sm:mb-4">
+                                    <LiveMatchMetadataTicker match={m} />
                                   </div>
 
                                   {/* Innings Active score panel */}
@@ -4389,9 +4399,9 @@ export const SpectatorScoreboardSection = ({
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {upcomingMatches.map((m) => (
+                      {upcomingMatches.map((m, mIdx) => (
                         <div 
-                          key={m.id}
+                          key={`${m.id || 'upcoming'}-${mIdx}`}
                           className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-3xl p-5 shadow-sm relative overflow-hidden text-slate-850 dark:text-slate-100 flex flex-col justify-between hover:scale-[1.01] transition-all"
                         >
                           <div className="flex justify-between items-center mb-3">
@@ -4490,9 +4500,9 @@ export const SpectatorScoreboardSection = ({
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {tournaments.map((t) => (
+                        {tournaments.map((t, tIdx) => (
                           <div
-                            key={t.id}
+                            key={`${t.id || 'tour'}-${tIdx}`}
                             onClick={() => setSelectedTournament(t)}
                             className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border border-slate-800 hover:border-amber-500/35 rounded-[2rem] p-6 shadow-lg hover:shadow-[0_20px_40px_rgba(0,0,0,0.55),0_0_20px_rgba(245,158,11,0.12)] hover:translate-y-[-3px] transition-all duration-300 cursor-pointer relative overflow-hidden text-white group"
                           >
@@ -4565,14 +4575,17 @@ export const SpectatorScoreboardSection = ({
                         <p className="text-xs text-slate-450 font-bold uppercase">No matches have been scheduled for this tournament yet.</p>
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {(selectedTournament.matches || []).map((m: any) => {
+                          {(selectedTournament.matches || []).map((m: any, mIdx: number) => {
                             const isCompleted = m.status === 'completed' || !!m.winner || (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled') || (!!m.scoreA && m.scoreA !== '0/0' && !!m.scoreB && m.scoreB !== '0/0');
                             const isLive = !isCompleted && m.status === 'live';
                             const isScheduled = !isCompleted && !isLive;
 
+                            const nameA = m.teamAName || m.teamA || 'Team A';
+                            const nameB = m.teamBName || m.teamB || 'Team B';
+
                             // Find team logos from selectedTournament object
-                            const teamAObj = selectedTournament.teams?.find((t: any) => t.id === m.teamAId || t.name === m.teamAName);
-                            const teamBObj = selectedTournament.teams?.find((t: any) => t.id === m.teamBId || t.name === m.teamBName);
+                            const teamAObj = selectedTournament.teams?.find((t: any) => t.id === m.teamAId || t.name === nameA);
+                            const teamBObj = selectedTournament.teams?.find((t: any) => t.id === m.teamBId || t.name === nameB);
                             const tALogo = teamAObj?.logo;
                             const tBLogo = teamBObj?.logo;
 
@@ -4583,7 +4596,7 @@ export const SpectatorScoreboardSection = ({
 
                             return (
                               <div
-                                key={m.id}
+                                key={`${m.id || 'tour_match'}-${mIdx}`}
                                 className={`bg-white dark:bg-slate-900 border rounded-[2rem] p-5 shadow-sm transition-all flex flex-col justify-between gap-4 hover:border-emerald-300 dark:hover:border-emerald-900 ${
                                   isLive ? 'border-amber-400 dark:border-amber-500/40 bg-amber-555/5 ring-1 ring-amber-400/20' : 'border-slate-100 dark:border-slate-800'
                                 }`}
@@ -4619,12 +4632,12 @@ export const SpectatorScoreboardSection = ({
                                       <div className="flex items-center gap-2.5 min-w-0">
                                         <div className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                                           {tALogo ? (
-                                            <img src={tALogo} alt={m.teamAName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                            <img src={tALogo} alt={nameA} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                           ) : (
-                                            <span className="font-extrabold text-[10px] text-indigo-500 dark:text-indigo-400 uppercase select-none">{m.teamAName[0] || 'A'}</span>
+                                            <span className="font-extrabold text-[10px] text-indigo-500 dark:text-indigo-400 uppercase select-none">{nameA.charAt(0) || 'A'}</span>
                                           )}
                                         </div>
-                                        <span className="text-xs font-black uppercase text-slate-800 dark:text-white truncate">{m.teamAName}</span>
+                                        <span className="text-xs font-black uppercase text-slate-800 dark:text-white truncate">{nameA}</span>
                                       </div>
                                       {isCompleted && (
                                         <span className="font-mono text-[11px] font-black text-slate-600 dark:text-slate-350">{m.scoreA || 'DNB'} ({m.oversA || '0'} ov)</span>
@@ -4646,12 +4659,12 @@ export const SpectatorScoreboardSection = ({
                                       <div className="flex items-center gap-2.5 min-w-0">
                                         <div className="w-8 h-8 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
                                           {tBLogo ? (
-                                            <img src={tBLogo} alt={m.teamBName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                            <img src={tBLogo} alt={nameB} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                                           ) : (
-                                            <span className="font-extrabold text-[10px] text-indigo-500 dark:text-indigo-400 uppercase select-none">{m.teamBName[0] || 'B'}</span>
+                                            <span className="font-extrabold text-[10px] text-indigo-500 dark:text-indigo-400 uppercase select-none">{nameB.charAt(0) || 'B'}</span>
                                           )}
                                         </div>
-                                        <span className="text-xs font-black uppercase text-slate-850 dark:text-white truncate">{m.teamBName}</span>
+                                        <span className="text-xs font-black uppercase text-slate-850 dark:text-white truncate">{nameB}</span>
                                       </div>
                                       {isCompleted && (
                                         <span className="font-mono text-[11px] font-black text-slate-600 dark:text-slate-350">{m.scoreB || 'DNB'} ({m.oversB || '0'} ov)</span>
@@ -4675,7 +4688,7 @@ export const SpectatorScoreboardSection = ({
                                   {isCompleted && (
                                     <div className="mt-3 p-3 bg-emerald-500/10 dark:bg-emerald-500/15 rounded-xl border border-emerald-500/25 text-[10px] font-black text-emerald-700 dark:text-emerald-300 text-center uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-2xs">
                                       <Award size={13} className="text-amber-500 shrink-0" />
-                                      <span>🎉 {m.winReason || (m.winner ? `${m.winner} won the match` : (m.winnerId === m.teamAId ? `${m.teamAName} won` : (m.winnerId === m.teamBId ? `${m.teamBName} won` : 'Match Completed')))}</span>
+                                      <span>🎉 {m.winReason || (m.winner ? `${m.winner} won the match` : (m.winnerId === m.teamAId ? `${nameA} won` : (m.winnerId === m.teamBId ? `${nameB} won` : 'Match Completed')))}</span>
                                       {m.manOfTheMatch && (
                                         <span className="ml-1 text-[9px] text-amber-500 font-extrabold bg-amber-500/10 px-2 py-0.5 rounded">
                                           ⭐ MoM: {m.manOfTheMatch}
@@ -4691,7 +4704,7 @@ export const SpectatorScoreboardSection = ({
                                     onClick={() => {
                                       const targetM = allMatches.find(am => 
                                         (am.tournamentId === selectedTournament.id && (am.tournamentMatchId === m.id || am.id === m.id || am.id === `tour_${selectedTournament.id}_${m.id}`)) ||
-                                        (am.teamA === m.teamAName && am.teamB === m.teamBName && am.status === 'completed')
+                                        (am.teamA === nameA && am.teamB === nameB && am.status === 'completed')
                                       );
                                       if (targetM) {
                                         selectMatch(targetM.id);
@@ -6097,7 +6110,7 @@ export const SpectatorScoreboardSection = ({
                             </span>
                             <button
                               type="button"
-                              onClick={() => setActiveTab('prizes')}
+                              onClick={() => setActiveTab('sponsors-prizes')}
                               className="text-[8.5px] font-bold text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-0.5"
                             >
                               Full Prize Room →
@@ -8189,7 +8202,7 @@ export const SpectatorScoreboardSection = ({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => setActiveTab('prizes')}
+                                onClick={() => setActiveTab('sponsors-prizes')}
                                 className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-1"
                               >
                                 <span>Trophy Room Page</span>

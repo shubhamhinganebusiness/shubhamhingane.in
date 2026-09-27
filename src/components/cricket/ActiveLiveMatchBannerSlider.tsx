@@ -7,6 +7,7 @@ import {
 import { MatchState } from '../../types/cricket';
 import { SponsorAdSlide } from './useSpectatorSliderImages';
 import { CricketMatchBanner } from './CricketImageFallback';
+import { LiveMatchMetadataTicker } from './LiveMatchMetadataTicker';
 
 export interface ActiveLiveBannerSlide {
   id: string;
@@ -205,7 +206,7 @@ export const ActiveLiveMatchBannerSlider: React.FC<ActiveLiveMatchBannerSliderPr
       {/* 5. Hero Mode Overlay Details (Tournament, Matchup, and CTA button) */}
       {isHero && (
         <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-slate-950/95 via-slate-950/60 to-transparent pt-12 pb-3.5 px-4 sm:px-6 flex flex-col sm:flex-row sm:items-end justify-between gap-3 pointer-events-none">
-          <div className="space-y-1">
+          <div className="space-y-1.5 max-w-lg w-full">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1">
                 <Trophy size={11} /> {m.tournamentName || 'Live Cricket Series'}
@@ -219,6 +220,9 @@ export const ActiveLiveMatchBannerSlider: React.FC<ActiveLiveMatchBannerSliderPr
             <h3 className="text-base sm:text-lg font-black text-white tracking-tight drop-shadow-md">
               {m.teamA} vs {m.teamB}
             </h3>
+            <div className="pointer-events-auto max-w-sm sm:max-w-md pt-0.5">
+              <LiveMatchMetadataTicker match={m} />
+            </div>
           </div>
 
           {onSelectMatch && (

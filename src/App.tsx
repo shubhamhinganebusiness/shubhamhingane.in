@@ -267,6 +267,18 @@ const DeferredSection: React.FC<{ children: React.ReactNode; fallback?: React.Re
 
 const HomePage = () => {
   const { settings, loading } = useSiteSettings();
+  const location = useLocation();
+
+  // If a captain squad submission link was opened on homepage or hash root, redirect to squad form immediately
+  const searchParams = new URLSearchParams(location.search);
+  const action = searchParams.get('action');
+  const teamIdParam = searchParams.get('teamId') || searchParams.get('team_id');
+  const tourIdParam = searchParams.get('tourId') || searchParams.get('tour_id');
+
+  if ((action === 'submit_squad' || action === 'squad_submit' || searchParams.has('submit_squad')) && teamIdParam) {
+    const tourQuery = tourIdParam ? `?tourId=${encodeURIComponent(tourIdParam)}&tourType=one_half` : '';
+    return <Navigate to={`/cricket-captain-squad/${encodeURIComponent(teamIdParam)}${tourQuery}`} replace />;
+  }
   
   const isVisible = (section: string) => {
     // If settings are loading, render sections by default using fallback translations

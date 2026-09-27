@@ -630,18 +630,12 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
     const effectiveTourId = tournament?.id || tournamentId;
     const tournamentDocRef = effectiveTourId ? doc(db, 'cricket_tournaments', effectiveTourId) : null;
     
-    // 2. Fetch remote document if available to merge
-    if (tournamentDocRef) {
+    // 2. Fetch remote document if not available in local cache
+    if (tournamentDocRef && !tournament) {
       try {
         const docSnap = await getDoc(tournamentDocRef);
         if (docSnap.exists()) {
-          const remoteData = { ...docSnap.data(), id: effectiveTourId };
-          if (!tournament) {
-            tournament = remoteData;
-          } else {
-            // Merge remote with local, keeping local matches if they have more recent updates
-            tournament = { ...remoteData, ...tournament, id: effectiveTourId };
-          }
+          tournament = { ...docSnap.data(), id: effectiveTourId };
         }
       } catch (fetchErr) {
         console.warn("Could not fetch remote tournament document, using local cache:", fetchErr);
@@ -910,9 +904,9 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
 
       // 2. Persist to Realtime Database, Real-Time Server, and Firestore asynchronously
       if (tournamentDocRef) {
-        await safeSetDoc(tournamentDocRef, updatedTournamentData, { merge: true });
+        safeSetDoc(tournamentDocRef, updatedTournamentData, { merge: true }).catch(() => {});
       }
-      await syncTournamentToRealtimeDB(updatedTournamentData);
+      syncTournamentToRealtimeDB(updatedTournamentData).catch(() => {});
     }
 
     // 3. Also sync live/completed match result to One-Half 32-Team Tournament ('one_half_tournament_v1') if applicable
@@ -2449,7 +2443,11 @@ export const CricketScoreboard: React.FC = () => {
 
         // Sanitize object to eliminate any undefined values before Firestore persistence
         const sanitized = sanitizeForFirestore(stateToSave);
-        await safeSetDoc(matchDocRef, sanitized);
+
+        // Keep tournament scores synchronized in real-time in the background
+        if (stateToSave.tournamentId && stateToSave.tournamentMatchId) {
+          syncLiveScoreToTournament(stateToSave.tournamentId, stateToSave.tournamentMatchId, stateToSave).catch(() => {});
+        }
 
         // Separate Write Pipeline: Publish ultra-lightweight (< 1.5 KB) summary for spectators
         try {
@@ -2464,15 +2462,13 @@ export const CricketScoreboard: React.FC = () => {
           console.warn('[RTDB Dual-Sync Note]:', err);
         });
 
+        // Primary match persistence
+        await safeSetDoc(matchDocRef, sanitized);
+
         setSaveStatus('saved');
         try {
           localStorage.removeItem('cricket_matches_offline_pending');
         } catch (e) {}
-
-        // Keep tournament scores synchronized in real-time
-        if (stateToSave.tournamentId && stateToSave.tournamentMatchId) {
-          await syncLiveScoreToTournament(stateToSave.tournamentId, stateToSave.tournamentMatchId, stateToSave);
-        }
       } catch (err) {
         if (isQuotaError(err)) {
           recordFirestoreQuotaExhaustion(2);
@@ -2802,29 +2798,19 @@ export const CricketScoreboard: React.FC = () => {
 
       // If the match currently loaded in the scoreboard was not found in remoteIds
       if (matchIdParam && !remoteIds.has(matchIdParam)) {
-        if (isMatchDeleted(matchIdParam)) {
-          setMatch({
-            id: '',
-            teamA: '',
-            teamB: '',
-            oversLimit: 5,
-            tossWinner: '',
-            tossChoice: 'bat',
-            currentInningsNum: 1,
-            innings1: null,
-            innings2: null,
-            status: 'setup',
-            date: '',
-            freeHitNext: false
-          });
-          setSearchParams({});
-        } else {
-          const localMatch = latestStateToSaveRef.current || getLocalMatchById(matchIdParam);
-          const isFresh = localMatch && (Date.now() - (localMatch.updatedAt || 0) < 10000);
-          if (localMatch && !isSpectator && isFresh) {
-            setMatch((prev) => (prev.id === matchIdParam ? prev : localMatch));
-          } else {
-            deleteLocalMatch(matchIdParam);
+        const localMatch = latestStateToSaveRef.current?.id === matchIdParam 
+          ? latestStateToSaveRef.current 
+          : getLocalMatchById(matchIdParam);
+        
+        // If the match exists locally (is live, setup, or recently updated), preserve it!
+        if (localMatch && !isSpectator) {
+          unmarkMatchDeleted(matchIdParam);
+          if (match.id !== matchIdParam || match.status !== localMatch.status) {
+            setMatch(localMatch);
+          }
+        } else if (isMatchDeleted(matchIdParam)) {
+          // Only reset if confirmed deleted and not the active match in memory
+          if (latestStateToSaveRef.current?.id !== matchIdParam && match.id !== matchIdParam) {
             setMatch({
               id: '',
               teamA: '',
@@ -2884,10 +2870,20 @@ export const CricketScoreboard: React.FC = () => {
     const handleMatchDeletedEvent = (e: any) => {
       const id = e?.detail?.id;
       if (id) {
+        // Protect active live match or recently created match from being wiped out
+        if (latestStateToSaveRef.current?.id === id && (latestStateToSaveRef.current.status === 'live' || (Date.now() - (latestStateToSaveRef.current.updatedAt || 0) < 600000))) {
+          unmarkMatchDeleted(id);
+          return;
+        }
+        if (match.id === id && (match.status === 'live' || (Date.now() - (match.updatedAt || 0) < 600000))) {
+          unmarkMatchDeleted(id);
+          return;
+        }
+
         setActiveLiveMatches(prev => prev.filter(m => m.id !== id));
         setMatchHistory(prev => prev.filter(m => m.id !== id));
         setSavedDrafts(prev => prev.filter(m => m.id !== id));
-        if (matchIdParam === id || latestStateToSaveRef.current?.id === id) {
+        if (matchIdParam === id) {
           latestStateToSaveRef.current = null;
           setMatch({
             id: '',
@@ -2913,7 +2909,7 @@ export const CricketScoreboard: React.FC = () => {
       unsub();
       window.removeEventListener('cricket_match_deleted', handleMatchDeletedEvent);
     };
-  }, [user, matchIdParam]);
+  }, [user]);
 
   // Sync approved players list from Firestore in real-time
   useEffect(() => {
@@ -3016,18 +3012,35 @@ export const CricketScoreboard: React.FC = () => {
             const localTime = prevLocal.updatedAt || 0;
             const remoteTime = remoteMatch.updatedAt || 0;
 
-            // If remote is newer in version or timestamp, accept it immediately
-            if (remoteVersion > localVersion || (remoteVersion === localVersion && remoteTime > localTime)) {
-              return remoteMatch;
-            }
-            // If spectator, always reflect the remote authority
-            if (isSpectator) {
-              return remoteMatch;
-            }
-            // If currently debouncing or saving and local version is newer, retain local state until write completes
-            if (saveStatusRef.current === 'saving' && localVersion > remoteVersion) {
+            const localBalls = (prevLocal.innings1?.ballsBowled || 0) + (prevLocal.innings2?.ballsBowled || 0);
+            const remoteBalls = (remoteMatch.innings1?.ballsBowled || 0) + (remoteMatch.innings2?.ballsBowled || 0);
+
+            // If this device is the Scoreboard Manager / Scorer, local state is the authoritative source
+            if (!isSpectator) {
+              // 1. If local match is completed, never revert to live/uncompleted
+              if (prevLocal.status === 'completed' && remoteMatch.status !== 'completed') {
+                return prevLocal;
+              }
+              // 2. If local has more balls bowled, never undo deliveries
+              if (localBalls > remoteBalls) {
+                return prevLocal;
+              }
+              // 3. If local version is equal or newer, retain the active local state
+              if (localVersion >= remoteVersion) {
+                return prevLocal;
+              }
+              // 4. Only adopt remote state if it is strictly newer and has at least as many balls bowled
+              if (remoteVersion > localVersion && remoteBalls >= localBalls && remoteTime > localTime) {
+                return remoteMatch;
+              }
               return prevLocal;
             }
+
+            // Spectators always follow the latest remote match
+            if (remoteVersion >= localVersion || remoteTime >= localTime || remoteBalls >= localBalls) {
+              return remoteMatch;
+            }
+            return prevLocal;
           }
           return remoteMatch;
         });
@@ -3070,12 +3083,36 @@ export const CricketScoreboard: React.FC = () => {
           const remoteVersion = remoteMatch.version || 0;
           const localTime = prevLocal.updatedAt || 0;
           const remoteTime = remoteMatch.updatedAt || 0;
-          if (remoteVersion > localVersion || (remoteVersion === localVersion && remoteTime > localTime) || isSpectator) {
-            return remoteMatch;
-          }
-          if (saveStatusRef.current === 'saving' && localVersion > remoteVersion) {
+
+          const localBalls = (prevLocal.innings1?.ballsBowled || 0) + (prevLocal.innings2?.ballsBowled || 0);
+          const remoteBalls = (remoteMatch.innings1?.ballsBowled || 0) + (remoteMatch.innings2?.ballsBowled || 0);
+
+          // If this device is the Scoreboard Manager / Scorer, local state is the authoritative source
+          if (!isSpectator) {
+            // 1. If local match is completed, never revert to live/uncompleted
+            if (prevLocal.status === 'completed' && remoteMatch.status !== 'completed') {
+              return prevLocal;
+            }
+            // 2. If local has more balls bowled, never undo deliveries
+            if (localBalls > remoteBalls) {
+              return prevLocal;
+            }
+            // 3. If local version is equal or newer, retain active local state
+            if (localVersion >= remoteVersion) {
+              return prevLocal;
+            }
+            // 4. Only adopt remote state if it is strictly newer and has at least as many balls bowled
+            if (remoteVersion > localVersion && remoteBalls >= localBalls && remoteTime > localTime) {
+              return remoteMatch;
+            }
             return prevLocal;
           }
+
+          // Spectators always follow latest remote match
+          if (remoteVersion >= localVersion || remoteTime >= localTime || remoteBalls >= localBalls) {
+            return remoteMatch;
+          }
+          return prevLocal;
         }
         return remoteMatch;
       });
@@ -6480,7 +6517,7 @@ export const CricketScoreboard: React.FC = () => {
           updateOverlayProp({ activeGraphic: 'match_presentation' });
         } catch (_) {}
 
-        saveMatchToHistory(modifiedState);
+        saveMatchToHistory(modifiedState, true);
 
         // PHASE 2 & 3 AUTOMATION: Trigger player career stats update and tournament standings recalculation
         try {
@@ -6851,8 +6888,10 @@ export const CricketScoreboard: React.FC = () => {
   };
 
   // Saves completed match state into history
-  const saveMatchToHistory = (completedMatch: MatchState) => {
-    syncMatch(completedMatch);
+  const saveMatchToHistory = (completedMatch: MatchState, skipSync = false) => {
+    if (!skipSync) {
+      syncMatch(completedMatch);
+    }
     showNotification('Match concluded and saved to History records.', 'success');
 
     // Immediately synchronize to tournament fixture and standings
@@ -16276,6 +16315,9 @@ export const CricketScoreboard: React.FC = () => {
                 tourPrizes = getTournamentPrizesByTournamentId(tourId);
               }
 
+              // Clear any old matchId searchParams
+              setSearchParams({});
+
               // Update Match Setup Form states
               setTeamA(tA);
               setTeamB(teamBName);
@@ -16299,6 +16341,9 @@ export const CricketScoreboard: React.FC = () => {
               if (tBLogo) setTeamBLogoUrl(tBLogo);
               if (tASquad.length > 0) setSelectedTeamARoster(tASquad);
               if (tBSquad.length > 0) setSelectedTeamBRoster(tBSquad);
+              if (tASquad[0]) setSetupOpeningBatsman1(tASquad[0]);
+              if (tASquad[1]) setSetupOpeningBatsman2(tASquad[1]);
+              if (tBSquad[0]) setSetupOpeningBowler(tBSquad[0]);
               if (Object.keys(pPhotos).length > 0) setPlayerPhotos(prev => ({ ...prev, ...pPhotos }));
 
               // Persist logos/names if provided
@@ -16349,9 +16394,14 @@ export const CricketScoreboard: React.FC = () => {
                 youtubeChannelLogo: ytLogo || undefined,
                 showYoutubeChannelLogo: !!ytLogo,
                 youtubeChannelName: ytName || undefined,
-                createdBy: user?.email || user?.uid || 'anonymous'
+                createdBy: user?.email || user?.uid || 'anonymous',
+                updatedAt: Date.now()
               };
 
+              unmarkMatchDeleted(newLiveMatch.id);
+              saveMatchToRegistry(newLiveMatch);
+              setActiveMatch(newLiveMatch);
+              latestStateToSaveRef.current = newLiveMatch;
               setMatch(newLiveMatch);
               try {
                 localStorage.setItem('cricket_active_match', JSON.stringify(newLiveMatch));
@@ -16499,12 +16549,49 @@ export const CricketScoreboard: React.FC = () => {
 
           <OneHalfTournamentSuite
             onStartLiveScore={(config) => {
+              // Clear any stale matchId in URL so old params don't conflict
+              setSearchParams({});
+
+              // Basic match info
               setTeamA(config.teamA);
               setTeamB(config.teamB);
               setOversLimit(config.overs);
               setTournamentName(config.tournamentName);
               setGroundName(config.groundName);
               setSeriesName(config.seriesName || config.tournamentName);
+
+              // Logos & banners
+              if (config.teamALogo) setTeamALogoUrl(config.teamALogo);
+              else setTeamALogoUrl('');
+              if (config.teamBLogo) setTeamBLogoUrl(config.teamBLogo);
+              else setTeamBLogoUrl('');
+              if (config.tournamentLogo) {
+                setTournamentLogo(config.tournamentLogo);
+                try { localStorage.setItem('cricket_tournament_logo', config.tournamentLogo); } catch (_) {}
+              }
+              if (config.matchBannerUrl) setMatchBannerUrl(config.matchBannerUrl);
+              else setMatchBannerUrl('');
+
+              // Officials & commentators
+              if (config.umpire1Name) setUmpire1Name(config.umpire1Name);
+              if (config.umpire1Photo) setUmpire1Photo(config.umpire1Photo);
+              if (config.umpire2Name) setUmpire2Name(config.umpire2Name);
+              if (config.umpire2Photo) setUmpire2Photo(config.umpire2Photo);
+              if (config.scoreboardManagerName) setScoreboardManagerName(config.scoreboardManagerName);
+              if (config.scoreboardManagerPhoto) setScoreboardManagerPhoto(config.scoreboardManagerPhoto);
+              if (config.commentatorName) setCommentatorName(config.commentatorName);
+              if (config.commentatorPhoto) setCommentatorPhoto(config.commentatorPhoto);
+              if (config.youtubeChannelLogo) setYoutubeChannelLogo(config.youtubeChannelLogo);
+              if (config.youtubeChannelName) setYoutubeChannelName(config.youtubeChannelName);
+
+              // Rosters & initial opening batters & bowler
+              const squadANames: string[] = ((config as any).teamASquad || []).map((p: any) => typeof p === 'string' ? p : p.name).filter(Boolean);
+              const squadBNames: string[] = ((config as any).teamBSquad || []).map((p: any) => typeof p === 'string' ? p : p.name).filter(Boolean);
+              if (squadANames.length > 0) setSelectedTeamARoster(squadANames);
+              if (squadBNames.length > 0) setSelectedTeamBRoster(squadBNames);
+              if (squadANames[0]) setSetupOpeningBatsman1(squadANames[0]);
+              if (squadANames[1]) setSetupOpeningBatsman2(squadANames[1]);
+              if (squadBNames[0]) setSetupOpeningBowler(squadBNames[0]);
 
               const newLiveMatch: MatchState = {
                 id: `live_${Date.now()}`,
@@ -16522,19 +16609,47 @@ export const CricketScoreboard: React.FC = () => {
                 tournamentId: config.tournamentId,
                 tournamentMatchId: config.matchId,
                 tournamentName: config.tournamentName,
+                tournamentLogo: config.tournamentLogo || undefined,
+                teamALogo: config.teamALogo || undefined,
+                teamBLogo: config.teamBLogo || undefined,
+                matchBannerUrl: config.matchBannerUrl || undefined,
+                tournamentPrizes: (config as any).tournamentPrizes,
                 groundName: config.groundName,
                 seriesName: config.seriesName || config.tournamentName,
+                umpire1Name: config.umpire1Name || undefined,
+                umpire1Photo: config.umpire1Photo || undefined,
+                umpire2Name: config.umpire2Name || undefined,
+                umpire2Photo: config.umpire2Photo || undefined,
+                scoreboardManagerName: config.scoreboardManagerName || currentManagerName || undefined,
+                scoreboardManagerPhoto: config.scoreboardManagerPhoto || undefined,
+                commentatorName: config.commentatorName || undefined,
+                commentatorPhoto: config.commentatorPhoto || undefined,
+                youtubeChannelName: config.youtubeChannelName || undefined,
+                youtubeChannelLogo: config.youtubeChannelLogo || undefined,
                 teamASquad: (config as any).teamASquad,
                 teamBSquad: (config as any).teamBSquad,
                 teamACaptain: (config as any).teamACaptain,
                 teamBCaptain: (config as any).teamBCaptain,
-                createdBy: user?.email || user?.uid || 'anonymous'
+                playerPhotos: (config as any).playerPhotos || {},
+                createdBy: user?.email || user?.uid || 'anonymous',
+                updatedAt: Date.now()
               };
 
+              unmarkMatchDeleted(newLiveMatch.id);
+              saveMatchToRegistry(newLiveMatch);
+              setActiveMatch(newLiveMatch);
+              latestStateToSaveRef.current = newLiveMatch;
               setMatch(newLiveMatch);
               try {
                 localStorage.setItem('cricket_active_match', JSON.stringify(newLiveMatch));
               } catch (_) {}
+
+              if ((config as any).tournamentPrizes && (config as any).tournamentPrizes.length > 0) {
+                try {
+                  saveTournamentPrizes((config as any).tournamentPrizes, newLiveMatch.id);
+                  saveTournamentPrizes((config as any).tournamentPrizes);
+                } catch (_) {}
+              }
 
               tournamentCallbackRef.current = config.onSave;
               setActiveSection('scorer');
@@ -25289,10 +25404,10 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-                        {savedTeams.map((t) => {
+                        {savedTeams.map((t, idx) => {
                           const isCaptainPending = t.status === 'pending_squad' && (!t.players || t.players.length === 0);
                           return (
-                            <div key={t.id} className="p-3.5 bg-slate-50 dark:bg-slate-850/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5 hover:border-emerald-500/30 transition-all">
+                            <div key={`${t.id || 'team'}-${idx}`} className="p-3.5 bg-slate-50 dark:bg-slate-850/60 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2.5 hover:border-emerald-500/30 transition-all">
                               <div className="flex justify-between items-start gap-2">
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">

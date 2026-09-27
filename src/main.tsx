@@ -6,13 +6,23 @@ import { LanguageProvider } from './components/LanguageContext.tsx';
 import { ThemeProvider } from './components/ThemeContext.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
-// Auto-redirect direct path access to hash route for HashRouter (only if pathname is non-root)
+// Auto-redirect direct path access or captain squad submission query params to hash route for HashRouter
 if (typeof window !== 'undefined') {
   try {
     const pathname = window.location.pathname;
     const search = window.location.search;
     const hash = window.location.hash;
-    if (pathname && pathname !== '/' && pathname !== '/index.html' && !hash) {
+
+    // Check if query parameters specify captain squad submission (e.g. from WhatsApp or legacy links)
+    const searchParams = new URLSearchParams(search);
+    const action = searchParams.get('action');
+    const teamIdParam = searchParams.get('teamId') || searchParams.get('team_id');
+    const tourIdParam = searchParams.get('tourId') || searchParams.get('tour_id');
+
+    if ((action === 'submit_squad' || action === 'squad_submit' || searchParams.has('submit_squad')) && teamIdParam) {
+      const tourQuery = tourIdParam ? `?tourId=${encodeURIComponent(tourIdParam)}&tourType=one_half` : '';
+      window.history.replaceState(null, '', `/#/cricket-captain-squad/${encodeURIComponent(teamIdParam)}${tourQuery}`);
+    } else if (pathname && pathname !== '/' && pathname !== '/index.html' && !hash) {
       window.history.replaceState(null, '', `/#${pathname}${search}`);
     }
   } catch (err) {

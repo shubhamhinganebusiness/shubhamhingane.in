@@ -2525,8 +2525,8 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
                 className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-[11px] font-bold border border-slate-200 dark:border-slate-700 outline-none max-w-[160px]"
               >
                 <option value="all">All 32 Teams</option>
-                {tournament.teams.map(t => (
-                  <option key={t.id} value={t.name}>{t.name}</option>
+                {tournament.teams.map((t, idx) => (
+                  <option key={`${t.id || 'team'}-${idx}`} value={t.name}>{t.name}</option>
                 ))}
               </select>
 
@@ -3654,9 +3654,9 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
                 Group {grp} (Day {grp})
               </span>
               <div className="space-y-1">
-                {tournament.teams.filter(t => t.group === grp).map(t => (
+                {tournament.teams.filter(t => t.group === grp).map((t, tIdx) => (
                   <div
-                    key={t.id}
+                    key={`${t.id || 'team'}-${tIdx}`}
                     className="w-full flex items-center justify-between p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800/80 transition text-[10px] font-bold text-slate-700 dark:text-slate-300 group"
                   >
                     <button
