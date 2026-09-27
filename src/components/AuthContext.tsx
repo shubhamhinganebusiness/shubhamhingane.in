@@ -1,405 +1,273 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { User } from 'firebase/auth';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import { User, onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth, db, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion, safeGetDoc } from '../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
-interface AuthContextType {
-  user: User | null;
-  role: 'super_admin' | 'dairy_admin' | 'Doctor' | 'Pharmacy' | 'mess_owner' | 'furniture_admin' | 'score_manager' | null;
-  isSuperAdmin: boolean;
-  isDairyAdmin: boolean;
-  isDoctor: boolean;
-  isPharmacy: boolean;
-  isMessOwner: boolean;
-  isFurnitureAdmin: boolean;
-  isScoreManager: boolean;
-  storeId: string | null;
-  pharmacyId: string | null;
-  loading: boolean;
-  logout: () => Promise<void>;
+export const ADMIN_EMAILS = [
+  'jamkhednewsnetwork@gmail.com',
+  'shubhamhingane7719@gmail.com',
+  'shubhamingane7719@gmail.com',
+  '771999595@admin.com',
+  '7719959593@admin.com',
+  'shubhamhinganebusiness@gmail.com',
+  'streetsportsoffical@gmail.com',
+  'admin@gullyscore.com'
+];
+
+export interface AuthUser extends Partial<User> {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+  role?: string | null;
+  mobile?: string;
+  storeId?: string;
+  pharmacyId?: string;
+  messId?: string;
 }
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  role: null,
-  isSuperAdmin: false,
-  isDairyAdmin: false,
-  isDoctor: false,
-  isPharmacy: false,
-  isMessOwner: false,
-  isFurnitureAdmin: false,
-  isScoreManager: false,
-  storeId: null,
-  pharmacyId: null,
-  loading: true,
-  logout: async () => {},
-});
+export interface AuthContextType {
+  user: (User | AuthUser) | null;
+  role: string | null;
+  loading: boolean;
+  isSuperAdmin: boolean;
+  isScoreManager: boolean;
+  isDoctor: boolean;
+  isPharmacy: boolean;
+  isDairyAdmin: boolean;
+  storeId: string | null;
+  pharmacyId: string | null;
+  messId: string | null;
+  logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Sync lookup helpers to eliminate first-render flashing
-  const getInitialSession = () => {
-    try {
-      const virtualUserStr = localStorage.getItem('erp_virtual_user');
-      if (virtualUserStr) {
-        const vu = JSON.parse(virtualUserStr);
-        return {
-          user: vu as any,
-          role: (vu.role || 'super_admin') as any,
-          pharmacyId: vu.pharmacyId || null,
-          storeId: vu.storeId || null,
-          loading: false
-        };
-      }
-    } catch (e) {
-      console.warn('LocalStorage erp_virtual_user read failed:', e);
-    }
-    return {
-      user: null,
-      role: null,
-      pharmacyId: null,
-      storeId: null,
-      loading: true
-    };
-  };
+  const [user, setUser] = useState<(User | AuthUser) | null>(null);
+  const [role, setRole] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const initial = getInitialSession();
-  const [user, setUser] = useState<User | null>(initial.user);
-  const [role, setRole] = useState<'super_admin' | 'dairy_admin' | 'Doctor' | 'Pharmacy' | 'mess_owner' | 'furniture_admin' | 'score_manager' | null>(initial.role);
-  const [storeId, setStoreId] = useState<string | null>(initial.storeId);
-  const [pharmacyId, setPharmacyId] = useState<string | null>(initial.pharmacyId);
-  const [loading, setLoading] = useState(initial.loading);
+  // Check virtual session from localStorage if present
+  const getVirtualSession = useCallback((): AuthUser | null => {
+    try {
+      const stored = localStorage.getItem('erp_virtual_user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.uid) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  }, []);
+
+  const resolveIsAdminEmail = useCallback((email?: string | null): boolean => {
+    if (!email) return false;
+    const clean = email.toLowerCase().trim();
+    return ADMIN_EMAILS.some(e => e.toLowerCase() === clean);
+  }, []);
+
+  const fetchProfile = useCallback(async (uid: string, email?: string | null) => {
+    const isAdmin = resolveIsAdminEmail(email);
+    let cachedRole: string | null = null;
+    try {
+      cachedRole = localStorage.getItem(`auth_role_${uid}`);
+    } catch {}
+
+    // First try safeGetDoc which checks server proxy / local mirror / firestore
+    try {
+      const data = await safeGetDoc('users', uid);
+      if (data) {
+        setUserProfile(data);
+        const resolvedRole = data.role || (isAdmin ? 'super_admin' : cachedRole || 'user');
+        setRole(resolvedRole);
+        try {
+          localStorage.setItem(`auth_role_${uid}`, resolvedRole);
+        } catch {}
+        return;
+      }
+    } catch (err: any) {
+      if (isQuotaError(err)) {
+        recordFirestoreQuotaExhaustion(30);
+      }
+    }
+
+    // Fallback to cached or admin role
+    const fallbackRole = isAdmin ? 'super_admin' : cachedRole || 'user';
+    setRole(fallbackRole);
+  }, [resolveIsAdminEmail]);
 
   useEffect(() => {
-    const checkUserSession = async () => {
-      const { auth, db, isFirestoreQuotaExhausted } = await import('../lib/firebase');
-      const { onAuthStateChanged } = await import('firebase/auth');
-      const { doc, getDoc, setDoc, query, collection, where, getDocs, limit } = await import('firebase/firestore');
+    let firestoreUnsub: (() => void) | null = null;
 
-      const unsubscribe = onAuthStateChanged(auth, async (user) => {
-        if (user) {
-          // Real Firebase user authenticated - clear any conflicting virtual user session
+    const authUnsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firestoreUnsub) {
+        firestoreUnsub();
+        firestoreUnsub = null;
+      }
+
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        const isAdmin = resolveIsAdminEmail(firebaseUser.email);
+        
+        let initialRole = isAdmin ? 'super_admin' : null;
+        try {
+          const cached = localStorage.getItem(`auth_role_${firebaseUser.uid}`);
+          if (cached) initialRole = cached;
+        } catch {}
+
+        if (initialRole) {
+          setRole(initialRole);
+        }
+
+        // Fetch or listen to Firestore profile safely
+        if (!isFirestoreQuotaExhausted()) {
           try {
-            const currentVu = localStorage.getItem('erp_virtual_user');
-            if (currentVu) {
-              const parsed = JSON.parse(currentVu);
-              if (parsed.uid !== user.uid) {
-                if (parsed.email === user.email || parsed.storeId === 'gullyscore_cricket' || parsed.role === 'score_manager') {
-                  parsed.uid = user.uid;
-                  localStorage.setItem('erp_virtual_user', JSON.stringify(parsed));
+            const userDocRef = doc(db, 'users', firebaseUser.uid);
+            firestoreUnsub = onSnapshot(
+              userDocRef,
+              (snap) => {
+                if (snap.exists()) {
+                  const data = snap.data();
+                  setUserProfile(data);
+                  const effectiveRole = data.role || (isAdmin ? 'super_admin' : 'user');
+                  setRole(effectiveRole);
+                  try {
+                    localStorage.setItem(`auth_role_${firebaseUser.uid}`, effectiveRole);
+                  } catch {}
                 } else {
-                  localStorage.removeItem('erp_virtual_user');
-                }
-              }
-            }
-          } catch (_) {}
-
-          setLoading(true);
-          setUser(user);
-          
-          // Safety check for the owner's email - always give them super_admin role if they log in
-          const adminEmails = [
-            'jamkhednewsnetwork@gmail.com', 
-            'shubhamhingane7719@gmail.com',
-            'shubhamingane7719@gmail.com',
-            '771999595@admin.com',
-            '7719959593@admin.com',
-            'shubhamhinganebusiness@gmail.com',
-            'streetsportsoffical@gmail.com'
-          ];
-          let forceSuperAdmin = false;
-          if (user.email && adminEmails.includes(user.email)) {
-            forceSuperAdmin = true;
-          }
-
-          // Fetch custom role from users collection
-          try {
-            const userRef = doc(db, 'users', user.uid);
-            const userDoc = await getDoc(userRef);
-            
-            if (userDoc.exists()) {
-              const data = userDoc.data();
-              const currentRole = forceSuperAdmin ? 'super_admin' : (data.role || (user.email?.toLowerCase().endsWith('@gullyscore.com') ? 'score_manager' : null));
-              setRole(currentRole as any);
-              setPharmacyId(data.pharmacyId || null);
-              setStoreId(data.storeId || null);
-              
-              // Cache locally for offline resilience
-              try {
-                localStorage.setItem(`auth_role_${user.uid}`, currentRole || '');
-                localStorage.setItem(`auth_pharmacyId_${user.uid}`, data.pharmacyId || '');
-                localStorage.setItem(`auth_storeId_${user.uid}`, data.storeId || '');
-              } catch (cacheErr) {
-                console.warn('Failed to cache user session locally:', cacheErr);
-              }
-              
-              // Sync role to user document if it's forced or missing
-              if (forceSuperAdmin && data.role !== 'super_admin' && !isFirestoreQuotaExhausted()) {
-                try {
-                  await setDoc(userRef, { role: 'super_admin' }, { merge: true });
-                } catch (e) {
-                  console.warn('Silent failure syncing admin role:', e);
-                }
-              }
-            } else {
-              // New user - check for pre-authorization
-              let initialRole: 'super_admin' | 'dairy_admin' | 'Doctor' | 'Pharmacy' | 'mess_owner' | 'furniture_admin' | 'score_manager' | null = null;
-              
-              if (user.email) {
-                const emailLower = user.email.toLowerCase();
-                
-                // New Hack: If email is @mess.os, it's a mess owner
-                if (emailLower.endsWith('@mess.os')) {
-                  initialRole = 'mess_owner';
-                } else if (emailLower.endsWith('@gullyscore.com') || emailLower.startsWith('scorer') || emailLower.startsWith('scorekeeper')) {
-                  initialRole = 'score_manager';
-                } else {
-                  // 1. Try authorized_accounts
-                  // Check if the email itself is the authKey
-                  let accountAuthRef = doc(db, 'authorized_accounts', emailLower);
-                  let accountAuthSnap = await getDoc(accountAuthRef);
-                  
-                  if (accountAuthSnap.exists()) {
-                    initialRole = accountAuthSnap.data().role;
-                  } else {
-                    // Try query fallback across common fields
-                    const qOptions = [
-                      query(collection(db, 'authorized_accounts'), where('email', '==', emailLower), limit(1)),
-                      query(collection(db, 'authorized_accounts'), where('username', '==', emailLower.split('@')[0]), limit(1)),
-                      query(collection(db, 'authorized_accounts'), where('mobile', '==', emailLower.split('@')[0]), limit(1))
-                    ];
-                    
-                    for (const q of qOptions) {
-                      const qSnap = await getDocs(q);
-                      if (!qSnap.empty) {
-                        initialRole = qSnap.docs[0].data().role;
-                        break;
-                      }
-                    }
-
-                    if (!initialRole && emailLower.endsWith('@admin.com')) {
-                      // Fallback for mobile ID lookup (m10 normalization)
-                      const rawMobile = emailLower.split('@')[0];
-                      const m10 = rawMobile.length >= 10 ? rawMobile.slice(-10) : rawMobile;
-                      
-                      const mobileLookups = [rawMobile, m10];
-                      for (const key of mobileLookups) {
-                        const mobileAuthRef = doc(db, 'authorized_accounts', key);
-                        const mobileAuthSnap = await getDoc(mobileAuthRef);
-                        if (mobileAuthSnap.exists()) {
-                          initialRole = mobileAuthSnap.data().role;
-                          break;
-                        }
-                      }
-                    }
+                  if (isAdmin) {
+                    setRole('super_admin');
                   }
                 }
-              }
-              
-              // Persist the user profile with the determined role
-              // First check if there's a pre-profile (created by super admin)
-              let preProfileData = {};
-              if (user.email) {
-                const emailLower = user.email.toLowerCase();
-                
-                // 1. Try direct ID lookup
-                let preProfileRef = doc(db, 'users', emailLower);
-                let preProfileSnap = await getDoc(preProfileRef);
-                
-                if (!preProfileSnap.exists()) {
-                  // 2. Try query by email field
-                  const qEmail = query(collection(db, 'users'), where('email', '==', emailLower), limit(1));
-                  const qEmailSnap = await getDocs(qEmail);
-                  if (!qEmailSnap.empty) {
-                    preProfileSnap = qEmailSnap.docs[0];
-                  } else if (emailLower.endsWith('@admin.com')) {
-                    // 3. Try mobile ID lookup (for synthetic emails with m10 normalization)
-                    const rawMobile = emailLower.split('@')[0];
-                    const m10 = rawMobile.length >= 10 ? rawMobile.slice(-10) : rawMobile;
-                    
-                    const mobileLookups = [rawMobile, m10];
-                    for (const key of mobileLookups) {
-                      const mobileRef = doc(db, 'users', key);
-                      const snap = await getDoc(mobileRef);
-                      if (snap.exists()) {
-                        preProfileSnap = snap;
-                        break;
-                      }
-                    }
-                    
-                    if (!preProfileSnap || !preProfileSnap.exists()) {
-                      // 4. Try query by mobile field
-                      const qMobile = query(collection(db, 'users'), where('mobile', 'in', [rawMobile, m10]), limit(1));
-                      const qMobileSnap = await getDocs(qMobile);
-                      if (!qMobileSnap.empty) {
-                        preProfileSnap = qMobileSnap.docs[0];
-                      }
-                    }
-                  }
+                setLoading(false);
+              },
+              (err) => {
+                if (isQuotaError(err)) {
+                  recordFirestoreQuotaExhaustion(30);
                 }
-
-                if (preProfileSnap && preProfileSnap.exists()) {
-                  preProfileData = preProfileSnap.data();
-                }
+                console.warn('[AuthContext] Firestore profile snapshot note (offline/quota fallback active):', err?.message);
+                // Non-blocking fallback
+                fetchProfile(firebaseUser.uid, firebaseUser.email).finally(() => setLoading(false));
               }
-
-              const finalData = {
-                uid: user.uid,
-                email: user.email,
-                role: forceSuperAdmin ? 'super_admin' : initialRole,
-                status: 'Active',
-                createdAt: new Date().toISOString(),
-                lastLogin: new Date().toISOString(),
-                ...preProfileData // Merge pre-profile data (pharmacyId, clinicName, etc.)
-              };
-
-              if (!isFirestoreQuotaExhausted()) {
-                try {
-                  await setDoc(userRef, finalData, { merge: true });
-                } catch (dbErr) {
-                  console.warn('Could not sync user profile to database (may be offline):', dbErr);
-                }
-              }
-
-              const resolvedRole = forceSuperAdmin ? 'super_admin' : initialRole;
-              setRole(resolvedRole);
-              setPharmacyId((finalData as any).pharmacyId || null);
-              setStoreId((finalData as any).storeId || null);
-
-              // Cache locally for offline resilience
-              try {
-                localStorage.setItem(`auth_role_${user.uid}`, resolvedRole || '');
-                localStorage.setItem(`auth_pharmacyId_${user.uid}`, (finalData as any).pharmacyId || '');
-                localStorage.setItem(`auth_storeId_${user.uid}`, (finalData as any).storeId || '');
-              } catch (cacheErr) {
-                console.warn('Failed to cache user session locally:', cacheErr);
-              }
-            }
-          } catch (err) {
-            console.warn('User role fetch offline/cache fallback active (expected offline state):', err);
-            
-            // Offline/Glitch Fallback
-            if (forceSuperAdmin) {
-              console.log('Forcefully granting offline Super Admin privilege based on authorized email authorization.');
-              setRole('super_admin');
-            } else {
-              try {
-                const cachedRole = localStorage.getItem(`auth_role_${user.uid}`);
-                const cachedPharmacyId = localStorage.getItem(`auth_pharmacyId_${user.uid}`);
-                const cachedStoreId = localStorage.getItem(`auth_storeId_${user.uid}`);
-                
-                if (cachedRole) {
-                  console.log('Restoring cached user role & authorization session offline:', cachedRole);
-                  setRole(cachedRole as any);
-                  setPharmacyId(cachedPharmacyId || null);
-                  setStoreId(cachedStoreId || null);
-                } else {
-                  setRole(null);
-                }
-              } catch (cacheRestoreErr) {
-                console.error('Could not restore offline user cache:', cacheRestoreErr);
-                setRole(null);
-              }
-            }
+            );
+          } catch {
+            fetchProfile(firebaseUser.uid, firebaseUser.email).finally(() => setLoading(false));
           }
         } else {
-          // If no Firebase user is authenticated, check for virtual failsafe session
-          let virtualUserStr = null;
-          try {
-            virtualUserStr = localStorage.getItem('erp_virtual_user');
-          } catch (e) {
-            console.warn('LocalStorage erp_virtual_user read blocked:', e);
-          }
-
-          if (virtualUserStr) {
-            try {
-              const vu = JSON.parse(virtualUserStr);
-              setUser(vu as any);
-              setRole(vu.role || 'super_admin');
-              setPharmacyId(vu.pharmacyId || null);
-              setStoreId(vu.storeId || null);
-              setLoading(false);
-              return;
-            } catch (e) {
-              console.error('Failed to parse virtual user:', e);
-            }
-          }
-
+          // Quota exhausted, rely on server proxy / cache
+          fetchProfile(firebaseUser.uid, firebaseUser.email).finally(() => setLoading(false));
+        }
+      } else {
+        // Check if there is an active virtual user session
+        const virtualUser = getVirtualSession();
+        if (virtualUser) {
+          setUser(virtualUser);
+          const effectiveRole = virtualUser.role || (resolveIsAdminEmail(virtualUser.email) ? 'super_admin' : 'user');
+          setRole(effectiveRole);
+          setUserProfile(virtualUser);
+        } else {
           setUser(null);
           setRole(null);
-          setPharmacyId(null);
-          setStoreId(null);
+          setUserProfile(null);
         }
         setLoading(false);
-      });
-
-      return unsubscribe;
-    };
-
-    let unsubFn: (() => void) | null = null;
-    checkUserSession().then(unsub => {
-      unsubFn = unsub;
+      }
     });
 
     return () => {
-      if (unsubFn) unsubFn();
+      authUnsub();
+      if (firestoreUnsub) firestoreUnsub();
     };
-  }, []);
+  }, [fetchProfile, getVirtualSession, resolveIsAdminEmail]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn('Sign out error:', err);
+    }
     try {
       localStorage.removeItem('erp_virtual_user');
-      sessionStorage.removeItem('erp_virtual_user');
-      // Clean up cached role entries
-      const keysToRemove: string[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith('auth_role_') || key.startsWith('auth_pharmacyId_') || key.startsWith('auth_storeId_'))) {
-          keysToRemove.push(key);
-        }
+      if (user?.uid) {
+        localStorage.removeItem(`auth_role_${user.uid}`);
       }
-      keysToRemove.forEach(k => localStorage.removeItem(k));
-    } catch (e) {
-      console.warn('Logging out did not clear localStorage erp_virtual_user:', e);
-    }
+    } catch {}
+    setUser(null);
+    setRole(null);
+    setUserProfile(null);
+  }, [user]);
 
-    try {
-      const { auth } = await import('../lib/firebase');
-      await auth.signOut();
-    } catch (signOutErr) {
-      console.warn('Firebase auth signOut error during logout:', signOutErr);
-    } finally {
-      setUser(null);
-      setRole(null);
-      setPharmacyId(null);
-      setStoreId(null);
-      setLoading(false);
+  const refreshProfile = useCallback(async () => {
+    if (user?.uid) {
+      await fetchProfile(user.uid, user.email);
     }
+  }, [user, fetchProfile]);
+
+  const emailIsAdmin = resolveIsAdminEmail(user?.email);
+  const isSuperAdmin = role === 'super_admin' || emailIsAdmin;
+  const isScoreManager = isSuperAdmin || role === 'score_manager';
+  const isDoctor = isSuperAdmin || role === 'doctor';
+  const isPharmacy = isSuperAdmin || role === 'pharmacy';
+  const isDairyAdmin = isSuperAdmin || role === 'dairy_admin';
+
+  const storeId = useMemo(() => {
+    return userProfile?.storeId || (user as any)?.storeId || (user ? user.uid : null);
+  }, [userProfile, user]);
+
+  const pharmacyId = useMemo(() => {
+    return userProfile?.pharmacyId || (user as any)?.pharmacyId || (user ? user.uid : null);
+  }, [userProfile, user]);
+
+  const messId = useMemo(() => {
+    return userProfile?.messId || (user as any)?.messId || (user ? user.uid : null);
+  }, [userProfile, user]);
+
+  const contextValue: AuthContextType = {
+    user,
+    role,
+    loading,
+    isSuperAdmin,
+    isScoreManager,
+    isDoctor,
+    isPharmacy,
+    isDairyAdmin,
+    storeId,
+    pharmacyId,
+    messId,
+    logout,
+    refreshProfile
   };
-  const isSuperAdmin = role === 'super_admin';
-  const isDairyAdmin = role === 'dairy_admin' || role === 'super_admin';
-  const isDoctor = role === 'Doctor' || role === 'super_admin';
-  const isPharmacy = role === 'Pharmacy' || role === 'super_admin';
-  const isMessOwner = role === 'mess_owner' || role === 'super_admin';
-  const isFurnitureAdmin = role === 'furniture_admin' || role === 'super_admin';
-  const isScoreManager = role === 'score_manager' || role === 'super_admin';
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      role, 
-      isSuperAdmin, 
-      isDairyAdmin, 
-      isDoctor, 
-      isPharmacy, 
-      isMessOwner, 
-      isFurnitureAdmin, 
-      isScoreManager,
-      storeId,
-      pharmacyId, 
-      loading, 
-      logout 
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    // Return a safe dummy fallback instead of throwing to prevent crashing entire subtree
+    return {
+      user: null,
+      role: null,
+      loading: false,
+      isSuperAdmin: false,
+      isScoreManager: false,
+      isDoctor: false,
+      isPharmacy: false,
+      isDairyAdmin: false,
+      storeId: null,
+      pharmacyId: null,
+      messId: null,
+      logout: async () => {},
+      refreshProfile: async () => {}
+    };
+  }
+  return context;
+};

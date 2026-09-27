@@ -13,8 +13,8 @@ import {
   IdCard,
   Briefcase
 } from "lucide-react";
-import { db, handleFirestoreError, OperationType, auth, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion } from "../../lib/firebase";
-import { collection, addDoc } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType, auth, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion, safeAddDoc as addDoc } from "../../lib/firebase";
+import { collection } from "firebase/firestore";
 import { RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult } from "firebase/auth";
 import { ConfettiCanvas } from "./ConfettiCanvas";
 import { uploadImageToStorage, STORAGE_FOLDERS } from "../../utils/imageUpload";

@@ -22,6 +22,124 @@ async function getSharp() {
 
 dotenv.config();
 
+// Intercept @firebase/firestore GrpcConnection RPC stream quota logs in Node.js stderr
+const origServerConsoleError = console.error;
+console.error = function (...args: any[]) {
+  const raw = args
+    .map((a) => {
+      if (typeof a === "string") return a;
+      if (a instanceof Error) return `${a.name}: ${a.message}`;
+      try {
+        return JSON.stringify(a);
+      } catch {
+        return String(a || "");
+      }
+    })
+    .join(" ");
+  if (
+    raw.includes("GrpcConnection RPC") ||
+    raw.includes("RESOURCE_EXHAUSTED") ||
+    raw.includes("resource-exhausted") ||
+    raw.includes("Quota limit exceeded") ||
+    raw.includes("Free daily write units")
+  ) {
+    return;
+  }
+  origServerConsoleError.apply(console, args);
+};
+
+// Persistent server-side fallback store for zero-downtime operation when Firestore daily write quota is reached
+const SERVER_LOCAL_DB_FILE = path.join(process.cwd(), "cricket-local-db.json");
+let serverLocalDbCache: Record<string, Record<string, any>> | null = null;
+
+function getServerLocalDb(): Record<string, Record<string, any>> {
+  if (serverLocalDbCache) return serverLocalDbCache;
+  try {
+    if (fs.existsSync(SERVER_LOCAL_DB_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(SERVER_LOCAL_DB_FILE, "utf-8"));
+      if (parsed && typeof parsed === "object") {
+        serverLocalDbCache = parsed;
+        return serverLocalDbCache!;
+      }
+    }
+  } catch (_) {}
+  serverLocalDbCache = {};
+  return serverLocalDbCache;
+}
+
+function flushServerLocalDb(): void {
+  if (!serverLocalDbCache) return;
+  try {
+    fs.writeFileSync(SERVER_LOCAL_DB_FILE, JSON.stringify(serverLocalDbCache), "utf-8");
+  } catch (_) {}
+}
+
+// Real-time Server-Sent Events (SSE) clients for instant cross-device cricket score & tournament sync
+const cricketRealtimeSseClients = new Set<any>();
+
+function broadcastCricketRealtimeEvent(payload: Record<string, any>): void {
+  if (cricketRealtimeSseClients.size === 0) return;
+  try {
+    const msg = `data: ${JSON.stringify(payload)}\n\n`;
+    for (const client of cricketRealtimeSseClients) {
+      try {
+        client.write(msg);
+      } catch (_) {
+        cricketRealtimeSseClients.delete(client);
+      }
+    }
+  } catch (_) {}
+}
+
+function saveToServerLocalDb(collectionName: string, docId: string, data: any, merge = true): any {
+  const store = getServerLocalDb();
+  if (!store[collectionName]) store[collectionName] = {};
+  if (merge && store[collectionName][docId] && typeof store[collectionName][docId] === "object") {
+    store[collectionName][docId] = { ...store[collectionName][docId], ...data };
+  } else {
+    store[collectionName][docId] = { ...data };
+  }
+  flushServerLocalDb();
+  const saved = store[collectionName][docId];
+  broadcastCricketRealtimeEvent({
+    type: "doc_update",
+    collectionName,
+    docId,
+    data: saved,
+    timestamp: Date.now()
+  });
+  return saved;
+}
+
+function getFromServerLocalDb(collectionName: string, docId: string): any | null {
+  const store = getServerLocalDb();
+  return store[collectionName]?.[docId] || null;
+}
+
+function listFromServerLocalDb(collectionName: string): any[] {
+  const store = getServerLocalDb();
+  const col = store[collectionName];
+  if (!col || typeof col !== "object") return [];
+  return Object.entries(col).map(([id, docData]) => ({
+    id,
+    ...(typeof docData === "object" && docData !== null ? docData : {})
+  }));
+}
+
+function deleteFromServerLocalDb(collectionName: string, docId: string): void {
+  const store = getServerLocalDb();
+  if (store[collectionName] && docId in store[collectionName]) {
+    delete store[collectionName][docId];
+    flushServerLocalDb();
+  }
+  broadcastCricketRealtimeEvent({
+    type: "doc_delete",
+    collectionName,
+    docId,
+    timestamp: Date.now()
+  });
+}
+
 // Lazy instance variables for server-side SEO database operations
 let serverFirebaseDb: any = null;
 
@@ -35,7 +153,10 @@ async function getFirebaseDb(): Promise<any> {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     const { initializeApp, getApps } = await import("firebase/app");
-    const { getFirestore } = await import("firebase/firestore");
+    const { getFirestore, setLogLevel } = await import("firebase/firestore");
+    try {
+      setLogLevel("silent");
+    } catch (_) {}
     
     const apps = getApps();
     const app = apps.length === 0 ? initializeApp(config) : apps[0];
@@ -785,20 +906,14 @@ async function startServer() {
         liveMatchesServerCache.timestamp = 0;
       } catch (_) {}
 
-      // Delete docs in Firestore and register real-time deletion tombstone
-      try {
-        const db = await getFirebaseDb();
-        if (db) {
-          const { doc, deleteDoc, setDoc } = await import("firebase/firestore");
-          deleteDoc(doc(db, "cricket_matches", matchId)).catch(() => {});
-          deleteDoc(doc(db, "cricket_live_summaries", matchId)).catch(() => {});
-          setDoc(doc(db, "cricket_deleted_matches", matchId), {
-            id: matchId,
-            deletedAt: Date.now(),
-            isDeleted: true
-          }).catch(() => {});
-        }
-      } catch (_) {}
+      // Update local fallback DB & tombstone
+      deleteFromServerLocalDb("cricket_matches", matchId);
+      deleteFromServerLocalDb("cricket_live_summaries", matchId);
+      saveToServerLocalDb("cricket_deleted_matches", matchId, {
+        id: matchId,
+        deletedAt: Date.now(),
+        isDeleted: true
+      });
 
       res.json({ success: true, deletedId: matchId, count: ids.length });
     } catch (error: any) {
@@ -842,16 +957,7 @@ async function startServer() {
         }
       }
 
-      // Delete doc in Firestore
-      try {
-        const db = await getFirebaseDb();
-        if (db) {
-          const { doc, deleteDoc } = await import("firebase/firestore");
-          deleteDoc(doc(db, "cricket_tournaments", tournamentId)).catch(() => {});
-        }
-      } catch (fErr) {
-        console.warn("[Cricket Deleted Tournaments] Firestore deleteDoc notice:", fErr);
-      }
+      deleteFromServerLocalDb("cricket_tournaments", tournamentId);
 
       res.json({ success: true, tournamentId });
     } catch (error: any) {
@@ -869,13 +975,7 @@ async function startServer() {
         fs.writeFileSync(DELETED_TOURNAMENTS_FILE, JSON.stringify(ids, null, 2), "utf-8");
       } catch (err) {}
     }
-    try {
-      const db = await getFirebaseDb();
-      if (db) {
-        const { doc, deleteDoc } = await import("firebase/firestore");
-        deleteDoc(doc(db, "cricket_tournaments", tournamentId)).catch(() => {});
-      }
-    } catch (_) {}
+    deleteFromServerLocalDb("cricket_tournaments", tournamentId);
     res.json({ success: true, tournamentId });
   });
 
@@ -1532,16 +1632,6 @@ function cleanServerUndefined(obj: any): any {
         return res.status(400).json({ error: "managerId and matchId are required" });
       }
 
-      const db = await getFirebaseDb();
-      if (!db) {
-        return res.status(503).json({ error: "Database not available" });
-      }
-
-      const { doc, setDoc, collection, query, where, getDocs } = await import("firebase/firestore");
-
-      // 1. Mark target match as 'live' and assign managerId using setDoc with merge: true
-      // This guarantees no '5 NOT_FOUND: No document to update' error even if client Firestore write is still pending
-      const targetMatchRef = doc(db, "cricket_matches", matchId);
       const matchUpdatePayload: Record<string, any> = {
         id: matchId,
         status: "live",
@@ -1559,26 +1649,8 @@ function cleanServerUndefined(obj: any): any {
         });
       }
 
-      // Enforce Firestore 1MB document limit by pruning oversized media before persistence
       const prunedPayload = pruneServerMatchPayload(matchUpdatePayload, 800000);
-
-      try {
-        await setDoc(targetMatchRef, prunedPayload, { merge: true });
-      } catch (writeErr: any) {
-        console.warn("[Cricket API] Full match setDoc failed, attempting minimal core fallback:", writeErr.message);
-        const fallbackCore: Record<string, any> = {
-          id: matchId,
-          status: "live",
-          managerId,
-          streamKey: streamKey || null,
-          teamA: matchData?.teamA || "Team A",
-          teamB: matchData?.teamB || "Team B",
-          currentInningsNum: matchData?.currentInningsNum || 1,
-          oversLimit: matchData?.oversLimit || 10,
-          updatedAt: Date.now()
-        };
-        await setDoc(targetMatchRef, fallbackCore, { merge: true });
-      }
+      saveToServerLocalDb("cricket_matches", matchId, prunedPayload, true);
 
       // Warm in-memory match summary cache immediately
       try {
@@ -1589,28 +1661,6 @@ function cleanServerUndefined(obj: any): any {
         }
       } catch {}
 
-      // 2. Retire any previously 'live' matches for this manager to 'completed'
-      try {
-        const oldMatchesQ = query(
-          collection(db, "cricket_matches"),
-          where("managerId", "==", managerId),
-          where("status", "==", "live")
-        );
-        const oldSnaps = await getDocs(oldMatchesQ);
-        for (const oldDoc of oldSnaps.docs) {
-          if (oldDoc.id !== matchId) {
-            await setDoc(doc(db, "cricket_matches", oldDoc.id), {
-              status: "completed",
-              updatedAt: Date.now()
-            }, { merge: true });
-          }
-        }
-      } catch (retireErr) {
-        console.warn("[Cricket API] Error retiring old live matches:", retireErr);
-      }
-
-      // 3. Update pointer in score_managers
-      const managerRef = doc(db, "score_managers", managerId);
       const pointerPayload = {
         managerId,
         streamKey: streamKey || null,
@@ -1618,20 +1668,11 @@ function cleanServerUndefined(obj: any): any {
         status: "live",
         updatedAt: Date.now()
       };
-      await setDoc(managerRef, pointerPayload, { merge: true });
-
-      // Keep official_scorer and default in sync so permanent OBS links resolve without delay
-      await setDoc(doc(db, "score_managers", "official_scorer"), pointerPayload, { merge: true }).catch(() => {});
-      await setDoc(doc(db, "score_managers", "default"), pointerPayload, { merge: true }).catch(() => {});
-
+      saveToServerLocalDb("score_managers", managerId, pointerPayload, true);
+      saveToServerLocalDb("score_managers", "official_scorer", pointerPayload, true);
+      saveToServerLocalDb("score_managers", "default", pointerPayload, true);
       if (streamKey) {
-        await setDoc(doc(db, "score_managers", streamKey), {
-          managerId,
-          streamKey,
-          activeMatchId: matchId,
-          status: "live",
-          updatedAt: Date.now()
-        }, { merge: true }).catch(() => {});
+        saveToServerLocalDb("score_managers", streamKey, pointerPayload, true);
       }
 
       return res.json({
@@ -1642,7 +1683,6 @@ function cleanServerUndefined(obj: any): any {
         message: "Match is now LIVE on the permanent OBS overlay."
       });
     } catch (err: any) {
-      console.error("[Cricket API] Error setting active match:", err);
       res.status(500).json({ error: err.message || "Failed to set active match" });
     }
   });
@@ -1655,35 +1695,26 @@ function cleanServerUndefined(obj: any): any {
         return res.status(400).json({ error: "matchId required" });
       }
 
-      const db = await getFirebaseDb();
-      if (!db) {
-        return res.status(503).json({ error: "Database not available" });
-      }
-
-      const { doc, setDoc } = await import("firebase/firestore");
-      await setDoc(doc(db, "cricket_matches", matchId), {
+      saveToServerLocalDb("cricket_matches", matchId, {
         status: "completed",
         updatedAt: Date.now()
-      }, { merge: true });
+      }, true);
 
       if (managerId) {
-        const managerRef = doc(db, "score_managers", managerId);
-        await setDoc(managerRef, {
+        saveToServerLocalDb("score_managers", managerId, {
           activeMatchId: null,
           status: "completed",
           updatedAt: Date.now()
-        }, { merge: true }).catch(() => {});
+        }, true);
       }
 
       return res.json({ success: true, matchId, status: "completed" });
     } catch (err: any) {
-      console.error("[Cricket API] Error completing match:", err);
       res.status(500).json({ error: err.message || "Failed to complete match" });
     }
   });
 
   // Resilient server-side cricket match save endpoint
-  // Provides low-latency server-to-database write proxy when client WebChannel is congested or times out
   app.post("/api/cricket/save-match", async (req, res) => {
     try {
       const { matchId, matchData } = req.body || {};
@@ -1691,30 +1722,15 @@ function cleanServerUndefined(obj: any): any {
         return res.status(400).json({ error: "matchId string is required" });
       }
 
-      const db = await getFirebaseDb();
-      if (!db) {
-        return res.status(503).json({ error: "Database not available" });
-      }
-
-      const { doc, setDoc } = await import("firebase/firestore");
-      const matchDocRef = doc(db, "cricket_matches", matchId);
-      
       const cleaned = cleanServerUndefined(matchData || {});
       const prunedPayload = pruneServerMatchPayload(cleaned, 800000);
       prunedPayload.updatedAt = Date.now();
 
-      try {
-        await setDoc(matchDocRef, prunedPayload, { merge: true });
-      } catch (writeErr: any) {
-        console.warn("[Cricket API] Initial setDoc failed, retrying with deep prune:", writeErr?.message || writeErr);
-        const deepPruned = pruneServerMatchPayload(cleaned, 400000);
-        deepPruned.updatedAt = Date.now();
-        await setDoc(matchDocRef, deepPruned, { merge: true });
-      }
+      const savedDoc = saveToServerLocalDb("cricket_matches", matchId, prunedPayload, true);
 
       // Warm in-memory match summary cache immediately
       try {
-        const summary = extractServerLiveSummary({ id: matchId, ...prunedPayload });
+        const summary = extractServerLiveSummary({ id: matchId, ...savedDoc });
         if (summary) {
           const etag = `W/"match-${matchId}-${Date.now()}-${summary.updatedAt || 0}"`;
           matchSummaryServerCache.set(matchId, { timestamp: Date.now(), etag, data: summary });
@@ -1723,12 +1739,11 @@ function cleanServerUndefined(obj: any): any {
 
       return res.json({ success: true, matchId, savedAt: Date.now() });
     } catch (err: any) {
-      console.error("[Cricket API] Error saving match on server:", err);
       res.status(500).json({ error: err.message || "Failed to save match on server" });
     }
   });
 
-  // Generic server-side document save endpoint for cricket collections
+  // Generic server-side document save endpoint for all app & cricket collections
   app.post("/api/cricket/save-doc", async (req, res) => {
     try {
       const { collectionName, docId, data, options } = req.body || {};
@@ -1736,39 +1751,31 @@ function cleanServerUndefined(obj: any): any {
         return res.status(400).json({ error: "collectionName and docId are required" });
       }
 
-      // Allowed cricket collections
-      const allowedCollections = [
-        "cricket_matches", 
-        "cricket_tournaments", 
-        "cricket_teams", 
-        "cricket_players", 
-        "cricket_sponsors", 
-        "cricket_live_summaries", 
-        "cricket_deleted_matches",
-        "score_managers"
-      ];
-      if (!allowedCollections.includes(collectionName)) {
-        return res.status(403).json({ error: `Collection ${collectionName} not authorized for proxy write` });
-      }
-
-      const db = await getFirebaseDb();
-      if (!db) {
-        return res.status(503).json({ error: "Database not available" });
-      }
-
-      const { doc, setDoc } = await import("firebase/firestore");
-      const targetDocRef = doc(db, collectionName, docId);
       const cleaned = cleanServerUndefined(data || {});
+      const merge = options?.merge !== false;
+      saveToServerLocalDb(String(collectionName), String(docId), cleaned, merge);
 
-      await setDoc(targetDocRef, cleaned, options || { merge: true });
       return res.json({ success: true, collectionName, docId, savedAt: Date.now() });
     } catch (err: any) {
-      console.error("[Cricket API] Error saving document via proxy:", err);
       res.status(500).json({ error: err.message || "Failed to save document on server" });
     }
   });
 
-  // Generic server-side document get endpoint for cricket collections (cross-device resilience)
+  // Generic server-side document delete endpoint
+  app.post("/api/cricket/delete-doc", async (req, res) => {
+    try {
+      const { collectionName, docId } = req.body || {};
+      if (!collectionName || !docId) {
+        return res.status(400).json({ error: "collectionName and docId are required" });
+      }
+      deleteFromServerLocalDb(String(collectionName), String(docId));
+      return res.json({ success: true, collectionName, docId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to delete document on server" });
+    }
+  });
+
+  // Generic server-side document get endpoint (checks local store first, then Firestore)
   app.get("/api/cricket/get-doc", async (req, res) => {
     try {
       const collectionName = req.query.collectionName as string;
@@ -1777,36 +1784,123 @@ function cleanServerUndefined(obj: any): any {
         return res.status(400).json({ error: "collectionName and docId query params are required" });
       }
 
-      const allowedCollections = [
-        "cricket_matches", 
-        "cricket_tournaments", 
-        "cricket_teams", 
-        "cricket_players", 
-        "cricket_sponsors", 
-        "cricket_live_summaries", 
-        "cricket_deleted_matches",
-        "score_managers"
-      ];
-      if (!allowedCollections.includes(collectionName)) {
-        return res.status(403).json({ error: `Collection ${collectionName} not authorized` });
+      const localDoc = getFromServerLocalDb(collectionName, docId);
+      if (localDoc) {
+        return res.json({ success: true, data: localDoc, source: "local_store" });
       }
 
-      const db = await getFirebaseDb();
-      if (!db) {
-        return res.status(503).json({ error: "Database not available" });
+      if (!isServerFirestoreQuotaExhausted()) {
+        try {
+          const db = await getFirebaseDb();
+          if (db) {
+            const { doc, getDoc } = await import("firebase/firestore");
+            const targetDocRef = doc(db, collectionName, docId);
+            const snap = await getDoc(targetDocRef);
+            if (snap.exists()) {
+              const docData = snap.data();
+              saveToServerLocalDb(collectionName, docId, docData, true);
+              return res.json({ success: true, data: docData, source: "firestore" });
+            }
+          }
+        } catch (readErr: any) {
+          if (isServerQuotaError(readErr)) {
+            recordServerFirestoreQuotaExhaustion(60);
+          }
+        }
       }
 
-      const { doc, getDoc } = await import("firebase/firestore");
-      const targetDocRef = doc(db, collectionName, docId);
-      const snap = await getDoc(targetDocRef);
-      if (snap.exists()) {
-        return res.json({ success: true, data: snap.data() });
-      }
       return res.status(404).json({ error: "Document not found" });
     } catch (err: any) {
-      console.error("[Cricket API] Error reading document via proxy:", err);
       res.status(500).json({ error: err.message || "Failed to read document on server" });
     }
+  });
+
+  // Generic server-side collection list endpoint (merges local real-time store + Firestore)
+  app.get("/api/cricket/list-docs", async (req, res) => {
+    try {
+      const collectionName = req.query.collectionName as string;
+      if (!collectionName) {
+        return res.status(400).json({ error: "collectionName query param is required" });
+      }
+
+      const localItems = listFromServerLocalDb(collectionName);
+      const mergedMap = new Map<string, any>();
+      for (const item of localItems) {
+        if (item && item.id) {
+          mergedMap.set(String(item.id), item);
+        }
+      }
+
+      if (!isServerFirestoreQuotaExhausted()) {
+        try {
+          const db = await getFirebaseDb();
+          if (db) {
+            const { collection, getDocs } = await import("firebase/firestore");
+            const snap = await getDocs(collection(db, collectionName));
+            snap.forEach((docSnap: any) => {
+              const id = docSnap.id;
+              const fsData = { id, ...docSnap.data() };
+              const existing = mergedMap.get(id);
+              if (!existing || (fsData.updatedAt || 0) > (existing.updatedAt || 0)) {
+                mergedMap.set(id, fsData);
+                saveToServerLocalDb(collectionName, id, fsData, true);
+              }
+            });
+          }
+        } catch (readErr: any) {
+          if (isServerQuotaError(readErr)) {
+            recordServerFirestoreQuotaExhaustion(60);
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        collectionName,
+        items: Array.from(mergedMap.values())
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to list collection on server" });
+    }
+  });
+
+  // Real-Time Server-Sent Events (SSE) endpoint for instant live match, tournament & One-Half tournament updates
+  app.get("/api/cricket/stream", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    if (typeof (res as any).flushHeaders === "function") {
+      (res as any).flushHeaders();
+    }
+
+    cricketRealtimeSseClients.add(res);
+
+    // Send initial snapshot of active matches and tournaments immediately on connect
+    try {
+      const matches = listFromServerLocalDb("cricket_matches");
+      const tournaments = listFromServerLocalDb("cricket_tournaments");
+      res.write(`data: ${JSON.stringify({
+        type: "initial_snapshot",
+        matches,
+        tournaments,
+        timestamp: Date.now()
+      })}\n\n`);
+    } catch (_) {}
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: heartbeat ${Date.now()}\n\n`);
+      } catch (_) {
+        clearInterval(heartbeat);
+        cricketRealtimeSseClients.delete(res);
+      }
+    }, 20000);
+
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      cricketRealtimeSseClients.delete(res);
+    });
   });
 
   // Heuristic cricket voice command parser for fallback

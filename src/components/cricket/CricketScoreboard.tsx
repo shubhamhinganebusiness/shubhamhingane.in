@@ -24,10 +24,14 @@ import {
   safeDeleteDoc,
   syncScoreToRealtimeDB,
   subscribeToRealtimeDBMatch,
+  syncTournamentToRealtimeDB,
+  syncOneHalfTournamentToRealtimeDB,
   subscribeToCricketMatchesCollection,
   subscribeToCricketMatchDoc
 } from '../../lib/firebase';
-import { doc, setDoc, getDoc, onSnapshot, collection, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, collection } from 'firebase/firestore';
+const setDoc = safeSetDoc;
+const deleteDoc = safeDeleteDoc;
 
 // Recharts imports
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, Cell } from 'recharts';
@@ -904,9 +908,212 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
         }
       }
 
-      // 2. Persist to Firestore asynchronously
-      if (tournamentDocRef && !isFirestoreQuotaExhausted()) {
+      // 2. Persist to Realtime Database, Real-Time Server, and Firestore asynchronously
+      if (tournamentDocRef) {
         await safeSetDoc(tournamentDocRef, updatedTournamentData, { merge: true });
+      }
+      await syncTournamentToRealtimeDB(updatedTournamentData);
+    }
+
+    // 3. Also sync live/completed match result to One-Half 32-Team Tournament ('one_half_tournament_v1') if applicable
+    if (typeof window !== 'undefined') {
+      try {
+        const oneHalfRaw = localStorage.getItem('one_half_tournament_v1');
+        if (oneHalfRaw) {
+          const oneHalfTour = JSON.parse(oneHalfRaw);
+          if (oneHalfTour && Array.isArray(oneHalfTour.matches)) {
+            const targetMatchId = matchId || matchState.tournamentMatchId;
+            const isOneHalfTourMatch =
+              Boolean(targetMatchId && oneHalfTour.matches.some((m: any) => m.id === targetMatchId)) ||
+              tournamentId === oneHalfTour.id ||
+              tournamentId === 'one_half_active_championship' ||
+              (matchState.tournamentName &&
+                oneHalfTour.name &&
+                matchState.tournamentName.toLowerCase().trim() === oneHalfTour.name.toLowerCase().trim());
+
+            if (isOneHalfTourMatch) {
+              const isCompleted = matchState.status === 'completed';
+              const winnerTeam = matchState.winner || null;
+              const updatedOneHalfMatches = [...oneHalfTour.matches];
+
+              let matchedIdx = updatedOneHalfMatches.findIndex(
+                (m: any) => targetMatchId && m.id === targetMatchId
+              );
+              if (matchedIdx === -1) {
+                matchedIdx = updatedOneHalfMatches.findIndex(
+                  (m: any) =>
+                    (m.teamA?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim() &&
+                      m.teamB?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim()) ||
+                    (m.teamA?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim() &&
+                      m.teamB?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim())
+                );
+              }
+
+              if (matchedIdx !== -1) {
+                const m = { ...updatedOneHalfMatches[matchedIdx] };
+                let scoreA = m.scoreA || '0/0';
+                let scoreB = m.scoreB || '0/0';
+                let oversA = m.oversA || `${oneHalfTour.overs || 8}.0`;
+                let oversB = m.oversB || `${oneHalfTour.overs || 8}.0`;
+
+                const normTeamA = (m.teamA || '').toLowerCase().trim();
+                const normTeamB = (m.teamB || '').toLowerCase().trim();
+
+                const assignInningsToOneHalf = (inn: any) => {
+                  if (!inn) return;
+                  const batTeam = (inn.battingTeam || '').toLowerCase().trim();
+                  const sc = `${inn.runs || 0}/${inn.wickets || 0}`;
+                  const balls = inn.ballsBowled || 0;
+                  const ov = `${Math.floor(balls / 6)}.${balls % 6}`;
+
+                  if (batTeam === normTeamA || (normTeamA && batTeam.includes(normTeamA))) {
+                    scoreA = sc;
+                    oversA = ov;
+                  } else if (batTeam === normTeamB || (normTeamB && batTeam.includes(normTeamB))) {
+                    scoreB = sc;
+                    oversB = ov;
+                  } else {
+                    const isStateTeamA = (matchState.teamA || '').toLowerCase().trim() === normTeamA;
+                    if (batTeam === (matchState.teamA || '').toLowerCase().trim()) {
+                      if (isStateTeamA) {
+                        scoreA = sc;
+                        oversA = ov;
+                      } else {
+                        scoreB = sc;
+                        oversB = ov;
+                      }
+                    } else {
+                      if (isStateTeamA) {
+                        scoreB = sc;
+                        oversB = ov;
+                      } else {
+                        scoreA = sc;
+                        oversA = ov;
+                      }
+                    }
+                  }
+                };
+
+                if (matchState.innings1) assignInningsToOneHalf(matchState.innings1);
+                if (matchState.innings2) assignInningsToOneHalf(matchState.innings2);
+
+                let winnerName = m.winner || '';
+                if (winnerTeam) {
+                  const normWinner = winnerTeam.toLowerCase().trim();
+                  if (normWinner === normTeamA || (normTeamA && normWinner.includes(normTeamA))) {
+                    winnerName = m.teamA;
+                  } else if (normWinner === normTeamB || (normTeamB && normWinner.includes(normTeamB))) {
+                    winnerName = m.teamB;
+                  } else if (normWinner === 'tie' || normWinner === 'draw') {
+                    winnerName = 'Tie';
+                  }
+                } else if (isCompleted) {
+                  const rA = parseInt(String(scoreA).split('/')[0], 10) || 0;
+                  const rB = parseInt(String(scoreB).split('/')[0], 10) || 0;
+                  if (rA > rB) winnerName = m.teamA;
+                  else if (rB > rA) winnerName = m.teamB;
+                }
+
+                const effectiveWinReason =
+                  matchState.winReason ||
+                  (winnerName && winnerName !== 'Tie'
+                    ? `${winnerName} won the match`
+                    : isCompleted
+                    ? 'Match Completed'
+                    : m.winReason || '');
+                const potm = isCompleted
+                  ? computePotmName(matchState) || matchState.manOfTheMatch || m.manOfTheMatch || ''
+                  : m.manOfTheMatch || '';
+
+                m.status = isCompleted ? 'completed' : 'live';
+                m.scoreA = scoreA;
+                m.scoreB = scoreB;
+                m.oversA = oversA;
+                m.oversB = oversB;
+                if (winnerName) m.winner = winnerName;
+                if (effectiveWinReason) m.winReason = effectiveWinReason;
+                if (potm) m.manOfTheMatch = potm;
+
+                updatedOneHalfMatches[matchedIdx] = m;
+
+                // Auto-propagate winners in 5-day bracket when completed
+                if (isCompleted && winnerName && winnerName !== 'Tie') {
+                  if (m.day >= 1 && m.day <= 4 && m.group) {
+                    const grp = m.group;
+                    if (m.round === 'round1') {
+                      const sf1Idx = updatedOneHalfMatches.findIndex((x: any) => x.id === `day_${grp}_r2_m1`);
+                      const sf2Idx = updatedOneHalfMatches.findIndex((x: any) => x.id === `day_${grp}_r2_m2`);
+                      if (m.id === `day_${grp}_r1_m1` && sf1Idx !== -1) {
+                        updatedOneHalfMatches[sf1Idx] = { ...updatedOneHalfMatches[sf1Idx], teamA: winnerName };
+                      } else if (m.id === `day_${grp}_r1_m2` && sf1Idx !== -1) {
+                        updatedOneHalfMatches[sf1Idx] = { ...updatedOneHalfMatches[sf1Idx], teamB: winnerName };
+                      } else if (m.id === `day_${grp}_r1_m3` && sf2Idx !== -1) {
+                        updatedOneHalfMatches[sf2Idx] = { ...updatedOneHalfMatches[sf2Idx], teamA: winnerName };
+                      } else if (m.id === `day_${grp}_r1_m4` && sf2Idx !== -1) {
+                        updatedOneHalfMatches[sf2Idx] = { ...updatedOneHalfMatches[sf2Idx], teamB: winnerName };
+                      }
+                    } else if (m.round === 'round2') {
+                      const grpFinalIdx = updatedOneHalfMatches.findIndex((x: any) => x.id === `day_${grp}_final`);
+                      if (grpFinalIdx !== -1) {
+                        if (m.id === `day_${grp}_r2_m1`) {
+                          updatedOneHalfMatches[grpFinalIdx] = { ...updatedOneHalfMatches[grpFinalIdx], teamA: winnerName };
+                        } else if (m.id === `day_${grp}_r2_m2`) {
+                          updatedOneHalfMatches[grpFinalIdx] = { ...updatedOneHalfMatches[grpFinalIdx], teamB: winnerName };
+                        }
+                      }
+                    } else if (m.round === 'group_final') {
+                      const sf1Idx = updatedOneHalfMatches.findIndex((x: any) => x.id === 'day_5_sf1');
+                      const sf2Idx = updatedOneHalfMatches.findIndex((x: any) => x.id === 'day_5_sf2');
+                      if (grp === 1 && sf1Idx !== -1) {
+                        updatedOneHalfMatches[sf1Idx] = { ...updatedOneHalfMatches[sf1Idx], teamA: winnerName };
+                      } else if (grp === 2 && sf1Idx !== -1) {
+                        updatedOneHalfMatches[sf1Idx] = { ...updatedOneHalfMatches[sf1Idx], teamB: winnerName };
+                      } else if (grp === 3 && sf2Idx !== -1) {
+                        updatedOneHalfMatches[sf2Idx] = { ...updatedOneHalfMatches[sf2Idx], teamA: winnerName };
+                      } else if (grp === 4 && sf2Idx !== -1) {
+                        updatedOneHalfMatches[sf2Idx] = { ...updatedOneHalfMatches[sf2Idx], teamB: winnerName };
+                      }
+                    }
+                  } else if (m.day === 5 && m.round === 'semi_final') {
+                    const grandFinalIdx = updatedOneHalfMatches.findIndex((x: any) => x.id === 'day_5_grand_final');
+                    const thirdFourthIdx = updatedOneHalfMatches.findIndex((x: any) => x.id === 'day_5_3rd_4th');
+                    const loserName = winnerName === m.teamA ? m.teamB : m.teamA;
+                    if (m.id === 'day_5_sf1') {
+                      if (grandFinalIdx !== -1) {
+                        updatedOneHalfMatches[grandFinalIdx] = { ...updatedOneHalfMatches[grandFinalIdx], teamA: winnerName };
+                      }
+                      if (thirdFourthIdx !== -1) {
+                        updatedOneHalfMatches[thirdFourthIdx] = { ...updatedOneHalfMatches[thirdFourthIdx], teamA: loserName };
+                      }
+                    } else if (m.id === 'day_5_sf2') {
+                      if (grandFinalIdx !== -1) {
+                        updatedOneHalfMatches[grandFinalIdx] = { ...updatedOneHalfMatches[grandFinalIdx], teamB: winnerName };
+                      }
+                      if (thirdFourthIdx !== -1) {
+                        updatedOneHalfMatches[thirdFourthIdx] = { ...updatedOneHalfMatches[thirdFourthIdx], teamB: loserName };
+                      }
+                    }
+                  }
+                }
+
+                const updatedOneHalf = {
+                  ...oneHalfTour,
+                  matches: updatedOneHalfMatches,
+                  updatedAt: Date.now()
+                };
+
+                localStorage.setItem('one_half_tournament_v1', JSON.stringify(updatedOneHalf));
+                window.dispatchEvent(new CustomEvent('one_half_tournament_updated', { detail: updatedOneHalf }));
+
+                const activeOneHalfRef = doc(db, 'cricket_tournaments', 'one_half_active_championship');
+                await safeSetDoc(activeOneHalfRef, updatedOneHalf, { merge: true });
+                await syncOneHalfTournamentToRealtimeDB(updatedOneHalf);
+              }
+            }
+          }
+        }
+      } catch (ohErr) {
+        console.warn('Error syncing live score to One-Half Tournament:', ohErr);
       }
     }
   } catch (err) {
@@ -15868,126 +16075,125 @@ export const CricketScoreboard: React.FC = () => {
   if (activeSection === 'tournaments') {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 font-sans">
-        <header className="bg-emerald-700 dark:bg-emerald-950 text-white shadow-md border-b border-emerald-800">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-600 rounded-xl shadow-inner">
-                <Trophy className="text-amber-300 animate-pulse" size={24} />
+        <header className="sticky top-0 z-40 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 dark:from-slate-950 dark:via-emerald-950 dark:to-slate-900 text-white shadow-lg border-b border-emerald-600/30 backdrop-blur-md">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2 sm:p-2.5 bg-emerald-600/90 dark:bg-emerald-800/80 rounded-xl shadow-inner border border-emerald-400/20 shrink-0">
+                <Trophy className="text-amber-300" size={20} />
               </div>
-              <div>
-                <h1 className="text-lg sm:text-2xl font-black uppercase tracking-tight flex items-center gap-2">
-                  GULLY<span className="text-amber-300 italic">SCORE</span>
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-xl font-black uppercase tracking-tight flex items-center gap-1.5 leading-none">
+                  <span>GULLY</span>
+                  <span className="text-amber-300 italic">SCORE</span>
+                  <span className="hidden xs:inline-block text-[8px] sm:text-[9px] font-mono font-black uppercase tracking-widest bg-emerald-950/60 text-emerald-300 px-1.5 py-0.5 rounded-md border border-emerald-400/20">
+                    PRO
+                  </span>
                 </h1>
-                <p className="text-[10px] text-emerald-100 font-bold uppercase tracking-widest hidden sm:block">Local Cricket Match Scoreboard Suite</p>
+                <p className="text-[8.5px] sm:text-[10px] text-emerald-100/90 font-bold uppercase tracking-widest truncate mt-0.5">
+                  Local Cricket Match Scoreboard Suite
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white transition-all cursor-pointer border-none"
-                title="Toggle theme mode"
-              >
-                {darkMode ? <Sun size={18} className="text-amber-300" /> : <Moon size={18} />}
-              </button>
-
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <Link
                 to="/live/cricket-toss"
-                className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition-all no-underline"
+                className="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-sm transition-all no-underline"
                 title="GullyScore: Cricket Digital Toss Simulator"
               >
-                <span>🪙 Digital Toss</span>
+                <span>🪙</span>
+                <span className="hidden sm:inline">Digital</span>
+                <span>Toss</span>
               </Link>
+
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all cursor-pointer border border-white/10"
+                title="Toggle theme mode"
+              >
+                {darkMode ? <Sun size={16} className="text-amber-300" /> : <Moon size={16} />}
+              </button>
 
               {isScoreManager ? (
                 <button
                   type="button"
                   id="btn-header-scorer-logout"
                   onClick={handleScoreManagerLogout}
-                  className="px-3 py-1.5 bg-rose-600/90 hover:bg-rose-600 border border-rose-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                  className="px-2.5 sm:px-3 py-1.5 bg-rose-600 hover:bg-rose-500 border border-rose-400/40 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1 cursor-pointer shadow-sm transition-all"
                   title="Sign out of scorekeeper session"
                 >
-                  <ShieldIcon size={14} className="text-amber-300" />
-                  <span>Logout Scorer</span>
+                  <ShieldIcon size={13} className="text-amber-300 shrink-0" />
+                  <span className="hidden sm:inline">Logout</span>
                 </button>
               ) : (
                 <Link
                   to="/cricket-login"
-                  className="px-3 py-1.5 bg-amber-550 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-lg hover:shadow-amber-500/10 transition-all no-underline decoration-transparent"
+                  className="px-2.5 sm:px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-sm transition-all no-underline"
                   title="Authenticate as Scorekeeper"
                 >
-                  <LoginIcon size={14} />
-                  <span>Scorer Login</span>
+                  <LoginIcon size={13} className="shrink-0" />
+                  <span>Login</span>
                 </Link>
               )}
 
               <Link
                 to="/projects"
-                className="p-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl uppercase tracking-widest transition-all hidden sm:flex items-center gap-1.5 no-underline decoration-transparent"
+                className="p-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl uppercase tracking-widest transition-all hidden sm:flex items-center gap-1 no-underline border border-white/10"
               >
-                <ArrowRight size={14} /> Back
+                <ArrowRight size={14} />
               </Link>
             </div>
           </div>
         </header>
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Section Switcher Tabs */}
-          <div className="flex justify-center border-b border-slate-200 dark:border-slate-800 mb-8 pb-1 font-sans">
-            <div className="flex gap-4">
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+          {/* Pro Mobile-First Segmented Navigation Bar */}
+          <div className="max-w-xl mx-auto mb-5 sm:mb-8">
+            <div className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-slate-200/80 dark:bg-slate-900 border border-slate-300/60 dark:border-slate-800 rounded-2xl shadow-inner">
               <button
                 onClick={() => {
                   setActiveSection('scorer');
                   playSoundEffect('click');
                 }}
-                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   activeSection === 'scorer'
-                    ? 'text-emerald-600 dark:text-emerald-400 font-black'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <BarChart3 size={16} /> Quick Scorer
-                </div>
+                <BarChart3 size={14} className="shrink-0" />
+                <span>Quick Scorer</span>
               </button>
               <button
                 onClick={() => {
                   setActiveSection('tournaments');
                   playSoundEffect('click');
                 }}
-                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   activeSection === 'tournaments'
-                    ? 'text-emerald-600 dark:text-emerald-400 font-black'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Trophy size={16} className="text-amber-500 animate-bounce" /> Tournaments
-                </div>
-                {activeSection === 'tournaments' && (
-                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full" />
-                )}
+                <Trophy size={14} className="text-amber-300 shrink-0" />
+                <span>Tournaments</span>
               </button>
               <button
                 onClick={() => {
                   setActiveSection('one-half');
                   playSoundEffect('click');
                 }}
-                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
                   activeSection === 'one-half'
-                    ? 'text-amber-500 dark:text-amber-400 font-black'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
+                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Flame size={16} className="text-rose-500 animate-pulse" /> One-Half 32
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
-                    5 Days
-                  </span>
-                </div>
-                {activeSection === 'one-half' && (
-                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-full" />
-                )}
+                <Flame size={14} className="text-rose-500 shrink-0" />
+                <span>One-Half</span>
+                <span className="hidden sm:inline-block text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
+                  32
+                </span>
               </button>
             </div>
           </div>
@@ -16174,79 +16380,86 @@ export const CricketScoreboard: React.FC = () => {
   if (activeSection === 'one-half') {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 font-sans">
-        <header className="bg-gradient-to-r from-amber-700 via-rose-800 to-indigo-950 text-white shadow-md border-b border-amber-800">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-amber-600 rounded-xl shadow-inner">
-                <Flame className="text-white animate-pulse" size={24} />
+        <header className="sticky top-0 z-40 bg-gradient-to-r from-amber-700 via-rose-800 to-indigo-950 text-white shadow-lg border-b border-amber-600/30 backdrop-blur-md">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2 sm:p-2.5 bg-amber-600/90 rounded-xl shadow-inner border border-amber-400/30 shrink-0">
+                <Flame className="text-white animate-pulse" size={20} />
               </div>
-              <div>
-                <h1 className="text-lg sm:text-2xl font-black uppercase tracking-tight flex items-center gap-2">
-                  GULLY<span className="text-amber-300 italic">SCORE</span>
-                  <span className="text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full">
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-xl font-black uppercase tracking-tight flex items-center gap-1.5 leading-none">
+                  <span>GULLY</span>
+                  <span className="text-amber-300 italic">SCORE</span>
+                  <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded-md">
                     One-Half 32
                   </span>
                 </h1>
-                <p className="text-[10px] text-amber-200 font-bold uppercase tracking-widest hidden sm:block">
-                  32 Teams • 4 Groups • 5 Days Knockout Championship
+                <p className="text-[8.5px] sm:text-[10px] text-amber-200/90 font-bold uppercase tracking-widest truncate mt-0.5">
+                  32 Teams • 4 Groups • 5 Days Knockout
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <Link
+                to="/live/cricket-toss"
+                className="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-sm transition-all no-underline"
+                title="GullyScore: Cricket Digital Toss Simulator"
+              >
+                <span>🪙</span>
+                <span className="hidden sm:inline">Digital</span>
+                <span>Toss</span>
+              </Link>
+
               <button
                 onClick={() => setDarkMode(!darkMode)}
-                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all cursor-pointer border-none"
+                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all cursor-pointer border border-white/10"
                 title="Toggle theme mode"
               >
-                {darkMode ? <Sun size={18} className="text-amber-300" /> : <Moon size={18} />}
+                {darkMode ? <Sun size={16} className="text-amber-300" /> : <Moon size={16} />}
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSection('scorer');
-                  playSoundEffect('click');
-                }}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition-all border-none"
-              >
-                <BarChart3 size={14} />
-                <span>Quick Scorer</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSection('tournaments');
-                  playSoundEffect('click');
-                }}
-                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-sm transition-all border-none"
-              >
-                <Trophy size={14} />
-                <span>Tournaments</span>
-              </button>
+              {isScoreManager ? (
+                <button
+                  type="button"
+                  onClick={handleScoreManagerLogout}
+                  className="px-2.5 sm:px-3 py-1.5 bg-rose-600 hover:bg-rose-500 border border-rose-400/40 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1 cursor-pointer shadow-sm transition-all"
+                  title="Sign out of scorekeeper session"
+                >
+                  <ShieldIcon size={13} className="text-amber-300 shrink-0" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
+              ) : (
+                <Link
+                  to="/cricket-login"
+                  className="px-2.5 sm:px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-sm transition-all no-underline"
+                  title="Authenticate as Scorekeeper"
+                >
+                  <LoginIcon size={13} className="shrink-0" />
+                  <span>Login</span>
+                </Link>
+              )}
             </div>
           </div>
         </header>
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Section Switcher Tabs */}
-          <div className="flex justify-center border-b border-slate-200 dark:border-slate-800 mb-8 pb-1 font-sans">
-            <div className="flex gap-4">
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
+          {/* Pro Mobile-First Segmented Navigation Bar */}
+          <div className="max-w-xl mx-auto mb-5 sm:mb-8">
+            <div className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-slate-200/80 dark:bg-slate-900 border border-slate-300/60 dark:border-slate-800 rounded-2xl shadow-inner">
               <button
                 onClick={() => {
                   setActiveSection('scorer');
                   playSoundEffect('click');
                 }}
-                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   activeSection === 'scorer'
-                    ? 'text-emerald-600 dark:text-emerald-400 font-black'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <BarChart3 size={16} /> Quick Scorer
-                </div>
+                <BarChart3 size={14} className="shrink-0" />
+                <span>Quick Scorer</span>
               </button>
 
               <button
@@ -16254,15 +16467,14 @@ export const CricketScoreboard: React.FC = () => {
                   setActiveSection('tournaments');
                   playSoundEffect('click');
                 }}
-                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   activeSection === 'tournaments'
-                    ? 'text-emerald-600 dark:text-emerald-400 font-black'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Trophy size={16} className="text-amber-500" /> Tournaments
-                </div>
+                <Trophy size={14} className="text-amber-500 shrink-0" />
+                <span>Tournaments</span>
               </button>
 
               <button
@@ -16270,19 +16482,17 @@ export const CricketScoreboard: React.FC = () => {
                   setActiveSection('one-half');
                   playSoundEffect('click');
                 }}
-                className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+                className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
                   activeSection === 'one-half'
-                    ? 'text-amber-500 dark:text-amber-400 font-black'
-                    : 'text-slate-400 hover:text-slate-600'
+                    ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
+                    : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <Flame size={16} className="text-rose-500 animate-pulse" /> One-Half 32
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
-                    5 Days
-                  </span>
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-full" />
+                <Flame size={14} className="text-white animate-pulse shrink-0" />
+                <span>One-Half</span>
+                <span className="hidden sm:inline-block text-[8px] px-1.5 py-0.5 rounded-full bg-black/25 text-amber-200 font-mono font-black">
+                  32
+                </span>
               </button>
             </div>
           </div>
@@ -16344,7 +16554,7 @@ export const CricketScoreboard: React.FC = () => {
       {/* Reset Confirmation Overlay */}
       {resetMatchConfirm && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-905 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl animate-fade-in">
             <div className="w-12 h-12 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-1">
               <Trash2 size={24} />
             </div>
@@ -16373,45 +16583,56 @@ export const CricketScoreboard: React.FC = () => {
         </div>
       )}
 
-      {/* Header Bar */}
-      <header className="bg-emerald-700 dark:bg-emerald-900 text-white shadow-md border-b border-emerald-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-600 rounded-xl shadow-inner">
-              <Trophy className="text-amber-300 animate-pulse" size={24} />
+      {/* Unified Pro Broadcast Header Bar */}
+      <header className="sticky top-0 z-40 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 dark:from-slate-950 dark:via-emerald-950 dark:to-slate-900 text-white shadow-lg border-b border-emerald-600/30 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 sm:p-2.5 bg-emerald-600/90 dark:bg-emerald-800/80 rounded-xl shadow-inner border border-emerald-400/20 shrink-0">
+              <Trophy className="text-amber-300" size={20} />
             </div>
-            <div>
-              <h1 className="text-lg sm:text-2xl font-black uppercase tracking-tight flex items-center gap-2">
-                GULLY<span className="text-amber-300 italic">SCORE</span>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl font-black uppercase tracking-tight flex items-center gap-1.5 leading-none">
+                <span>GULLY</span>
+                <span className="text-amber-300 italic">SCORE</span>
+                <span className="hidden xs:inline-block text-[8px] sm:text-[9px] font-mono font-black uppercase tracking-widest bg-emerald-950/60 text-emerald-300 px-1.5 py-0.5 rounded-md border border-emerald-400/20">
+                  PRO
+                </span>
               </h1>
-              <p className="text-[10px] text-emerald-100 font-bold uppercase tracking-widest hidden sm:block">Local Cricket Match Scoreboard Suite</p>
+              <p className="text-[8.5px] sm:text-[10px] text-emerald-100/90 font-bold uppercase tracking-widest truncate mt-0.5">
+                Local Cricket Match Scoreboard Suite
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-
-
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {match.innings1 && (
               <button
                 onClick={handleExportMatchPDF}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-sm"
+                className="px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border border-white/10 text-white shadow-sm"
+                title="Export Match PDF"
               >
-                <FileDown size={13} />
+                <FileDown size={14} />
                 <span className="hidden sm:inline">Export PDF</span>
               </button>
             )}
 
-            {match.status !== 'setup' && (
-              <button 
-                onClick={() => setShowHistory(!showHistory)}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none text-white shadow-sm"
-              >
-                <Clock size={13} />
-                {showHistory ? 'Close Logs' : 'Past Matches'}
-              </button>
-            )}
+            <button 
+              onClick={() => setShowHistory(!showHistory)}
+              className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer border shadow-sm ${
+                showHistory
+                  ? 'bg-amber-400 text-slate-950 border-amber-300'
+                  : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
+              }`}
+              title="View Past Matches & Completed Records"
+            >
+              <Clock size={14} className="shrink-0" />
+              <span className="hidden md:inline">{showHistory ? 'Close Logs' : 'Past Matches'}</span>
+              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/20">
+                {pastMatches.length + matchHistory.length}
+              </span>
+            </button>
 
-            {/* Small Permanent OBS Overlay Link Icon near Past Matches - Always Available on all screens including Setup */}
+            {/* Permanent OBS Overlay Link Icon */}
             <button
               type="button"
               onClick={() => {
@@ -16422,139 +16643,124 @@ export const CricketScoreboard: React.FC = () => {
                   showNotification('Overlay link copied!', 'success');
                 });
               }}
-              className={`p-2 rounded-xl transition-all cursor-pointer border-none text-white relative shadow-sm flex items-center justify-center ${
+              className={`p-2 rounded-xl transition-all cursor-pointer border text-white relative shadow-sm flex items-center justify-center ${
                 copiedOverlayLink 
-                  ? 'bg-amber-400 text-slate-950 font-bold shadow-md' 
-                  : 'bg-emerald-600 hover:bg-emerald-500'
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold shadow-md' 
+                  : 'bg-white/10 hover:bg-white/20 border-white/10'
               }`}
-              title={copiedOverlayLink ? "Copied overlay link!" : "Copy overlay link"}
+              title={copiedOverlayLink ? "Copied overlay link!" : "Copy OBS Broadcast Overlay Link"}
               id="btn-top-bar-obs-link-icon"
               aria-label="Copy overlay link"
             >
               {copiedOverlayLink ? (
-                <Check size={18} className="text-slate-950 font-bold" />
+                <Check size={16} className="text-slate-950 font-bold" />
               ) : (
                 <div className="relative flex items-center justify-center">
-                  <Link2 size={18} />
+                  <Link2 size={16} />
                   <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-rose-400 animate-pulse ring-1 ring-emerald-900" />
                 </div>
               )}
             </button>
 
-            {match.status !== 'setup' && (
-              <>
-                <button
-                  onClick={() => setSoundEnabled(!soundEnabled)}
-                  className={`p-2 rounded-xl transition-all cursor-pointer border-none text-white ${soundEnabled ? 'bg-emerald-600' : 'bg-emerald-800/40 opacity-60'}`}
-                  title={soundEnabled ? "Mute audio" : "Enable sound"}
-                >
-                  {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} className="text-amber-200" />}
-                </button>
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className={`p-2 rounded-xl transition-all cursor-pointer border border-white/10 text-white hidden sm:flex items-center justify-center ${soundEnabled ? 'bg-white/10 hover:bg-white/20' : 'bg-black/20 opacity-60'}`}
+              title={soundEnabled ? "Mute audio" : "Enable sound"}
+            >
+              {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} className="text-amber-200" />}
+            </button>
 
-                <button
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="p-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white transition-all cursor-pointer border-none"
-                  title="Toggle theme mode"
-                >
-                  {darkMode ? <Sun size={18} className="text-amber-300" /> : <Moon size={18} />}
-                </button>
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all cursor-pointer border border-white/10 flex items-center justify-center"
+              title="Toggle theme mode"
+            >
+              {darkMode ? <Sun size={16} className="text-amber-300" /> : <Moon size={16} />}
+            </button>
 
-                {isScoreManager ? (
-                  <button
-                    type="button"
-                    id="btn-mobile-scorer-logout"
-                    onClick={handleScoreManagerLogout}
-                    className="px-3 py-1.5 bg-rose-600/90 hover:bg-rose-600 border border-rose-500 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
-                    title="Sign out of scorekeeper session"
-                  >
-                    <ShieldIcon size={14} className="text-amber-300" />
-                    <span>Logout Scorer</span>
-                  </button>
-                ) : (
-                  <Link
-                    to="/cricket-login"
-                    className="px-3 py-1.5 bg-amber-550 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-lg hover:shadow-amber-500/10 transition-all no-underline decoration-transparent"
-                    title="Authenticate as Scorekeeper"
-                  >
-                    <LoginIcon size={14} />
-                    <span>Scorer Login</span>
-                  </Link>
-                )}
-              </>
+            {isScoreManager ? (
+              <button
+                type="button"
+                id="btn-mobile-scorer-logout"
+                onClick={handleScoreManagerLogout}
+                className="px-2.5 sm:px-3 py-1.5 bg-rose-600 hover:bg-rose-500 border border-rose-400/40 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-white flex items-center gap-1 cursor-pointer shadow-sm transition-all"
+                title="Sign out of scorekeeper session"
+              >
+                <ShieldIcon size={13} className="text-amber-300 shrink-0" />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            ) : (
+              <Link
+                to="/cricket-login"
+                className="px-2.5 sm:px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-sm transition-all no-underline"
+                title="Authenticate as Scorekeeper"
+              >
+                <LoginIcon size={13} className="shrink-0" />
+                <span>Login</span>
+              </Link>
             )}
 
             <Link
               to="/projects"
-              className="p-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl uppercase tracking-widest transition-all hidden sm:flex items-center gap-1.5 no-underline decoration-transparent"
+              className="p-2 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl uppercase tracking-widest transition-all hidden sm:flex items-center gap-1 no-underline border border-white/10"
+              title="Back to Projects"
             >
-              <ArrowRight size={14} /> Back
+              <ArrowRight size={14} />
             </Link>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8">
 
-        {/* Section Switcher Tabs */}
-        <div className="flex justify-center border-b border-slate-200 dark:border-slate-800 mb-8 pb-1 font-sans">
-          <div className="flex gap-4 font-sans">
+        {/* Pro Mobile-First Segmented Navigation Bar */}
+        <div className="max-w-xl mx-auto mb-5 sm:mb-8">
+          <div className="grid grid-cols-3 gap-1 sm:gap-1.5 p-1 sm:p-1.5 bg-slate-200/80 dark:bg-slate-900 border border-slate-300/60 dark:border-slate-800 rounded-2xl shadow-inner">
             <button
               onClick={() => {
                 setActiveSection('scorer');
                 playSoundEffect('click');
               }}
-              className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+              className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
                 activeSection === 'scorer'
-                  ? 'text-emerald-600 dark:text-emerald-400 font-extrabold pb-3'
-                  : 'text-slate-400 hover:text-slate-600'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <BarChart3 size={16} /> Quick Scorer
-              </div>
-              {activeSection === 'scorer' && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full font-sans" />
-              )}
+              <BarChart3 size={14} className="shrink-0" />
+              <span>Quick Scorer</span>
             </button>
             <button
               onClick={() => {
                 setActiveSection('tournaments');
                 playSoundEffect('click');
               }}
-              className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+              className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
                 activeSection === 'tournaments'
-                  ? 'text-emerald-600 dark:text-emerald-400 font-extrabold pb-3'
-                  : 'text-slate-400 hover:text-slate-600'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <Trophy size={16} className="text-amber-500" /> Tournaments
-              </div>
-              {activeSection === 'tournaments' && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-emerald-500 rounded-full font-sans" />
-              )}
+              <Trophy size={14} className="text-amber-500 shrink-0" />
+              <span>Tournaments</span>
             </button>
             <button
               onClick={() => {
                 setActiveSection('one-half');
                 playSoundEffect('click');
               }}
-              className={`pb-3 px-6 font-black uppercase text-xs sm:text-sm tracking-wider relative transition-all border-none bg-transparent cursor-pointer ${
+              className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
                 activeSection === 'one-half'
-                  ? 'text-amber-500 dark:text-amber-400 font-extrabold pb-3'
-                  : 'text-slate-400 hover:text-slate-600'
+                  ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
+                  : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <Flame size={16} className="text-rose-500 animate-pulse" /> One-Half 32
-                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
-                  5 Days
-                </span>
-              </div>
-              {activeSection === 'one-half' && (
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500 rounded-full font-sans" />
-              )}
+              <Flame size={14} className="text-rose-500 animate-pulse shrink-0" />
+              <span>One-Half</span>
+              <span className="hidden sm:inline-block text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-500 font-mono font-black border border-amber-500/30">
+                32
+              </span>
             </button>
           </div>
         </div>
@@ -16586,15 +16792,15 @@ export const CricketScoreboard: React.FC = () => {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2rem] p-6 mb-8 shadow-xl overflow-hidden"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-4 sm:p-6 mb-6 shadow-xl overflow-hidden"
             >
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-50 dark:border-slate-800">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div>
-                  <h3 className="text-base font-black uppercase tracking-widest text-slate-800 dark:text-white flex items-center gap-2">
-                    <HistoryIcon className="text-amber-500" />
-                    PAST MATCHES SECTION ({pastMatches.length} Registered)
+                  <h3 className="text-sm sm:text-base font-black uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-2">
+                    <HistoryIcon size={18} className="text-amber-500 shrink-0" />
+                    <span>Past Matches Registry ({pastMatches.length})</span>
                   </h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Manage, search, and customize past match databases locally</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Manage, search, and restore match scorecards</p>
                 </div>
 
                 {/* Main Action Bar for adding new custom past match & toggling hidden */}
@@ -16605,29 +16811,29 @@ export const CricketScoreboard: React.FC = () => {
                       setPastDateInput(new Date().toISOString().split('T')[0]);
                       setShowAddPastModal(true);
                     }}
-                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all cursor-pointer border-none flex items-center gap-1.5 shadow-sm"
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black uppercase text-[9.5px] tracking-wider transition-all cursor-pointer border-none flex items-center gap-1.5 shadow-sm"
                   >
                     <Plus size={13} />
-                    Add New Match
+                    Add Match
                   </button>
 
                   <button
                     onClick={() => setShowHiddenPast(!showHiddenPast)}
-                    className={`px-4 py-2 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+                    className={`px-3.5 py-2 rounded-xl font-black uppercase text-[9.5px] tracking-wider transition-all cursor-pointer border-none flex items-center gap-1.5 ${
                       showHiddenPast 
                         ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400' 
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-705'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     {showHiddenPast ? <Eye size={13} /> : <EyeOff size={13} />}
-                    {showHiddenPast ? 'Hide Hidden Group' : 'Show Hidden Matches'}
+                    {showHiddenPast ? 'Hide Hidden' : 'Hidden Matches'}
                   </button>
 
                   {activeHistoryTab === 'restorable' && matchHistory.length > 0 && (
                     clearHistoryConfirm ? (
                       <div className="flex items-center gap-1.5 p-1 bg-rose-50 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-900 rounded-xl">
                         <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 px-1.5">
-                          Delete all {matchHistory.length} completed records?
+                          Delete all {matchHistory.length} records?
                         </span>
                         <button
                           onClick={() => {
@@ -16636,7 +16842,7 @@ export const CricketScoreboard: React.FC = () => {
                           }}
                           className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-black uppercase text-[8px] tracking-wider cursor-pointer border-none shadow-sm transition-all"
                         >
-                          Confirm Delete All
+                          Confirm
                         </button>
                         <button
                           onClick={() => setClearHistoryConfirm(false)}
@@ -16648,11 +16854,11 @@ export const CricketScoreboard: React.FC = () => {
                     ) : (
                       <button
                         onClick={() => setClearHistoryConfirm(true)}
-                        className="px-3.5 py-2 hover:bg-rose-100 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-900/50 rounded-xl font-bold uppercase text-[9px] tracking-widest transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        className="px-3.5 py-2 hover:bg-rose-100 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-900/50 rounded-xl font-black uppercase text-[9.5px] tracking-wider transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
                         title="Permanently delete all completed records"
                       >
                         <Trash2 size={12} />
-                        <span>Delete All Records</span>
+                        <span>Delete All</span>
                       </button>
                     )
                   )}
@@ -16660,57 +16866,57 @@ export const CricketScoreboard: React.FC = () => {
               </div>
 
               {/* Navigation Tabs */}
-              <div className="flex gap-2 p-1 bg-slate-50 dark:bg-slate-950 rounded-xl mb-6 w-fit border border-slate-200/40 dark:border-slate-800 shadow-inner">
+              <div className="flex overflow-x-auto no-scrollbar gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-950 rounded-2xl mb-5 w-full sm:w-fit border border-slate-200/70 dark:border-slate-800 shadow-inner">
                 <button
                   onClick={() => setActiveHistoryTab('custom')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border-none ${
+                  className={`px-3 py-2 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer border-none shrink-0 ${
                     activeHistoryTab === 'custom'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
                   }`}
                 >
-                  Past Matches Registry
+                  Registry
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveHistoryTab('live')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border-none ${
+                  className={`px-3 py-2 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer border-none shrink-0 ${
                     activeHistoryTab === 'live'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
                   }`}
                 >
-                  Active Live Matches ({activeLiveMatches.length})
+                  Live ({activeLiveMatches.length})
                 </button>
                 <button
                   onClick={() => setActiveHistoryTab('restorable')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border-none ${
+                  className={`px-3 py-2 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer border-none shrink-0 ${
                     activeHistoryTab === 'restorable'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
                   }`}
                 >
-                  Completed Records ({matchHistory.length})
+                  Completed ({matchHistory.length})
                 </button>
                 <button
                   onClick={() => setActiveHistoryTab('drafts')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border-none ${
+                  className={`px-3 py-2 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer border-none shrink-0 ${
                     activeHistoryTab === 'drafts'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
                   }`}
                 >
-                  Saved Drafts ({savedDrafts.length})
+                  Drafts ({savedDrafts.length})
                 </button>
                 <button
                   onClick={() => setActiveHistoryTab('stats')}
-                  className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition-all cursor-pointer border-none ${
+                  className={`px-3 py-2 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all cursor-pointer border-none shrink-0 ${
                     activeHistoryTab === 'stats'
-                      ? 'bg-emerald-500 text-white shadow-md'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
                   }`}
                 >
-                  Leaderboard & Stats 📊
+                  Stats 📊
                 </button>
               </div>
 
@@ -17895,23 +18101,23 @@ export const CricketScoreboard: React.FC = () => {
         {/* ==================== 1. MATCH SETUP SCREEN ==================== */}
         {match.status === 'setup' && (
           <>
-            <div className="max-w-2xl mx-auto bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-[2.5rem] p-8 shadow-xl">
+            <div className="max-w-3xl mx-auto bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl sm:rounded-[2.25rem] p-3.5 sm:p-7 shadow-xl">
             
             {/* Autosaved match resume card info block */}
             {localAutosavedMatch && (
-              <div className="mb-6 p-5 rounded-2xl bg-amber-500/5 dark:bg-amber-505/10 border border-amber-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs shadow-inner">
-                <div className="flex gap-3">
-                  <div className="mt-0.5 p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 h-9 w-9 flex items-center justify-center">
+              <div className="mb-4 sm:mb-6 p-3.5 sm:p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-inner">
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="p-2 bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 h-9 w-9 flex items-center justify-center">
                     <Radio className="animate-pulse" size={16} />
                   </div>
-                  <div>
-                    <h4 className="font-extrabold uppercase text-amber-750 dark:text-amber-400 text-sm">Ongoing Game In Progress!</h4>
-                    <p className="text-slate-500 dark:text-slate-400 font-semibold leading-normal mt-0.5 animate-pulse">
-                      Found auto-saved active match: <span className="font-extrabold text-slate-800 dark:text-white">{localAutosavedMatch.teamA} vs {localAutosavedMatch.teamB}</span> ({localAutosavedMatch.date}).
+                  <div className="min-w-0">
+                    <h4 className="font-extrabold uppercase text-amber-700 dark:text-amber-400 text-xs sm:text-sm">Ongoing Game In Progress</h4>
+                    <p className="text-slate-600 dark:text-slate-300 font-semibold leading-snug mt-0.5 text-[11px] sm:text-xs">
+                      Auto-saved match: <span className="font-extrabold text-slate-900 dark:text-white">{localAutosavedMatch.teamA} vs {localAutosavedMatch.teamB}</span> ({localAutosavedMatch.date})
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => {
                       setMatch(localAutosavedMatch);
@@ -17919,7 +18125,7 @@ export const CricketScoreboard: React.FC = () => {
                       setLocalAutosavedMatch(null);
                       showNotification('Resumed previous live match successfully!', 'success');
                     }}
-                    className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all shadow-sm"
+                    className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all shadow-sm text-center"
                   >
                     Resume Match
                   </button>
@@ -17933,7 +18139,7 @@ export const CricketScoreboard: React.FC = () => {
                         showNotification('Auto-saved match session discarded.', 'info');
                       }
                     }}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all"
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all text-center"
                   >
                     Discard
                   </button>
@@ -17943,7 +18149,7 @@ export const CricketScoreboard: React.FC = () => {
 
             {/* Live Cloud Match Banner (Detected across different devices/laptops) */}
             {!localAutosavedMatch && activeLiveMatches.length > 0 && (
-              <div className="mb-6 space-y-3">
+              <div className="mb-4 sm:mb-6 space-y-2.5">
                 {activeLiveMatches.map((liveM, lIdx) => {
                   const currInn = liveM.currentInningsNum === 1 ? liveM.innings1 : liveM.innings2;
                   const balls = currInn?.ballsBowled || 0;
@@ -17954,32 +18160,31 @@ export const CricketScoreboard: React.FC = () => {
                   return (
                     <div 
                       key={liveM.id || lIdx}
-                      className="p-5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-sky-500/10 to-indigo-500/10 border border-emerald-500/40 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs shadow-md"
+                      className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-sky-500/10 to-indigo-500/10 border border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md"
                     >
-                      <div className="flex gap-3">
-                        <div className="mt-0.5 p-2.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl shrink-0 h-10 w-10 flex items-center justify-center">
-                          <Radio className="animate-pulse" size={18} />
+                      <div className="flex items-start sm:items-center gap-3">
+                        <div className="p-2 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl shrink-0 h-9 w-9 flex items-center justify-center">
+                          <Radio className="animate-pulse" size={16} />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="px-2 py-0.5 rounded-full bg-red-500 text-white font-black text-[9px] uppercase tracking-wider animate-pulse flex items-center gap-1">
+                            <span className="px-2 py-0.5 rounded-full bg-red-500 text-white font-black text-[8.5px] uppercase tracking-wider flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping inline-block" />
-                              LIVE IN FIREBASE CLOUD
+                              LIVE IN CLOUD
                             </span>
-                            <span className="text-[10px] font-mono font-bold text-slate-400">
-                              Overs: {liveM.oversLimit} • Innings {liveM.currentInningsNum}
+                            <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">
+                              {liveM.oversLimit} Ov • Inn {liveM.currentInningsNum}
                             </span>
                           </div>
-                          <h4 className="font-extrabold uppercase text-slate-900 dark:text-white text-sm mt-1">
+                          <h4 className="font-extrabold uppercase text-slate-900 dark:text-white text-xs sm:text-sm mt-1 truncate">
                             {liveM.teamA} vs {liveM.teamB}
                           </h4>
-                          <p className="text-slate-600 dark:text-slate-300 font-semibold leading-normal mt-0.5">
-                            Current Score: <span className="font-black text-emerald-600 dark:text-emerald-400">{runs}/{wickets} ({oversText})</span>
-                            <span className="text-slate-400 ml-1.5">• Ready to resume scoring seamlessly on this phone</span>
+                          <p className="text-slate-600 dark:text-slate-300 font-semibold leading-snug mt-0.5 text-[11px]">
+                            Score: <span className="font-black text-emerald-600 dark:text-emerald-400">{runs}/{wickets} ({oversText})</span>
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => {
@@ -17987,9 +18192,9 @@ export const CricketScoreboard: React.FC = () => {
                             setSearchParams({ matchId: liveM.id });
                             showNotification(`Resumed live match: ${liveM.teamA} vs ${liveM.teamB}!`, 'success');
                           }}
-                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all shadow-md flex items-center gap-1.5 active:scale-95"
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-xl font-black uppercase text-[10px] tracking-wider cursor-pointer transition-all shadow-md flex items-center justify-center gap-1 active:scale-95"
                         >
-                          <Play size={13} fill="currentColor" /> Resume Scoring on Phone
+                          <Play size={12} fill="currentColor" /> Resume
                         </button>
                         <Link
                           to={`/live/cricket-details?matchId=${liveM.id}`}
@@ -18004,96 +18209,69 @@ export const CricketScoreboard: React.FC = () => {
               </div>
             )}
 
-            {/* Direct Scoreboard Switch Banner */}
-            <div className="mb-8 p-5 bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 rounded-3xl border border-indigo-500/10 shadow-md">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="text-left">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 font-mono text-[9px] font-extrabold uppercase tracking-widest mb-2">
-                    <Sparkles size={11} className="text-amber-400" /> Isolated Environment
-                  </span>
-                  <h3 className="text-sm font-black uppercase tracking-tight text-slate-800 dark:text-white">
-                    Need an isolated score management system?
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Operate tournaments or street matches on a specialized local scorekeeper dashboard with zero overlay options.
+            {/* Pro Broadcast Match Configuration Hero Banner */}
+            <div className="mb-5 sm:mb-6 p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-emerald-900 via-slate-900 to-teal-950 text-white border border-emerald-500/30 shadow-lg relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 font-mono text-[9px] font-black uppercase tracking-widest mb-1.5">
+                    <Sparkles size={10} className="text-amber-300" /> New Match Configuration
+                  </div>
+                  <h2 className="text-lg sm:text-2xl font-black uppercase tracking-tight text-white leading-tight">
+                    Setup Live Scorecard
+                  </h2>
+                  <p className="text-[10px] sm:text-xs text-emerald-100/80 font-medium mt-0.5">
+                    Configure teams, playing XI, toss & broadcast graphics in seconds
                   </p>
                 </div>
-                <Link
-                  to="/live/local-cricket-dashboard"
-                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-lg hover:shadow-indigo-500/20 transition-all text-center no-underline border-none shrink-0"
-                >
-                  Local Scoring Dashboard
-                </Link>
-              </div>
-            </div>
 
-            <div className="text-center mb-8">
-              <span className="px-4 py-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full font-black text-[10px] uppercase tracking-widest">
-                New Match Configuration
-              </span>
-              <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight text-slate-800 dark:text-white mt-3">
-                Setup Live Scorecard
-              </h2>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">Provide Local match coordinates to initialize</p>
-            </div>
-
-            <div className="space-y-6">
-              {/* ⚡ One-Half 32 Tournament Quick Setup Banner */}
-              <div className="bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/15 p-4 sm:p-5 rounded-3xl border border-amber-500/30 space-y-3 shadow-md">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black text-[9px] uppercase tracking-wider">
-                        ⚡ 32-Team Format
-                      </span>
-                      <h3 className="text-xs sm:text-sm font-black uppercase text-amber-500 dark:text-amber-400 tracking-wider flex items-center gap-1.5">
-                        <Flame size={15} className="text-rose-500" />
-                        One-Half Tournament Setup (4 Groups • 5 Days)
-                      </h3>
-                    </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-300 font-medium">
-                      City special 5-day tournament: 8 teams knockout per day (Day 1 to 4) ➔ 4 qualifiers clash on Day 5 for 1st, 2nd, 3rd & 4th prizes!
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveSection('one-half');
-                        playSoundEffect('click');
-                      }}
-                      className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-lg hover:shadow-amber-500/20 transition-all flex items-center gap-1.5 border-none active:scale-95"
-                    >
-                      <Trophy size={14} className="text-amber-200" />
-                      <span>One-Half 32 Tournament Bracket ➔</span>
-                    </button>
-                  </div>
+                {/* Compact Mode Switcher Pills */}
+                <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0 pt-1 sm:pt-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSection('one-half');
+                      playSoundEffect('click');
+                    }}
+                    className="px-3 py-2 bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-black text-[10px] uppercase tracking-wider rounded-xl cursor-pointer shadow-md transition-all flex items-center justify-center gap-1.5 border-none active:scale-95"
+                  >
+                    <Flame size={12} className="text-amber-200 shrink-0" />
+                    <span className="truncate">One-Half 32</span>
+                  </button>
+                  <Link
+                    to="/live/local-cricket-dashboard"
+                    className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 no-underline border border-white/15"
+                  >
+                    <BarChart3 size={12} className="text-emerald-300 shrink-0" />
+                    <span className="truncate">Isolated Mode</span>
+                  </Link>
                 </div>
               </div>
+            </div>
 
+            <div className="space-y-4 sm:space-y-6">
               {/* Presets and Team Management Section */}
-              <div className="bg-slate-50 dark:bg-slate-950 p-4 sm:p-5 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-4 shadow-sm">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-200 dark:border-slate-800/80">
+              <div className="bg-slate-50 dark:bg-slate-950/80 p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200/80 dark:border-slate-800 space-y-3.5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-200 dark:border-slate-800">
                   <div>
                     <h3 className="text-xs font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider flex items-center gap-1.5">
-                      <Users size={15} />
-                      Local Cricket Teams & 1-Click Setup
+                      <Users size={15} className="shrink-0" />
+                      <span>Teams & 1-Click Squad Loader</span>
                     </h3>
-                    <p className="text-[10px] text-slate-400 font-medium mt-0.5">
-                      Send a link to team captains to submit their 15-player squad, or add teams directly for instant 1-click live scoreboard setup.
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                      Invite captains via link, add teams, or tap any saved team to load Playing XI.
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid grid-cols-3 sm:flex items-center gap-1.5 sm:gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setTeamModalTab('invite_captain');
                         setShowTeamModal(true);
                       }}
-                      className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm hover:scale-105 active:scale-95"
+                      className="text-[9.5px] sm:text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2 sm:px-3 py-2 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer border border-indigo-500/20 active:scale-95 whitespace-nowrap"
                     >
-                      <Smartphone size={12} />
-                      📲 Send Captain Link
+                      <Smartphone size={11} className="shrink-0" />
+                      <span>Captain Link</span>
                     </button>
                     <button
                       type="button"
@@ -18105,10 +18283,10 @@ export const CricketScoreboard: React.FC = () => {
                         setTeamModalTab('direct_add');
                         setShowTeamModal(true);
                       }}
-                      className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm hover:scale-105 active:scale-95"
+                      className="text-[9.5px] sm:text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 sm:px-3 py-2 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer border border-emerald-500/20 active:scale-95 whitespace-nowrap"
                     >
-                      <PlusCircle size={12} />
-                      + Add Team Directly
+                      <PlusCircle size={11} className="shrink-0" />
+                      <span>Add Team</span>
                     </button>
                     <button
                       type="button"
@@ -18116,10 +18294,10 @@ export const CricketScoreboard: React.FC = () => {
                         setTeamModalTab('presets');
                         setShowTeamModal(true);
                       }}
-                      className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 bg-slate-200/60 dark:bg-slate-800 hover:bg-slate-300 px-3 py-1.5 rounded-full transition-all flex items-center gap-1.5 cursor-pointer border-none"
+                      className="text-[9.5px] sm:text-[10px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 px-2 sm:px-3 py-2 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer border border-slate-300/60 dark:border-slate-700 whitespace-nowrap"
                     >
-                      <Users size={12} />
-                      Manage All ({savedTeams.length})
+                      <Users size={11} className="shrink-0" />
+                      <span>All ({savedTeams.length})</span>
                     </button>
                   </div>
                 </div>
@@ -18128,8 +18306,8 @@ export const CricketScoreboard: React.FC = () => {
                 {savedTeams.length > 0 && (
                   <div className="space-y-2">
                     <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                      <Zap size={12} className="text-amber-500" />
-                      ⚡ 1-Click Match Setup: Click to load squad into Team A or Team B
+                      <Zap size={11} className="text-amber-500 shrink-0" />
+                      <span>1-Click Match Setup: Load saved squad into Team A or Team B</span>
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                       {savedTeams.map(t => {
@@ -18144,7 +18322,7 @@ export const CricketScoreboard: React.FC = () => {
                                 <img src={t.logo} alt={t.name} className="w-8 h-8 rounded-xl object-contain bg-slate-100 dark:bg-slate-800 p-0.5 shrink-0 border border-slate-200 dark:border-slate-700" />
                               )}
                               <div className="min-w-0 flex-1">
-                                <strong className="text-xs font-black text-slate-850 dark:text-white truncate block">
+                                <strong className="text-xs font-black text-slate-800 dark:text-white truncate block">
                                   {t.name}
                                 </strong>
                                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -18181,7 +18359,7 @@ export const CricketScoreboard: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleOneClickLoadTeam(t, 'A')}
-                                className="py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-xl text-[9.5px] font-black uppercase tracking-wider border border-emerald-500/20 cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95 shadow-xs"
+                                className="py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 rounded-xl text-[9.5px] font-black uppercase tracking-wider border border-emerald-500/20 cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95"
                               >
                                 <Zap size={11} className="text-emerald-500" />
                                 ⚡ Team A
@@ -18189,7 +18367,7 @@ export const CricketScoreboard: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleOneClickLoadTeam(t, 'B')}
-                                className="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-xl text-[9.5px] font-black uppercase tracking-wider border border-indigo-500/20 cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95 shadow-xs"
+                                className="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-xl text-[9.5px] font-black uppercase tracking-wider border border-indigo-500/20 cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95"
                               >
                                 <Zap size={11} className="text-indigo-500" />
                                 ⚡ Team B
@@ -18203,9 +18381,9 @@ export const CricketScoreboard: React.FC = () => {
                 )}
 
                 {/* Dropdowns for quick selection */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                   <div>
-                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">Load Team A Preset</label>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1">Load Team A Preset</label>
                     <select
                       onChange={(e) => {
                         const sel = savedTeams.find(t => t.id === e.target.value);
@@ -18217,7 +18395,7 @@ export const CricketScoreboard: React.FC = () => {
                           setSelectedTeamARoster([]);
                         }
                       }}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20"
                     >
                       <option value="">-- No preset (Manual Entry) --</option>
                       {savedTeams.map(t => (
@@ -18226,7 +18404,7 @@ export const CricketScoreboard: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">Load Team B Preset</label>
+                    <label className="text-[9px] font-black uppercase text-slate-400 tracking-wider block mb-1">Load Team B Preset</label>
                     <select
                       onChange={(e) => {
                         const sel = savedTeams.find(t => t.id === e.target.value);
@@ -18238,7 +18416,7 @@ export const CricketScoreboard: React.FC = () => {
                           setSelectedTeamBRoster([]);
                         }
                       }}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/20"
                     >
                       <option value="">-- No preset (Manual Entry) --</option>
                       {savedTeams.map(t => (
@@ -18367,7 +18545,7 @@ export const CricketScoreboard: React.FC = () => {
                             {selectedTeamARoster.map((player, idx) => (
                               <span
                                 key={idx}
-                                className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-slate-50 dark:bg-slate-950 text-slate-750 dark:text-slate-200 rounded-lg text-[10px] font-extrabold border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 transition-all"
+                                className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 rounded-lg text-[10px] font-extrabold border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 transition-all"
                               >
                                 <span className="text-[8px] text-emerald-500 font-mono font-bold">#{idx + 1}</span>
                                 {player}
@@ -18537,7 +18715,7 @@ export const CricketScoreboard: React.FC = () => {
                             {selectedTeamBRoster.map((player, idx) => (
                               <span
                                 key={idx}
-                                className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-slate-50 dark:bg-slate-950 text-slate-755 dark:text-slate-200 rounded-lg text-[10px] font-extrabold border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 transition-all"
+                                className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200 rounded-lg text-[10px] font-extrabold border border-slate-200 dark:border-slate-800 shadow-sm hover:border-emerald-500/30 transition-all"
                               >
                                 <span className="text-[8px] text-emerald-500 font-mono font-bold">#{idx + 1}</span>
                                 {player}
@@ -18602,19 +18780,19 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
 
                   {/* Approved Players Selection Panel */}
-                  <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl p-4 space-y-2.5">
-                    <div className="flex justify-between items-center pb-1.5 border-b border-slate-100 dark:border-slate-850">
-                      <span className="text-[9.5px] font-black uppercase tracking-wider text-emerald-500 flex items-center gap-1 select-none">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 sm:p-4 space-y-2.5">
+                    <div className="flex flex-wrap justify-between items-center gap-1 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+                      <span className="text-[9.5px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1 select-none">
                         <Award size={13} />
-                        Approved Roster Quick-Assign Picker ({approvedPlayers.length})
+                        Approved Roster Quick-Assign ({approvedPlayers.length})
                       </span>
-                      <span className="text-[8px] text-slate-450 italic">Click directly to allocate to matching side</span>
+                      <span className="text-[8px] text-slate-400 italic">Tap +A or +B to assign</span>
                     </div>
 
                     {approvedPlayers.length === 0 ? (
-                      <div className="text-center py-4 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
+                      <div className="text-center py-3.5 bg-slate-50 dark:bg-slate-950/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-800">
                         <p className="text-[10px] text-slate-400 font-bold uppercase leading-none mb-1">No Approved Cricketers Available</p>
-                        <p className="text-[9px] text-slate-450 leading-normal font-sans">Approve submitted profiles in the Super Admin dashboard first to load them dynamically.</p>
+                        <p className="text-[9px] text-slate-400 leading-normal font-sans">Approve submitted profiles in the Super Admin dashboard first to load them dynamically.</p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
@@ -18624,8 +18802,8 @@ export const CricketScoreboard: React.FC = () => {
                           const inA = selectedTeamARoster.includes(name);
                           const inB = selectedTeamBRoster.includes(name);
                           return (
-                            <div key={p.id} className="flex justify-between items-center p-2 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-100 dark:border-slate-850 hover:border-emerald-500/20 transition-all text-xs">
-                              <div className="flex items-center gap-2">
+                            <div key={p.id} className="flex justify-between items-center p-2 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-emerald-500/30 transition-all text-xs">
+                              <div className="flex items-center gap-2 min-w-0">
                                 <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-500 font-bold flex items-center justify-center text-[10px] overflow-hidden shrink-0 shadow-inner">
                                   {p.photo ? (
                                     <img src={p.photo} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -18633,12 +18811,12 @@ export const CricketScoreboard: React.FC = () => {
                                     <span className="font-extrabold">{name[0]}</span>
                                   )}
                                 </div>
-                                <div className="leading-tight">
-                                  <strong className="font-black text-slate-800 dark:text-slate-100 block">{name}</strong>
-                                  <span className="text-[8px] font-black uppercase text-emerald-600 dark:text-emerald-450 leading-none">{role}</span>
+                                <div className="leading-tight min-w-0">
+                                  <strong className="font-black text-slate-800 dark:text-slate-100 block truncate">{name}</strong>
+                                  <span className="text-[8px] font-black uppercase text-emerald-600 dark:text-emerald-400 leading-none">{role}</span>
                                 </div>
                               </div>
-                              <div className="flex gap-1">
+                              <div className="flex gap-1 shrink-0">
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -18649,10 +18827,10 @@ export const CricketScoreboard: React.FC = () => {
                                       setSelectedTeamARoster(prev => [...prev, name]);
                                     }
                                   }}
-                                  className={`px-2 py-1 rounded text-[9px] font-black uppercase border-none cursor-pointer transition-all ${
+                                  className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all ${
                                     inA 
-                                      ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm' 
-                                      : 'bg-white hover:bg-slate-100 text-slate-655 dark:bg-slate-800 dark:text-slate-350 hover:text-emerald-500 border border-slate-150 dark:border-slate-700'
+                                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-sm' 
+                                      : 'bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                                   }`}
                                 >
                                   {inA ? 'A ✓' : '+ A'}
@@ -18667,10 +18845,10 @@ export const CricketScoreboard: React.FC = () => {
                                       setSelectedTeamBRoster(prev => [...prev, name]);
                                     }
                                   }}
-                                  className={`px-2 py-1 rounded text-[9px] font-black uppercase border-none cursor-pointer transition-all ${
+                                  className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all ${
                                     inB 
-                                      ? 'bg-amber-500 hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-700 text-slate-950 font-black shadow-sm' 
-                                      : 'bg-white hover:bg-slate-100 text-slate-655 dark:bg-slate-800 dark:text-slate-350 hover:text-emerald-500 border border-slate-150 dark:border-slate-700'
+                                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black border border-amber-400 shadow-sm' 
+                                      : 'bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                                   }`}
                                 >
                                   {inB ? 'B ✓' : '+ B'}
@@ -18685,289 +18863,368 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Teams input names */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Team A Name (Batting/Bowling)</label>
-                  <input
-                    type="text"
-                    value={teamA}
-                    onChange={(e) => setTeamA(e.target.value)}
-                    placeholder="E.g. Team A"
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
-                  />
+              {/* Pro Matchup Card: Team A vs Team B */}
+              <div className="bg-slate-50 dark:bg-slate-950/80 p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200/80 dark:border-slate-800 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-white flex items-center gap-1.5">
+                    <Trophy size={14} className="text-emerald-500" />
+                    <span>Head-to-Head Teams & Logos</span>
+                  </span>
+                  <span className="text-[9px] font-mono font-bold uppercase text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                    Matchup
+                  </span>
+                </div>
 
-                  {/* Team A Upload option */}
-                  <div className="mt-3 flex items-center gap-3 bg-slate-50 dark:bg-slate-950/40 p-3 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                    {teamALogoUrl ? (
-                      <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-white/5 border border-slate-250 dark:border-slate-800 shrink-0 flex items-center justify-center">
-                        <img src={teamALogoUrl} alt="Team A Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                        <button 
-                          type="button"
-                          onClick={() => setTeamALogoUrl('')}
-                          className="absolute inset-0 bg-black/75 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-[9px] font-black uppercase transition-all duration-150 cursor-pointer border-none"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center shrink-0 text-slate-400 text-lg">
-                        🛡️
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0 text-left">
-                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-1">Team A Logo Emblem</span>
-                      <div className="relative overflow-hidden inline-block">
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          id="setup-team-a-logo"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              compressImageFile(file, 256, 256, 0.75).then((compressed) => {
-                                if (compressed) {
-                                  setTeamALogoUrl(compressed);
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Team A Card */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-500/25 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-wider">
+                        Team A Name
+                      </label>
+                      <span className="text-[8.5px] font-mono font-bold text-slate-400">HOME / SIDE 1</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={teamA}
+                      onChange={(e) => setTeamA(e.target.value)}
+                      placeholder="Enter Team A Name"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-3 text-sm font-black focus:ring-2 focus:ring-emerald-500/20 outline-none focus:border-emerald-500 transition-all text-slate-900 dark:text-white"
+                    />
+
+                    {/* Team A Upload option */}
+                    <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950/60 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                      {teamALogoUrl ? (
+                        <div className="relative w-11 h-11 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shrink-0 flex items-center justify-center">
+                          <img src={teamALogoUrl} alt="Team A Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                          <button 
+                            type="button"
+                            onClick={() => setTeamALogoUrl('')}
+                            className="absolute inset-0 bg-black/75 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-[8px] font-black uppercase transition-all duration-150 cursor-pointer border-none"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-500 text-base">
+                          🛡️
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0 text-left">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-1">Team A Crest / Logo</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative overflow-hidden inline-block">
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              id="setup-team-a-logo"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+                                    if (compressed) {
+                                      setTeamALogoUrl(compressed);
+                                    }
+                                  });
                                 }
-                              });
-                            }
-                          }}
-                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                        />
-                        <label htmlFor="setup-team-a-logo" className="px-3 py-1.5 bg-slate-205 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-705 dark:text-slate-300 font-extrabold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer">
-                          Choose Logo File
-                        </label>
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label htmlFor="setup-team-a-logo" className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 font-black text-[9px] uppercase tracking-wider rounded-lg cursor-pointer transition-all">
+                              <Camera size={11} /> Upload Logo
+                            </label>
+                          </div>
+                          {teamALogoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setTeamALogoUrl('')}
+                              className="px-2 py-1 text-[9px] font-bold text-rose-500 bg-rose-500/10 rounded-lg border-none cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Team B Name</label>
-                  <input
-                    type="text"
-                    value={teamB}
-                    onChange={(e) => setTeamB(e.target.value)}
-                    placeholder="E.g. Team B"
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
-                  />
 
-                  {/* Team B Upload option */}
-                  <div className="mt-3 flex items-center gap-3 bg-slate-50 dark:bg-slate-950/40 p-3 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                    {teamBLogoUrl ? (
-                      <div className="relative w-12 h-12 rounded-xl overflow-hidden bg-white/5 border border-slate-250 dark:border-slate-800 shrink-0 flex items-center justify-center">
-                        <img src={teamBLogoUrl} alt="Team B Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                        <button 
-                          type="button"
-                          onClick={() => setTeamBLogoUrl('')}
-                          className="absolute inset-0 bg-black/75 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-[9px] font-black uppercase transition-all duration-150 cursor-pointer border-none"
-                        >
-                          Clear
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center shrink-0 text-slate-400 text-lg">
-                        🛡️
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0 text-left">
-                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-1">Team B Logo Emblem</span>
-                      <div className="relative overflow-hidden inline-block">
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          id="setup-team-b-logo"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              compressImageFile(file, 256, 256, 0.75).then((compressed) => {
-                                if (compressed) {
-                                  setTeamBLogoUrl(compressed);
+                  {/* Team B Card */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-indigo-500/25 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 tracking-wider">
+                        Team B Name
+                      </label>
+                      <span className="text-[8.5px] font-mono font-bold text-slate-400">AWAY / SIDE 2</span>
+                    </div>
+                    <input
+                      type="text"
+                      value={teamB}
+                      onChange={(e) => setTeamB(e.target.value)}
+                      placeholder="Enter Team B Name"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-3 text-sm font-black focus:ring-2 focus:ring-indigo-500/20 outline-none focus:border-indigo-500 transition-all text-slate-900 dark:text-white"
+                    />
+
+                    {/* Team B Upload option */}
+                    <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950/60 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                      {teamBLogoUrl ? (
+                        <div className="relative w-11 h-11 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shrink-0 flex items-center justify-center">
+                          <img src={teamBLogoUrl} alt="Team B Logo" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                          <button 
+                            type="button"
+                            onClick={() => setTeamBLogoUrl('')}
+                            className="absolute inset-0 bg-black/75 opacity-0 hover:opacity-100 flex items-center justify-center text-white text-[8px] font-black uppercase transition-all duration-150 cursor-pointer border-none"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-11 h-11 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-500 text-base">
+                          🛡️
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0 text-left">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-1">Team B Crest / Logo</span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="relative overflow-hidden inline-block">
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              id="setup-team-b-logo"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  compressImageFile(file, 256, 256, 0.75).then((compressed) => {
+                                    if (compressed) {
+                                      setTeamBLogoUrl(compressed);
+                                    }
+                                  });
                                 }
-                              });
-                            }
-                          }}
-                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                        />
-                        <label htmlFor="setup-team-b-logo" className="px-3 py-1.5 bg-slate-205 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-705 dark:text-slate-300 font-extrabold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer">
-                          Choose Logo File
-                        </label>
+                              }}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <label htmlFor="setup-team-b-logo" className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/25 font-black text-[9px] uppercase tracking-wider rounded-lg cursor-pointer transition-all">
+                              <Camera size={11} /> Upload Logo
+                            </label>
+                          </div>
+                          {teamBLogoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setTeamBLogoUrl('')}
+                              className="px-2 py-1 text-[9px] font-bold text-rose-500 bg-rose-500/10 rounded-lg border-none cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Match limits */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Match Overs Count</label>
-                  <select
-                    value={oversLimit}
-                    onChange={(e) => setOversLimit(Number(e.target.value))}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white"
-                  >
-                    {[1, 2, 5, 8, 10, 12, 15, 20, 50].map((ov) => (
-                      <option key={ov} value={ov}>{ov} Overs</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Toss Winner Preference</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowSpinCoinModal(true)}
-                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 text-stone-950 font-black text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-sm transition-transform hover:scale-105 active:scale-95 cursor-pointer border-none"
-                      title="Spin Coin for Toss"
-                    >
-                      <span>🪙 Spin Coin</span>
-                    </button>
-                  </div>
-                  <div className="flex bg-slate-50 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-250 dark:border-slate-800">
-                    <button
-                      type="button"
-                      onClick={() => setTossWinner('Team A')}
-                      className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                        getTossResolution().isTeamAWinner 
-                          ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400/40' 
-                          : 'text-slate-400 dark:text-slate-500 bg-transparent'
-                      }`}
-                    >
-                      {teamA ? teamA.substring(0, 15) : 'Team A'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTossWinner('Team B')}
-                      className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                        !getTossResolution().isTeamAWinner 
-                          ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400/40' 
-                          : 'text-slate-400 dark:text-slate-500 bg-transparent'
-                      }`}
-                    >
-                      {teamB ? teamB.substring(0, 15) : 'Team B'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Toss Choice Selection */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Electing Option Winner</label>
-                  {connectedTossInfo && (
-                    <span className="text-[9px] font-bold text-amber-500 uppercase tracking-wider">
-                      Decided by Toss: {connectedTossInfo.tossWinner}
-                    </span>
-                  )}
-                </div>
-                <div className="flex bg-slate-50 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-250 dark:border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setTossChoice('bat')}
-                    className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                      tossChoice === 'bat' 
-                        ? 'bg-amber-500 text-white shadow-sm animate-pulse' 
-                        : 'text-slate-400 dark:text-slate-500 bg-transparent'
-                    }`}
-                  >
-                    🏏 Eelected to Bat First
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTossChoice('bowl')}
-                    className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
-                      tossChoice === 'bowl' 
-                        ? 'bg-amber-500 text-white shadow-sm animate-pulse' 
-                        : 'text-slate-400 dark:text-slate-500 bg-transparent'
-                    }`}
-                  >
-                    🥎 Elected to Bowl First
-                  </button>
-                </div>
-              </div>
-
-              {/* GullyScore: Cricket Digital Toss Simulator Integration Widget */}
-              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-amber-500/15 border border-amber-500/30 space-y-3 shadow-inner">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-amber-500/20 text-amber-500">
-                      <Sparkles size={18} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
-                          GullyScore Digital Toss Simulator
-                        </h4>
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-[9px] font-black uppercase tracking-wider">
-                          Integrated
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                        Perform an official digital coin toss with audio effects, MCC Law 13 rules, and captain decision logic.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowSpinCoinModal(true)}
-                      className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-stone-950 font-black text-[11px] uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer border-none"
-                    >
-                      <span>🪙 Spin Coin Now</span>
-                    </button>
-                    <Link
-                      to={`/live/cricket-toss?teamA=${encodeURIComponent(teamA || 'Team A')}&teamB=${encodeURIComponent(teamB || 'Team B')}&overs=${oversLimit}&ground=${encodeURIComponent(groundName)}&fromScoreboard=true`}
-                      className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-[11px] uppercase tracking-wider flex items-center gap-1 transition-all no-underline"
-                    >
-                      <span>Full Toss Page</span>
-                      <ArrowRight size={13} />
-                    </Link>
-                  </div>
-                </div>
-
-                {/* Active Connected Toss or Local Storage Toss preview */}
-                {connectedTossInfo ? (
-                  <div className="p-3 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-base">🏆</span>
-                      <div>
-                        <span className="font-extrabold text-emerald-700 dark:text-emerald-300">
-                          Toss Synchronized: <span className="underline">{connectedTossInfo.tossWinner}</span> won toss
-                        </span>
-                        <span className="text-slate-600 dark:text-slate-400 ml-1.5 font-bold">
-                          & elected to {connectedTossInfo.tossChoice === 'bat' ? 'Bat First 🏏' : 'Bowl First 🥎'}
-                        </span>
-                      </div>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-black text-[10px] uppercase">
-                      Synced ✓
-                    </span>
-                  </div>
-                ) : latestStoredToss ? (
-                  <div className="p-3 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                    <div>
-                      <span className="text-[9px] font-mono font-bold uppercase text-slate-400 block">
-                        Recent Digital Toss Found ({latestStoredToss.timestamp || 'Today'})
+              {/* Match Overs & Toss Decision Card */}
+              <div className="bg-slate-50 dark:bg-slate-950/80 p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200/80 dark:border-slate-800 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Overs Limit with Quick-Tap Pills */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                        Match Overs Limit
+                      </label>
+                      <span className="text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
+                        {oversLimit} {oversLimit === 1 ? 'Over' : 'Overs'} ({oversLimit * 6} Balls)
                       </span>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="font-extrabold text-slate-800 dark:text-white">
-                          {latestStoredToss.teamA} vs {latestStoredToss.teamB}:
-                        </span>
-                        <span className="font-black text-amber-600 dark:text-amber-400">
-                          {latestStoredToss.tossWinner} won ({latestStoredToss.coinResult || 'Coin'}) • Chose {latestStoredToss.tossChoice?.toUpperCase()}
-                        </span>
+                    </div>
+                    <select
+                      value={oversLimit}
+                      onChange={(e) => setOversLimit(Number(e.target.value))}
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs font-black focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                    >
+                      {[1, 2, 4, 5, 6, 8, 10, 12, 15, 20, 50].map((ov) => (
+                        <option key={ov} value={ov}>{ov} Overs</option>
+                      ))}
+                    </select>
+                    <div className="grid grid-cols-6 gap-1 pt-0.5">
+                      {[5, 6, 8, 10, 12, 20].map((ov) => (
+                        <button
+                          key={ov}
+                          type="button"
+                          onClick={() => setOversLimit(ov)}
+                          className={`py-1.5 rounded-lg text-[10px] font-mono font-black border cursor-pointer transition-all ${
+                            oversLimit === ov
+                              ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent hover:border-slate-300'
+                          }`}
+                        >
+                          {ov}ov
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Toss Winner Selector */}
+                  <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2.5 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
+                          Toss Won By
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowSpinCoinModal(true)}
+                          className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider flex items-center gap-1 shadow-sm transition-transform active:scale-95 cursor-pointer border-none"
+                          title="Spin Coin for Toss"
+                        >
+                          <span>🪙 Spin Coin</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setTossWinner('Team A')}
+                          className={`py-2.5 px-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer truncate ${
+                            getTossResolution().isTeamAWinner 
+                              ? 'bg-emerald-600 text-white shadow-sm' 
+                              : 'text-slate-500 dark:text-slate-400 bg-transparent'
+                          }`}
+                        >
+                          {teamA ? teamA.substring(0, 14) : 'Team A'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTossWinner('Team B')}
+                          className={`py-2.5 px-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all border-none cursor-pointer truncate ${
+                            !getTossResolution().isTeamAWinner 
+                              ? 'bg-emerald-600 text-white shadow-sm' 
+                              : 'text-slate-500 dark:text-slate-400 bg-transparent'
+                          }`}
+                        >
+                          {teamB ? teamB.substring(0, 14) : 'Team B'}
+                        </button>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleApplyStoredToss(latestStoredToss)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shadow-sm transition-all shrink-0"
-                    >
-                      Import This Toss Result ✓
-                    </button>
+
+                    {/* Toss Choice Selection */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[9.5px] font-black uppercase text-slate-400 tracking-wider">Elected To</label>
+                        {connectedTossInfo && (
+                          <span className="text-[8.5px] font-bold text-amber-500 uppercase tracking-wider">
+                            Synced: {connectedTossInfo.tossWinner}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setTossChoice('bat')}
+                          className={`py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                            tossChoice === 'bat' 
+                              ? 'bg-amber-500 text-slate-950 shadow-sm' 
+                              : 'text-slate-500 dark:text-slate-400 bg-transparent'
+                          }`}
+                        >
+                          🏏 Bat First
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTossChoice('bowl')}
+                          className={`py-2 px-2 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                            tossChoice === 'bowl' 
+                              ? 'bg-amber-500 text-slate-950 shadow-sm' 
+                              : 'text-slate-500 dark:text-slate-400 bg-transparent'
+                          }`}
+                        >
+                          🥎 Bowl First
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                ) : null}
+                </div>
+
+                {/* GullyScore: Cricket Digital Toss Simulator Integration Widget */}
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-emerald-500/10 to-amber-500/15 border border-amber-500/30 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-xl bg-amber-500/20 text-amber-500 shrink-0">
+                        <Sparkles size={16} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h4 className="text-xs font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider">
+                            Digital Coin Toss Simulator
+                          </h4>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-[8.5px] font-black uppercase tracking-wider">
+                            MCC Law 13
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                          3D coin flip with sound effects & automatic captain decision sync.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowSpinCoinModal(true)}
+                        className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm cursor-pointer border-none"
+                      >
+                        <span>🪙 Spin Coin</span>
+                      </button>
+                      <Link
+                        to={`/live/cricket-toss?teamA=${encodeURIComponent(teamA || 'Team A')}&teamB=${encodeURIComponent(teamB || 'Team B')}&overs=${oversLimit}&ground=${encodeURIComponent(groundName)}&fromScoreboard=true`}
+                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 transition-all no-underline"
+                      >
+                        <span>Full Toss</span>
+                        <ArrowRight size={12} />
+                      </Link>
+                    </div>
+                  </div>
+
+                  {/* Active Connected Toss or Local Storage Toss preview */}
+                  {connectedTossInfo ? (
+                    <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm shrink-0">🏆</span>
+                        <div className="truncate">
+                          <span className="font-extrabold text-emerald-700 dark:text-emerald-300">
+                            {connectedTossInfo.tossWinner} won toss
+                          </span>
+                          <span className="text-slate-600 dark:text-slate-400 ml-1 font-bold">
+                            • {connectedTossInfo.tossChoice === 'bat' ? 'Bat First 🏏' : 'Bowl First 🥎'}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-black text-[9px] uppercase shrink-0">
+                        Synced ✓
+                      </span>
+                    </div>
+                  ) : latestStoredToss ? (
+                    <div className="p-2.5 rounded-xl bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <span className="text-[8.5px] font-mono font-bold uppercase text-slate-400 block">
+                          Recent Toss Found ({latestStoredToss.timestamp || 'Today'})
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <span className="font-extrabold text-slate-800 dark:text-white text-[11px]">
+                            {latestStoredToss.teamA} vs {latestStoredToss.teamB}:
+                          </span>
+                          <span className="font-black text-amber-600 dark:text-amber-400 text-[11px]">
+                            {latestStoredToss.tossWinner} ({latestStoredToss.tossChoice?.toUpperCase()})
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyStoredToss(latestStoredToss)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shadow-sm transition-all shrink-0"
+                      >
+                        Apply Toss ✓
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               {/* Tournament & Ground Branding */}
@@ -19019,7 +19276,7 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
 
                 {/* Tournament Logo Upload & URL */}
-                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-250 dark:border-slate-800">
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-2.5">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-wider text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
@@ -19151,7 +19408,7 @@ export const CricketScoreboard: React.FC = () => {
                         <h4 className="text-xs font-black uppercase text-slate-800 dark:text-slate-200 tracking-wider">
                           YouTube Channel Watermark Logo
                         </h4>
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-500/10 text-red-650 dark:text-red-400 border border-red-500/20">
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
                           Top-Right Corner
                         </span>
                       </div>
@@ -19391,7 +19648,7 @@ export const CricketScoreboard: React.FC = () => {
                           />
                           <label
                             htmlFor="setup-umpire1-photo-file"
-                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
                           >
                             📷 Upload Photo
                           </label>
@@ -19473,7 +19730,7 @@ export const CricketScoreboard: React.FC = () => {
                           />
                           <label
                             htmlFor="setup-umpire2-photo-file"
-                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
                           >
                             📷 Upload Photo
                           </label>
@@ -19555,7 +19812,7 @@ export const CricketScoreboard: React.FC = () => {
                           />
                           <label
                             htmlFor="setup-manager-photo-file"
-                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
                           >
                             📷 Upload Photo
                           </label>
@@ -19637,7 +19894,7 @@ export const CricketScoreboard: React.FC = () => {
                           />
                           <label
                             htmlFor="setup-commentator-photo-file"
-                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                            className="block py-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-center font-bold text-[9px] uppercase tracking-wider rounded-lg cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
                           >
                             📷 Upload Photo
                           </label>
@@ -19877,7 +20134,7 @@ export const CricketScoreboard: React.FC = () => {
                           value={setupOpeningBatsman1}
                           onChange={(e) => setSetupOpeningBatsman1(e.target.value)}
                           placeholder="Or type custom striker name..."
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-2.5 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
                         />
 
                         {/* Quick selection chips from batting squad */}
@@ -19931,7 +20188,7 @@ export const CricketScoreboard: React.FC = () => {
                           value={setupOpeningBatsman2}
                           onChange={(e) => setSetupOpeningBatsman2(e.target.value)}
                           placeholder="Or type custom non-striker name..."
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-2.5 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
                         />
 
                         {/* Quick selection chips from batting squad */}
@@ -19985,7 +20242,7 @@ export const CricketScoreboard: React.FC = () => {
                           value={setupOpeningBowler}
                           onChange={(e) => setSetupOpeningBowler(e.target.value)}
                           placeholder="Or type custom bowler name..."
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-xl p-2.5 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none text-slate-800 dark:text-white"
                         />
 
                         {/* Quick selection chips from bowling squad */}
@@ -20014,133 +20271,126 @@ export const CricketScoreboard: React.FC = () => {
                 );
               })()}
 
-              <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <button
                   onClick={handleStartMatch}
                   id="btn-start-gully-match"
-                  className="w-full py-4.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-wider text-xs transition-transform hover:scale-[1.02] active:scale-[0.98] shadow-lg flex items-center justify-center gap-2 border-none cursor-pointer"
+                  className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-black uppercase tracking-wider text-xs sm:text-sm transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 border-none cursor-pointer"
                 >
-                  <Play size={16} />
-                  Start Gully Match
+                  <Play size={16} fill="currentColor" />
+                  <span>Start Gully Match</span>
                 </button>
                 <button
                   onClick={handleSaveDraftFromSetup}
                   id="btn-save-draft-setup"
-                  className="w-full py-4.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-2xl font-black uppercase tracking-wider text-xs transition-transform hover:scale-[1.02] active:scale-[0.98] shadow-lg flex items-center justify-center gap-2 border-none cursor-pointer"
+                  className="w-full py-4 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl font-black uppercase tracking-wider text-xs sm:text-sm transition-all active:scale-[0.98] shadow-md flex items-center justify-center gap-2 border-none cursor-pointer"
                   title="Save current setup as draft to resume anytime"
                 >
                   <Save size={16} />
-                  Save as Draft
+                  <span>Save as Draft</span>
                 </button>
               </div>
 
               {/* Bottom Quick Controls: Past Matches, Audio Button, Toggle Theme Mode, Core Login */}
-              <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-800">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  {/* Left: Past Matches Button */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      id="btn-setup-past-matches"
-                      onClick={() => {
-                        setShowHistory(prev => !prev);
-                        if (!showHistory) {
-                          setTimeout(() => {
-                            const historyEl = document.getElementById('section-past-matches-registry');
-                            if (historyEl) {
-                              historyEl.scrollIntoView({ behavior: 'smooth' });
-                            } else {
-                              window.scrollTo({ top: 0, behavior: 'smooth' });
-                            }
-                          }, 100);
-                        }
-                      }}
-                      className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border shadow-sm ${
-                        showHistory
-                          ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md'
-                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
-                      }`}
-                      title="View Past Matches and saved logs"
-                    >
-                      <Clock size={15} className={showHistory ? 'text-slate-950' : 'text-amber-500'} />
-                      <span>{showHistory ? 'Close Past Matches' : `Past Matches (${pastMatches.length})`}</span>
-                    </button>
-                  </div>
-
-                  {/* Right: Audio button, Toggle Theme Mode, Core Login button */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Audio Button */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        id="btn-setup-audio-toggle"
-                        onClick={() => {
-                          setSoundEnabled(prev => !prev);
-                          if (soundEnabled) {
-                            setShowAudioSettingsDropdown(false);
+              <div className="mt-6 pt-5 border-t border-slate-200 dark:border-slate-800">
+                <div className="grid grid-cols-2 sm:flex sm:items-center sm:justify-between gap-2 text-xs">
+                  {/* Past Matches Button */}
+                  <button
+                    type="button"
+                    id="btn-setup-past-matches"
+                    onClick={() => {
+                      setShowHistory(prev => !prev);
+                      if (!showHistory) {
+                        setTimeout(() => {
+                          const historyEl = document.getElementById('section-past-matches-registry');
+                          if (historyEl) {
+                            historyEl.scrollIntoView({ behavior: 'smooth' });
+                          } else {
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
                           }
-                        }}
-                        className={`px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer border shadow-sm ${
-                          soundEnabled
-                            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                        }`}
-                        title={soundEnabled ? "Audio On (Click to Mute)" : "Audio Muted (Click to Enable)"}
-                      >
-                        {soundEnabled ? (
-                          <Volume2 size={16} className="text-emerald-600 dark:text-emerald-400" />
-                        ) : (
-                          <VolumeX size={16} className="text-rose-500" />
-                        )}
-                        <span>{soundEnabled ? 'Audio On' : 'Audio Muted'}</span>
-                      </button>
-                    </div>
+                        }, 100);
+                      }
+                    }}
+                    className={`px-3 py-2.5 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm ${
+                      showHistory
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                    }`}
+                    title="View Past Matches and saved logs"
+                  >
+                    <Clock size={14} className={showHistory ? 'text-slate-950 shrink-0' : 'text-amber-500 shrink-0'} />
+                    <span className="truncate">{showHistory ? 'Close Logs' : `Past Matches (${pastMatches.length})`}</span>
+                  </button>
 
-                    {/* Toggle Theme Mode Button */}
+                  {/* Audio Button */}
+                  <button
+                    type="button"
+                    id="btn-setup-audio-toggle"
+                    onClick={() => {
+                      setSoundEnabled(prev => !prev);
+                      if (soundEnabled) {
+                        setShowAudioSettingsDropdown(false);
+                      }
+                    }}
+                    className={`px-3 py-2.5 rounded-xl font-bold text-[10px] sm:text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer border shadow-sm ${
+                      soundEnabled
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                    }`}
+                    title={soundEnabled ? "Audio On (Click to Mute)" : "Audio Muted (Click to Enable)"}
+                  >
+                    {soundEnabled ? (
+                      <Volume2 size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    ) : (
+                      <VolumeX size={15} className="text-rose-500 shrink-0" />
+                    )}
+                    <span className="truncate">{soundEnabled ? 'Audio On' : 'Muted'}</span>
+                  </button>
+
+                  {/* Toggle Theme Mode Button */}
+                  <button
+                    type="button"
+                    id="btn-setup-theme-toggle"
+                    onClick={() => setDarkMode(prev => !prev)}
+                    className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-[10px] sm:text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 shadow-sm"
+                    title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                  >
+                    {darkMode ? (
+                      <>
+                        <Sun size={15} className="text-amber-400 shrink-0" />
+                        <span>Light Mode</span>
+                      </>
+                    ) : (
+                      <>
+                        <Moon size={15} className="text-indigo-500 shrink-0" />
+                        <span>Dark Mode</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Core Login Button */}
+                  {isScoreManager ? (
                     <button
                       type="button"
-                      id="btn-setup-theme-toggle"
-                      onClick={() => setDarkMode(prev => !prev)}
-                      className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition-all flex items-center gap-2 cursor-pointer border border-slate-200 dark:border-slate-700 shadow-sm"
-                      title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                      id="btn-setup-core-logout"
+                      onClick={handleScoreManagerLogout}
+                      className="px-3 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md border border-rose-500"
+                      title="Core Scorer authenticated - Click to log out"
                     >
-                      {darkMode ? (
-                        <>
-                          <Sun size={16} className="text-amber-400" />
-                          <span>Light</span>
-                        </>
-                      ) : (
-                        <>
-                          <Moon size={16} className="text-indigo-500" />
-                          <span>Dark</span>
-                        </>
-                      )}
+                      <ShieldIcon size={14} className="text-amber-300 shrink-0" />
+                      <span className="truncate">Logout Scorer</span>
                     </button>
-
-                    {/* Core Login Button */}
-                    {isScoreManager ? (
-                      <button
-                        type="button"
-                        id="btn-setup-core-logout"
-                        onClick={handleScoreManagerLogout}
-                        className="px-3.5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md border border-rose-500"
-                        title="Core Scorer authenticated - Click to log out"
-                      >
-                        <ShieldIcon size={15} className="text-amber-300" />
-                        <span>Logout Scorer</span>
-                      </button>
-                    ) : (
-                      <Link
-                        to="/cricket-login"
-                        id="btn-setup-core-login"
-                        className="px-4 py-2.5 rounded-xl bg-amber-550 hover:bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-md hover:shadow-amber-500/20 no-underline decoration-transparent"
-                        title="Authenticate with Core Scorer credentials"
-                      >
-                        <LoginIcon size={15} />
-                        <span>Core Login</span>
-                      </Link>
-                    )}
-                  </div>
+                  ) : (
+                    <Link
+                      to="/cricket-login"
+                      id="btn-setup-core-login"
+                      className="px-3 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md no-underline"
+                      title="Authenticate with Core Scorer credentials"
+                    >
+                      <LoginIcon size={14} className="shrink-0" />
+                      <span className="truncate">Core Login</span>
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>

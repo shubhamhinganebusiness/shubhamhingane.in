@@ -84,8 +84,18 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
     };
   }, []);
 
+  const isOneHalfTournament = Boolean(
+    tournament?.id?.includes('one-half') ||
+    tournament?.id?.includes('one_half') ||
+    (tournament as any)?.type === 'one-half' ||
+    (tournament?.teams && tournament.teams.length >= 16 && tournament?.type === 'knockout')
+  );
+
   // Pick up the latest state of the tournament directly from localStorage if updated
   const currentTournament = useMemo(() => {
+    if (isOneHalfTournament) {
+      return tournament;
+    }
     if (typeof window !== 'undefined' && tournament?.id) {
       try {
         const saved = localStorage.getItem('gully_tournaments_v1');
@@ -93,13 +103,13 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
           const list = JSON.parse(saved);
           if (Array.isArray(list)) {
             const found = list.find((t: any) => t.id === tournament.id);
-            if (found) return found;
+            if (found && Array.isArray(found.teams) && found.teams.length > 0) return found;
           }
         }
       } catch (_) {}
     }
     return tournament;
-  }, [tournament, refreshKey]);
+  }, [tournament, refreshKey, isOneHalfTournament]);
 
   const defaultOvers = currentTournament.customOvers || (currentTournament.format === 'T20' ? 20 : currentTournament.format === 'ODI' ? 50 : 10);
   const tourPointsConfig = (currentTournament as any).pointsConfig;
@@ -125,9 +135,10 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
         pointsForNoResult: tourPointsConfig?.tiePoints ?? 1,
         pointsForLoss: tourPointsConfig?.lossPoints ?? 0,
         tieBreakerRule: tieBreakerRule,
+        includeKnockoutMatches: isOneHalfTournament || currentTournament.type === 'knockout',
       }
     );
-  }, [currentTournament, defaultOvers, qualifyingThreshold, tourPointsConfig, tieBreakerRule]);
+  }, [currentTournament, defaultOvers, qualifyingThreshold, tourPointsConfig, tieBreakerRule, isOneHalfTournament]);
 
   // Head-to-Head Cross Matrix
   const h2hMatrix = useMemo(() => {
@@ -282,18 +293,20 @@ export const TournamentHierarchyPointsTable: React.FC<TournamentHierarchyPointsT
             <span>Points Table</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setViewMode('h2h_matrix')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all border-none cursor-pointer ${
-              viewMode === 'h2h_matrix'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-transparent'
-            }`}
-          >
-            <Swords size={13} />
-            <span>H2H Matrix</span>
-          </button>
+          {!isOneHalfTournament && (
+            <button
+              type="button"
+              onClick={() => setViewMode('h2h_matrix')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition-all border-none cursor-pointer ${
+                viewMode === 'h2h_matrix'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-transparent'
+              }`}
+            >
+              <Swords size={13} />
+              <span>H2H Matrix</span>
+            </button>
+          )}
 
           <button
             type="button"

@@ -60,6 +60,10 @@ export interface StandingsTeamStats {
   forRunRate: number;
   againstRunRate: number;
   NRR: number;
+  netRunRate?: number;
+  matchesPlayed?: number;
+  wins?: number;
+  losses?: number;
   streak?: string[]; // e.g. ['W', 'W', 'L', 'W']
   qualificationStatus?: 'qualified' | 'eliminated' | 'contention' | 'top2_secured' | 'champion' | 'runner_up';
   qualificationBadge?: QualificationBadge;
@@ -107,6 +111,7 @@ export interface PointsSystemRules {
   standardOversQuota: number; // default e.g. 20 for T20, 10 for Box, 50 for ODI
   qualifyingSpots: number; // e.g. top 4 for playoffs
   tieBreakerRule?: TieBreakerRule; // 'icc_standard' (Pts > W > NRR > H2H) vs 'head_to_head_first' (Pts > H2H > W > NRR)
+  includeKnockoutMatches?: boolean; // true for One-Half 32-Team & knockout tournaments so all rounds count in Points & NRR
 }
 
 export const DEFAULT_POINTS_RULES: PointsSystemRules = {
@@ -117,6 +122,7 @@ export const DEFAULT_POINTS_RULES: PointsSystemRules = {
   standardOversQuota: 20,
   qualifyingSpots: 4,
   tieBreakerRule: 'icc_standard',
+  includeKnockoutMatches: false,
 };
 
 /**
@@ -161,23 +167,31 @@ export function formatDecimalToOversDisplay(decimalOvers: number): string {
 /**
  * Parses total runs scored and whether team was all out from a score string like "185/10", "185/4", or "185".
  */
-export function parseScoreDetails(scoreStr: string | undefined | null): { runs: number; wickets: number; isAllOut: boolean } {
+export function parseScoreDetails(scoreStr: string | undefined | null): { runs: number; wickets: number; isAllOut: boolean; embeddedOvers?: number } {
   if (!scoreStr) return { runs: 0, wickets: 0, isAllOut: false };
   const cleaned = scoreStr.toString().trim();
-  
-  if (cleaned.includes('/')) {
-    const parts = cleaned.split('/');
+
+  let embeddedOvers: number | undefined;
+  const oversMatch = cleaned.match(/\((\d+(?:\.\d+)?)\s*(?:ov|overs)?\)/i);
+  if (oversMatch && oversMatch[1]) {
+    embeddedOvers = convertOversToDecimal(oversMatch[1]);
+  }
+
+  const scorePart = cleaned.replace(/\(.*?\)/g, '').trim();
+  if (scorePart.includes('/') || scorePart.includes('-')) {
+    const parts = scorePart.split(/[\/\-]/);
     const runs = parseInt(parts[0], 10) || 0;
     const wickets = parseInt(parts[1], 10) || 0;
     return {
       runs,
       wickets,
       isAllOut: wickets >= 10,
+      embeddedOvers,
     };
   }
-  
-  const runs = parseInt(cleaned, 10) || 0;
-  return { runs, wickets: 0, isAllOut: false };
+
+  const runs = parseInt(scorePart, 10) || 0;
+  return { runs, wickets: 0, isAllOut: false, embeddedOvers };
 }
 
 /**
@@ -287,7 +301,16 @@ export function buildHeadToHeadMatrix(
     const sB = parseScoreDetails(m.scoreB);
 
     const isNoResult = m.winReason?.toLowerCase().includes('no result') || m.winReason?.toLowerCase().includes('abandoned');
-    const isTie = m.winnerId === 'tie' || m.winner?.toLowerCase() === 'tie' || m.winReason?.toLowerCase().includes('tie') || (!m.winnerId && !m.winner && sA.runs === sB.runs && sA.runs > 0);
+    const hasValidTeamWinner = Boolean(
+      (m.winner && m.winner.toLowerCase().trim() !== 'tie' && m.winner.toLowerCase().trim() !== 'draw') ||
+      (m.winnerId && m.winnerId.toLowerCase().trim() !== 'tie' && m.winnerId.toLowerCase().trim() !== 'draw')
+    );
+    const isTie = !hasValidTeamWinner && (
+      m.winnerId?.toLowerCase() === 'tie' ||
+      m.winner?.toLowerCase() === 'tie' ||
+      m.winReason?.toLowerCase().includes('tie') ||
+      (sA.runs === sB.runs && sA.runs > 0)
+    );
 
     const normAName = (m.teamAName || tA.name).toLowerCase().trim();
     const isWinnerA = !isNoResult && !isTie && (
@@ -430,10 +453,13 @@ export function calculateTournamentStandings(
   // Build Head-to-Head matrix for tiebreaker calculations
   const h2hMatrix = buildHeadToHeadMatrix(teams, matches);
 
-  // Filter completed league/group stage matches
-  const completedLeagueMatches = matches.filter(
-    m => isMatchFinished(m) && !isKnockoutStage(m.stage)
+  // Filter completed league/group stage matches (or all completed matches for One-Half/knockout tournaments)
+  let completedLeagueMatches = matches.filter(
+    m => isMatchFinished(m) && (mergedRules.includeKnockoutMatches || !isKnockoutStage(m.stage))
   );
+  if (completedLeagueMatches.length === 0) {
+    completedLeagueMatches = matches.filter(m => isMatchFinished(m));
+  }
 
   completedLeagueMatches.forEach(m => {
     const tA = table[m.teamAId] || Object.values(table).find(t => 
@@ -460,8 +486,8 @@ export function calculateTournamentStandings(
     // Standard overs quota for NRR: if all-out, team faces full allotted overs quota
     const allottedOvers = mergedRules.standardOversQuota;
 
-    let oversFacedA = convertOversToDecimal(m.oversA) || allottedOvers;
-    let oversFacedB = convertOversToDecimal(m.oversB) || allottedOvers;
+    let oversFacedA = convertOversToDecimal(m.oversA) || scoreAInfo.embeddedOvers || allottedOvers;
+    let oversFacedB = convertOversToDecimal(m.oversB) || scoreBInfo.embeddedOvers || allottedOvers;
 
     // ICC Cricket Rule: If team is bowled out, full quota of overs applies to their run rate calculation!
     if (scoreAInfo.isAllOut || m.allOutA) {
@@ -484,10 +510,16 @@ export function calculateTournamentStandings(
 
     // Win/Loss/Tie resolution
     const isNoResult = m.winReason?.toLowerCase().includes('no result') || m.winReason?.toLowerCase().includes('abandoned');
-    const isExplicitTie = m.winnerId === 'tie' || 
+    const hasValidTeamWinner = Boolean(
+      (m.winner && m.winner.toLowerCase().trim() !== 'tie' && m.winner.toLowerCase().trim() !== 'draw') ||
+      (m.winnerId && m.winnerId.toLowerCase().trim() !== 'tie' && m.winnerId.toLowerCase().trim() !== 'draw')
+    );
+    const isExplicitTie = !hasValidTeamWinner && (
+      m.winnerId?.toLowerCase() === 'tie' || 
       m.winner?.toLowerCase() === 'tie' || 
       m.winReason?.toLowerCase().includes('tie') || 
-      (!m.winnerId && !m.winner && runsA === runsB && runsA > 0);
+      (runsA === runsB && runsA > 0)
+    );
     
     tA.matchHistory = tA.matchHistory || [];
     tB.matchHistory = tB.matchHistory || [];
@@ -596,6 +628,10 @@ export function calculateTournamentStandings(
       forRunRate: Number(forRate.toFixed(3)),
       againstRunRate: Number(againstRate.toFixed(3)),
       NRR: isNaN(nrr) ? 0 : nrr,
+      netRunRate: isNaN(nrr) ? 0 : nrr,
+      matchesPlayed: t.played,
+      wins: t.won,
+      losses: t.lost,
       oversFacedDisplay: formatDecimalToOversDisplay(t.oversFacedDecimal),
       oversBowledDisplay: formatDecimalToOversDisplay(t.oversBowledDecimal),
       formGuide: (t.formGuide || []).slice(-5), // last 5 results

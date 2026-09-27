@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Shield, Sparkles, X, Upload, Award } from 'lucide-react';
-import type { MatchState } from './types';
+import type { MatchState } from './CricketScoreboard';
 
 interface TournamentLogoOverlayProps {
   match: MatchState;

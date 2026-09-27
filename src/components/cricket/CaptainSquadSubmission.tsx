@@ -22,8 +22,8 @@ import {
   X,
   Upload
 } from 'lucide-react';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { db, isFirestoreQuotaExhausted } from '../../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db, isFirestoreQuotaExhausted, safeSetDoc as setDoc } from '../../lib/firebase';
 import { uploadImageToStorage, STORAGE_FOLDERS } from '../../utils/imageUpload';
 
 export interface SquadPlayerItem {

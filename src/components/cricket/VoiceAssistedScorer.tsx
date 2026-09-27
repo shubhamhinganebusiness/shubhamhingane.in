@@ -1081,7 +1081,7 @@ export const VoiceAssistedScorer: React.FC<VoiceAssistedScorerProps> = ({
         break;
 
       case 'overlay':
-        if (res.overlayType === 'none' || res.overlayType === 'clear') {
+        if ((res.overlayType as string) === 'none' || (res.overlayType as string) === 'clear') {
           if (onDismissOverlay) {
             onDismissOverlay();
           } else if (onTriggerOverlay) {

@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { db } from '../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface CMSContextType {
   settings: any;
@@ -28,11 +30,8 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
-    const initCMS = async () => {
+    const initCMS = () => {
       try {
-        const { db } = await import('../lib/firebase');
-        const { doc, onSnapshot } = await import('firebase/firestore');
-
         // Only one listener for the entire app
         unsub = onSnapshot(doc(db, 'site', 'settings'), (snap) => {
           let data = {};
@@ -52,7 +51,7 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setLoading(false);
         });
       } catch (err) {
-        console.warn("Failed to lazy load site settings (unconfigured or offline):", err);
+        console.warn("Failed to load site settings (unconfigured or offline):", err);
         setSettings((prev: any) => prev || {});
         setLoading(false);
       }

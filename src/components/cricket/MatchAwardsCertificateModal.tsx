@@ -55,6 +55,8 @@ export interface AwardPlayer {
   wickets: number;
   runsConceded?: number;
   points: number;
+  team?: string;
+  [key: string]: any;
 }
 
 export interface MatchCertificateData {

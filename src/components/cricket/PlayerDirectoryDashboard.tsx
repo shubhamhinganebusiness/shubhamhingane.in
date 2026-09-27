@@ -33,8 +33,8 @@ import {
   SlidersHorizontal,
   Share2
 } from "lucide-react";
-import { db, handleFirestoreError, OperationType, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion } from "../../lib/firebase";
-import { collection, onSnapshot, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion, safeUpdateDoc as updateDoc, safeDeleteDoc as deleteDoc } from "../../lib/firebase";
+import { collection, onSnapshot, doc } from "firebase/firestore";
 import { CricketPlayer } from "./PlayerRegistrationForm";
 import { useAuth } from "../AuthContext";
 import {

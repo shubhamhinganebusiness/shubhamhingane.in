@@ -7,8 +7,8 @@ import {
   Filter, ArrowUpDown, LayoutGrid, List, Award
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { db, removeMatchFromRealtimeDB } from '../../lib/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, removeMatchFromRealtimeDB, safeSetDoc as setDoc, safeDeleteDoc as deleteDoc } from '../../lib/firebase';
+import { collection, onSnapshot, doc } from 'firebase/firestore';
 import { MatchState } from './CricketScoreboard';
 import { markMatchDeleted, deleteLocalMatch, isMatchDeleted, broadcastMatchChange } from './cricketStorage';
 import { deleteMatchGlobally } from '../../services/cricketDb';

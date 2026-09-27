@@ -1,5 +1,5 @@
-import { db, safeSetDoc } from '../lib/firebase';
-import { collection, doc, getDocs, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { db, safeSetDoc, safeDeleteDoc as deleteDoc } from '../lib/firebase';
+import { collection, doc, getDocs, onSnapshot } from 'firebase/firestore';
 
 export interface LocalCricketSponsor {
   id: string;

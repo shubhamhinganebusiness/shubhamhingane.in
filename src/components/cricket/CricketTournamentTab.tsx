@@ -17,8 +17,11 @@ const GULLY_RULES_PRESETS = [
   'No LBW dismissal',
   'Free Hit on No-Ball'
 ];
-import { db, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion, safeSetDoc } from '../../lib/firebase';
-import { doc, setDoc, deleteDoc, updateDoc, collection, onSnapshot } from 'firebase/firestore';
+import { db, isFirestoreQuotaExhausted, isQuotaError, recordFirestoreQuotaExhaustion, safeSetDoc, safeDeleteDoc, subscribeToRealtimeDBTournaments, syncTournamentToRealtimeDB, removeTournamentFromRealtimeDB } from '../../lib/firebase';
+import { doc, collection, onSnapshot } from 'firebase/firestore';
+const setDoc = safeSetDoc;
+const deleteDoc = safeDeleteDoc;
+const updateDoc = (docRef: any, data: any) => safeSetDoc(docRef, data, { merge: true });
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { useAuth } from '../AuthContext';
@@ -144,6 +147,101 @@ interface Tournament {
   };
 }
 
+// Helper to normalize tournament records and filter out One-Half 32-team internal pointer docs
+function normalizeGullyTournament(raw: any): Tournament | null {
+  if (!raw || typeof raw !== 'object' || !raw.id) return null;
+  // Filter out the One-Half 32-Team internal cloud pointer document or 32-team OneHalfTournamentState objects
+  if (
+    raw.id === 'one_half_active_championship' ||
+    raw.prize1st !== undefined ||
+    (Array.isArray(raw.teams) && raw.teams.length > 0 && raw.teams[0]?.squad && !raw.teams[0]?.players)
+  ) {
+    return null;
+  }
+
+  const normalizedTeams: TournamentTeam[] = Array.isArray(raw.teams)
+    ? raw.teams
+        .filter((t: any) => t && typeof t === 'object')
+        .map((t: any, idx: number) => {
+          const rawPlayers = Array.isArray(t.players)
+            ? t.players
+            : Array.isArray(t.squad)
+            ? t.squad
+            : [];
+          const cleanPlayers: string[] = rawPlayers
+            .map((p: any) => (typeof p === 'string' ? p : String(p?.name || '')))
+            .filter((name: string) => name.trim().length > 0);
+
+          return {
+            id: String(t.id || `team_${idx}_${Date.now()}`),
+            name: String(t.name || `Team ${idx + 1}`),
+            captain: String(t.captain || t.captainName || 'Captain'),
+            players: cleanPlayers,
+            logo: t.logo || undefined,
+            playerPhotos: t.playerPhotos && typeof t.playerPhotos === 'object' ? t.playerPhotos : undefined
+          };
+        })
+    : [];
+
+  const normalizedMatches: TournamentMatch[] = Array.isArray(raw.matches)
+    ? raw.matches
+        .filter((m: any) => m && typeof m === 'object')
+        .map((m: any, idx: number) => ({
+          id: String(m.id || `match_${idx}_${Date.now()}`),
+          teamAId: String(m.teamAId || m.teamA || ''),
+          teamBId: String(m.teamBId || m.teamB || ''),
+          teamAName: String(m.teamAName || m.teamA || 'Team A'),
+          teamBName: String(m.teamBName || m.teamB || 'Team B'),
+          date: String(m.date || new Date().toISOString().split('T')[0]),
+          time: String(m.time || '10:00 AM'),
+          venue: String(m.venue || raw.groundName || raw.venue || 'Main Ground'),
+          status:
+            m.status === 'completed'
+              ? 'completed'
+              : m.status === 'live' || m.status === 'in_progress'
+              ? 'live'
+              : 'scheduled',
+          scoreA:
+            typeof m.scoreA === 'string'
+              ? m.scoreA
+              : m.scoreA && typeof m.scoreA === 'object'
+              ? `${m.scoreA.runs ?? 0}/${m.scoreA.wickets ?? 0}`
+              : '',
+          scoreB:
+            typeof m.scoreB === 'string'
+              ? m.scoreB
+              : m.scoreB && typeof m.scoreB === 'object'
+              ? `${m.scoreB.runs ?? 0}/${m.scoreB.wickets ?? 0}`
+              : '',
+          oversA: String(m.oversA ?? (m.scoreA && typeof m.scoreA === 'object' ? m.scoreA.overs ?? '0' : '0')),
+          oversB: String(m.oversB ?? (m.scoreB && typeof m.scoreB === 'object' ? m.scoreB.overs ?? '0' : '0')),
+          winnerId: m.winnerId ?? m.winner ?? null,
+          winReason: String(m.winReason || ''),
+          manOfTheMatch: String(m.manOfTheMatch || ''),
+          stage: String(m.stage || m.round || 'League'),
+          pitchType: m.pitchType,
+          umpire1: m.umpire1,
+          umpire2: m.umpire2,
+          scorer: m.scorer,
+          matchBannerUrl: m.matchBannerUrl
+        }))
+    : [];
+
+  return {
+    ...raw,
+    id: String(raw.id),
+    name: String(raw.name || 'Cricket Tournament'),
+    teamCount: Number(raw.teamCount || normalizedTeams.length || 4),
+    format: raw.format || 'T20',
+    type: raw.type || 'league',
+    startDate: String(raw.startDate || new Date().toISOString().split('T')[0]),
+    status: raw.status === 'completed' ? 'completed' : raw.status === 'active' ? 'active' : 'setup',
+    teams: normalizedTeams,
+    matches: normalizedMatches,
+    winnerTeamName: raw.winnerTeamName || null
+  };
+}
+
 export const CricketTournamentTab: React.FC<{
   onStartLiveScore?: (
     teamAOrConfig: string | TournamentLiveScoreConfig,
@@ -167,7 +265,9 @@ export const CricketTournamentTab: React.FC<{
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          return parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+          return parsed
+            .map((t: any) => normalizeGullyTournament(t))
+            .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id));
         }
       }
       return [];
@@ -180,7 +280,7 @@ export const CricketTournamentTab: React.FC<{
   const [activeTournamentId, setActiveTournamentId] = useState<string | null>(() => {
     try {
       const activeId = localStorage.getItem('gully_active_tournament_id');
-      if (activeId && isTournamentDeleted(activeId)) {
+      if (activeId && (isTournamentDeleted(activeId) || activeId === 'one_half_active_championship')) {
         localStorage.removeItem('gully_active_tournament_id');
         return null;
       }
@@ -451,15 +551,18 @@ export const CricketTournamentTab: React.FC<{
   const [quickEditStatus, setQuickEditStatus] = useState<'scheduled' | 'live' | 'completed'>('scheduled');
   const [quickEditBannerUrl, setQuickEditBannerUrl] = useState('');
 
-  // Load and sync tournaments with Firestore in a loop-proof way
+  // Load and sync tournaments with Firebase Realtime Database, Real-Time Server Stream, and Firestore in a loop-proof way
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
+    const applyIncomingTournaments = (rawItems: any[]) => {
       const dbList: Tournament[] = [];
-      snap.forEach((docSnap) => {
-        const tid = docSnap.id;
-        const data = docSnap.data() as Tournament;
-        if (!isTournamentDeleted(tid) && !isTournamentDeleted(data?.id)) {
-          dbList.push({ ...data, id: tid });
+      rawItems.forEach((rawData) => {
+        if (!rawData) return;
+        const tid = rawData.id;
+        if (tid && !isTournamentDeleted(tid)) {
+          const normalized = normalizeGullyTournament({ ...rawData, id: tid });
+          if (normalized) {
+            dbList.push(normalized);
+          }
         }
       });
 
@@ -471,7 +574,9 @@ export const CricketTournamentTab: React.FC<{
           if (raw) {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
-              localList = parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id));
+              localList = parsed
+                .map((t: any) => normalizeGullyTournament(t))
+                .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id));
             }
           }
         } catch (_) {}
@@ -487,8 +592,9 @@ export const CricketTournamentTab: React.FC<{
 
         // Merge dbList with any tournaments in our local state (including newly created ones)
         prev.forEach((localT) => {
-          if (!isTournamentDeleted(localT.id) && !filteredMerged.some(m => m.id === localT.id)) {
-            filteredMerged.push(localT);
+          const normLocal = normalizeGullyTournament(localT);
+          if (normLocal && !isTournamentDeleted(normLocal.id) && !filteredMerged.some(m => m.id === normLocal.id)) {
+            filteredMerged.push(normLocal);
           }
         });
         localList.forEach((localT) => {
@@ -515,8 +621,8 @@ export const CricketTournamentTab: React.FC<{
             const om = (localT.matches || []).find(m => m.id === nm.id);
             if (!om) return nm;
 
-            const omCompleted = om.status === 'completed' || !!om.winner || (!!om.scoreA && om.scoreA !== '0/0');
-            const nmCompleted = nm.status === 'completed' || !!nm.winner || (!!nm.scoreA && nm.scoreA !== '0/0');
+            const omCompleted = om.status === 'completed' || !!(om as any).winner || (!!om.scoreA && om.scoreA !== '0/0');
+            const nmCompleted = nm.status === 'completed' || !!(nm as any).winner || (!!nm.scoreA && nm.scoreA !== '0/0');
 
             if (omCompleted && !nmCompleted) {
               return { ...nm, ...om };
@@ -530,7 +636,7 @@ export const CricketTournamentTab: React.FC<{
               scoreB: nm.scoreB || om.scoreB,
               oversA: nm.oversA || om.oversA,
               oversB: nm.oversB || om.oversB,
-              winner: nm.winner || om.winner,
+              winner: (nm as any).winner || (om as any).winner,
               winnerId: nm.winnerId || om.winnerId,
               winReason: nm.winReason || om.winReason,
               manOfTheMatch: nm.manOfTheMatch || om.manOfTheMatch,
@@ -539,22 +645,49 @@ export const CricketTournamentTab: React.FC<{
             };
           });
 
-          return {
+          const combined = normalizeGullyTournament({
             ...newT,
             teams: mergedTeams,
             matches: [...mergedMatches, ...localOnlyMatches],
             status: (newT.status === 'completed' || localT.status === 'completed') ? 'completed' : newT.status,
             winnerTeamName: newT.winnerTeamName || localT.winnerTeamName,
-            updatedAt: Math.max(newT.updatedAt || 0, localT.updatedAt || 0)
-          };
+            updatedAt: Math.max((newT as any).updatedAt || 0, (localT as any).updatedAt || 0)
+          });
+          return combined || newT;
         });
 
         return mergedTournaments.filter(t => t && t.id && !isTournamentDeleted(t.id));
       });
+    };
+
+    // 1. Subscribe to Firebase Realtime Database & Real-Time Server Stream (always active)
+    const unsubRtdb = subscribeToRealtimeDBTournaments((rtdbTournaments) => {
+      if (Array.isArray(rtdbTournaments)) {
+        applyIncomingTournaments(rtdbTournaments);
+      }
+    });
+
+    // 2. Also subscribe to Firestore when quota is available
+    if (isFirestoreQuotaExhausted()) {
+      return () => {
+        unsubRtdb();
+      };
+    }
+
+    const unsub = onSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
+      const items: any[] = [];
+      snap.forEach((docSnap) => {
+        items.push({ ...docSnap.data(), id: docSnap.id });
+      });
+      applyIncomingTournaments(items);
     }, (error) => {
       console.warn("Failed to subscribe to tournaments in firestore:", error);
     });
-    return () => unsub();
+
+    return () => {
+      unsubRtdb();
+      unsub();
+    };
   }, []);
 
   // Listen for local and external tournament updates in real time
@@ -565,7 +698,11 @@ export const CricketTournamentTab: React.FC<{
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            setTournaments(parsed.filter((t: any) => t && t.id && !isTournamentDeleted(t.id)));
+            setTournaments(
+              parsed
+                .map((t: any) => normalizeGullyTournament(t))
+                .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id))
+            );
           }
         }
       } catch (e) {
@@ -582,25 +719,16 @@ export const CricketTournamentTab: React.FC<{
     };
   }, []);
 
-  // Persistence side-effect - saves locally AND archives directly in Firestore
+  // Persistence side-effect - saves locally to localStorage without triggering an infinite Firestore write loop
   useEffect(() => {
-    const validTournaments = tournaments.filter(t => t && t.id && !isTournamentDeleted(t.id));
+    const validTournaments = tournaments
+      .map((t) => normalizeGullyTournament(t))
+      .filter((t): t is Tournament => t !== null && !isTournamentDeleted(t.id));
     try {
       localStorage.setItem('gully_tournaments_v1', JSON.stringify(validTournaments));
     } catch (e) {
       console.warn('LocalStorage gully_tournaments_v1 write blocked:', e);
     }
-    if (isFirestoreQuotaExhausted()) return;
-    validTournaments.forEach((t) => {
-      safeSetDoc(doc(db, 'cricket_tournaments', t.id), t).catch((err) => {
-        if (isQuotaError(err)) {
-          recordFirestoreQuotaExhaustion(360);
-          console.warn("Firestore quota limit reached. Tournaments safely kept in local storage.");
-        } else {
-          console.warn("Failed to backup tournament to Firestore:", err);
-        }
-      });
-    });
   }, [tournaments]);
 
   useEffect(() => {
@@ -2456,12 +2584,12 @@ export const CricketTournamentTab: React.FC<{
           )}
 
           {/* Requirement 2: Tournament Best Batsman, Best Bowler, Man of the Series automatically show after tournament final match complete */}
-          {(activeTournament.status === 'completed' || activeTournament.winnerTeamName || (activeTournament.matches.some(m => m.stage?.toLowerCase()?.includes('final') && m.status === 'completed')) || (activeTournament.matches.length > 0 && activeTournament.matches.every(m => m.status === 'completed'))) && (
+          {(activeTournament.status === 'completed' || activeTournament.winnerTeamName || ((activeTournament.matches || []).some(m => m.stage?.toLowerCase()?.includes('final') && m.status === 'completed')) || ((activeTournament.matches || []).length > 0 && (activeTournament.matches || []).every(m => m.status === 'completed'))) && (
             <TournamentAwardsPresentationCard
               tournamentName={activeTournament.name}
               winnerTeamName={activeTournament.winnerTeamName}
-              matches={activeTournament.matches}
-              teams={activeTournament.teams}
+              matches={activeTournament.matches || []}
+              teams={activeTournament.teams || []}
               prizes={activeTournament.prizes || getTournamentPrizesByTournamentId(activeTournament.id)}
               onTriggerPresentationBoard={() => {
                 window.dispatchEvent(
@@ -2771,7 +2899,7 @@ export const CricketTournamentTab: React.FC<{
                                 setEditTeamId(team.id);
                                 setTeamFormName(team.name);
                                 setTeamFormCaptain(team.captain);
-                                setTeamFormPlayersText(team.players.join(', '));
+                                setTeamFormPlayersText((team.players || []).join(', '));
                                 setTeamFormLogo(team.logo || '');
                                 setTeamFormPlayerPhotos(team.playerPhotos || {});
                                 setShowAddTeamModal(true);
@@ -2803,9 +2931,9 @@ export const CricketTournamentTab: React.FC<{
 
                         {/* Players scrollable row list */}
                         <div className="mt-4 border-t border-slate-50 dark:border-slate-800/60 pt-4">
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Roster Crew ({team.players.length})</span>
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block mb-2">Roster Crew ({(team.players || []).length})</span>
                           <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar p-1">
-                            {team.players.map((p, idx) => {
+                            {(team.players || []).map((p, idx) => {
                               const photo = team.playerPhotos?.[p] || '';
                               return (
                                 <span 

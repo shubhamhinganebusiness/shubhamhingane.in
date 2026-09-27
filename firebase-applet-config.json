@@ -8,5 +8,6 @@
   "measurementId": "",
   "firestoreDatabaseId": "ai-studio-remixshubhamhing-a0ff377c-7ae5-429e-9263-df2bcb690093",
   "oAuthClientId": "734186569442-figv5lrkhddvvadtc0qlp9tpr9qs9gaa.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "recaptchaSiteKey": "",
+  "databaseURL": "https://gen-lang-client-0115478070-default-rtdb.firebaseio.com"
 }

@@ -112,9 +112,10 @@ export async function fetchRecentBalls(
  */
 export async function deleteBallDelivery(matchId: string, deliveryId: string): Promise<void> {
   if (!matchId || !deliveryId) return;
+  if (isFirestoreQuotaExhausted()) return;
   try {
     const ballRef = doc(db, 'cricket_matches', matchId, 'deliveries', deliveryId);
-    await deleteDoc(ballRef);
+    await safeDeleteDoc(ballRef);
   } catch (error) {
     console.warn('[cricketDb] deleteBallDelivery note:', error);
   }
@@ -373,6 +374,7 @@ export async function updatePlayerCareerStats(
   perf: MatchPlayerPerformance
 ): Promise<void> {
   if (!playerId) return;
+  if (isFirestoreQuotaExhausted()) return;
   try {
     const playerRef = doc(db, 'cricket_players', playerId);
     
@@ -505,6 +507,7 @@ export async function updateTournamentStandingsAfterMatch(
   }
 ): Promise<void> {
   if (!tournamentId) return;
+  if (isFirestoreQuotaExhausted()) return;
   try {
     const tourRef = doc(db, 'cricket_tournaments', tournamentId);
     await runTransaction(db, async (tx) => {
@@ -691,6 +694,7 @@ export async function atomicUpdateScore(
   isWicket: boolean
 ): Promise<void> {
   if (!matchId) return;
+  if (isFirestoreQuotaExhausted()) return;
   try {
     const matchRef = doc(db, 'cricket_matches', matchId);
     await runTransaction(db, async (tx) => {

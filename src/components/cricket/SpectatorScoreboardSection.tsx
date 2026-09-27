@@ -4156,14 +4156,15 @@ export const SpectatorScoreboardSection = ({
                                           const raw = (currentInnings.commentaryList || [])
                                             .filter(c => {
                                               if (!c || !c.overBall || c.overBall === '0.0') return false;
+                                              const anyC = c as any;
                                               if (
-                                                c.type === 'milestone' || 
-                                                c.type === 'announcement' || 
-                                                c.type === 'break' || 
-                                                c.type === 'info' || 
-                                                c.specialEvent === 'retire_hurt' ||
-                                                c.announcementType === 'new_batsman' ||
-                                                c.announcementType === 'new_bowler'
+                                                anyC.type === 'milestone' || 
+                                                anyC.type === 'announcement' || 
+                                                anyC.type === 'break' || 
+                                                anyC.type === 'info' || 
+                                                anyC.specialEvent === 'retire_hurt' ||
+                                                anyC.announcementType === 'new_batsman' ||
+                                                anyC.announcementType === 'new_bowler'
                                               ) return false;
                                               const desc = (c.description || '').toLowerCase();
                                               if (
@@ -6099,7 +6100,7 @@ export const SpectatorScoreboardSection = ({
                             </span>
                             <button
                               type="button"
-                              onClick={() => setActiveTab('prizes')}
+                              onClick={() => setActiveTab('sponsors-prizes')}
                               className="text-[8.5px] font-bold text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-0.5"
                             >
                               Full Prize Room →
@@ -6201,7 +6202,7 @@ export const SpectatorScoreboardSection = ({
                           );
                         }
                         return commentary.slice(0, 15).map((comm) => {
-                          const isSquadAnnouncement = comm.announcementType === 'squad_announcement' || 
+                          const isSquadAnnouncement = (comm as any).announcementType === 'squad_announcement' || 
                             (comm.overBall === '0.0' && (comm.description || '').toLowerCase().includes('squad'));
                           const isWkt = comm.type === 'wicket';
                           const isBnd = comm.type === 'boundary';
@@ -8191,7 +8192,7 @@ export const SpectatorScoreboardSection = ({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => setActiveTab('prizes')}
+                                onClick={() => setActiveTab('sponsors-prizes')}
                                 className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-1"
                               >
                                 <span>Trophy Room Page</span>
@@ -8330,7 +8331,7 @@ export const SpectatorScoreboardSection = ({
                           }
 
                           return list.map((comm) => {
-                            const isSquadAnnouncement = comm.announcementType === 'squad_announcement' || 
+                            const isSquadAnnouncement = (comm as any).announcementType === 'squad_announcement' || 
                               (comm.overBall === '0.0' && (comm.description || '').toLowerCase().includes('squad'));
                             const isWkt = comm.type === 'wicket';
                             const isBnd = comm.type === 'boundary';

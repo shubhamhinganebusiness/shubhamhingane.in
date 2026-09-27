@@ -17,6 +17,8 @@ export interface TournamentPrize {
   sponsorName?: string;
   sponsorPhoto?: string;
   sponsorDesignation?: string;
+  winnerName?: string;
+  trophyIncluded?: boolean;
   tagline?: string;
   trophyType?: string;
   isActive?: boolean;
@@ -281,6 +283,8 @@ function normalizePrize(p: any): TournamentPrize {
     sponsorName: p.sponsorName || p.personName || '',
     sponsorPhoto: p.sponsorPhoto || p.personPhoto || '',
     sponsorDesignation: p.sponsorDesignation || p.personDesignation || '',
+    winnerName: p.winnerName || '',
+    trophyIncluded: p.trophyIncluded !== false,
     tagline: p.tagline || 'Award Sponsored By',
     trophyType: p.trophyType || 'special',
     isActive: p.isActive !== false,

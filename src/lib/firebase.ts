@@ -150,41 +150,212 @@ try {
 // Initialize Firebase Realtime Database (RTDB)
 export let rtdb: Database | null = null;
 try {
-  const customDbUrl = (firebaseConfig as any).databaseURL || (typeof process !== 'undefined' && process.env?.VITE_FIREBASE_DATABASE_URL);
+  const defaultRtdbUrl = (firebaseConfig as any).projectId
+    ? `https://${(firebaseConfig as any).projectId}-default-rtdb.firebaseio.com`
+    : undefined;
+  const customDbUrl =
+    (firebaseConfig as any).databaseURL ||
+    (typeof process !== 'undefined' && process.env?.VITE_FIREBASE_DATABASE_URL) ||
+    defaultRtdbUrl;
   if (customDbUrl) {
     rtdb = getDatabase(app, customDbUrl);
   } else {
     rtdb = getDatabase(app);
   }
 } catch (err) {
-  // If databaseURL is not provided or RTDB is not enabled in Firebase console, log informatively
-  console.info('[Firebase Realtime Database] RTDB initialized in standby or requires databaseURL in firebase-applet-config.json:', err);
+  console.info('[Firebase Realtime Database] RTDB initialized in standby:', err);
+}
+
+// Shared client-side Real-Time Server Stream (SSE) & Cache so Quick Match, Tournament, and One-Half Tournament
+// stay 100% real-time connected across tabs/devices alongside Firebase Realtime Database
+const realtimeMatchListeners = new Map<string, Set<(match: any) => void>>();
+const realtimeMatchesListListeners = new Set<(matches: any[]) => void>();
+const realtimeActiveLiveListeners = new Set<(data: any) => void>();
+const realtimeCompletedMatchListeners = new Set<(match: any) => void>();
+const realtimeTournamentsListeners = new Set<(tournaments: any[]) => void>();
+const realtimeOneHalfListeners = new Set<(data: any) => void>();
+
+const clientMatchesRealtimeCache = new Map<string, any>();
+const clientTournamentsRealtimeCache = new Map<string, any>();
+let sseInitialized = false;
+
+const isOneHalfTournamentDocId = (id?: string | null): boolean =>
+  id === 'one_half_active_championship' || id === 'one_half_32_tournament';
+
+function ensureCricketRealtimeStream() {
+  if (typeof window === 'undefined' || sseInitialized) return;
+  sseInitialized = true;
+
+  // 1. Initial hydrate of matches & tournaments from server real-time store
+  fetch('/api/cricket/list-docs?collectionName=cricket_matches')
+    .then(r => (r.ok ? r.json() : null))
+    .then(json => {
+      if (json && Array.isArray(json.items)) {
+        for (const item of json.items) {
+          if (item && item.id) {
+            clientMatchesRealtimeCache.set(String(item.id), item);
+          }
+        }
+        const allMatches = Array.from(clientMatchesRealtimeCache.values());
+        realtimeMatchesListListeners.forEach(cb => {
+          try { cb(allMatches); } catch {}
+        });
+      }
+    })
+    .catch(() => {});
+
+  fetch('/api/cricket/list-docs?collectionName=cricket_tournaments')
+    .then(r => (r.ok ? r.json() : null))
+    .then(json => {
+      if (json && Array.isArray(json.items)) {
+        for (const item of json.items) {
+          if (item && item.id) {
+            clientTournamentsRealtimeCache.set(String(item.id), item);
+            if (isOneHalfTournamentDocId(item.id) && Array.isArray(item.matches) && Array.isArray(item.teams)) {
+              clientTournamentsRealtimeCache.set('one_half_active_championship', item);
+              realtimeOneHalfListeners.forEach(cb => {
+                try { cb(item); } catch {}
+              });
+            }
+          }
+        }
+        const allTournaments = Array.from(clientTournamentsRealtimeCache.values()).filter(
+          t => t && t.id && !isOneHalfTournamentDocId(t.id)
+        );
+        realtimeTournamentsListeners.forEach(cb => {
+          try { cb(allTournaments); } catch {}
+        });
+      }
+    })
+    .catch(() => {});
+
+  // 2. Connect persistent SSE stream for instant real-time updates
+  const connectSse = () => {
+    try {
+      const es = new EventSource('/api/cricket/stream');
+      es.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(evt.data);
+          if (!payload || typeof payload !== 'object') return;
+
+          if (payload.type === 'initial_snapshot') {
+            if (Array.isArray(payload.matches)) {
+              for (const m of payload.matches) {
+                if (m && m.id) clientMatchesRealtimeCache.set(String(m.id), m);
+              }
+              const list = Array.from(clientMatchesRealtimeCache.values());
+              realtimeMatchesListListeners.forEach(cb => { try { cb(list); } catch {} });
+            }
+            if (Array.isArray(payload.tournaments)) {
+              for (const t of payload.tournaments) {
+                if (t && t.id) {
+                  clientTournamentsRealtimeCache.set(String(t.id), t);
+                  if (isOneHalfTournamentDocId(t.id) && Array.isArray(t.matches) && Array.isArray(t.teams)) {
+                    clientTournamentsRealtimeCache.set('one_half_active_championship', t);
+                    realtimeOneHalfListeners.forEach(cb => { try { cb(t); } catch {} });
+                  }
+                }
+              }
+              const tList = Array.from(clientTournamentsRealtimeCache.values()).filter(
+                t => t && t.id && !isOneHalfTournamentDocId(t.id)
+              );
+              realtimeTournamentsListeners.forEach(cb => { try { cb(tList); } catch {} });
+            }
+          } else if (payload.type === 'doc_update') {
+            const { collectionName, docId, data } = payload;
+            if (collectionName === 'cricket_matches' && docId && data) {
+              const fullMatch = { id: docId, ...data };
+              clientMatchesRealtimeCache.set(String(docId), fullMatch);
+              const matchCbs = realtimeMatchListeners.get(String(docId));
+              if (matchCbs) {
+                matchCbs.forEach(cb => { try { cb(fullMatch); } catch {} });
+              }
+              const list = Array.from(clientMatchesRealtimeCache.values());
+              realtimeMatchesListListeners.forEach(cb => { try { cb(list); } catch {} });
+
+              if (fullMatch.status === 'live') {
+                const liveBroadcast = {
+                  id: fullMatch.id,
+                  teamA: fullMatch.teamA,
+                  teamB: fullMatch.teamB,
+                  status: fullMatch.status,
+                  updatedAt: fullMatch.updatedAt || Date.now(),
+                  match: fullMatch
+                };
+                realtimeActiveLiveListeners.forEach(cb => { try { cb(liveBroadcast); } catch {} });
+              } else if (fullMatch.status === 'completed') {
+                realtimeCompletedMatchListeners.forEach(cb => { try { cb(fullMatch); } catch {} });
+              }
+            } else if (collectionName === 'cricket_tournaments' && docId && data) {
+              const fullTour = { id: docId, ...data };
+              clientTournamentsRealtimeCache.set(String(docId), fullTour);
+              if (isOneHalfTournamentDocId(docId) && Array.isArray(fullTour.matches) && Array.isArray(fullTour.teams)) {
+                clientTournamentsRealtimeCache.set('one_half_active_championship', fullTour);
+                realtimeOneHalfListeners.forEach(cb => { try { cb(fullTour); } catch {} });
+              } else {
+                const tList = Array.from(clientTournamentsRealtimeCache.values()).filter(
+                  t => t && t.id && !isOneHalfTournamentDocId(t.id)
+                );
+                realtimeTournamentsListeners.forEach(cb => { try { cb(tList); } catch {} });
+              }
+            }
+          } else if (payload.type === 'doc_delete') {
+            const { collectionName, docId } = payload;
+            if (collectionName === 'cricket_matches' && docId) {
+              clientMatchesRealtimeCache.delete(String(docId));
+              const list = Array.from(clientMatchesRealtimeCache.values());
+              realtimeMatchesListListeners.forEach(cb => { try { cb(list); } catch {} });
+            } else if (collectionName === 'cricket_tournaments' && docId) {
+              clientTournamentsRealtimeCache.delete(String(docId));
+              const tList = Array.from(clientTournamentsRealtimeCache.values()).filter(
+                t => t && t.id && t.id !== 'one_half_32_tournament'
+              );
+              realtimeTournamentsListeners.forEach(cb => { try { cb(tList); } catch {} });
+            }
+          }
+        } catch {}
+      };
+      es.onerror = () => {
+        try { es.close(); } catch {}
+        setTimeout(connectSse, 4000);
+      };
+    } catch {}
+  };
+
+  connectSse();
 }
 
 /**
- * Synchronize live cricket scores to Firebase Realtime Database
+ * Synchronize live cricket scores (Quick Match & Live Scorer) to Firebase Realtime Database & Real-Time Server
  */
 export async function syncScoreToRealtimeDB(matchId: string, matchData: any): Promise<void> {
   if (!matchId || !matchData) return;
+  const cleaned = cleanUndefined({ id: matchId, ...matchData });
+  clientMatchesRealtimeCache.set(String(matchId), cleaned);
+
+  // 1. Push to Real-Time Server Proxy (which broadcasts via SSE to all connected clients)
+  saveMatchViaServerProxy(matchId, cleaned).catch(() => {});
+
+  // 2. Push to Firebase Realtime Database (RTDB)
   if (!rtdb) return;
   try {
     const matchRef = rtdbRef(rtdb, `cricket_matches/${matchId}`);
-    await rtdbSet(matchRef, matchData);
+    await rtdbSet(matchRef, cleaned);
 
     // If match is currently live, also update active live match pointer for instant global discovery
-    if (matchData.status === 'live') {
+    if (cleaned.status === 'live') {
       const liveRef = rtdbRef(rtdb, 'cricket_active_live_match');
       await rtdbSet(liveRef, {
-        id: matchData.id,
-        teamA: matchData.teamA,
-        teamB: matchData.teamB,
-        status: matchData.status,
-        updatedAt: matchData.updatedAt || Date.now(),
-        match: matchData
+        id: cleaned.id,
+        teamA: cleaned.teamA,
+        teamB: cleaned.teamB,
+        status: cleaned.status,
+        updatedAt: cleaned.updatedAt || Date.now(),
+        match: cleaned
       });
-    } else if (matchData.status === 'completed') {
+    } else if (cleaned.status === 'completed') {
       const completedRef = rtdbRef(rtdb, 'cricket_completed_match');
-      await rtdbSet(completedRef, matchData);
+      await rtdbSet(completedRef, cleaned);
     }
   } catch (err) {
     console.warn('[Realtime Database] Live score push note:', err);
@@ -192,97 +363,150 @@ export async function syncScoreToRealtimeDB(matchId: string, matchData: any): Pr
 }
 
 /**
- * Subscribe to a specific cricket match in Firebase Realtime Database
+ * Subscribe to a specific cricket match in Firebase Realtime Database & Real-Time Stream
  */
 export function subscribeToRealtimeDBMatch(matchId: string, onUpdate: (match: any) => void): () => void {
-  if (!matchId || !rtdb) return () => {};
-  try {
-    const matchRef = rtdbRef(rtdb, `cricket_matches/${matchId}`);
-    return rtdbOnValue(matchRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const val = snapshot.val();
-        if (val) onUpdate(val);
-      }
-    }, (error) => {
-      console.warn('[Realtime Database] Match listener note:', error);
-    });
-  } catch (e) {
-    return () => {};
+  if (!matchId) return () => {};
+  ensureCricketRealtimeStream();
+
+  if (!realtimeMatchListeners.has(matchId)) {
+    realtimeMatchListeners.set(matchId, new Set());
   }
+  realtimeMatchListeners.get(matchId)!.add(onUpdate);
+
+  const cached = clientMatchesRealtimeCache.get(matchId);
+  if (cached) {
+    setTimeout(() => { try { onUpdate(cached); } catch {} }, 0);
+  }
+
+  let unsubRtdb = () => {};
+  if (rtdb) {
+    try {
+      const matchRef = rtdbRef(rtdb, `cricket_matches/${matchId}`);
+      unsubRtdb = rtdbOnValue(matchRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          if (val) {
+            clientMatchesRealtimeCache.set(matchId, val);
+            onUpdate(val);
+          }
+        }
+      }, (error) => {
+        console.warn('[Realtime Database] Match listener note:', error);
+      });
+    } catch {}
+  }
+
+  return () => {
+    realtimeMatchListeners.get(matchId)?.delete(onUpdate);
+    try { unsubRtdb(); } catch {}
+  };
 }
 
 /**
- * Subscribe to the active live match broadcast in Firebase Realtime Database
+ * Subscribe to the active live match broadcast in Firebase Realtime Database & Real-Time Stream
  */
 export function subscribeToRealtimeDBActiveLive(onUpdate: (data: any) => void): () => void {
-  if (!rtdb) return () => {};
-  try {
-    const liveRef = rtdbRef(rtdb, 'cricket_active_live_match');
-    return rtdbOnValue(liveRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const val = snapshot.val();
-        if (val) onUpdate(val);
-      }
-    }, (error) => {
-      console.warn('[Realtime Database] Global live listener note:', error);
-    });
-  } catch (e) {
-    return () => {};
+  ensureCricketRealtimeStream();
+  realtimeActiveLiveListeners.add(onUpdate);
+
+  let unsubRtdb = () => {};
+  if (rtdb) {
+    try {
+      const liveRef = rtdbRef(rtdb, 'cricket_active_live_match');
+      unsubRtdb = rtdbOnValue(liveRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          if (val) onUpdate(val);
+        }
+      }, (error) => {
+        console.warn('[Realtime Database] Global live listener note:', error);
+      });
+    } catch {}
   }
+
+  return () => {
+    realtimeActiveLiveListeners.delete(onUpdate);
+    try { unsubRtdb(); } catch {}
+  };
 }
 
 /**
- * Subscribe to the list of all matches in Firebase Realtime Database
+ * Subscribe to the list of all matches in Firebase Realtime Database & Real-Time Stream
  */
 export function subscribeToRealtimeDBMatchesList(onUpdate: (matches: any[]) => void): () => void {
-  if (!rtdb) return () => {};
-  try {
-    const matchesRef = rtdbRef(rtdb, 'cricket_matches');
-    return rtdbOnValue(matchesRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const val = snapshot.val();
-        if (val && typeof val === 'object') {
-          const list = Object.values(val);
-          onUpdate(list);
-        } else {
-          onUpdate([]);
-        }
-      } else {
-        onUpdate([]);
-      }
-    }, (error) => {
-      console.warn('[Realtime Database] Matches list listener note:', error);
-    });
-  } catch (e) {
-    return () => {};
+  ensureCricketRealtimeStream();
+  realtimeMatchesListListeners.add(onUpdate);
+
+  if (clientMatchesRealtimeCache.size > 0) {
+    const initial = Array.from(clientMatchesRealtimeCache.values());
+    setTimeout(() => { try { onUpdate(initial); } catch {} }, 0);
   }
+
+  let unsubRtdb = () => {};
+  if (rtdb) {
+    try {
+      const matchesRef = rtdbRef(rtdb, 'cricket_matches');
+      unsubRtdb = rtdbOnValue(matchesRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          if (val && typeof val === 'object') {
+            const list = Object.values(val) as any[];
+            for (const m of list) {
+              if (m && m.id) clientMatchesRealtimeCache.set(String(m.id), m);
+            }
+            onUpdate(Array.from(clientMatchesRealtimeCache.values()));
+          }
+        }
+      }, (error) => {
+        console.warn('[Realtime Database] Matches list listener note:', error);
+      });
+    } catch {}
+  }
+
+  return () => {
+    realtimeMatchesListListeners.delete(onUpdate);
+    try { unsubRtdb(); } catch {}
+  };
 }
 
 /**
- * Subscribe to completed match updates in Firebase Realtime Database
+ * Subscribe to completed match updates in Firebase Realtime Database & Real-Time Stream
  */
 export function subscribeToRealtimeDBCompletedMatch(onUpdate: (completedMatch: any) => void): () => void {
-  if (!rtdb) return () => {};
-  try {
-    const completedRef = rtdbRef(rtdb, 'cricket_completed_match');
-    return rtdbOnValue(completedRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const val = snapshot.val();
-        if (val) onUpdate(val);
-      }
-    }, (error) => {
-      console.warn('[Realtime Database] Completed match listener note:', error);
-    });
-  } catch (e) {
-    return () => {};
+  ensureCricketRealtimeStream();
+  realtimeCompletedMatchListeners.add(onUpdate);
+
+  let unsubRtdb = () => {};
+  if (rtdb) {
+    try {
+      const completedRef = rtdbRef(rtdb, 'cricket_completed_match');
+      unsubRtdb = rtdbOnValue(completedRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          if (val) onUpdate(val);
+        }
+      }, (error) => {
+        console.warn('[Realtime Database] Completed match listener note:', error);
+      });
+    } catch {}
   }
+
+  return () => {
+    realtimeCompletedMatchListeners.delete(onUpdate);
+    try { unsubRtdb(); } catch {}
+  };
 }
 
 /**
  * Remove a match and its pointers from Firebase Realtime Database
  */
 export async function removeMatchFromRealtimeDB(matchId: string): Promise<void> {
-  if (!matchId || !rtdb) return;
+  if (!matchId) return;
+  clientMatchesRealtimeCache.delete(String(matchId));
+  deleteDocViaServerProxy('cricket_matches', matchId).catch(() => {});
+
+  if (!rtdb) return;
   try {
     const matchRef = rtdbRef(rtdb, `cricket_matches/${matchId}`);
     await rtdbRemove(matchRef).catch(() => {});
@@ -302,36 +526,146 @@ export async function removeMatchFromRealtimeDB(matchId: string): Promise<void> 
 }
 
 /**
- * Synchronize One-Half Tournament state to Firebase Realtime Database
+ * Synchronize Standard Tournament state to Firebase Realtime Database & Real-Time Server
+ */
+export async function syncTournamentToRealtimeDB(tournamentData: any): Promise<void> {
+  if (!tournamentData || !tournamentData.id) return;
+  const cleaned = cleanUndefined(tournamentData);
+  clientTournamentsRealtimeCache.set(String(cleaned.id), cleaned);
+
+  saveDocViaServerProxy('cricket_tournaments', String(cleaned.id), cleaned, { merge: true }).catch(() => {});
+
+  if (!rtdb) return;
+  try {
+    const tourRef = rtdbRef(rtdb, `cricket_tournaments/${cleaned.id}`);
+    await rtdbSet(tourRef, cleaned);
+  } catch (err) {
+    console.warn('[Realtime Database] Standard tournament push note:', err);
+  }
+}
+
+/**
+ * Subscribe to all Standard Tournaments in Firebase Realtime Database & Real-Time Stream
+ */
+export function subscribeToRealtimeDBTournaments(onUpdate: (tournaments: any[]) => void): () => void {
+  ensureCricketRealtimeStream();
+  realtimeTournamentsListeners.add(onUpdate);
+
+  const initialList = Array.from(clientTournamentsRealtimeCache.values()).filter(
+    t => t && t.id && !isOneHalfTournamentDocId(t.id)
+  );
+  if (initialList.length > 0) {
+    setTimeout(() => { try { onUpdate(initialList); } catch {} }, 0);
+  }
+
+  let unsubRtdb = () => {};
+  if (rtdb) {
+    try {
+      const toursRef = rtdbRef(rtdb, 'cricket_tournaments');
+      unsubRtdb = rtdbOnValue(toursRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          if (val && typeof val === 'object') {
+            const list = Object.values(val) as any[];
+            for (const t of list) {
+              if (t && t.id) {
+                clientTournamentsRealtimeCache.set(String(t.id), t);
+              }
+            }
+            const filtered = Array.from(clientTournamentsRealtimeCache.values()).filter(
+              t => t && t.id && !isOneHalfTournamentDocId(t.id)
+            );
+            onUpdate(filtered);
+          }
+        }
+      }, (error) => {
+        console.warn('[Realtime Database] Standard tournaments listener note:', error);
+      });
+    } catch {}
+  }
+
+  return () => {
+    realtimeTournamentsListeners.delete(onUpdate);
+    try { unsubRtdb(); } catch {}
+  };
+}
+
+/**
+ * Remove a Standard Tournament from Firebase Realtime Database & Real-Time Server
+ */
+export async function removeTournamentFromRealtimeDB(tournamentId: string): Promise<void> {
+  if (!tournamentId) return;
+  clientTournamentsRealtimeCache.delete(String(tournamentId));
+  deleteDocViaServerProxy('cricket_tournaments', tournamentId).catch(() => {});
+
+  if (!rtdb) return;
+  try {
+    const tourRef = rtdbRef(rtdb, `cricket_tournaments/${tournamentId}`);
+    await rtdbRemove(tourRef).catch(() => {});
+  } catch (err) {
+    console.warn('[Realtime Database] Tournament removal note:', err);
+  }
+}
+
+/**
+ * Synchronize One-Half Tournament state to Firebase Realtime Database & Real-Time Server
  */
 export async function syncOneHalfTournamentToRealtimeDB(tournamentData: any): Promise<void> {
-  if (!tournamentData || !rtdb) return;
+  if (!tournamentData) return;
+  const cleaned = cleanUndefined({
+    ...tournamentData,
+    id: tournamentData.id || 'one_half_active_championship',
+    updatedAt: tournamentData.updatedAt || Date.now()
+  });
+  clientTournamentsRealtimeCache.set('one_half_active_championship', cleaned);
+
+  saveDocViaServerProxy('cricket_tournaments', 'one_half_active_championship', cleaned, { merge: true }).catch(() => {});
+
+  if (!rtdb) return;
   try {
     const tourRef = rtdbRef(rtdb, 'cricket_one_half_tournament');
-    await rtdbSet(tourRef, tournamentData);
+    await rtdbSet(tourRef, cleaned);
   } catch (err) {
     console.warn('[Realtime Database] One-Half tournament push note:', err);
   }
 }
 
 /**
- * Subscribe to One-Half Tournament state in Firebase Realtime Database
+ * Subscribe to One-Half Tournament state in Firebase Realtime Database & Real-Time Stream
  */
 export function subscribeToRealtimeDBOneHalfTournament(onUpdate: (data: any) => void): () => void {
-  if (!rtdb) return () => {};
-  try {
-    const tourRef = rtdbRef(rtdb, 'cricket_one_half_tournament');
-    return rtdbOnValue(tourRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const val = snapshot.val();
-        if (val) onUpdate(val);
-      }
-    }, (error) => {
-      console.warn('[Realtime Database] One-Half tournament listener note:', error);
-    });
-  } catch (e) {
-    return () => {};
+  ensureCricketRealtimeStream();
+  realtimeOneHalfListeners.add(onUpdate);
+
+  const cached =
+    clientTournamentsRealtimeCache.get('one_half_active_championship') ||
+    clientTournamentsRealtimeCache.get('one_half_32_tournament');
+  if (cached && Array.isArray(cached.matches) && Array.isArray(cached.teams)) {
+    setTimeout(() => { try { onUpdate(cached); } catch {} }, 0);
   }
+
+  let unsubRtdb = () => {};
+  if (rtdb) {
+    try {
+      const tourRef = rtdbRef(rtdb, 'cricket_one_half_tournament');
+      unsubRtdb = rtdbOnValue(tourRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          if (val) {
+            clientTournamentsRealtimeCache.set('one_half_active_championship', val);
+            onUpdate(val);
+          }
+        }
+      }, (error) => {
+        console.warn('[Realtime Database] One-Half tournament listener note:', error);
+      });
+    } catch {}
+  }
+
+  return () => {
+    realtimeOneHalfListeners.delete(onUpdate);
+    try { unsubRtdb(); } catch {}
+  };
 }
 
 /**
@@ -455,19 +789,15 @@ export function clearFirestoreQuotaExhaustion(): void {
   } catch {}
 }
 
-// Automatically clear legacy hardcoded date lock and stale quota flags on startup
+// Preserve active quota circuit breaker across reloads; only clear if expired
 if (typeof window !== 'undefined') {
   try {
-    localStorage.removeItem(QUOTA_DATE_KEY);
-    sessionStorage.removeItem(QUOTA_DATE_KEY);
     const until = localStorage.getItem(QUOTA_STORAGE_KEY) || sessionStorage.getItem(QUOTA_STORAGE_KEY);
     if (until) {
       const expiry = parseInt(until, 10);
       if (isNaN(expiry) || Date.now() >= expiry) {
         clearFirestoreQuotaExhaustion();
       }
-    } else {
-      clearFirestoreQuotaExhaustion();
     }
   } catch {}
 }
@@ -670,146 +1000,117 @@ async function saveDocViaServerProxy(collectionName: string, docId: string, data
   }
 }
 
+async function deleteDocViaServerProxy(collectionName: string, docId: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !collectionName || !docId) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('/api/cricket/delete-doc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collectionName, docId }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Safe write wrapper for setDoc that writes reliably with a timeout guard and automatic server fallback
+ * Safe write wrapper for setDoc that routes writes via the resilient server proxy & local mirror
+ * to avoid triggering client-side GrpcConnection/WebChannel Write stream quota errors.
  */
 export async function safeSetDoc(docRef: any, data: any, options?: any) {
   const cleaned = cleanUndefined(data);
   const payloadToWrite = isOversized(cleaned) ? pruneDocSize(cleaned) : cleaned;
   
   const docPath = docRef?.path || '';
-  const docId = docRef?.id || '';
-  const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
-  const collectionName = docPath.split('/')[0] || '';
+  const pathParts = docPath.split('/').filter(Boolean);
+  const docId = docRef?.id || pathParts[pathParts.length - 1] || '';
+  const collectionName = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : (pathParts[0] || '');
+  const isTopLevelCricketMatch = collectionName === 'cricket_matches';
 
-  // If daily Firestore quota is already exhausted, do NOT call client setDoc to avoid GrpcConnection RPC stream crash
-  if (isFirestoreQuotaExhausted()) {
-    if (isCricketMatch && docId) {
-      await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => {});
-    } else if (collectionName && docId) {
-      await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => {});
-    }
-    return;
+  // Mirror locally for instant offline/local readback
+  if (typeof window !== 'undefined' && collectionName && docId) {
+    try {
+      const mirrorKey = `fs_mirror_${collectionName}_${docId}`;
+      if (options?.merge) {
+        const existingRaw = localStorage.getItem(mirrorKey);
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        localStorage.setItem(mirrorKey, JSON.stringify({ ...existing, ...payloadToWrite }));
+      } else {
+        localStorage.setItem(mirrorKey, JSON.stringify(payloadToWrite));
+      }
+    } catch {}
   }
 
-  // Quick 3.5s timeout for client write before invoking resilient server proxy
-  const timeoutMs = 3500;
-  let clientTimedOut = false;
-
-  try {
-    const writePromise = options !== undefined ? setDoc(docRef, payloadToWrite, options) : setDoc(docRef, payloadToWrite);
-    await Promise.race([
-      writePromise,
-      new Promise((_, reject) => setTimeout(() => {
-        clientTimedOut = true;
-        reject(new Error('Firestore write timeout'));
-      }, timeoutMs))
-    ]);
-  } catch (error: any) {
-    if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(360);
-      if (isCricketMatch && docId) {
-        await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => {});
-      } else if (collectionName && docId) {
-        await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => {});
+  // Also mirror to Firebase Realtime Database (RTDB) for cricket matches & tournaments
+  if (isTopLevelCricketMatch && docId && rtdb) {
+    try {
+      const matchRef = rtdbRef(rtdb, `cricket_matches/${docId}`);
+      rtdbSet(matchRef, { id: docId, ...payloadToWrite }).catch(() => {});
+    } catch {}
+  } else if (collectionName === 'cricket_tournaments' && docId && rtdb) {
+    try {
+      if (isOneHalfTournamentDocId(docId)) {
+        const ohRef = rtdbRef(rtdb, 'cricket_one_half_tournament');
+        rtdbSet(ohRef, { id: docId, ...payloadToWrite }).catch(() => {});
+      } else {
+        const tourRef = rtdbRef(rtdb, `cricket_tournaments/${docId}`);
+        rtdbSet(tourRef, { id: docId, ...payloadToWrite }).catch(() => {});
       }
-      return;
-    }
+    } catch {}
+  }
 
-    // If client write encounters a timeout or network latency, invoke fast server proxy
-    if (isCricketMatch && docId) {
-      const serverOk = await saveMatchViaServerProxy(docId, payloadToWrite);
-      if (serverOk) {
-        return;
-      }
-    } else if (collectionName && docId) {
-      const serverOk = await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options);
-      if (serverOk) {
-        return;
-      }
-    }
-
-    const errMsg = String(error?.message || error || '').toLowerCase();
-    if (
-      errMsg.includes('exceeds the maximum allowed size') || 
-      errMsg.includes('1,048,576 bytes') || 
-      errMsg.includes('cannot be written because its size')
-    ) {
-      console.warn('[Firestore Safe Guard] Retrying with aggressive media pruning for doc:', docId || docPath);
-      try {
-        const pruned = pruneDocSize(payloadToWrite);
-        if (isCricketMatch && docId) {
-          const serverRetryOk = await saveMatchViaServerProxy(docId, pruned);
-          if (serverRetryOk) return;
-        } else if (collectionName && docId) {
-          const serverRetryOk = await saveDocViaServerProxy(collectionName, docId, pruned, options);
-          if (serverRetryOk) return;
-        }
-
-        const retryPromise = options !== undefined ? setDoc(docRef, pruned, options) : setDoc(docRef, pruned);
-        await Promise.race([
-          retryPromise,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore write timeout')), 5000))
-        ]);
-        return;
-      } catch (retryErr) {
-        if (isCricketMatch && docId) {
-          const finalServerOk = await saveMatchViaServerProxy(docId, pruneDocSize(payloadToWrite));
-          if (finalServerOk) return;
-        }
-        console.warn('[Firestore Safe Guard] Write maintained in local/offline cache:', retryErr);
-        return;
-      }
-    }
-
-    // If client timed out, don't throw an unhandled fatal error;
-    // The background WebChannel write will still settle or the local cache has preserved it
-    if (clientTimedOut) {
-      console.info('[Firestore Safe Guard] Client write deferred to background channel for:', docId || docPath);
-      return;
-    }
-
-    throw error;
+  // Primary path: Route through server proxy so client Firestore Write stream is never saturated
+  if (isTopLevelCricketMatch && docId) {
+    const ok = await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => false);
+    if (ok) return;
+  }
+  if (collectionName && docId) {
+    const ok = await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => false);
+    if (ok) return;
   }
 }
 
 /**
- * Safe read wrapper that reads from Firestore with timeout and automatic fallback to server proxy
+ * Safe read wrapper that reads from server proxy / local mirror / Firestore with timeout
  */
 export async function safeGetDoc(collectionName: string, docId: string): Promise<any | null> {
   if (typeof window === 'undefined' || !collectionName || !docId) return null;
 
-  // 1. If daily Firestore quota is exhausted on client, fetch directly via server proxy
-  if (isFirestoreQuotaExhausted()) {
-    try {
-      const res = await fetch(`/api/cricket/get-doc?collectionName=${encodeURIComponent(collectionName)}&docId=${encodeURIComponent(docId)}`);
-      if (res.ok) {
-        const json = await res.json();
-        return json.data || null;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  // 2. Try client Firestore with 3.5s timeout
+  // 1. Fetch via server proxy (which checks both server fallback store and Firestore)
   try {
-    const { doc, getDoc } = await import('firebase/firestore');
-    const docRef = doc(db, collectionName, docId);
-    const snapPromise = getDoc(docRef);
-    const snap = await Promise.race([
-      snapPromise,
-      new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Firestore read timeout')), 3500))
-    ]);
-    if (snap && snap.exists()) {
-      return snap.data();
+    const res = await fetch(`/api/cricket/get-doc?collectionName=${encodeURIComponent(collectionName)}&docId=${encodeURIComponent(docId)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.data) {
+        return json.data;
+      }
     }
-  } catch (err) {
-    // If client fetch fails or times out, try server proxy
+  } catch (_) {}
+
+  // 2. Check local mirror
+  try {
+    const mirrorRaw = localStorage.getItem(`fs_mirror_${collectionName}_${docId}`);
+    if (mirrorRaw) {
+      return JSON.parse(mirrorRaw);
+    }
+  } catch (_) {}
+
+  // 3. Fallback to client Firestore if quota is not exhausted
+  if (!isFirestoreQuotaExhausted()) {
     try {
-      const res = await fetch(`/api/cricket/get-doc?collectionName=${encodeURIComponent(collectionName)}&docId=${encodeURIComponent(docId)}`);
-      if (res.ok) {
-        const json = await res.json();
-        return json.data || null;
+      const { doc, getDoc } = await import('firebase/firestore');
+      const docRef = doc(db, collectionName, docId);
+      const snap = await Promise.race([
+        getDoc(docRef),
+        new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Firestore read timeout')), 3000))
+      ]);
+      if (snap && snap.exists()) {
+        return snap.data();
       }
     } catch (_) {}
   }
@@ -818,75 +1119,58 @@ export async function safeGetDoc(collectionName: string, docId: string): Promise
 }
 
 /**
- * Safe write wrapper for updateDoc that writes reliably with a timeout guard
+ * Safe write wrapper for updateDoc
  */
 export async function safeUpdateDoc(docRef: any, ...args: any[]) {
-  if (isFirestoreQuotaExhausted()) {
-    const docPath = docRef?.path || '';
-    const docId = docRef?.id || '';
-    const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
-    if (isCricketMatch && docId && args.length === 1 && typeof args[0] === 'object') {
-      await saveMatchViaServerProxy(docId, args[0]).catch(() => {});
-    }
+  if (args.length === 1 && typeof args[0] === 'object') {
+    await safeSetDoc(docRef, args[0], { merge: true });
     return;
   }
-
-  const timeoutMs = 20000;
-  try {
-    const writePromise = (updateDoc as any)(docRef, ...args);
-    await Promise.race([
-      writePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore update timeout')), timeoutMs))
-    ]);
-  } catch (error: any) {
-    if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(360);
-      return;
+  const updateObj: Record<string, any> = {};
+  for (let i = 0; i < args.length; i += 2) {
+    if (typeof args[i] === 'string') {
+      updateObj[args[i]] = args[i + 1];
     }
-
-    const docPath = docRef?.path || '';
-    const docId = docRef?.id || '';
-    const isCricketMatch = docPath.startsWith('cricket_matches') || docPath.includes('cricket_matches');
-
-    if (isCricketMatch && docId && args.length === 1 && typeof args[0] === 'object') {
-      const serverOk = await saveMatchViaServerProxy(docId, args[0]);
-      if (serverOk) return;
-    }
-
-    const errMsg = String(error?.message || error || '').toLowerCase();
-    if (errMsg.includes('not_found') || errMsg.includes('no document to update') || errMsg.includes('not-found')) {
-      try {
-        if (args.length === 1 && typeof args[0] === 'object') {
-          await setDoc(docRef, args[0], { merge: true });
-          return;
-        }
-      } catch (fallbackErr) {
-        console.warn('[safeUpdateDoc fallback note]:', fallbackErr);
-      }
-    }
-    throw error;
   }
+  await safeSetDoc(docRef, updateObj, { merge: true });
 }
 
 /**
- * Safe write wrapper for deleteDoc that writes reliably with a timeout guard
+ * Safe write wrapper for addDoc
+ */
+export async function safeAddDoc(colRef: any, data: any): Promise<{ id: string }> {
+  const newDocRef = doc(colRef);
+  await safeSetDoc(newDocRef, { ...data, id: newDocRef.id });
+  return { id: newDocRef.id };
+}
+
+/**
+ * Safe write wrapper for deleteDoc
  */
 export async function safeDeleteDoc(docRef: any) {
-  if (isFirestoreQuotaExhausted()) {
-    return;
+  const docPath = docRef?.path || '';
+  const pathParts = docPath.split('/').filter(Boolean);
+  const docId = docRef?.id || pathParts[pathParts.length - 1] || '';
+  const collectionName = pathParts.length > 1 ? pathParts.slice(0, -1).join('/') : (pathParts[0] || '');
+
+  if (typeof window !== 'undefined' && collectionName && docId) {
+    try {
+      localStorage.removeItem(`fs_mirror_${collectionName}_${docId}`);
+    } catch {}
   }
-  try {
-    const writePromise = deleteDoc(docRef);
-    await Promise.race([
-      writePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore delete timeout')), 10000))
-    ]);
-  } catch (error: any) {
-    if (isQuotaError(error)) {
-      recordFirestoreQuotaExhaustion(360);
-      return;
-    }
-    console.warn('[safeDeleteDoc note]:', error);
+
+  if (collectionName === 'cricket_matches' && docId && rtdb) {
+    try {
+      rtdbRemove(rtdbRef(rtdb, `cricket_matches/${docId}`)).catch(() => {});
+    } catch {}
+  } else if (collectionName === 'cricket_tournaments' && docId && rtdb) {
+    try {
+      rtdbRemove(rtdbRef(rtdb, `cricket_tournaments/${docId}`)).catch(() => {});
+    } catch {}
+  }
+
+  if (collectionName && docId) {
+    await deleteDocViaServerProxy(collectionName, docId).catch(() => false);
   }
 }
 
