@@ -20,7 +20,12 @@ const fallbackImages: Record<string, string> = {
   'school-erp': 'https://images.unsplash.com/photo-1546410531-bb4caa6b424d?q=80&w=800&auto=format&fit=crop',
   'cricket-scoreboard': 'https://images.unsplash.com/photo-1624526261102-98fdc0c0749e?auto=format&fit=crop&q=80&w=800',
   'cricket-auction': 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&q=80&w=800',
+  'cricket-toss': 'https://images.unsplash.com/photo-1531415080290-bc9854593f6f?auto=format&fit=crop&q=80&w=800',
+  'video-streamer-recorder': 'https://images.unsplash.com/photo-1478737270239-2f04b77fc618?auto=format&fit=crop&q=80&w=800',
+  'id-card-generator': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&q=80&w=800',
+  'photography-portfolio': 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&q=80&w=800',
   'ganpati-mandal': 'https://images.unsplash.com/photo-1567591414240-e248b61c4fc9?auto=format&fit=crop&q=80&w=800',
+  'election-command-center': 'https://images.unsplash.com/photo-1540910419892-4a36d2c3266c?auto=format&fit=crop&q=80&w=800'
 };
 
 export const ProjectCardImage: React.FC<ProjectCardImageProps> = ({ project, className = "", style }) => {
