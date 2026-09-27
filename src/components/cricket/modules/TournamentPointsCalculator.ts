@@ -60,10 +60,6 @@ export interface StandingsTeamStats {
   forRunRate: number;
   againstRunRate: number;
   NRR: number;
-  netRunRate?: number;
-  matchesPlayed?: number;
-  wins?: number;
-  losses?: number;
   streak?: string[]; // e.g. ['W', 'W', 'L', 'W']
   qualificationStatus?: 'qualified' | 'eliminated' | 'contention' | 'top2_secured' | 'champion' | 'runner_up';
   qualificationBadge?: QualificationBadge;
@@ -628,10 +624,6 @@ export function calculateTournamentStandings(
       forRunRate: Number(forRate.toFixed(3)),
       againstRunRate: Number(againstRate.toFixed(3)),
       NRR: isNaN(nrr) ? 0 : nrr,
-      netRunRate: isNaN(nrr) ? 0 : nrr,
-      matchesPlayed: t.played,
-      wins: t.won,
-      losses: t.lost,
       oversFacedDisplay: formatDecimalToOversDisplay(t.oversFacedDecimal),
       oversBowledDisplay: formatDecimalToOversDisplay(t.oversBowledDecimal),
       formGuide: (t.formGuide || []).slice(-5), // last 5 results

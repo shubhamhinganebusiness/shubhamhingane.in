@@ -49,11 +49,11 @@ export const Navbar = () => {
 
   return (
     <>
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-[#f4f5f6]/80 backdrop-blur-md border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
-            <Link to="/" className="flex-shrink-0 flex items-center gap-4 group" aria-label="Go to homepage">
-              <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary group-hover:scale-110 transition-transform bg-white relative">
+      <nav className="fixed top-0 left-0 right-0 w-full max-w-[100vw] z-50 bg-[#f4f5f6]/95 dark:bg-zinc-950/95 backdrop-blur-md border-b border-gray-200 dark:border-zinc-800 shadow-xs">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16 sm:h-20 gap-2">
+            <Link to="/" className="flex-shrink-0 flex items-center gap-2.5 sm:gap-4 group min-w-0" aria-label="Go to homepage">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full overflow-hidden border-2 border-primary group-hover:scale-105 transition-transform bg-white relative shrink-0">
                 {loading && !settings ? (
                   <div className="absolute inset-0 bg-gray-200 dark:bg-gray-800 animate-pulse" />
                 ) : (
@@ -68,7 +68,9 @@ export const Navbar = () => {
                   />
                 )}
               </div>
-              <span className="text-xl font-bold tracking-wider group-hover:text-primary transition-colors">SHUBHAM</span>
+              <span className="text-lg sm:text-xl font-black tracking-wider text-gray-900 dark:text-white group-hover:text-primary transition-colors truncate">
+                SHUBHAM
+              </span>
             </Link>
 
             <div className="hidden md:block">
@@ -86,7 +88,7 @@ export const Navbar = () => {
                           }
                         }}
                         title={`Go to ${link.name} section`}
-                        className="text-gray-600 hover:text-primary transition-colors duration-300 font-medium uppercase text-xs tracking-widest"
+                        className="text-gray-600 dark:text-gray-300 hover:text-primary transition-colors duration-300 font-bold uppercase text-xs tracking-widest"
                       >
                         {link.name}
                       </a>
@@ -101,7 +103,7 @@ export const Navbar = () => {
                         onTouchStart={() => {
                           if (link.href === '/projects') import('../pages/Projects').catch(() => {});
                         }}
-                        className="text-gray-600 hover:text-primary transition-colors duration-300 font-medium uppercase text-xs tracking-widest"
+                        className="text-gray-600 dark:text-gray-300 hover:text-primary transition-colors duration-300 font-bold uppercase text-xs tracking-widest"
                       >
                         {link.name}
                       </Link>
@@ -111,27 +113,27 @@ export const Navbar = () => {
               </div>
             </div>
 
-            <div className="md:hidden flex items-center gap-3">
+            <div className="md:hidden flex items-center gap-2 shrink-0">
               <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="text-gray-600 hover:text-primary transition-colors focus:outline-none p-1.5 cursor-pointer"
+                className="text-gray-700 dark:text-gray-200 hover:text-primary transition-colors focus:outline-none p-2 rounded-xl bg-white/80 dark:bg-zinc-900 border border-gray-200/80 dark:border-zinc-800 cursor-pointer"
                 aria-label="Toggle navigation menu"
               >
-                {isOpen ? <X size={26} /> : <Menu size={26} />}
+                {isOpen ? <X size={24} /> : <Menu size={24} />}
               </button>
             </div>
           </div>
         </div>
 
         {isOpen && (
-          <div className="md:hidden bg-white shadow-xl animate-in fade-in slide-in-from-top-4">
-            <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+          <div className="md:hidden bg-white dark:bg-zinc-950 shadow-xl border-t border-gray-100 dark:border-zinc-800 animate-in fade-in slide-in-from-top-4">
+            <div className="px-3 pt-2 pb-4 grid grid-cols-2 gap-2">
               {navLinks.map((link) => (
                 link.href.startsWith('/#') ? (
                   <a
                     key={link.name}
                     href={link.href}
-                    className="block px-3 py-4 text-base font-medium text-gray-700 hover:text-primary border-b border-gray-100"
+                    className="block px-3 py-3 text-xs font-extrabold uppercase tracking-wider text-center rounded-xl bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-gray-200 hover:text-primary border border-gray-200/60 dark:border-zinc-800"
                     onClick={(e) => {
                       handleNavClick(link.href);
                       if (location.pathname === '/' && link.href.startsWith('/#')) {
@@ -145,7 +147,7 @@ export const Navbar = () => {
                   <Link
                     key={link.name}
                     to={link.href}
-                    className="block px-3 py-4 text-base font-medium text-gray-700 hover:text-primary border-b border-gray-100"
+                    className="block px-3 py-3 text-xs font-extrabold uppercase tracking-wider text-center rounded-xl bg-gray-50 dark:bg-zinc-900 text-gray-700 dark:text-gray-200 hover:text-primary border border-gray-200/60 dark:border-zinc-800"
                     onClick={() => setIsOpen(false)}
                   >
                     {link.name}

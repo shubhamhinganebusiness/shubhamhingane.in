@@ -80,22 +80,21 @@ export type DonorCategory =
 
 export interface DonorProfile {
   id: string;
-  donorId?: string;
-  name?: string;
-  phone?: string;
+  donorId: string;
+  name: string;
+  phone: string;
   email?: string;
   panNumber?: string;
-  address?: string;
-  area?: string;
-  category?: DonorCategory | string;
-  totalDonated?: number;
-  donationsCount?: number;
-  lastDonationDate?: string;
-  receiptNumbers?: string[];
+  address: string;
+  area: string;
+  category: DonorCategory;
+  totalDonated: number;
+  donationsCount: number;
+  lastDonationDate: string;
+  receiptNumbers: string[];
   notes?: string;
-  repeatDonor?: boolean;
-  status?: 'Active' | 'Pending' | 'FollowUp' | string;
-  [key: string]: any;
+  repeatDonor: boolean;
+  status: 'Active' | 'Pending' | 'FollowUp';
 }
 
 export interface PendingVarganiEntry {
@@ -220,7 +219,6 @@ export interface MandalProfile {
   logoUrl?: string;
   slogan?: string;
   regNumber: string;
-  panNumber?: string;
   establishedYear: number;
   presidentName: string;
   vicePresidentName?: string;
@@ -255,7 +253,6 @@ export interface MandalProfile {
     bankName: string;
     branch: string;
   };
-  [key: string]: any;
 }
 
 export interface DigitalPavati {
@@ -290,31 +287,28 @@ export interface DigitalPavati {
 
 export interface VolunteerCollector {
   id: string;
-  name?: string;
-  phone?: string;
-  role?: 'admin' | 'volunteer' | 'treasurer' | 'head_collector' | string;
-  pin?: string;
-  bookNumber?: string;
-  bookPrefix?: string;
-  assignedRangeStart?: number;
-  assignedRangeEnd?: number;
-  allocatedReceiptsRange?: string;
-  currentReceiptIndex?: number;
-  assignedArea?: string;
-  assignedZone?: string;
-  targetAmount?: number;
+  name: string;
+  phone: string;
+  role: 'admin' | 'volunteer' | 'treasurer' | 'head_collector';
+  pin: string;
+  bookNumber: string;
+  bookPrefix: string;
+  assignedRangeStart: number;
+  assignedRangeEnd: number;
+  currentReceiptIndex: number;
+  assignedArea: string;
+  targetAmount: number;
   dailyTargetAmount?: number;
-  status?: 'Active' | 'OnField' | 'Break' | 'Inactive' | string;
-  totalCollected?: number;
-  totalReceiptsCount?: number;
-  cashCollected?: number;
-  digitalCollected?: number;
-  cashHandedOver?: number;
-  cashInHand?: number;
-  deviceId?: string;
-  lastActiveAt?: string;
+  status: 'Active' | 'OnField' | 'Break' | 'Inactive';
+  totalCollected: number;
+  totalReceiptsCount: number;
+  cashCollected: number;
+  digitalCollected: number;
+  cashHandedOver: number;
+  cashInHand: number;
+  deviceId: string;
+  lastActiveAt: string;
   notes?: string;
-  [key: string]: any;
 }
 
 export interface CashHandoverRecord {
@@ -437,33 +431,27 @@ export interface MandalEvent {
 
 export interface MannatWish {
   id: string;
-  devoteeName?: string;
-  city?: string;
-  wishText?: string;
-  prayer?: string;
-  likes?: number;
-  date?: string;
-  flowerCount?: number;
-  isApproved?: boolean;
-  isFeatured?: boolean;
-  answeredStatus?: 'Awaiting' | 'Fulfilled (नवस पूर्ण)' | string;
-  [key: string]: any;
+  devoteeName: string;
+  city: string;
+  wishText: string;
+  date: string;
+  flowerCount: number;
+  isApproved: boolean;
+  isFeatured: boolean;
+  answeredStatus?: 'Awaiting' | 'Fulfilled (नवस पूर्ण)';
 }
 
 export type MannatPrayer = MannatWish;
 
 export interface GalleryMedia {
   id: string;
-  titleMr?: string;
-  titleEn?: string;
-  title?: string;
-  category?: 'Murti' | 'Decoration' | 'Aarti' | 'VIP Visits' | 'Cultural' | 'Visarjan' | string;
-  mediaUrl?: string;
-  url?: string;
-  thumbnail?: string;
-  year?: number;
-  caption?: string;
-  [key: string]: any;
+  titleMr: string;
+  titleEn: string;
+  category: 'Murti' | 'Decoration' | 'Aarti' | 'VIP Visits' | 'Cultural' | 'Visarjan';
+  mediaUrl: string;
+  thumbnail: string;
+  year: number;
+  caption: string;
 }
 
 export type GalleryItem = GalleryMedia;
@@ -569,7 +557,6 @@ export interface MandalUserSession {
   mandalCode: string;
   mandalNameMr: string;
   mandalNameEn: string;
-  mandalName?: string;
   role: 'admin' | 'treasurer' | 'karyakarta' | 'devotee';
   userName: string;
   userPhone?: string;
@@ -577,7 +564,6 @@ export interface MandalUserSession {
   bookPrefix?: string;
   token: string;
   loginTime: string;
-  [key: string]: any;
 }
 
 export interface MandalDataset {

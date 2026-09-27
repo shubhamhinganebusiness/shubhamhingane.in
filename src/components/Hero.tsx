@@ -78,7 +78,7 @@ export const Hero = () => {
   };
 
   return (
-    <section id="home" className="relative min-h-[calc(100vh-5rem)] flex flex-col justify-center py-4 lg:py-6 px-4 md:px-8 max-w-7xl mx-auto select-none">
+    <section id="home" className="relative min-h-[calc(100vh-5rem)] flex flex-col justify-center py-4 lg:py-6 px-3.5 sm:px-6 md:px-8 max-w-7xl w-full mx-auto select-none overflow-x-clip">
       {/* Kinetic Ambient Aurora Canvas (Smooth pointer reaction & particles) */}
       <KineticAuroraCanvas />
 
@@ -120,9 +120,9 @@ export const Hero = () => {
         className="absolute bottom-10 left-[15%] w-[300px] h-[300px] bg-blue-500/10 dark:bg-blue-500/5 rounded-full blur-[90px] -z-20 pointer-events-none"
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 xl:gap-10 items-center w-full relative z-10">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 xl:gap-10 items-center w-full relative z-10 min-w-0">
         <motion.div 
-          className="order-2 lg:order-1 flex flex-col items-start w-full"
+          className="order-2 lg:order-1 flex flex-col items-start w-full min-w-0"
           initial={{ opacity: 0, x: -40 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
@@ -251,17 +251,17 @@ export const Hero = () => {
           )}
 
           {/* Action Buttons Hub with primary visual guides & interactive tools */}
-          <div className="flex flex-wrap items-center gap-2.5 mb-3 w-full sm:w-auto">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-2.5 mb-3 w-full">
             <motion.button 
               id="hero-hire-me"
               onClick={() => window.dispatchEvent(new CustomEvent('open-hire-modal'))}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-5 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-lg shadow-primary/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center"
+              className="relative overflow-hidden px-3 sm:px-5 py-2.5 sm:py-3 bg-primary text-white rounded-xl font-bold uppercase tracking-wider text-[11px] sm:text-xs shadow-lg shadow-primary/25 hover:brightness-110 transition-all duration-300 flex items-center gap-1.5 sm:gap-2 group cursor-pointer w-full sm:w-auto justify-center"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <span className="relative z-10 font-black tracking-wider">{t.nav.hireMe}</span>
-              <ArrowRight className="w-3.5 h-3.5 text-white group-hover:translate-x-1 transition-transform relative z-10" />
+              <span className="relative z-10 font-black tracking-wider truncate">{t.nav.hireMe}</span>
+              <ArrowRight className="w-3.5 h-3.5 text-white group-hover:translate-x-1 transition-transform relative z-10 shrink-0" />
             </motion.button>
 
             {/* Gully Score Tournament Manager Login */}
@@ -270,15 +270,15 @@ export const Hero = () => {
               onClick={() => navigate('/cricket-login')}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-4 py-2.5 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-md shadow-emerald-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-emerald-400/40"
+              className="relative overflow-hidden px-3 sm:px-4 py-2.5 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold uppercase tracking-wider text-[11px] sm:text-xs shadow-md shadow-emerald-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-1.5 sm:gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-emerald-400/40"
               title="Gully Scoreboard & Tournament Manager Login"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <Trophy size={14} className="text-amber-300 group-hover:scale-110 transition-transform relative z-10" />
-              <span className="relative z-10 font-black">
-                {language === 'mr' ? 'गुल्ली स्कोअर लॉगिन' : language === 'hi' ? 'गल्ली स्कोर लॉगिन' : 'Gully Score Login'}
+              <Trophy size={13} className="text-amber-300 group-hover:scale-110 transition-transform relative z-10 shrink-0" />
+              <span className="relative z-10 font-black truncate">
+                {language === 'mr' ? 'गुल्ली स्कोअर' : language === 'hi' ? 'गल्ली स्कोर' : 'Gully Score'}
               </span>
-              <LogIn size={12} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
+              <LogIn size={11} className="text-emerald-100 group-hover:translate-x-0.5 transition-transform relative z-10 shrink-0" />
             </motion.button>
 
             {/* Dairy ERP Portal Login */}
@@ -287,15 +287,15 @@ export const Hero = () => {
               onClick={() => navigate('/dairy-login')}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-4 py-2.5 sm:py-3 bg-gradient-to-r from-sky-600 via-blue-600 to-sky-700 hover:from-sky-500 hover:to-blue-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-md shadow-sky-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-sky-400/40"
+              className="relative overflow-hidden px-3 sm:px-4 py-2.5 sm:py-3 bg-gradient-to-r from-sky-600 via-blue-600 to-sky-700 hover:from-sky-500 hover:to-blue-500 text-white rounded-xl font-bold uppercase tracking-wider text-[11px] sm:text-xs shadow-md shadow-sky-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-1.5 sm:gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-sky-400/40"
               title="Dairy & Agro ERP Platform Login"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <Milk size={14} className="text-sky-200 group-hover:scale-110 transition-transform relative z-10" />
-              <span className="relative z-10 font-black">
-                {language === 'mr' ? 'डेअरी ईआरपी लॉगिन' : language === 'hi' ? 'डेयरी ईआरपी लॉगिन' : 'Dairy ERP Login'}
+              <Milk size={13} className="text-sky-200 group-hover:scale-110 transition-transform relative z-10 shrink-0" />
+              <span className="relative z-10 font-black truncate">
+                {language === 'mr' ? 'डेअरी ईआरपी' : language === 'hi' ? 'डेयरी ईआरपी' : 'Dairy ERP'}
               </span>
-              <LogIn size={12} className="text-sky-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
+              <LogIn size={11} className="text-sky-100 group-hover:translate-x-0.5 transition-transform relative z-10 shrink-0" />
             </motion.button>
 
             {/* Instant ID Card Builder Login */}
@@ -304,15 +304,15 @@ export const Hero = () => {
               onClick={() => navigate('/login', { state: { from: { pathname: '/live/instant-id-builder' } } })}
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className="relative overflow-hidden px-4 py-2.5 sm:py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-bold uppercase tracking-wider text-xs shadow-md shadow-indigo-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-indigo-400/40"
+              className="relative overflow-hidden px-3 sm:px-4 py-2.5 sm:py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-bold uppercase tracking-wider text-[11px] sm:text-xs shadow-md shadow-indigo-600/25 hover:brightness-110 transition-all duration-300 flex items-center gap-1.5 sm:gap-2 group cursor-pointer w-full sm:w-auto justify-center border border-indigo-400/40"
               title="Instant ID Card Builder Login"
             >
               <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-white/0 via-white/25 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out" />
-              <CreditCard size={14} className="text-purple-200 group-hover:scale-110 transition-transform relative z-10" />
-              <span className="relative z-10 font-black">
-                {language === 'mr' ? 'आयडी कार्ड लॉगिन' : language === 'hi' ? 'आईडी कार्ड लॉगिन' : 'ID Card Login'}
+              <CreditCard size={13} className="text-purple-200 group-hover:scale-110 transition-transform relative z-10 shrink-0" />
+              <span className="relative z-10 font-black truncate">
+                {language === 'mr' ? 'आयडी कार्ड' : language === 'hi' ? 'आईडी कार्ड' : 'ID Card Login'}
               </span>
-              <LogIn size={12} className="text-indigo-100 group-hover:translate-x-0.5 transition-transform relative z-10" />
+              <LogIn size={11} className="text-indigo-100 group-hover:translate-x-0.5 transition-transform relative z-10 shrink-0" />
             </motion.button>
           </div>
 
@@ -386,7 +386,7 @@ export const Hero = () => {
 
         {/* Interactive Media Presentation Column with Mini-App Dock */}
         <motion.div 
-          className="order-1 lg:order-2 relative flex flex-col items-center justify-center py-4 lg:py-0 w-full"
+          className="order-1 lg:order-2 relative flex flex-col items-center justify-center py-4 lg:py-0 w-full min-w-0"
           initial={{ opacity: 0, scale: 0.92, rotate: 1 }}
           animate={{ opacity: 1, scale: 1, rotate: 0 }}
           transition={{ duration: 0.8, delay: 0.15, ease: "easeOut" }}

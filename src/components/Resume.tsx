@@ -242,12 +242,12 @@ export const Resume = () => {
         <span className="uppercase tracking-[2px] text-primary font-bold block mb-4 italic">{subtitle}</span>
         <h2 className="text-4xl md:text-6xl font-extrabold mb-12 text-main-text">{title}</h2>
         
-        <div className="flex justify-center gap-4 mb-16 overflow-x-auto pb-4 px-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap justify-center gap-2.5 sm:gap-4 mb-12 sm:mb-16 px-1">
           {tabs.map((tab) => (
             <button 
               key={tab.id} 
               onClick={() => setActiveTab(tab.id)}
-              className={`px-6 md:px-12 py-5 rounded-xl font-bold uppercase tracking-widest text-sm whitespace-nowrap transition-all duration-300 ${activeTab === tab.id ? 'card-shadow bg-surface text-primary' : 'text-gray-500 dark:text-gray-400 hover:text-primary hover:card-shadow bg-transparent'}`}
+              className={`px-3 sm:px-6 md:px-10 py-3.5 sm:py-5 rounded-xl font-bold uppercase tracking-wider sm:tracking-widest text-xs sm:text-sm text-center transition-all duration-300 cursor-pointer ${activeTab === tab.id ? 'card-shadow bg-surface text-primary' : 'text-gray-500 dark:text-gray-400 hover:text-primary hover:card-shadow bg-surface/40 sm:bg-transparent'}`}
             >
               {tab.label}
             </button>

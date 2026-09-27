@@ -334,61 +334,61 @@ export const HeroMiniAppDock: React.FC<HeroMiniAppDockProps> = ({
       </div>
 
       {/* Interactive Micro-Dock Switcher Bar */}
-      <div className="mt-3 p-1.5 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md rounded-2xl border border-gray-200/80 dark:border-zinc-800 shadow-lg flex items-center gap-1">
+      <div className="mt-3 p-1.5 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md rounded-2xl border border-gray-200/80 dark:border-zinc-800 shadow-lg grid grid-cols-4 sm:flex items-center gap-1 w-full sm:w-auto max-w-full">
         <button
           type="button"
           onClick={() => onTabChange('profile')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+          className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
             activeTab === 'profile'
               ? 'bg-primary text-white shadow-sm font-black'
               : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
           }`}
           title="Shubham Hingane Profile"
         >
-          <User size={13} />
-          <span className="text-[10.5px]">Profile</span>
+          <User size={12} className="shrink-0" />
+          <span className="text-[10px] sm:text-[10.5px] truncate">Profile</span>
         </button>
 
         <button
           type="button"
           onClick={() => onTabChange('cricket')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+          className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
             activeTab === 'cricket'
               ? 'bg-emerald-600 text-white shadow-sm font-black'
               : 'text-slate-600 dark:text-zinc-400 hover:text-emerald-500'
           }`}
           title="Live GullyScore Tournament Engine"
         >
-          <Trophy size={13} />
-          <span className="text-[10.5px]">GullyScore</span>
+          <Trophy size={12} className="shrink-0" />
+          <span className="text-[10px] sm:text-[10.5px] truncate">GullyScore</span>
         </button>
 
         <button
           type="button"
           onClick={() => onTabChange('dairy')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+          className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
             activeTab === 'dairy'
               ? 'bg-sky-600 text-white shadow-sm font-black'
               : 'text-slate-600 dark:text-zinc-400 hover:text-sky-500'
           }`}
           title="Dairy & Agro ERP Platform"
         >
-          <Cpu size={13} />
-          <span className="text-[10.5px]">Dairy ERP</span>
+          <Cpu size={12} className="shrink-0" />
+          <span className="text-[10px] sm:text-[10.5px] truncate">Dairy ERP</span>
         </button>
 
         <button
           type="button"
           onClick={() => onTabChange('idcard')}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center gap-1.5 ${
+          className={`px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-none flex items-center justify-center gap-1 sm:gap-1.5 min-w-0 ${
             activeTab === 'idcard'
               ? 'bg-indigo-600 text-white shadow-sm font-black'
               : 'text-slate-600 dark:text-zinc-400 hover:text-indigo-500'
           }`}
           title="Instant ID Card Builder"
         >
-          <Smartphone size={13} />
-          <span className="text-[10.5px]">ID Cards</span>
+          <Smartphone size={12} className="shrink-0" />
+          <span className="text-[10px] sm:text-[10.5px] truncate">ID Cards</span>
         </button>
       </div>
     </div>

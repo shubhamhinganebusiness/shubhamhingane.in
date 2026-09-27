@@ -69,7 +69,7 @@ export const HeroTrustMarquee: React.FC = () => {
   const fullList = [...marqueeItems, ...marqueeItems];
 
   return (
-    <div className="w-full mt-6 pt-4 pb-2 border-t border-gray-200/50 dark:border-zinc-800/80 overflow-hidden relative group select-none">
+    <div className="w-full max-w-full min-w-0 mt-6 pt-4 pb-2 border-t border-gray-200/50 dark:border-zinc-800/80 overflow-hidden overflow-x-clip relative group select-none">
       {/* Left and Right fade gradients for seamless look */}
       <div className="absolute left-0 inset-y-0 w-12 bg-gradient-to-r from-white dark:from-zinc-950 to-transparent z-10 pointer-events-none" />
       <div className="absolute right-0 inset-y-0 w-12 bg-gradient-to-l from-white dark:from-zinc-950 to-transparent z-10 pointer-events-none" />

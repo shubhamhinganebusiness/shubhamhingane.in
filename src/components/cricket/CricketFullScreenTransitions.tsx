@@ -112,9 +112,6 @@ export interface MatchState {
   pitchCondition?: string;
   weatherCondition?: string;
   overlayConfig?: any;
-  ground?: string;
-  venue?: string;
-  [key: string]: any;
 }
 
 interface Props {

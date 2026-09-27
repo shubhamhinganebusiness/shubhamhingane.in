@@ -3751,8 +3751,8 @@ export const SpectatorScoreboardSection = ({
   }
 
   return (
-    <section id="spectator-hub" className="min-h-screen py-24 bg-slate-50 dark:bg-slate-950 border-t border-b border-slate-100 dark:border-slate-900 transition-colors duration-200">
-      <div className="max-w-7xl mx-auto px-4 md:px-8">
+    <section id="spectator-hub" className="min-h-screen py-16 sm:py-24 bg-slate-50 dark:bg-slate-950 border-t border-b border-slate-100 dark:border-slate-900 transition-colors duration-200 overflow-x-clip w-full max-w-[100vw]">
+      <div className="max-w-7xl mx-auto px-3.5 sm:px-6 md:px-8">
         
         {/* Section Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 mb-12">
@@ -4156,15 +4156,14 @@ export const SpectatorScoreboardSection = ({
                                           const raw = (currentInnings.commentaryList || [])
                                             .filter(c => {
                                               if (!c || !c.overBall || c.overBall === '0.0') return false;
-                                              const anyC = c as any;
                                               if (
-                                                anyC.type === 'milestone' || 
-                                                anyC.type === 'announcement' || 
-                                                anyC.type === 'break' || 
-                                                anyC.type === 'info' || 
-                                                anyC.specialEvent === 'retire_hurt' ||
-                                                anyC.announcementType === 'new_batsman' ||
-                                                anyC.announcementType === 'new_bowler'
+                                                c.type === 'milestone' || 
+                                                c.type === 'announcement' || 
+                                                c.type === 'break' || 
+                                                c.type === 'info' || 
+                                                c.specialEvent === 'retire_hurt' ||
+                                                c.announcementType === 'new_batsman' ||
+                                                c.announcementType === 'new_bowler'
                                               ) return false;
                                               const desc = (c.description || '').toLowerCase();
                                               if (
@@ -4736,37 +4735,35 @@ export const SpectatorScoreboardSection = ({
           <div className="space-y-8 animate-fade-in">
             
             {/* Back Button & Navigation Action */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-between gap-2 sm:gap-3">
+              <div className="col-span-2 sm:col-span-1 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
                 <button
                   onClick={() => selectMatch('')}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-200 text-slate-800 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer border-none shadow-sm active:scale-95 hover:scale-[1.02]"
+                  className="px-3 sm:px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-200 text-slate-800 rounded-2xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer border-none shadow-sm active:scale-95"
                 >
-                  ← Change Match (Home Scoreboard)
+                  ← Change Match
                 </button>
                 <button
                   onClick={() => navigate(`/live/cricket-scoreboard?matchId=${selectedMatch.id}`)}
-                  className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-md shadow-emerald-600/20 active:scale-95"
+                  className="px-3 sm:px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-md shadow-emerald-600/20 active:scale-95"
                   title="Open Cricket Scoreboard Management Console"
                 >
-                  <ShieldCheck size={14} className="text-amber-300" />
-                  <span>Scoreboard Management</span>
+                  <ShieldCheck size={13} className="text-amber-300 shrink-0" />
+                  <span className="truncate">Manage Score</span>
                 </button>
                 <button
                   onClick={() => navigate('/')}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-400 text-slate-600 rounded-2xl text-[11px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm active:scale-95"
+                  className="px-3 sm:px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-slate-400 text-slate-600 rounded-2xl text-[10px] sm:text-[11px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm active:scale-95"
                 >
                   🏠 Home
                 </button>
-              </div>
-              <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
                     const refreshed = getLocalMatchById(selectedMatch.id) || getActiveMatch() || getAnyActiveOrRecentMatch();
                     if (refreshed) setSelectedMatch(refreshed);
                     setLastRefreshed(new Date());
                   }}
-                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-[11px] font-bold tracking-wider transition-all flex items-center gap-1.5 cursor-pointer border-none shadow-sm"
+                  className="px-3 sm:px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-2xl text-[10px] sm:text-[11px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer border-none shadow-sm"
                   title="Reload match state"
                 >
                   <RefreshCw size={13} />
@@ -6100,7 +6097,7 @@ export const SpectatorScoreboardSection = ({
                             </span>
                             <button
                               type="button"
-                              onClick={() => setActiveTab('sponsors-prizes')}
+                              onClick={() => setActiveTab('prizes')}
                               className="text-[8.5px] font-bold text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-0.5"
                             >
                               Full Prize Room →
@@ -6202,7 +6199,7 @@ export const SpectatorScoreboardSection = ({
                           );
                         }
                         return commentary.slice(0, 15).map((comm) => {
-                          const isSquadAnnouncement = (comm as any).announcementType === 'squad_announcement' || 
+                          const isSquadAnnouncement = comm.announcementType === 'squad_announcement' || 
                             (comm.overBall === '0.0' && (comm.description || '').toLowerCase().includes('squad'));
                           const isWkt = comm.type === 'wicket';
                           const isBnd = comm.type === 'boundary';
@@ -6444,8 +6441,8 @@ export const SpectatorScoreboardSection = ({
             {/* Selector Nav Tabs for Details Card */}
             <div id="details-nav-tabs" className="space-y-6">
                 
-                {/* Visual tabs selectors */}
-                <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/60 dark:bg-slate-900 rounded-2xl w-full overflow-x-auto scrollbar-none md:flex-wrap">
+                {/* Visual tabs selectors (all visible on mobile without left/right scrolling) */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap items-center gap-1.5 p-1.5 bg-slate-200/60 dark:bg-slate-900 rounded-2xl w-full">
                   {[
                     { id: 'arena', label: '🏟️ Live Arena' },
                     { id: 'scorecard', label: '📊 Full Scorecard' },
@@ -6458,7 +6455,7 @@ export const SpectatorScoreboardSection = ({
                     <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id as any)}
-                      className={`shrink-0 md:flex-1 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all border-none cursor-pointer ${
+                      className={`md:flex-1 px-2.5 sm:px-3.5 py-2 sm:py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-wider text-center transition-all border-none cursor-pointer truncate ${
                         activeTab === tab.id 
                           ? 'bg-white dark:bg-slate-800 text-emerald-600 dark:text-white shadow-sm font-extrabold' 
                           : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white bg-transparent'
@@ -8192,7 +8189,7 @@ export const SpectatorScoreboardSection = ({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => setActiveTab('sponsors-prizes')}
+                                onClick={() => setActiveTab('prizes')}
                                 className="text-[9px] font-black uppercase text-amber-500 hover:text-amber-400 bg-transparent border-none cursor-pointer flex items-center gap-1"
                               >
                                 <span>Trophy Room Page</span>
@@ -8331,7 +8328,7 @@ export const SpectatorScoreboardSection = ({
                           }
 
                           return list.map((comm) => {
-                            const isSquadAnnouncement = (comm as any).announcementType === 'squad_announcement' || 
+                            const isSquadAnnouncement = comm.announcementType === 'squad_announcement' || 
                               (comm.overBall === '0.0' && (comm.description || '').toLowerCase().includes('squad'));
                             const isWkt = comm.type === 'wicket';
                             const isBnd = comm.type === 'boundary';
@@ -9813,17 +9810,19 @@ export const SpectatorScoreboardSection = ({
           />
         )}
 
-        {/* Floating Quick Action Button: Scoreboard Management (Always visible on screen) */}
-        <div className="fixed bottom-5 right-5 z-40 print:hidden">
-          <button
-            onClick={() => navigate(selectedMatch ? `/live/cricket-scoreboard?matchId=${selectedMatch.id}` : '/live/cricket-scoreboard')}
-            className="px-4 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-2xl flex items-center gap-2 cursor-pointer border-2 border-emerald-400/40 transition-all hover:scale-105 active:scale-95 group"
-            title="Open Cricket Scoreboard Management Console"
-          >
-            <ShieldCheck size={16} className="text-amber-300 group-hover:rotate-12 transition-transform" />
-            <span>Scoreboard Management</span>
-          </button>
-        </div>
+        {/* Floating Quick Action Button: Scoreboard Management (Visible on standalone spectator view) */}
+        {!homepageMode && (
+          <div className="fixed bottom-5 right-5 z-40 print:hidden">
+            <button
+              onClick={() => navigate(selectedMatch ? `/live/cricket-scoreboard?matchId=${selectedMatch.id}` : '/live/cricket-scoreboard')}
+              className="px-4 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-2xl flex items-center gap-2 cursor-pointer border-2 border-emerald-400/40 transition-all hover:scale-105 active:scale-95 group"
+              title="Open Cricket Scoreboard Management Console"
+            >
+              <ShieldCheck size={16} className="text-amber-300 group-hover:rotate-12 transition-transform" />
+              <span>Scoreboard Management</span>
+            </button>
+          </div>
+        )}
 
       </div>
     </section>

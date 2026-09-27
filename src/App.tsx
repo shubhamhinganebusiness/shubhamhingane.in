@@ -347,7 +347,7 @@ export default function App() {
       <CMSProvider>
         <Router>
           <ScrollToTop />
-          <div className="min-h-screen flex flex-col">
+          <div className="min-h-screen flex flex-col w-full max-w-[100vw] overflow-x-clip">
             <Suspense fallback={null}>
               <LiveMatchGlobalBanner />
             </Suspense>
@@ -371,7 +371,7 @@ function AppContent() {
   const isHomepage = location.pathname === '/';
   
   return (
-    <div className={`flex-1 ${showNav ? 'pt-20' : ''}`}>
+    <div className={`flex-1 w-full max-w-[100vw] overflow-x-clip ${showNav ? 'pt-16 sm:pt-20' : ''}`}>
       <Suspense fallback={
         <div className="min-h-screen flex items-center justify-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>

@@ -200,14 +200,14 @@ export const Courses = () => {
       </div>
 
       {/* Category Tabs */}
-      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-surface/80 dark:bg-zinc-900/80 border border-gray-200/70 dark:border-zinc-800/80 backdrop-blur-md mb-12 overflow-x-auto custom-scrollbar w-fit max-w-full">
+      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-surface/80 dark:bg-zinc-900/80 border border-gray-200/70 dark:border-zinc-800/80 backdrop-blur-md mb-12 w-full sm:w-fit max-w-full">
         {categories.map((cat) => {
           const isActive = activeCategory === cat.id;
           return (
             <button
               key={cat.id}
               onClick={() => setActiveCategory(cat.id as CourseCategory)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all duration-300 whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-[11px] sm:text-xs transition-all duration-300 cursor-pointer ${
                 isActive
                   ? 'bg-primary text-white shadow-md shadow-primary/20 scale-[1.02]'
                   : 'text-gray-600 dark:text-gray-400 hover:text-primary dark:hover:text-white hover:bg-gray-100 dark:hover:bg-zinc-800/60'

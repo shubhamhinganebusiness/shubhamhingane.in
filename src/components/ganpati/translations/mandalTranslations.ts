@@ -4,20 +4,15 @@ export const mandalTranslations = {
     mandalSubtitle: 'पारंपरिक हिशोब वहीचे आधुनिक डिजिटल रूप',
     nav: {
       overview: 'मंडळ माहिती',
-      mandalProfile: 'मंडळ माहिती',
       pavatiBook: 'डिजिटल पावती पुस्तक',
       expenses: 'खर्च नोंदवही',
       members: 'सभासद व स्वयंसेवक',
-      membership: 'सभासद व स्वयंसेवक',
       aartiSchedule: 'आरती व पूजा बुकिंग',
-      events: 'आरती व पूजा बुकिंग',
       devoteeHub: 'भाविक दर्शन व नवस',
-      devoteeCorner: 'भाविक दर्शन व नवस',
       inventory: 'साठा व्यवस्थापन',
       reports: 'आर्थिक अहवाल व ऑडिट',
       liveStream: 'थेट दर्शन',
-      map: 'पंडाल नकाशा',
-      pandalMap: 'पंडाल नकाशा'
+      map: 'पंडाल नकाशा'
     },
     roles: {
       admin: '👑 मुख्य विश्वस्त / अध्यक्ष',
@@ -80,7 +75,6 @@ export const mandalTranslations = {
     events: {
       title: 'दहा दिवसीय उत्सव वेळापत्रक व महाआरती',
       dailyAarti: 'दैनंदिन आरती वेळापत्रक',
-      dailyAartiTitle: 'दैनंदिन आरती वेळापत्रक',
       upcomingFestivals: 'आगामी उत्सव व कार्यक्रम',
       bookSlot: 'आरती यजमानपद / पूजा स्लॉट बुक करा',
       devoteeName: 'यजमानाचे नाव',
@@ -96,9 +90,7 @@ export const mandalTranslations = {
       flowerShower: 'पुष्पवृष्टी करा 🌸',
       liveDarshan: 'थेट थेट मूर्ती दर्शन',
       virtualThali: 'व्हर्च्युअल आरती ओवाळा 🪔',
-      feedbackTitle: 'भाविक अभिप्राय व सूचना',
-      gallery: 'उत्सव फोटो व व्हिडीओ गॅलरी',
-      postPrayer: 'प्रार्थना अर्पण करा'
+      feedbackTitle: 'भाविक अभिप्राय व सूचना'
     },
     inventory: {
       title: 'प्रसाद व साहित्य साठा नियंत्रण',
@@ -129,20 +121,15 @@ export const mandalTranslations = {
     mandalSubtitle: 'पारंपरिक रजिस्टर का आधुनिक डिजिटल रूप',
     nav: {
       overview: 'मंडल विवरण',
-      mandalProfile: 'मंडल विवरण',
       pavatiBook: 'डिजिटल पावती बुक',
       expenses: 'व्यय लेजर',
       members: 'सदस्य व स्वयंसेवक',
-      membership: 'सदस्य व स्वयंसेवक',
       aartiSchedule: 'आरती व पूजा बुकिंग',
-      events: 'आरती व पूजा बुकिंग',
       devoteeHub: 'भक्त दर्शन व मन्नत',
-      devoteeCorner: 'भक्त दर्शन व मन्नत',
       inventory: 'सामग्री स्टॉक',
       reports: 'वित्तीय रिपोर्ट व ऑडिट',
       liveStream: 'लाइव दर्शन',
-      map: 'पंडाल नक्शा',
-      pandalMap: 'पंडाल नक्शा'
+      map: 'पंडाल नक्शा'
     },
     roles: {
       admin: '👑 मुख्य ट्रस्टी / अध्यक्ष',
@@ -205,7 +192,6 @@ export const mandalTranslations = {
     events: {
       title: '१० दिवसीय उत्सव समय-सारिणी व महाआरती',
       dailyAarti: 'दैनिक आरती समय',
-      dailyAartiTitle: 'दैनिक आरती समय',
       upcomingFestivals: 'आगामी उत्सव व कार्यक्रम',
       bookSlot: 'आरती यजमान / पूजा स्लॉट बुक करें',
       devoteeName: 'यजमान का नाम',
@@ -221,9 +207,7 @@ export const mandalTranslations = {
       flowerShower: 'पुष्प वर्षा करें 🌸',
       liveDarshan: 'लाइव मूर्ति दर्शन',
       virtualThali: 'वर्चुअल आरती उतारें 🪔',
-      feedbackTitle: 'भक्त सुझाव व समीक्षा',
-      gallery: 'उत्सव फोटो व वीडियो गैलरी',
-      postPrayer: 'प्रार्थना अर्पित करें'
+      feedbackTitle: 'भक्त सुझाव व समीक्षा'
     },
     inventory: {
       title: 'प्रसाद एवं पूजा सामग्री स्टॉक',
@@ -254,20 +238,15 @@ export const mandalTranslations = {
     mandalSubtitle: 'Modernizing the traditional trust ledger with cloud precision',
     nav: {
       overview: 'Mandal Profile',
-      mandalProfile: 'Mandal Profile',
       pavatiBook: 'Digital Pavati Ledger',
       expenses: 'Expense Register',
       members: 'Members & Volunteers',
-      membership: 'Members & Volunteers',
       aartiSchedule: 'Aarti & Puja Booking',
-      events: 'Aarti & Puja Booking',
       devoteeHub: 'Devotee Darshan & Wishes',
-      devoteeCorner: 'Devotee Darshan & Wishes',
       inventory: 'Stock Management',
       reports: 'Financial Audit & Reports',
       liveStream: 'Live Darshan',
-      map: 'Pandal Map',
-      pandalMap: 'Pandal Map'
+      map: 'Pandal Map'
     },
     roles: {
       admin: '👑 Trustee / President',
@@ -330,7 +309,6 @@ export const mandalTranslations = {
     events: {
       title: '10-Day Festival Timeline & Aarti Schedule',
       dailyAarti: 'Daily Aarti Schedule',
-      dailyAartiTitle: 'Daily Aarti Schedule',
       upcomingFestivals: 'Upcoming Festivals & Programs',
       bookSlot: 'Book Aarti Yajman / Puja Slot',
       devoteeName: 'Yajman Full Name',
@@ -346,9 +324,7 @@ export const mandalTranslations = {
       flowerShower: 'Shower Flowers 🌸',
       liveDarshan: 'Live Murti Stream',
       virtualThali: 'Wave Virtual Aarti 🪔',
-      feedbackTitle: 'Devotee Feedback & Reviews',
-      gallery: 'Festival Photo & Video Gallery',
-      postPrayer: 'Submit Your Prayer'
+      feedbackTitle: 'Devotee Feedback & Reviews'
     },
     inventory: {
       title: 'Prasad & Pandal Asset Inventory',

@@ -36,7 +36,7 @@ import {
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db, safeSetDoc, safeGetDoc, isFirestoreQuotaExhausted, syncOneHalfTournamentToRealtimeDB, subscribeToRealtimeDBOneHalfTournament } from '../../lib/firebase';
 import { TournamentVenueScheduler, TeamWithRoster } from './TournamentVenueScheduler';
-import { TournamentStatsAndLeaderboards } from './TournamentStatsAndLeaderboards';
+import { TournamentStatsAndLeaderboards, StatsLeaderboardSubTab } from './TournamentStatsAndLeaderboards';
 import { PointsTableModule } from './PointsTableModule';
 import { MatchBannerModal } from './MatchBannerModal';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
@@ -485,6 +485,8 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   // Standings Subtab Mode
   const [standingsTabMode, setStandingsTabMode] = useState<'tables' | 'sandbox'>('tables');
   const [standingsGroupFilter, setStandingsGroupFilter] = useState<'all' | '1' | '2' | '3' | '4'>('all');
+  const [statsSubTab, setStatsSubTab] = useState<StatsLeaderboardSubTab>('batting');
+  const [statsGroupFilter, setStatsGroupFilter] = useState<'all' | '1' | '2' | '3' | '4'>('all');
 
   const [showAutoScheduleModal, setShowAutoScheduleModal] = useState(false);
   const [showTimeSlotEditModal, setShowTimeSlotEditModal] = useState(false);
@@ -1311,26 +1313,37 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
 
   // Mapped Data for Stats & Leaderboards
   const mappedVenueTeams: TeamWithRoster[] = useMemo(() => {
-    return tournament.teams.map((t, idx) => ({
-      id: t.id,
-      name: t.name,
-      captain: t.captain || 'Captain',
-      contactEmail: t.captainPhone || '',
-      players: (t.squad || []).map(p => ({
-        name: p.name,
-        age: 24,
-        role: p.role,
-        battingStyle: 'Right Hand' as const,
-        bowlingStyle: 'Right-Arm Fast' as const,
+    return tournament.teams.map((t, idx) => {
+      const effectiveSquad =
+        t.squad && t.squad.length > 0
+          ? t.squad
+          : generateDefault15Squad(t.name, t.captain || `${t.name.split(' ')[0]} Skipper`);
+      return {
+        id: t.id,
+        name: t.name,
+        captain: t.captain || 'Captain',
+        contactEmail: t.captainPhone || '',
+        players: effectiveSquad.map(p => ({
+          name: p.name,
+          age: 24,
+          role: p.role,
+          battingStyle: 'Right Hand' as const,
+          bowlingStyle: 'Right-Arm Fast' as const,
+          regFeePaid: true,
+          regFeeAmount: 0
+        })),
+        regStatus: 'Approved' as const,
         regFeePaid: true,
-        regFeeAmount: 0
-      })),
-      regStatus: 'Approved' as const,
-      regFeePaid: true,
-      seed: idx + 1,
-      group: `Group ${t.group}`
-    }));
+        seed: idx + 1,
+        group: `Group ${t.group}`
+      };
+    });
   }, [tournament.teams]);
+
+  const filteredStatsVenueTeams: TeamWithRoster[] = useMemo(() => {
+    if (statsGroupFilter === 'all') return mappedVenueTeams;
+    return mappedVenueTeams.filter(t => t.group === `Group ${statsGroupFilter}`);
+  }, [mappedVenueTeams, statsGroupFilter]);
 
   const mappedStatsMatches = useMemo(() => {
     return tournament.matches.map(m => ({
@@ -2062,15 +2075,30 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setMainTab('stats')}
-              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition border-none"
-            >
-              <BarChart3 size={13} />
-              <span>Full Cap Standings</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {([
+              { id: 'batting', label: '🏏 Batting' },
+              { id: 'bowling', label: '⚾ Bowling' },
+              { id: 'partnerships', label: '🤝 Partnerships' },
+              { id: 'fielding', label: '🧤 Fielding' },
+              { id: 'team_stats', label: '🛡️ Team Stats' },
+            ] as const).map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => {
+                  setStatsSubTab(st.id);
+                  setMainTab('stats');
+                }}
+                className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 cursor-pointer transition border ${
+                  mainTab === 'stats' && statsSubTab === st.id
+                    ? 'bg-amber-500 text-slate-950 border-amber-400'
+                    : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
+              >
+                <span>{st.label}</span>
+              </button>
+            ))}
             <button
               type="button"
               onClick={() => setIsCapStripCompact(prev => !prev)}
@@ -2347,14 +2375,14 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
         />
       )}
 
-      {/* Main Suite Module Navigation Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+      {/* Main Suite Module Navigation Bar (All buttons visible on mobile without horizontal scroll) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-center gap-2">
         {[
           { id: 'bracket', label: '5-Day Bracket & Schedule', icon: Trophy },
           { id: 'teams', label: '32 Teams & Squads', icon: Users },
           { id: 'venue-scheduler', label: 'Grounds & Logistics', icon: MapPin },
           { id: 'standings', label: 'Points Table & NRR', icon: ListOrdered },
-          { id: 'stats', label: 'Leaderboards & Caps', icon: BarChart3 },
+          { id: 'stats', label: 'Stats & Leaderboards', icon: BarChart3 },
           { id: 'prizes', label: 'Prizes & Certificates', icon: Award },
         ].map(tab => {
           const Icon = tab.icon;
@@ -2374,14 +2402,14 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
                   setViewMode('bracket');
                 }
               }}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shrink-0 transition cursor-pointer border ${
+              className={`px-3 sm:px-4 py-2.5 rounded-2xl text-[10.5px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center lg:justify-start gap-1.5 sm:gap-2 transition cursor-pointer border min-w-0 ${
                 active
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/20'
                   : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-500/40'
               }`}
             >
-              <Icon size={14} />
-              <span>{tab.label}</span>
+              <Icon size={14} className="shrink-0" />
+              <span className="truncate">{tab.label}</span>
             </button>
           );
         })}
@@ -2625,12 +2653,149 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
           />
         </div>
       ) : mainTab === 'stats' ? (
-        <TournamentStatsAndLeaderboards
-          tournamentId={tournament.id}
-          tournamentName={tournament.name}
-          teams={mappedVenueTeams}
-          matches={mappedStatsMatches}
-        />
+        <div className="space-y-5">
+          {/* One-Half 32-Team Statistics Module Header & Group Filter */}
+          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider">
+                    CricHeroes & Cricbuzz Pro Analytics
+                  </span>
+                  <span className="text-[11px] font-bold text-slate-400">
+                    32 Teams • 4 Groups • 60+ Tournament Metrics
+                  </span>
+                </div>
+                <h2 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white mt-1 flex items-center gap-2">
+                  <BarChart3 size={20} className="text-amber-500" />
+                  <span>{tournament.name} — Complete Tournament Statistics</span>
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Full Batting (15 metrics), Bowling (15 metrics), Partnership (8 metrics), Fielding (12 metrics), and Team (10 metrics) leaderboards.
+                </p>
+              </div>
+
+              {/* Group / Day Filter */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mr-1">
+                  Scope:
+                </span>
+                {(['all', '1', '2', '3', '4'] as const).map(grp => (
+                  <button
+                    key={grp}
+                    type="button"
+                    onClick={() => setStatsGroupFilter(grp)}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase cursor-pointer border transition ${
+                      statsGroupFilter === grp
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent hover:border-emerald-500/40'
+                    }`}
+                  >
+                    {grp === 'all' ? 'All 32 Teams' : `Group ${grp} (Day ${grp})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 5 Core Statistics Modules Quick-Select Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              {[
+                {
+                  id: 'batting' as StatsLeaderboardSubTab,
+                  title: 'Batting Stats',
+                  sub: '15 Metrics · Orange Cap, SR,Avg, 4s/6s',
+                  emoji: '🏏',
+                  activeClass: 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/20'
+                },
+                {
+                  id: 'bowling' as StatsLeaderboardSubTab,
+                  title: 'Bowling Stats',
+                  sub: '15 Metrics · Purple Cap, BBI, Econ, Dots',
+                  emoji: '⚾',
+                  activeClass: 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/20'
+                },
+                {
+                  id: 'partnerships' as StatsLeaderboardSubTab,
+                  title: 'Partnerships',
+                  sub: '8 Metrics · Best Stands, 1st–6th Wkt',
+                  emoji: '🤝',
+                  activeClass: 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                },
+                {
+                  id: 'fielding' as StatsLeaderboardSubTab,
+                  title: 'Fielding Stats',
+                  sub: '12 Metrics · Catches, Run-Outs, WK',
+                  emoji: '🧤',
+                  activeClass: 'bg-cyan-600 text-white border-cyan-500 shadow-md shadow-cyan-600/20'
+                },
+                {
+                  id: 'team_stats' as StatsLeaderboardSubTab,
+                  title: 'Team Statistics',
+                  sub: '10 Metrics · Highest Totals, Chases, RR',
+                  emoji: '🛡️',
+                  activeClass: 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/20'
+                }
+              ].map(card => {
+                const isSelected = statsSubTab === card.id;
+                return (
+                  <button
+                    key={card.id}
+                    type="button"
+                    onClick={() => setStatsSubTab(card.id)}
+                    className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-1 ${
+                      isSelected
+                        ? card.activeClass
+                        : 'bg-slate-50 dark:bg-slate-800/70 border-slate-200 dark:border-slate-800 hover:border-amber-500/40 text-slate-800 dark:text-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-base">{card.emoji}</span>
+                      <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                        isSelected ? 'bg-black/20 text-current' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
+                      }`}>
+                        Active
+                      </span>
+                    </div>
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wide truncate">
+                        {card.title}
+                      </div>
+                      <div className={`text-[10px] font-medium truncate mt-0.5 ${
+                        isSelected ? 'opacity-90' : 'text-slate-500 dark:text-slate-400'
+                      }`}>
+                        {card.sub}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <TournamentStatsAndLeaderboards
+            tournamentId={tournament.id}
+            tournamentName={tournament.name}
+            teams={filteredStatsVenueTeams}
+            matches={mappedStatsMatches}
+            activeSubTab={statsSubTab}
+            onSubTabChange={setStatsSubTab}
+            onGoToFixtures={() => setMainTab('bracket')}
+            onStartScoringMatch={(m) => {
+              const orig = tournament.matches.find(x => x.id === m.id);
+              if (orig) {
+                handleLaunchLiveScorer(orig);
+              }
+            }}
+            onSelectTeam={(teamName) => {
+              const found = tournament.teams.find(t => t.name === teamName);
+              if (found) {
+                setSelectedTeamIdForPage(found.id);
+                setMainTab('teams');
+                setViewMode('teams');
+              }
+            }}
+          />
+        </div>
       ) : mainTab === 'prizes' ? (
         <div className="space-y-6">
           {/* Top Prize Pool & Sponsor Podium Center */}
