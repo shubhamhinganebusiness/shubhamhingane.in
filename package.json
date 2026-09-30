@@ -19,7 +19,7 @@
     "cors": "^2.8.6",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "express": "^4.21.2",
     "firebase": "^12.12.0",
     "framer-motion": "^12.38.0",
@@ -32,7 +32,7 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "papaparse": "^5.5.3",
-    "pdfjs-dist": "^6.1.200",
+    "pdfjs-dist": "^6.2.108",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -40,7 +40,7 @@
     "react-use-measure": "^2.1.7",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.6.0",
-    "vite": "^6.2.0",
+    "vite": "^6.4.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
