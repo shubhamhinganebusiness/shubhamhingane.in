@@ -41,7 +41,6 @@ import { TournamentStatsAndLeaderboards, StatsLeaderboardSubTab } from './Tourna
 import { PointsTableModule } from './PointsTableModule';
 import { MatchBannerModal } from './MatchBannerModal';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
-import { computeFighterOfTheMatch } from '../../utils/certificateVerification';
 import { TournamentMatchScorecardModal } from './TournamentMatchScorecardModal';
 import { TournamentPublicShareModal } from './TournamentPublicShareModal';
 import { PrizeManagementModal } from './PrizeManagementModal';
@@ -1520,7 +1519,6 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   // Open Award Certificates Modal
   const handleOpenMatchAwardCertificates = (m: OneHalfMatch, defaultAward: AwardType = 'potm') => {
     const winner = m.winner || m.teamA;
-    const runnerUp = (winner.toLowerCase() === m.teamA.toLowerCase()) ? m.teamB : m.teamA;
     const teamAObj = tournament.teams.find(t => t.name === m.teamA);
     const teamBObj = tournament.teams.find(t => t.name === m.teamB);
 
@@ -1537,70 +1535,9 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
       isWinner: winner === m.teamB
     }));
 
-    // Check for cached detailed match performance record if scored in live scorer
-    let cachedMatch: any = null;
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const parseList = (key: string) => {
-          try {
-            const raw = localStorage.getItem(key);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [parsed];
-          } catch { return []; }
-        };
-        const allLocal = [
-          ...parseList('cricket_matches_local_registry'),
-          ...parseList('cricket_custom_past_matches'),
-          ...parseList('cricket_active_match')
-        ];
-        cachedMatch = allLocal.find((cm: any) => 
-          cm && (cm.id === m.id || cm.tournamentMatchId === m.id || 
-            ((cm.teamA === m.teamA && cm.teamB === m.teamB) || (cm.teamA === m.teamB && cm.teamB === m.teamA)))
-        );
-      }
-    } catch (_) {}
-
-    const winningSquad = winner === m.teamA ? (teamAObj?.squad || []) : (teamBObj?.squad || []);
-    const runnerUpSquad = winner === m.teamA ? (teamBObj?.squad || []) : (teamAObj?.squad || []);
-
-    const potmName = (cachedMatch?.playerOfTheMatch?.name) 
-      ? cachedMatch.playerOfTheMatch.name
-      : (m.manOfTheMatch && m.manOfTheMatch.trim() 
-          ? m.manOfTheMatch.trim() 
-          : (winningSquad[0]?.name || `${winner} Star Player`));
-
-    const bowlerPlayer = (cachedMatch?.bestBowler?.name && cachedMatch.bestBowler.name !== 'N/A')
-      ? cachedMatch.bestBowler
-      : (() => {
-          const specializedBowler = winningSquad.find(p => 
-            p.role && (p.role.toLowerCase().includes('bowl') || p.role.toLowerCase().includes('all-round'))
-          );
-          const bowlerName = specializedBowler?.name || winningSquad[1]?.name || `${winner} Strike Bowler`;
-          return {
-            name: bowlerName,
-            runs: 0,
-            wickets: 3,
-            runsConceded: 18,
-            points: 75
-          };
-        })();
-
-    const fighterPlayer = cachedMatch ? computeFighterOfTheMatch(cachedMatch) : null;
-    const resolvedFighter = fighterPlayer ? {
-      name: fighterPlayer.name,
-      runs: fighterPlayer.runs,
-      wickets: fighterPlayer.wickets,
-      points: fighterPlayer.points || 50
-    } : (() => {
-      const runnerUpStar = runnerUpSquad.find(p => p.role && (p.role.toLowerCase().includes('capt') || p.role.toLowerCase().includes('all-round'))) || runnerUpSquad[0];
-      return runnerUpStar?.name ? {
-        name: runnerUpStar.name,
-        runs: 35,
-        wickets: 1,
-        points: 60
-      } : undefined;
-    })();
+    const potmName = m.manOfTheMatch && m.manOfTheMatch.trim() 
+      ? m.manOfTheMatch.trim() 
+      : `${winner} Star Player`;
 
     const isFinal = m.round === 'grand_final';
 
@@ -1618,18 +1555,22 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
       isFinalMatch: isFinal,
       playerOfTheMatch: {
         name: potmName,
-        runs: cachedMatch?.playerOfTheMatch?.runs || 45,
-        wickets: cachedMatch?.playerOfTheMatch?.wickets || 1,
-        points: cachedMatch?.playerOfTheMatch?.points || 70
+        runs: 0,
+        wickets: 0,
+        points: 50
       },
       bestBatsman: {
-        name: cachedMatch?.bestBatter?.name || potmName,
-        runs: cachedMatch?.bestBatter?.runs || 45,
+        name: potmName,
+        runs: 0,
         wickets: 0,
-        points: cachedMatch?.bestBatter?.points || 45
+        points: 40
       },
-      bestBowler: bowlerPlayer,
-      fighterOfTheMatch: resolvedFighter,
+      bestBowler: {
+        name: `${winner} Star Bowler`,
+        runs: 0,
+        wickets: 0,
+        points: 40
+      },
       squadPlayers: [...squadPlayersA, ...squadPlayersB]
     };
 

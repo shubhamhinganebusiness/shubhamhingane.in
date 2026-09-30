@@ -6044,7 +6044,7 @@ export const CricketScoreboard: React.FC = () => {
       : `${currentDeliveryOverIdx}.${ballsBowledBeforeBall % 6}`;
 
     const ballCommEntry = {
-      id: `c-${Date.now()}`,
+      id: `c-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       overBall: deliveryOverBall,
       overIndex: currentDeliveryOverIdx,
       overNumber: currentDeliveryOverIdx + 1,
@@ -6052,6 +6052,7 @@ export const CricketScoreboard: React.FC = () => {
       type: eventType,
       extraType: effectiveExtraType,
       isNoBall: event.type === 'noball',
+      isWide: event.type === 'wide',
       runsOffBat: runsOffBatFromDelivery,
       ballScore: ballLabel,
       batterName: striker.name,
@@ -8603,28 +8604,8 @@ export const CricketScoreboard: React.FC = () => {
     }
   };
 
-  // Robust autoTable runner that works in all Vite/ESM/CJS bundling environments
-  const runAutoTable = (targetDoc: any, options: any) => {
-    try {
-      if (typeof autoTable === 'function') {
-        autoTable(targetDoc, options);
-      } else if (typeof (autoTable as any)?.default === 'function') {
-        (autoTable as any).default(targetDoc, options);
-      } else if (typeof (targetDoc as any)?.autoTable === 'function') {
-        (targetDoc as any).autoTable(options);
-      }
-    } catch (e) {
-      console.warn('AutoTable invocation fallback error:', e);
-      if (typeof (targetDoc as any)?.autoTable === 'function') {
-        try {
-          (targetDoc as any).autoTable(options);
-        } catch (_) {}
-      }
-    }
-  };
-
   const handleExportMatchPDF = () => {
-    if (!match || (!match.innings1 && !match.mainMatchState?.innings1)) {
+    if (!match || !match.innings1) {
       showNotification('No match data to export!', 'alert');
       return;
     }
@@ -8633,11 +8614,6 @@ export const CricketScoreboard: React.FC = () => {
       showNotification('Generating PDF Match Report...', 'info');
       const doc = new jsPDF();
       
-      // Determine effective primary match data (handles Super Over state smoothly)
-      const primaryInn1 = match.mainMatchState?.innings1 || match.innings1;
-      const primaryInn2 = match.mainMatchState?.innings2 || match.innings2;
-      const isSuperOverMatch = !!(match.isSuperOver || match.superOversHistory?.length || match.mainMatchState);
-
       // Set PDF properties to make it read-only and secured
       doc.setProperties({
         title: "Official Secure Match Ledger",
@@ -8659,36 +8635,34 @@ export const CricketScoreboard: React.FC = () => {
 
       const processInningsForPotm = (inn: typeof match.innings1) => {
         if (!inn) return;
-        (inn.batsmen || []).forEach(b => {
-          if (!b || !b.name) return;
+        inn.batsmen.forEach(b => {
+          if (!b.name) return;
           const p = getOrCreatePlayer(b.name);
-          p.runs += Number(b.runs) || 0;
-          p.balls += Number(b.balls) || 0;
-          p.fours += Number(b.fours) || 0;
-          p.sixes += Number(b.sixes) || 0;
+          p.runs += b.runs;
+          p.balls += b.balls;
+          p.fours += b.fours;
+          p.sixes += b.sixes;
         });
-        (inn.bowlers || []).forEach(bw => {
-          if (!bw || !bw.name) return;
+        inn.bowlers.forEach(bw => {
+          if (!bw.name) return;
           const p = getOrCreatePlayer(bw.name);
-          p.wickets += Number(bw.wickets) || 0;
-          p.runsConceded += Number(bw.runsConceded) || 0;
+          p.wickets += bw.wickets;
+          p.runsConceded += bw.runsConceded;
         });
       };
 
-      processInningsForPotm(primaryInn1);
-      if (primaryInn2) {
-        processInningsForPotm(primaryInn2);
-      }
+      processInningsForPotm(match.innings1);
+      processInningsForPotm(match.innings2);
 
       let potmPlayer = 'N/A';
       let potmDetails = '';
-      if (playerOfTheMatch && playerOfTheMatch.name) {
+      if (playerOfTheMatch) {
         potmPlayer = playerOfTheMatch.name;
         const p = statsMap[playerOfTheMatch.name.trim().toLowerCase()];
         if (p) {
           potmDetails = `${p.runs} runs (${p.fours || 0}x4, ${p.sixes || 0}x6) | ${p.wickets} wickets conceded ${p.runsConceded} runs`;
         } else {
-          potmDetails = `${playerOfTheMatch.runs || 0} runs (${playerOfTheMatch.fours || 0}x4, ${playerOfTheMatch.sixes || 0}x6) | ${playerOfTheMatch.wickets || 0} wickets conceded ${playerOfTheMatch.runsConceded || 0} runs`;
+          potmDetails = `${playerOfTheMatch.runs} runs (${playerOfTheMatch.fours || 0}x4, ${playerOfTheMatch.sixes || 0}x6) | ${playerOfTheMatch.wickets} wickets conceded ${playerOfTheMatch.runsConceded} runs`;
         }
       } else {
         let maxPoints = -1;
@@ -8712,32 +8686,25 @@ export const CricketScoreboard: React.FC = () => {
       
       const findHighlights = (inn: typeof match.innings1) => {
         if (!inn) return;
-        (inn.batsmen || []).forEach(b => {
-          if (!b) return;
-          const r = Number(b.runs) || 0;
-          if (r > topBatterRuns) {
-            topBatterRuns = r;
+        inn.batsmen.forEach(b => {
+          if (b.runs > topBatterRuns) {
+            topBatterRuns = b.runs;
             topBatterName = b.name;
           }
         });
-        (inn.bowlers || []).forEach(bw => {
-          if (!bw) return;
-          const w = Number(bw.wickets) || 0;
-          const rc = Number(bw.runsConceded) || 0;
-          if (w > topBowlerWickets) {
-            topBowlerWickets = w;
+        inn.bowlers.forEach(bw => {
+          if (bw.wickets > topBowlerWickets) {
+            topBowlerWickets = bw.wickets;
             topBowlerName = bw.name;
-            topBowlerRuns = rc;
-          } else if (w === topBowlerWickets && rc < topBowlerRuns) {
+            topBowlerRuns = bw.runsConceded;
+          } else if (bw.wickets === topBowlerWickets && bw.runsConceded < topBowlerRuns) {
             topBowlerName = bw.name;
-            topBowlerRuns = rc;
+            topBowlerRuns = bw.runsConceded;
           }
         });
       };
-      findHighlights(primaryInn1);
-      if (primaryInn2) {
-        findHighlights(primaryInn2);
-      }
+      findHighlights(match.innings1);
+      findHighlights(match.innings2);
 
       // Page header - CUSTOM DESIGNED footprint
       doc.setFont('Helvetica', 'bold');
@@ -8754,7 +8721,7 @@ export const CricketScoreboard: React.FC = () => {
       doc.setTextColor(120);
       doc.setFont('Helvetica', 'normal');
       doc.text(`Generated on: ${new Date().toLocaleString()} (READ-ONLY SECURED DOCUMENT)`, 14, 28);
-      doc.text(`Match Date: ${match.date || new Date().toISOString().split('T')[0]}`, 14, 33);
+      doc.text(`Match Date: ${match.date || 'N/A'}`, 14, 33);
       
       // Divider
       doc.setDrawColor(220, 220, 220);
@@ -8768,13 +8735,13 @@ export const CricketScoreboard: React.FC = () => {
       
       doc.setFontSize(11);
       doc.setFont('Helvetica', 'normal');
-      doc.text(`Overs Limit: ${match.oversLimit || 10} Overs`, 14, 51);
-      doc.text(`Toss Winner: ${match.tossWinner || match.teamA} (elected to ${match.tossChoice || 'bat'} first)`, 14, 56);
+      doc.text(`Overs Limit: ${match.oversLimit || 'N/A'} Overs`, 14, 51);
+      doc.text(`Toss Winner: ${match.tossWinner} (elected to ${match.tossChoice} first)`, 14, 56);
       
       if (match.status === 'completed') {
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(190, 110, 11);
-        doc.text(`Result: ${match.winner === 'Tie' ? 'Match Tie!' : `${match.winner || 'Winner'} ${match.winReason || 'won the match'}`}`, 14, 63);
+        doc.text(`Result: ${match.winner === 'Tie' ? 'Match Tie!' : `${match.winner} ${match.winReason}`}`, 14, 63);
       } else {
         doc.setTextColor(70);
         doc.text(`Status: Match Currently Live`, 14, 63);
@@ -8799,108 +8766,81 @@ export const CricketScoreboard: React.FC = () => {
       doc.text(`Best Innings Batting: ${batterText}   |   Best Bowling Figures: ${bowlerText}`, 18, 86);
 
       // Innings 1 Card
-      if (primaryInn1) {
-        doc.setTextColor(30);
-        doc.setFontSize(13);
-        doc.setFont('Helvetica', 'bold');
-        doc.text(`1st Innings: ${primaryInn1.battingTeam || match.teamA} Scorecard`, 14, 102);
-        
-        doc.setFontSize(10);
-        doc.setFont('Helvetica', 'normal');
-        doc.text(`Total Score: ${primaryInn1.runs || 0}/${primaryInn1.wickets || 0} in ${formatOvers(primaryInn1.ballsBowled || 0)} overs`, 14, 107);
-        
-        // Innings 1 Batting table
-        const validInn1Batsmen = (primaryInn1.batsmen || []).filter(b => b && b.name);
-        const inn1BatRows = validInn1Batsmen.length > 0
-          ? validInn1Batsmen.map(b => {
-              const runs = Number(b.runs) || 0;
-              const balls = Number(b.balls) || 0;
-              const fours = Number(b.fours) || 0;
-              const sixes = Number(b.sixes) || 0;
-              return [
-                b.name,
-                b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-                runs.toString(),
-                balls.toString(),
-                fours.toString(),
-                sixes.toString(),
-                balls > 0 ? ((runs / balls) * 100).toFixed(1) : '0.0'
-              ];
-            })
-          : [
-              ['Scoreboard Total (Innings 1)', 'Completed', (primaryInn1.runs || 0).toString(), (primaryInn1.ballsBowled || 0).toString(), '-', '-', '-']
-            ];
-        
-        runAutoTable(doc, {
-          startY: 111,
-          head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
-          body: inn1BatRows,
-          theme: 'striped',
-          headStyles: { fillColor: [16, 185, 129] },
-          styles: { fontSize: 8.5 }
-        });
-        
-        let lastY1 = (doc as any).lastAutoTable?.finalY || 135;
-        
-        // Extras break-out line
-        const ext1 = (typeof primaryInn1.extras === 'object' && primaryInn1.extras !== null)
-          ? primaryInn1.extras
-          : { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
-        const extTotal1 = (ext1.wides || 0) + (ext1.noBalls || 0) + (ext1.byes || 0) + (ext1.legByes || 0) + (ext1.penalty || 0);
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(60);
-        doc.text(`Extras: ${extTotal1} (wides: ${ext1.wides || 0}, no-balls: ${ext1.noBalls || 0}, byes: ${ext1.byes || 0}, legbyes: ${ext1.legByes || 0}, penalty: ${ext1.penalty || 0})`, 14, lastY1 + 6);
-        
-        // Fall of Wickets line
-        const fowItems1 = primaryInn1.fallOfWickets && primaryInn1.fallOfWickets.length > 0
-          ? primaryInn1.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
-          : 'No wickets fell';
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text(`Fall of Wickets: ${fowItems1}`, 14, lastY1 + 11);
-        
-        let bowlStartY1 = lastY1 + 16;
-        doc.setFontSize(12);
-        doc.setFont('Helvetica', 'bold');
-        doc.setTextColor(30);
-        const bowlTeam1 = primaryInn1.bowlingTeam || (primaryInn1.battingTeam === match.teamA ? match.teamB : match.teamA);
-        doc.text(`${bowlTeam1} Bowling Figures`, 14, bowlStartY1);
-        
-        const validInn1Bowlers = (primaryInn1.bowlers || []).filter(bw => bw && bw.name);
-        const inn1BowlRows = validInn1Bowlers.length > 0
-          ? validInn1Bowlers.map(bw => {
-              const bb = Number(bw.ballsBowled) || 0;
-              const maidens = Number(bw.maidens) || 0;
-              const rc = Number(bw.runsConceded) || 0;
-              const wkts = Number(bw.wickets) || 0;
-              return [
-                bw.name,
-                formatOvers(bb),
-                maidens.toString(),
-                rc.toString(),
-                wkts.toString(),
-                bb > 0 ? ((rc / bb) * 6).toFixed(2) : '0.00'
-              ];
-            })
-          : [
-              ['Bowling Attack Combined', formatOvers(primaryInn1.ballsBowled || 0), '0', (primaryInn1.runs || 0).toString(), (primaryInn1.wickets || 0).toString(), '-']
-            ];
-        
-        runAutoTable(doc, {
-          startY: bowlStartY1 + 4,
-          head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
-          body: inn1BowlRows,
-          theme: 'striped',
-          headStyles: { fillColor: [15, 23, 42] },
-          styles: { fontSize: 8.5 }
-        });
-      }
+      doc.setTextColor(30);
+      doc.setFontSize(13);
+      doc.setFont('Helvetica', 'bold');
+      doc.text(`1st Innings: ${match.innings1.battingTeam} Scorecard`, 14, 102);
       
-      let nextY = ((doc as any).lastAutoTable?.finalY || 160) + 15;
+      doc.setFontSize(10);
+      doc.setFont('Helvetica', 'normal');
+      doc.text(`Total Score: ${match.innings1.runs}/${match.innings1.wickets} in ${formatOvers(match.innings1.ballsBowled)} overs`, 14, 107);
+      
+      // Innings 1 Batting table
+      const inn1BatRows = match.innings1.batsmen.map(b => [
+        b.name,
+        b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - bowling: ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
+        b.runs.toString(),
+        b.balls.toString(),
+        b.fours.toString(),
+        b.sixes.toString(),
+        b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : '0.0'
+      ]);
+      
+      autoTable(doc, {
+        startY: 111,
+        head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
+        body: inn1BatRows,
+        theme: 'striped',
+        headStyles: { fillColor: [16, 185, 129] },
+        styles: { fontSize: 8.5 }
+      });
+      
+      let lastY1 = (doc as any).lastAutoTable.finalY;
+      
+      // Extras break-out line
+      const ext1 = match.innings1.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
+      const extTotal1 = ext1.wides + ext1.noBalls + ext1.byes + ext1.legByes + (ext1.penalty || 0);
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(60);
+      doc.text(`Extras: ${extTotal1} (wides: ${ext1.wides}, no-balls: ${ext1.noBalls}, byes: ${ext1.byes}, legbyes: ${ext1.legByes}, penalty: ${ext1.penalty || 0})`, 14, lastY1 + 6);
+      
+      // Fall of Wickets line
+      const fowItems1 = match.innings1.fallOfWickets && match.innings1.fallOfWickets.length > 0
+        ? match.innings1.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
+        : 'No wickets fell';
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(`Fall of Wickets: ${fowItems1}`, 14, lastY1 + 11);
+      
+      let bowlStartY1 = lastY1 + 16;
+      doc.setFontSize(12);
+      doc.setFont('Helvetica', 'bold');
+      doc.setTextColor(30);
+      doc.text(`${match.innings1.battingTeam} Bowlers Performance`, 14, bowlStartY1);
+      
+      const inn1BowlRows = match.innings1.bowlers.map(bw => [
+        bw.name,
+        formatOvers(bw.ballsBowled),
+        bw.maidens.toString(),
+        bw.runsConceded.toString(),
+        bw.wickets.toString(),
+        bw.ballsBowled > 0 ? ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(2) : '0.00'
+      ]);
+      
+      autoTable(doc, {
+        startY: bowlStartY1 + 4,
+        head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
+        body: inn1BowlRows,
+        theme: 'striped',
+        headStyles: { fillColor: [15, 23, 42] },
+        styles: { fontSize: 8.5 }
+      });
+      
+      let nextY = (doc as any).lastAutoTable.finalY + 15;
       
       // Check if we need a new page for Innings 2 Scorecard
-      if (primaryInn2) {
+      if (match.innings2) {
         if (nextY > 200) {
           doc.addPage();
           nextY = 20;
@@ -8909,35 +8849,24 @@ export const CricketScoreboard: React.FC = () => {
         doc.setFontSize(13);
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(30);
-        doc.text(`2nd Innings: ${primaryInn2.battingTeam || match.teamB} Scorecard`, 14, nextY);
+        doc.text(`2nd Innings: ${match.innings2.battingTeam} Scorecard`, 14, nextY);
         
         doc.setFontSize(10);
         doc.setFont('Helvetica', 'normal');
-        doc.text(`Total Score: ${primaryInn2.runs || 0}/${primaryInn2.wickets || 0} in ${formatOvers(primaryInn2.ballsBowled || 0)} overs`, 14, nextY + 6);
+        doc.text(`Total Score: ${match.innings2.runs}/${match.innings2.wickets} in ${formatOvers(match.innings2.ballsBowled)} overs`, 14, nextY + 6);
         
         // Innings 2 Batting table
-        const validInn2Batsmen = (primaryInn2.batsmen || []).filter(b => b && b.name);
-        const inn2BatRows = validInn2Batsmen.length > 0
-          ? validInn2Batsmen.map(b => {
-              const runs = Number(b.runs) || 0;
-              const balls = Number(b.balls) || 0;
-              const fours = Number(b.fours) || 0;
-              const sixes = Number(b.sixes) || 0;
-              return [
-                b.name,
-                b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-                runs.toString(),
-                balls.toString(),
-                fours.toString(),
-                sixes.toString(),
-                balls > 0 ? ((runs / balls) * 100).toFixed(1) : '0.0'
-              ];
-            })
-          : [
-              ['Scoreboard Total (Innings 2)', 'Completed', (primaryInn2.runs || 0).toString(), (primaryInn2.ballsBowled || 0).toString(), '-', '-', '-']
-            ];
+        const inn2BatRows = match.innings2.batsmen.map(b => [
+          b.name,
+          b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - bowling: ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
+          b.runs.toString(),
+          b.balls.toString(),
+          b.fours.toString(),
+          b.sixes.toString(),
+          b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : '0.0'
+        ]);
         
-        runAutoTable(doc, {
+        autoTable(doc, {
           startY: nextY + 11,
           head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
           body: inn2BatRows,
@@ -8946,21 +8875,19 @@ export const CricketScoreboard: React.FC = () => {
           styles: { fontSize: 8.5 }
         });
         
-        let lastY2 = (doc as any).lastAutoTable?.finalY || (nextY + 45);
+        let lastY2 = (doc as any).lastAutoTable.finalY;
         
         // Extras break-out line Innings 2
-        const ext2 = (typeof primaryInn2.extras === 'object' && primaryInn2.extras !== null)
-          ? primaryInn2.extras
-          : { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
-        const extTotal2 = (ext2.wides || 0) + (ext2.noBalls || 0) + (ext2.byes || 0) + (ext2.legByes || 0) + (ext2.penalty || 0);
+        const ext2 = match.innings2.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
+        const extTotal2 = ext2.wides + ext2.noBalls + ext2.byes + ext2.legByes + (ext2.penalty || 0);
         doc.setFont('Helvetica', 'bold');
         doc.setFontSize(8.5);
         doc.setTextColor(60);
-        doc.text(`Extras: ${extTotal2} (wides: ${ext2.wides || 0}, no-balls: ${ext2.noBalls || 0}, byes: ${ext2.byes || 0}, legbyes: ${ext2.legByes || 0}, penalty: ${ext2.penalty || 0})`, 14, lastY2 + 6);
+        doc.text(`Extras: ${extTotal2} (wides: ${ext2.wides}, no-balls: ${ext2.noBalls}, byes: ${ext2.byes}, legbyes: ${ext2.legByes}, penalty: ${ext2.penalty || 0})`, 14, lastY2 + 6);
         
         // Fall of Wickets line Innings 2
-        const fowItems2 = primaryInn2.fallOfWickets && primaryInn2.fallOfWickets.length > 0
-          ? primaryInn2.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
+        const fowItems2 = match.innings2.fallOfWickets && match.innings2.fallOfWickets.length > 0
+          ? match.innings2.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
           : 'No wickets fell';
         doc.setFont('Helvetica', 'normal');
         doc.setFontSize(8);
@@ -8970,30 +8897,18 @@ export const CricketScoreboard: React.FC = () => {
         doc.setFontSize(12);
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(30);
-        const bowlTeam2 = primaryInn2.bowlingTeam || (primaryInn2.battingTeam === match.teamA ? match.teamB : match.teamA);
-        doc.text(`${bowlTeam2} Bowling Figures`, 14, bowlStartY2);
+        doc.text(`${match.innings2.battingTeam} Bowlers Performance`, 14, bowlStartY2);
         
-        const validInn2Bowlers = (primaryInn2.bowlers || []).filter(bw => bw && bw.name);
-        const inn2BowlRows = validInn2Bowlers.length > 0
-          ? validInn2Bowlers.map(bw => {
-              const bb = Number(bw.ballsBowled) || 0;
-              const maidens = Number(bw.maidens) || 0;
-              const rc = Number(bw.runsConceded) || 0;
-              const wkts = Number(bw.wickets) || 0;
-              return [
-                bw.name,
-                formatOvers(bb),
-                maidens.toString(),
-                rc.toString(),
-                wkts.toString(),
-                bb > 0 ? ((rc / bb) * 6).toFixed(2) : '0.00'
-              ];
-            })
-          : [
-              ['Bowling Attack Combined', formatOvers(primaryInn2.ballsBowled || 0), '0', (primaryInn2.runs || 0).toString(), (primaryInn2.wickets || 0).toString(), '-']
-            ];
+        const inn2BowlRows = match.innings2.bowlers.map(bw => [
+          bw.name,
+          formatOvers(bw.ballsBowled),
+          bw.maidens.toString(),
+          bw.runsConceded.toString(),
+          bw.wickets.toString(),
+          bw.ballsBowled > 0 ? ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(2) : '0.00'
+        ]);
         
-        runAutoTable(doc, {
+        autoTable(doc, {
           startY: bowlStartY2 + 4,
           head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
           body: inn2BowlRows,
@@ -9002,49 +8917,11 @@ export const CricketScoreboard: React.FC = () => {
           styles: { fontSize: 8.5 }
         });
         
-        nextY = ((doc as any).lastAutoTable?.finalY || (bowlStartY2 + 35)) + 15;
-      }
-
-      // If Super Over was contested, render Super Over Scorecard section
-      if (isSuperOverMatch && match.innings1 && match.innings2) {
-        if (nextY > 200) {
-          doc.addPage();
-          nextY = 20;
-        }
-
-        doc.setFontSize(13);
-        doc.setFont('Helvetica', 'bold');
-        doc.setTextColor(190, 18, 60); // Rose 700
-        doc.text(`⚡ Official Super Over Decider Scorecard`, 14, nextY);
-
-        const soRows = [
-          [
-            `1st Super Over: ${match.innings1.battingTeam}`,
-            `${match.innings1.runs}/${match.innings1.wickets}`,
-            `${formatOvers(match.innings1.ballsBowled)} ov`,
-            match.innings1.batsmen?.filter(b => b.runs > 0).map(b => `${b.name} (${b.runs})`).join(', ') || 'Batting logged'
-          ],
-          [
-            `2nd Super Over: ${match.innings2.battingTeam}`,
-            `${match.innings2.runs}/${match.innings2.wickets}`,
-            `${formatOvers(match.innings2.ballsBowled)} ov`,
-            match.innings2.batsmen?.filter(b => b.runs > 0).map(b => `${b.name} (${b.runs})`).join(', ') || 'Batting logged'
-          ]
-        ];
-
-        runAutoTable(doc, {
-          startY: nextY + 5,
-          head: [['Super Over Innings', 'Score', 'Overs', 'Top Performers']],
-          body: soRows,
-          theme: 'striped',
-          headStyles: { fillColor: [190, 18, 60] },
-          styles: { fontSize: 8.5 }
-        });
-
-        nextY = ((doc as any).lastAutoTable?.finalY || (nextY + 30)) + 15;
+        nextY = (doc as any).lastAutoTable.finalY + 15;
       }
 
       // Tournament Sponsors & Given Prize Money Honors Section in PDF Report
+      // Requirement: "also in match scoreboard pdf add this all deatils if score manager not added prize details then dont add anythink."
       const tourPrizesRaw = match.tournamentPrizes || 
         (match.tournamentId ? getTournamentPrizesByTournamentId(match.tournamentId) : null) || 
         getTournamentPrizes(match.id);
@@ -9087,7 +8964,7 @@ export const CricketScoreboard: React.FC = () => {
           ];
         });
 
-        runAutoTable(doc, {
+        autoTable(doc, {
           startY: nextY + 8,
           head: [['#', 'Award / Given Prize', 'Sponsor Name', 'Position / Designation', 'Given Prize Money']],
           body: prizeTableRows,
@@ -9096,7 +8973,7 @@ export const CricketScoreboard: React.FC = () => {
           styles: { fontSize: 8.5 }
         });
 
-        nextY = ((doc as any).lastAutoTable?.finalY || (nextY + 30)) + 15;
+        nextY = (doc as any).lastAutoTable.finalY + 15;
       }
       
       // Add Commentary Log Section
@@ -9112,37 +8989,36 @@ export const CricketScoreboard: React.FC = () => {
       // Collect commentary lines
       const logsCombined: string[][] = [];
       const appendCommentary = (inn: typeof match.innings1) => {
-        if (!inn || !Array.isArray(inn.commentaryList)) return;
+        if (!inn) return;
         inn.commentaryList.slice().reverse().forEach(comm => {
-          if (!comm) return;
           let badgeType = "Ball";
           if (comm.type === 'wicket') badgeType = "WICKET 🔴";
           else if (comm.type === 'boundary') {
             const isFour = comm.ballScore === '4' || (comm as any).runsOffBat === 4 || (comm as any).runs === 4;
-            const isSix = !isFour && (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || (comm.description || '').toLowerCase().includes('six') || (comm.description || '').toLowerCase().includes('6 runs'));
+            const isSix = !isFour && (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || comm.description.toLowerCase().includes('six') || comm.description.toLowerCase().includes('6 runs'));
             badgeType = isSix ? "SIXER 🚀" : "FOUR 🏏";
           } else if (comm.type === 'milestone') badgeType = "MILESTONE 🎉";
           else if (comm.type === 'extra') badgeType = "EXTRA ⚡";
 
           logsCombined.push([
-            inn.battingTeam || 'Batting Team',
-            `Over ${comm.overBall || '-'}`,
+            inn.battingTeam,
+            `Over ${comm.overBall}`,
             badgeType,
-            comm.description || 'Ball delivered'
+            comm.description
           ]);
         });
       };
       
-      appendCommentary(primaryInn1);
-      if (primaryInn2) {
-        appendCommentary(primaryInn2);
+      appendCommentary(match.innings1);
+      if (match.innings2) {
+        appendCommentary(match.innings2);
       }
       
       if (logsCombined.length === 0) {
         logsCombined.push(['-', '-', '-', 'No deliveries bowled or logged yet.']);
       }
       
-      runAutoTable(doc, {
+      autoTable(doc, {
         startY: nextY + 4,
         head: [['Innings / Batting Team', 'Delivery Info', 'Category', 'Over Summary Log / Incident Notes']],
         body: logsCombined,
@@ -9151,10 +9027,14 @@ export const CricketScoreboard: React.FC = () => {
         styles: { fontSize: 8 }
       });
       
-      // Apply Footnote branding on every page
+      // Apply Watermark & Developed By footprint on every page
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
+        
+        // Watermarks removed per client request
+        
+        // Footnote branding
         doc.setFont('Helvetica', 'bold');
         doc.setFontSize(7.5);
         doc.setTextColor(140, 140, 140);

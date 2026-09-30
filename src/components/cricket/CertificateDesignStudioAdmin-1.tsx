@@ -74,16 +74,6 @@ const SAMPLE_PREVIEW_DATA: MatchCertificateData = {
     wickets: 4,
     runsConceded: 14,
     points: 130
-  },
-  fighterOfTheMatch: {
-    name: 'Surya Kumar',
-    runs: 62,
-    balls: 31,
-    fours: 6,
-    sixes: 4,
-    wickets: 1,
-    runsConceded: 18,
-    points: 105
   }
 };
 

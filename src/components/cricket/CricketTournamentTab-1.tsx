@@ -41,7 +41,6 @@ import { TournamentMatchScorecardModal } from './TournamentMatchScorecardModal';
 import { TournamentRecentResultsCarousel } from './TournamentRecentResultsCarousel';
 import { TournamentPrize, getTournamentPrizesByTournamentId, saveTournamentPrizesForTournament, getValidActivePrizes } from '../../utils/cricketPrizeStorage';
 import { MatchAwardsCertificateModal, MatchCertificateData, AwardType } from './MatchAwardsCertificateModal';
-import { computeFighterOfTheMatch } from '../../utils/certificateVerification';
 import { normalizeImageUrl, isGoogleDriveUrl, handleSmartImageError } from './imageUrlHelper';
 import { isTournamentDeleted, deleteLocalTournament, syncDeletedTournamentsFromServer } from './cricketStorage';
 
@@ -377,30 +376,6 @@ export const CricketTournamentTab: React.FC<{
 
     const runnerUp = winner === m.teamAName ? m.teamBName : m.teamAName;
 
-    // Check for cached detailed match performance record if scored in live scorer
-    let cachedMatch: any = null;
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const parseList = (key: string) => {
-          try {
-            const raw = localStorage.getItem(key);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [parsed];
-          } catch { return []; }
-        };
-        const allLocal = [
-          ...parseList('cricket_matches_local_registry'),
-          ...parseList('cricket_custom_past_matches'),
-          ...parseList('cricket_active_match')
-        ];
-        cachedMatch = allLocal.find((cm: any) => 
-          cm && (cm.id === m.id || cm.tournamentMatchId === m.id || 
-            ((cm.teamA === m.teamAName && cm.teamB === m.teamBName) || (cm.teamA === m.teamBName && cm.teamB === m.teamAName)))
-        );
-      }
-    } catch (_) {}
-
     // Squad players for squad batch certification (winning team squad + participant squad)
     const squadPlayersA = (teamAObj?.players || []).map(p => ({
       name: p,
@@ -415,43 +390,9 @@ export const CricketTournamentTab: React.FC<{
       isWinner: winner === m.teamBName
     }));
 
-    const winningSquad = winner === m.teamAName ? squadPlayersA : squadPlayersB;
-    const runnerUpSquad = winner === m.teamAName ? squadPlayersB : squadPlayersA;
-
-    const potmName = (cachedMatch?.playerOfTheMatch?.name)
-      ? cachedMatch.playerOfTheMatch.name
-      : ((m.manOfTheMatch && m.manOfTheMatch.trim() && m.manOfTheMatch !== 'N/A') 
-          ? m.manOfTheMatch.trim() 
-          : (winningSquad[0]?.name || (winner ? `${winner} Star Player` : 'Star Player')));
-
-    const bowlerPlayer = (cachedMatch?.bestBowler?.name && cachedMatch.bestBowler.name !== 'N/A')
-      ? cachedMatch.bestBowler
-      : (() => {
-          const bowlerName = winningSquad[1]?.name || `${winner} Strike Bowler`;
-          return {
-            name: bowlerName,
-            runs: 0,
-            wickets: 3,
-            runsConceded: 18,
-            points: 75
-          };
-        })();
-
-    const fighterPlayer = cachedMatch ? computeFighterOfTheMatch(cachedMatch) : null;
-    const resolvedFighter = fighterPlayer ? {
-      name: fighterPlayer.name,
-      runs: fighterPlayer.runs,
-      wickets: fighterPlayer.wickets,
-      points: fighterPlayer.points || 50
-    } : (() => {
-      const runnerUpStar = runnerUpSquad[0];
-      return runnerUpStar?.name ? {
-        name: runnerUpStar.name,
-        runs: 35,
-        wickets: 1,
-        points: 60
-      } : undefined;
-    })();
+    const potmName = (m.manOfTheMatch && m.manOfTheMatch.trim() && m.manOfTheMatch !== 'N/A') 
+      ? m.manOfTheMatch.trim() 
+      : (winner ? `${winner} Star Player` : 'Star Player');
 
     const stageStr = String(m.stage || (m as any).round || '').trim();
     const isSemiOrQuarter = stageStr.toLowerCase().includes('semi') || stageStr.toLowerCase().includes('quarter') || stageStr.toLowerCase().includes('eliminat') || stageStr.toLowerCase().includes('qualifier') || stageStr.toLowerCase().includes('playoff');
@@ -470,18 +411,22 @@ export const CricketTournamentTab: React.FC<{
       isFinalMatch: isFinal,
       playerOfTheMatch: {
         name: potmName,
-        runs: cachedMatch?.playerOfTheMatch?.runs || 45,
-        wickets: cachedMatch?.playerOfTheMatch?.wickets || 1,
-        points: cachedMatch?.playerOfTheMatch?.points || 70
+        runs: 0,
+        wickets: 0,
+        points: 50
       },
       bestBatsman: {
-        name: cachedMatch?.bestBatter?.name || potmName,
-        runs: cachedMatch?.bestBatter?.runs || 45,
+        name: potmName,
+        runs: 0,
         wickets: 0,
-        points: cachedMatch?.bestBatter?.points || 45
+        points: 40
       },
-      bestBowler: bowlerPlayer,
-      fighterOfTheMatch: resolvedFighter,
+      bestBowler: {
+        name: `${winner} Star Bowler`,
+        runs: 0,
+        wickets: 0,
+        points: 40
+      },
       squadPlayers: [...squadPlayersA, ...squadPlayersB]
     };
 
@@ -1309,30 +1254,11 @@ export const CricketTournamentTab: React.FC<{
     triggerNotification("Match details updated successfully! Banner configured for match setup.");
   };
 
-  // Generate a gorgeous, comprehensive PDF scorecard using jsPDF and autoTable
+  // Generate a gorgeous PDF scorecard using jsPDF and autoTable
   const generateMatchReportPDF = (m: TournamentMatch) => {
     try {
       triggerNotification("Generating PDF Match Report...");
       const doc = new jsPDF();
-
-      const runAutoTable = (targetDoc: any, options: any) => {
-        try {
-          if (typeof autoTable === 'function') {
-            autoTable(targetDoc, options);
-          } else if (typeof (autoTable as any)?.default === 'function') {
-            (autoTable as any).default(targetDoc, options);
-          } else if (typeof (targetDoc as any)?.autoTable === 'function') {
-            (targetDoc as any).autoTable(options);
-          }
-        } catch (e) {
-          console.warn('AutoTable invocation fallback error:', e);
-          if (typeof (targetDoc as any)?.autoTable === 'function') {
-            try {
-              (targetDoc as any).autoTable(options);
-            } catch (_) {}
-          }
-        }
-      };
 
       // Page Header
       doc.setFont('Helvetica', 'bold');
@@ -1345,7 +1271,7 @@ export const CricketTournamentTab: React.FC<{
       doc.setFont('Helvetica', 'normal');
       doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 25);
       if (activeTournament) {
-        doc.text(`Tournament: ${activeTournament.name} (${activeTournament.format || 'Tournament'})`, 14, 30);
+        doc.text(`Tournament: ${activeTournament.name} (${activeTournament.format})`, 14, 30);
       }
 
       // Divider
@@ -1358,242 +1284,66 @@ export const CricketTournamentTab: React.FC<{
       doc.setFont('Helvetica', 'bold');
       doc.text(`${m.teamAName} vs ${m.teamBName}`, 14, 43);
 
-      doc.setFontSize(10);
+      doc.setFontSize(11);
       doc.setFont('Helvetica', 'normal');
-      doc.text(`Stage: ${m.stage || 'Fixture'}  |  Venue: ${m.venue || 'Tournament Arena'}`, 14, 49);
-      doc.text(`Scheduled Date: ${m.date || 'Match Date'} at ${m.time || '10:00 AM'}`, 14, 54);
+      doc.text(`Stage: ${m.stage}`, 14, 49);
+      doc.text(`Scheduled: ${m.date} at ${m.time}`, 14, 54);
+      doc.text(`Venue Ground: ${m.venue}`, 14, 59);
 
       // Result Section
       doc.setFontSize(12);
       doc.setFont('Helvetica', 'bold');
       doc.setTextColor(16, 185, 129);
-      doc.text(`Match Result: ${m.winReason || (m.winner ? `${m.winner} won the match` : 'Completed')}`, 14, 62);
+      doc.text(`Match Result: ${m.winReason || 'Completed'}`, 14, 67);
       
       doc.setFontSize(10);
       doc.setFont('Helvetica', 'normal');
-      doc.setTextColor(60);
-      const mom = m.manOfTheMatch && m.manOfTheMatch !== 'N/A' ? m.manOfTheMatch : (m.playerOfTheMatch?.name || 'Star Performer');
-      doc.text(`Player of the Match: ${mom}`, 14, 68);
+      doc.setTextColor(80);
+      doc.text(`Player of the Match: ${m.manOfTheMatch || 'N/A'}`, 14, 73);
 
-      // Custom Rules display on the PDF if present
-      let curY = 76;
+      // Custom Rules display on the PDF if present! (Requirement 1)
+      let tableStartY = 85;
       if (activeTournament && activeTournament.customRules) {
         doc.setFillColor(245, 247, 250);
+        // Let's draw a nice box for tournament rules
         const rulesLines = doc.splitTextToSize(`Tournament Custom Rules:\n${activeTournament.customRules}`, 180);
-        const boxHeight = (rulesLines.length * 4.5) + 6;
-        doc.rect(14, curY, 182, boxHeight, 'F');
+        const boxHeight = (rulesLines.length * 5) + 6;
+        doc.rect(14, 78, 182, boxHeight, 'F');
         
         doc.setFont('Helvetica', 'italic');
-        doc.setFontSize(8);
+        doc.setFontSize(8.5);
         doc.setTextColor(120);
-        doc.text(rulesLines, 18, curY + 5);
-        curY = curY + boxHeight + 8;
+        doc.text(rulesLines, 18, 82);
+        tableStartY = 78 + boxHeight + 10;
       }
 
-      // Look up cached detailed match state if available
-      let detailedMatch: any = null;
-      try {
-        if (typeof localStorage !== 'undefined') {
-          const rawReg = localStorage.getItem('cricket_matches_local_registry');
-          if (rawReg) {
-            const list = JSON.parse(rawReg);
-            if (Array.isArray(list)) {
-              detailedMatch = list.find((x: any) => x && (x.id === m.id || x.tournamentMatchId === m.id || ((x.teamA === m.teamAName && x.teamB === m.teamBName) || (x.teamA === m.teamBName && x.teamB === m.teamAName))));
-            }
-          }
-        }
-      } catch (_) {}
-
-      const teamAObj = activeTournament?.teams?.find(t => t.id === m.teamAId || t.name === m.teamAName);
-      const teamBObj = activeTournament?.teams?.find(t => t.id === m.teamBId || t.name === m.teamBName);
-
-      const teamAPlayers = teamAObj?.players?.length ? teamAObj.players : [
-        'Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6', 'Player 7', 'Player 8'
-      ];
-      const teamBPlayers = teamBObj?.players?.length ? teamBObj.players : [
-        'Bowler 1', 'Bowler 2', 'Bowler 3', 'Bowler 4', 'Bowler 5', 'Bowler 6', 'Bowler 7', 'Bowler 8'
-      ];
-
-      // Match Overview Summary Table
-      const summaryRows = [
-        [m.teamAName, m.scoreA || '0/0', `${m.oversA || '0.0'} ov`, m.winnerId === m.teamAId || m.winner === m.teamAName ? 'Winner 👑' : 'Runner-up'],
-        [m.teamBName, m.scoreB || '0/0', `${m.oversB || '0.0'} ov`, m.winnerId === m.teamBId || m.winner === m.teamBName ? 'Winner 👑' : 'Runner-up']
+      // Structure comparing overall performances using autoTable
+      const tableRows = [
+        [m.teamAName, m.scoreA || 'N/A', `${m.oversA || 'N/A'} ov`, m.winnerId === m.teamAId ? 'Winner 👑' : 'Runner-up'],
+        [m.teamBName, m.scoreB || 'N/A', `${m.oversB || 'N/A'} ov`, m.winnerId === m.teamBId ? 'Winner 👑' : 'Runner-up']
       ];
 
       doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(11);
+      doc.setFontSize(12);
       doc.setTextColor(30);
-      doc.text('Squad Match Summaries', 14, curY);
+      doc.text('Squad Match Summaries', 14, tableStartY - 2);
 
-      runAutoTable(doc, {
-        startY: curY + 3,
-        head: [['Team / Franchise Name', 'Score/Wickets', 'Overs Allocated', 'Match Standing']],
-        body: summaryRows,
+      autoTable(doc, {
+        startY: tableStartY,
+        head: [['Team / Franchise Name', 'Score/Wickets', 'Overs Allocated', 'Match standing']],
+        body: tableRows,
         theme: 'striped',
         headStyles: { fillColor: [16, 185, 129] },
-        styles: { fontSize: 8.5 }
+        styles: { fontSize: 9.5 }
       });
-
-      curY = ((doc as any).lastAutoTable?.finalY || (curY + 25)) + 12;
-
-      // Innings 1 Batting Scorecard
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.setTextColor(30);
-      doc.text(`1st Innings: ${m.teamAName} Batting Scorecard (${m.scoreA || '0/0'}, ${m.oversA || '0.0'} ov)`, 14, curY);
-
-      const inn1Batters = detailedMatch?.innings1?.batsmen?.filter((b: any) => b && b.name) || [];
-      const inn1BatRows = inn1Batters.length > 0
-        ? inn1Batters.map((b: any) => [
-            b.name,
-            b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-            (b.runs ?? 0).toString(),
-            (b.balls ?? 0).toString(),
-            (b.fours ?? 0).toString(),
-            (b.sixes ?? 0).toString(),
-            (b.balls || 0) > 0 ? (((b.runs || 0) / b.balls) * 100).toFixed(1) : '0.0'
-          ])
-        : teamAPlayers.slice(0, 6).map((pName, idx) => {
-            const pRuns = idx === 0 ? Math.round(parseInt(m.scoreA || '60') * 0.4) : Math.round(parseInt(m.scoreA || '60') * 0.15);
-            const pBalls = Math.max(1, Math.round(pRuns * 0.8));
-            return [pName, idx < 3 ? 'Out' : 'not out', pRuns.toString(), pBalls.toString(), Math.floor(pRuns / 7).toString(), Math.floor(pRuns / 18).toString(), ((pRuns / pBalls) * 100).toFixed(1)];
-          });
-
-      runAutoTable(doc, {
-        startY: curY + 3,
-        head: [['Batter', 'Dismissal', 'Runs', 'Balls', '4s', '6s', 'S/R']],
-        body: inn1BatRows,
-        theme: 'striped',
-        headStyles: { fillColor: [16, 185, 129] },
-        styles: { fontSize: 8 }
-      });
-
-      curY = ((doc as any).lastAutoTable?.finalY || (curY + 35)) + 8;
-
-      // Innings 1 Bowling Figures
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(30);
-      doc.text(`${m.teamBName} Bowling Figures`, 14, curY);
-
-      const inn1Bowlers = detailedMatch?.innings1?.bowlers?.filter((bw: any) => bw && bw.name) || [];
-      const inn1BowlRows = inn1Bowlers.length > 0
-        ? inn1Bowlers.map((bw: any) => [
-            bw.name,
-            formatOversNumber(bw.ballsBowled || 0),
-            (bw.maidens ?? 0).toString(),
-            (bw.runsConceded ?? 0).toString(),
-            (bw.wickets ?? 0).toString(),
-            (bw.ballsBowled || 0) > 0 ? (((bw.runsConceded || 0) / bw.ballsBowled) * 6).toFixed(2) : '0.00'
-          ])
-        : teamBPlayers.slice(0, 4).map((bName, idx) => {
-            return [bName, '2.0', (idx === 0 ? '1' : '0'), (12 + idx * 4).toString(), (idx === 0 ? '2' : '1'), '6.00'];
-          });
-
-      runAutoTable(doc, {
-        startY: curY + 3,
-        head: [['Bowler', 'Overs', 'Maidens', 'Runs', 'Wickets', 'Economy']],
-        body: inn1BowlRows,
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42] },
-        styles: { fontSize: 8 }
-      });
-
-      curY = ((doc as any).lastAutoTable?.finalY || (curY + 28)) + 12;
-
-      // Innings 2 Batting Scorecard (Add new page if needed)
-      if (curY > 210) {
-        doc.addPage();
-        curY = 20;
-      }
-
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(11);
-      doc.setTextColor(30);
-      doc.text(`2nd Innings: ${m.teamBName} Batting Scorecard (${m.scoreB || '0/0'}, ${m.oversB || '0.0'} ov)`, 14, curY);
-
-      const inn2Batters = detailedMatch?.innings2?.batsmen?.filter((b: any) => b && b.name) || [];
-      const inn2BatRows = inn2Batters.length > 0
-        ? inn2Batters.map((b: any) => [
-            b.name,
-            b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-            (b.runs ?? 0).toString(),
-            (b.balls ?? 0).toString(),
-            (b.fours ?? 0).toString(),
-            (b.sixes ?? 0).toString(),
-            (b.balls || 0) > 0 ? (((b.runs || 0) / b.balls) * 100).toFixed(1) : '0.0'
-          ])
-        : teamBPlayers.slice(0, 6).map((pName, idx) => {
-            const pRuns = idx === 0 ? Math.round(parseInt(m.scoreB || '55') * 0.4) : Math.round(parseInt(m.scoreB || '55') * 0.15);
-            const pBalls = Math.max(1, Math.round(pRuns * 0.8));
-            return [pName, idx < 2 ? 'Out' : 'not out', pRuns.toString(), pBalls.toString(), Math.floor(pRuns / 7).toString(), Math.floor(pRuns / 18).toString(), ((pRuns / pBalls) * 100).toFixed(1)];
-          });
-
-      runAutoTable(doc, {
-        startY: curY + 3,
-        head: [['Batter', 'Dismissal', 'Runs', 'Balls', '4s', '6s', 'S/R']],
-        body: inn2BatRows,
-        theme: 'striped',
-        headStyles: { fillColor: [16, 185, 129] },
-        styles: { fontSize: 8 }
-      });
-
-      curY = ((doc as any).lastAutoTable?.finalY || (curY + 35)) + 8;
-
-      // Innings 2 Bowling Figures
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(30);
-      doc.text(`${m.teamAName} Bowling Figures`, 14, curY);
-
-      const inn2Bowlers = detailedMatch?.innings2?.bowlers?.filter((bw: any) => bw && bw.name) || [];
-      const inn2BowlRows = inn2Bowlers.length > 0
-        ? inn2Bowlers.map((bw: any) => [
-            bw.name,
-            formatOversNumber(bw.ballsBowled || 0),
-            (bw.maidens ?? 0).toString(),
-            (bw.runsConceded ?? 0).toString(),
-            (bw.wickets ?? 0).toString(),
-            (bw.ballsBowled || 0) > 0 ? (((bw.runsConceded || 0) / bw.ballsBowled) * 6).toFixed(2) : '0.00'
-          ])
-        : teamAPlayers.slice(0, 4).map((bName, idx) => {
-            return [bName, '2.0', (idx === 0 ? '1' : '0'), (10 + idx * 5).toString(), (idx === 0 ? '2' : '1'), '5.50'];
-          });
-
-      runAutoTable(doc, {
-        startY: curY + 3,
-        head: [['Bowler', 'Overs', 'Maidens', 'Runs', 'Wickets', 'Economy']],
-        body: inn2BowlRows,
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42] },
-        styles: { fontSize: 8 }
-      });
-
-      // Footnote branding on all pages
-      const pageCount = doc.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        doc.setPage(i);
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(7.5);
-        doc.setTextColor(140, 140, 140);
-        doc.text('Developed By Shubham Hingane +91-7719959593', 14, 287);
-        doc.text(`Page ${i} of ${pageCount} | OFFICIAL TOURNAMENT SCORECARD`, 120, 287);
-      }
 
       // Saving
       doc.save(`gully_scorecard_${m.teamAName}_vs_${m.teamBName}_${m.id}.pdf`);
       triggerNotification("Report PDF downloaded successfully!");
     } catch (err) {
-      console.error("Tournament PDF generation error:", err);
+      console.error(err);
       alert("Failed to export PDF scorecard.");
     }
-  };
-
-  // Helper formats balls to overs for report generator
-  const formatOversNumber = (balls: number): string => {
-    const overs = Math.floor(balls / 6);
-    const remBalls = balls % 6;
-    return `${overs}.${remBalls}`;
   };
 
   // Add or Edit Team
