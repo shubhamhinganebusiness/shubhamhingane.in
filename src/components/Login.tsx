@@ -43,7 +43,6 @@ export const Login: React.FC = () => {
     const fetchStats = async () => {
       try {
         const today = new Date().toISOString().split('T')[0];
-        const { doc, getDoc } = await import('firebase/firestore');
         const statsSnap = await getDoc(doc(db, 'site_stats', today));
         if (statsSnap.exists()) {
           setTodayStats(statsSnap.data().visits || 0);

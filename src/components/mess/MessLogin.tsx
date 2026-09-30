@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
 import { db, auth } from '../../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { motion } from 'motion/react';
 import { Lock, Phone, ArrowLeft, Loader2, Utensils } from 'lucide-react';
 import { Link } from 'react-router-dom';

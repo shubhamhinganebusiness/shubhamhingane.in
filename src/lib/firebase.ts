@@ -10,6 +10,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  getDoc,
   getDocFromCache, 
   getDocFromServer,
   terminate,
@@ -1328,7 +1329,6 @@ export async function safeGetDoc(collectionName: string, docId: string): Promise
   // 3. Fallback to client Firestore if quota is not exhausted
   if (!isFirestoreQuotaExhausted()) {
     try {
-      const { doc, getDoc } = await import('firebase/firestore');
       const docRef = doc(db, collectionName, docId);
       const snap = await Promise.race([
         getDoc(docRef),
