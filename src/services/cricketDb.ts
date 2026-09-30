@@ -295,8 +295,8 @@ export function subscribeToLiveSummary(
   }
   try {
     const summaryRef = doc(db, 'cricket_live_summaries', matchId);
-    return onSnapshot(summaryRef, (snap) => {
-      if (snap.exists()) {
+    return safeOnSnapshot(summaryRef, (snap) => {
+      if (snap && snap.exists && snap.exists()) {
         onUpdate(snap.data() as MatchLiveSummary);
       }
     }, (err) => {

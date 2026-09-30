@@ -31,6 +31,28 @@ try {
   setLogLevel('silent');
 } catch {}
 
+let firestoreAssertionTripped = false;
+
+export function isInternalFirestoreAssertionError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? `${err.message} ${err.stack || ''}` : String(err);
+  return (
+    msg.includes('INTERNAL ASSERTION FAILED') ||
+    msg.includes('Unexpected state') ||
+    msg.includes('ID: ca9') ||
+    msg.includes('ID: b815') ||
+    msg.includes('{"ve":-1}')
+  );
+}
+
+export function markFirestoreAssertionFailed(): void {
+  firestoreAssertionTripped = true;
+}
+
+export function isFirestoreAssertionFailed(): boolean {
+  return firestoreAssertionTripped;
+}
+
 // Global window error listener to gracefully intercept internal assertion crashes from Firestore SDK
 if (typeof window !== 'undefined') {
   const origConsoleError = console.error;
@@ -40,6 +62,12 @@ if (typeof window !== 'undefined') {
       if (a instanceof Error) return `${a.name}: ${a.message} ${a.stack || ''}`;
       try { return JSON.stringify(a); } catch { return String(a || ''); }
     }).join(' ');
+
+    if (isInternalFirestoreAssertionError(raw)) {
+      markFirestoreAssertionFailed();
+      console.warn('[Firestore SDK Guard] Suppressed internal assertion log:', raw.slice(0, 180));
+      return;
+    }
 
     if (
       raw.includes('GrpcConnection RPC') ||
@@ -69,6 +97,12 @@ if (typeof window !== 'undefined') {
 
   window.addEventListener('error', (event) => {
     const msg = event?.message || event?.error?.message || '';
+    if (isInternalFirestoreAssertionError(msg) || isInternalFirestoreAssertionError(event?.error)) {
+      markFirestoreAssertionFailed();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (
       typeof msg === 'string' &&
       (msg.includes('FIRESTORE') ||
@@ -99,6 +133,12 @@ if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
     const reason = event?.reason;
     const msg = reason instanceof Error ? reason.message : String(reason || '');
+    if (isInternalFirestoreAssertionError(reason) || isInternalFirestoreAssertionError(msg)) {
+      markFirestoreAssertionFailed();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (
       typeof msg === 'string' &&
       (msg.includes('FIRESTORE') ||
@@ -129,14 +169,13 @@ if (typeof window !== 'undefined') {
 
 export const app = initializeApp(firebaseConfig);
 
-export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-a0ff377c-7ae5-429e-9263-df2bcb690093';
+export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-d8b37397-e561-4460-b64b-a158e4a9e9d6';
 
-// Initialize Firestore with memory cache to prevent IndexedDB lock conflicts in preview iframes
-// and enable experimentalForceLongPolling to eliminate HTTP/2 stream RST_STREAM drops in proxy/iframe environments
+// Initialize Firestore with memory cache and auto-detected long polling to prevent TargetState (ID: ca9) multiplex collisions
 export const db = initializeFirestore(app, {
   localCache: memoryLocalCache(),
   ignoreUndefinedProperties: true,
-  experimentalForceLongPolling: typeof window !== 'undefined'
+  experimentalAutoDetectLongPolling: typeof window !== 'undefined'
 }, firestoreDatabaseId);
 
 // Initialize Firebase Storage
@@ -668,24 +707,230 @@ export function subscribeToRealtimeDBOneHalfTournament(onUpdate: (data: any) => 
   };
 }
 
+interface SharedStreamEntry {
+  subscribers: Set<{ onNext: (snap: any) => void; onError?: (err: any) => void }>;
+  lastSnapshot: any | null;
+  rawUnsub: (() => void) | null;
+  teardownTimer: any | null;
+}
+
+const sharedFirestoreStreams = new Map<string, SharedStreamEntry>();
+
+function getFirestoreTargetKey(target: any): string | null {
+  if (!target) return null;
+  try {
+    if (typeof target.path === 'string' && target.path) {
+      return `${target.type || 'ref'}:${target.path}`;
+    }
+    const q = target._query || target;
+    if (q?.path && typeof q.path.canonicalString === 'function') {
+      const basePath = q.path.canonicalString();
+      const filters = Array.isArray(q.filters) ? q.filters.map((f: any) => f?.field?.canonicalString?.() || '').join(',') : '';
+      const orders = Array.isArray(q.explicitOrderBy) ? q.explicitOrderBy.map((o: any) => `${o?.field?.canonicalString?.() || ''}:${o?.dir || ''}`).join(',') : '';
+      const lim = q.limit ?? '';
+      return `query:${basePath}|f:${filters}|o:${orders}|l:${lim}`;
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Fault-tolerant, multiplexed wrapper around Firestore onSnapshot.
+ * - Prevents duplicate concurrent WatchStream targets (which trigger Firebase 12.12.0 ID: ca9 {"ve":-1})
+ * - Debounces target teardown so rapid React unmount/remount never underflows TargetState ref counts
+ * - Guards against synchronous ID: b815 throws on both attach and unsubscribe cleanup
+ */
+export function safeOnSnapshot(
+  target: any,
+  onNext: (snapshot: any) => void,
+  onError?: (error: any) => void
+): () => void {
+  if (!target || typeof window === 'undefined' || !db) {
+    return () => {};
+  }
+
+  if (isFirestoreAssertionFailed() || isFirestoreQuotaExhausted()) {
+    if (onError) {
+      setTimeout(() => {
+        try {
+          onError(new Error('Firestore stream bypassed (local/SSE mode active)'));
+        } catch {}
+      }, 0);
+    }
+    return () => {};
+  }
+
+  const targetKey = getFirestoreTargetKey(target);
+  if (targetKey) {
+    let entry = sharedFirestoreStreams.get(targetKey);
+    const subObj = { onNext, onError };
+
+    if (entry) {
+      if (entry.teardownTimer) {
+        clearTimeout(entry.teardownTimer);
+        entry.teardownTimer = null;
+      }
+      entry.subscribers.add(subObj);
+      if (entry.lastSnapshot) {
+        const cachedSnap = entry.lastSnapshot;
+        setTimeout(() => {
+          if (entry && entry.subscribers.has(subObj)) {
+            try {
+              onNext(cachedSnap);
+            } catch {}
+          }
+        }, 0);
+      }
+    } else {
+      entry = {
+        subscribers: new Set([subObj]),
+        lastSnapshot: null,
+        rawUnsub: null,
+        teardownTimer: null
+      };
+      sharedFirestoreStreams.set(targetKey, entry);
+
+      try {
+        const currentEntry = entry;
+        currentEntry.rawUnsub = onSnapshot(
+          target,
+          (snap: any) => {
+            currentEntry.lastSnapshot = snap;
+            currentEntry.subscribers.forEach((s) => {
+              try {
+                s.onNext(snap);
+              } catch (cbErr) {
+                console.warn('[safeOnSnapshot] Subscriber callback error:', cbErr);
+              }
+            });
+          },
+          (err: any) => {
+            if (isInternalFirestoreAssertionError(err)) {
+              markFirestoreAssertionFailed();
+            } else if (isQuotaError(err)) {
+              recordFirestoreQuotaExhaustion(5);
+            }
+            currentEntry.subscribers.forEach((s) => {
+              if (s.onError) {
+                try {
+                  s.onError(err);
+                } catch {}
+              }
+            });
+          }
+        );
+      } catch (attachErr: any) {
+        if (isInternalFirestoreAssertionError(attachErr)) {
+          markFirestoreAssertionFailed();
+        }
+        sharedFirestoreStreams.delete(targetKey);
+        if (onError) {
+          setTimeout(() => {
+            try {
+              onError(attachErr);
+            } catch {}
+          }, 0);
+        }
+        return () => {};
+      }
+    }
+
+    return () => {
+      const currentEntry = sharedFirestoreStreams.get(targetKey);
+      if (!currentEntry) return;
+      currentEntry.subscribers.delete(subObj);
+      if (currentEntry.subscribers.size === 0 && !currentEntry.teardownTimer) {
+        currentEntry.teardownTimer = setTimeout(() => {
+          const latestEntry = sharedFirestoreStreams.get(targetKey);
+          if (latestEntry && latestEntry.subscribers.size === 0) {
+            sharedFirestoreStreams.delete(targetKey);
+            if (!isFirestoreAssertionFailed() && latestEntry.rawUnsub) {
+              try {
+                latestEntry.rawUnsub();
+              } catch (unsubErr) {
+                if (isInternalFirestoreAssertionError(unsubErr)) {
+                  markFirestoreAssertionFailed();
+                }
+              }
+            }
+          }
+        }, 1500);
+      }
+    };
+  }
+
+  // Fallback for non-keyable targets
+  let rawUnsub: (() => void) | null = null;
+  try {
+    rawUnsub = onSnapshot(
+      target,
+      (snap: any) => {
+        try {
+          onNext(snap);
+        } catch {}
+      },
+      (err: any) => {
+        if (isInternalFirestoreAssertionError(err)) {
+          markFirestoreAssertionFailed();
+        } else if (isQuotaError(err)) {
+          recordFirestoreQuotaExhaustion(5);
+        }
+        if (onError) {
+          try {
+            onError(err);
+          } catch {}
+        }
+      }
+    );
+  } catch (err: any) {
+    if (isInternalFirestoreAssertionError(err)) {
+      markFirestoreAssertionFailed();
+    }
+    if (onError) {
+      setTimeout(() => {
+        try {
+          onError(err);
+        } catch {}
+      }, 0);
+    }
+    return () => {};
+  }
+
+  return () => {
+    if (isFirestoreAssertionFailed() || !rawUnsub) return;
+    const fn = rawUnsub;
+    rawUnsub = null;
+    setTimeout(() => {
+      if (isFirestoreAssertionFailed()) return;
+      try {
+        fn();
+      } catch (unsubErr) {
+        if (isInternalFirestoreAssertionError(unsubErr)) {
+          markFirestoreAssertionFailed();
+        }
+      }
+    }, 500);
+  };
+}
+
 /**
  * Subscribe to the cricket_deleted_matches Firestore collection for real-time deletion synchronization
  */
 export function subscribeToDeletedMatches(onDeleted: (deletedIds: string[]) => void): () => void {
   if (!db) return () => {};
-  try {
-    return onSnapshot(collection(db, 'cricket_deleted_matches'), (snapshot) => {
+  return safeOnSnapshot(
+    collection(db, 'cricket_deleted_matches'),
+    (snapshot) => {
       const ids: string[] = [];
-      snapshot.forEach(docSnap => {
+      snapshot.forEach((docSnap: any) => {
         ids.push(docSnap.id);
       });
       onDeleted(ids);
-    }, (error) => {
-      console.warn('[Firestore] Deleted matches stream note:', error);
-    });
-  } catch (e) {
-    return () => {};
-  }
+    },
+    (error) => {
+      console.warn('[Firestore] Deleted matches stream note:', error?.message || error);
+    }
+  );
 }
 
 /**
@@ -695,24 +940,14 @@ export function subscribeToCricketMatchesCollection(
   onNext: (snapshot: any) => void,
   onError?: (error: any) => void
 ): () => void {
-  if (isFirestoreQuotaExhausted()) {
-    if (onError) onError(new Error('Firestore quota paused'));
-    return () => {};
-  }
-  try {
-    const q = collection(db, 'cricket_matches');
-    return onSnapshot(q, onNext, (err) => {
-      if (isQuotaError(err)) {
-        recordFirestoreQuotaExhaustion(5);
-      }
+  return safeOnSnapshot(
+    collection(db, 'cricket_matches'),
+    onNext,
+    (err) => {
       console.warn('[Firestore] cricket_matches listener note:', err?.message || err);
       if (onError) onError(err);
-    });
-  } catch (err) {
-    console.warn('[Firestore] Failed to attach cricket_matches listener:', err);
-    if (onError) onError(err);
-    return () => {};
-  }
+    }
+  );
 }
 
 /**
@@ -724,24 +959,14 @@ export function subscribeToCricketMatchDoc(
   onError?: (error: any) => void
 ): () => void {
   if (!matchId) return () => {};
-  if (isFirestoreQuotaExhausted()) {
-    if (onError) onError(new Error('Firestore quota paused'));
-    return () => {};
-  }
-  try {
-    const docRef = doc(db, 'cricket_matches', matchId);
-    return onSnapshot(docRef, onNext, (err) => {
-      if (isQuotaError(err)) {
-        recordFirestoreQuotaExhaustion(5);
-      }
+  return safeOnSnapshot(
+    doc(db, 'cricket_matches', matchId),
+    onNext,
+    (err) => {
       console.warn(`[Firestore] cricket_matches/${matchId} listener note:`, err?.message || err);
       if (onError) onError(err);
-    });
-  } catch (err) {
-    console.warn(`[Firestore] Failed to attach doc listener for ${matchId}:`, err);
-    if (onError) onError(err);
-    return () => {};
-  }
+    }
+  );
 }
 
 export const auth = getAuth(app);

@@ -30,13 +30,13 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const initCMS = async () => {
       try {
-        const { db } = await import('../lib/firebase');
-        const { doc, onSnapshot } = await import('firebase/firestore');
+        const { db, safeOnSnapshot } = await import('../lib/firebase');
+        const { doc } = await import('firebase/firestore');
 
-        // Only one listener for the entire app
-        unsub = onSnapshot(doc(db, 'site', 'settings'), (snap) => {
+        // Only one listener for the entire app, protected by safeOnSnapshot
+        unsub = safeOnSnapshot(doc(db, 'site', 'settings'), (snap) => {
           let data = {};
-          if (snap.exists()) {
+          if (snap && snap.exists && snap.exists()) {
             data = snap.data();
           }
           setSettings(data);
@@ -61,7 +61,11 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initCMS();
 
     return () => {
-      if (unsub) unsub();
+      if (unsub) {
+        try {
+          unsub();
+        } catch {}
+      }
     };
   }, []);
 

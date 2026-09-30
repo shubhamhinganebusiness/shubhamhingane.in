@@ -14,6 +14,7 @@ import {
   db, 
   handleFirestoreError, 
   OperationType, 
+  safeOnSnapshot,
   subscribeToRealtimeDBMatch,
   subscribeToRealtimeDBMatchesList,
   subscribeToRealtimeDBCompletedMatch,
@@ -23,7 +24,7 @@ import {
 } from '../../lib/firebase';
 import { subscribeToLiveSummary } from '../../services/cricketDb';
 import { liveFanOutClient } from './modules/LiveFanOutClient';
-import { doc, onSnapshot, collection } from 'firebase/firestore';
+import { doc, collection } from 'firebase/firestore';
 
 // Local storage & real-time sync across scoreboard components
 import { 
@@ -98,6 +99,7 @@ import {
   subscribeToSponsors,
   DEFAULT_PRESET_SPONSORS 
 } from '../../utils/cricketSponsorsStorage';
+import { SpectatorOneHalfBracketViewer } from './SpectatorOneHalfBracketViewer';
 
 // Struct definitions matching those in CricketScoreboard.tsx
 interface Batsman {
@@ -573,7 +575,7 @@ export const LiveMatchGlobalBanner = () => {
     window.addEventListener('cricket_match_deleted', handleDeletedEvent);
 
     return () => {
-      unsub();
+      try { unsub(); } catch {}
       window.removeEventListener('cricket_match_deleted', handleDeletedEvent);
     };
   }, []);
@@ -853,7 +855,7 @@ export const SpectatorScoreboardSection = ({
   const [showMatchSelectionHub, setShowMatchSelectionHub] = useState(false);
   const [dismissedAutoSelect, setDismissedAutoSelect] = useState(false);
   const [typedMatchId, setTypedMatchId] = useState('');
-  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'standing' | 'sponsors-prizes'>('arena');
+  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'bracket' | 'standing' | 'sponsors-prizes'>('arena');
   const [sponsorsList, setSponsorsList] = useState<LocalCricketSponsor[]>(() => getLocalSponsors());
 
   useEffect(() => {
@@ -979,7 +981,15 @@ export const SpectatorScoreboardSection = ({
   const [insightsError, setInsightsError] = useState<string>( '');
 
   // Subtab navigation inside spectator screen
-  const [spectatorSearchTab, setSpectatorSearchTab] = useState<'fixtures' | 'tournaments'>('fixtures');
+  const [spectatorSearchTab, setSpectatorSearchTab] = useState<'fixtures' | 'bracket' | 'tournaments'>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : ''));
+      if (params.get('view') === 'tournament_hub' || params.get('tab') === 'bracket') {
+        return 'bracket';
+      }
+    } catch (_) {}
+    return 'fixtures';
+  });
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [selectedTournament, setSelectedTournament] = useState<any | null>(null);
 
@@ -1727,12 +1737,12 @@ export const SpectatorScoreboardSection = ({
     window.addEventListener('cricket_select_match', handleSelectMatchEvent);
 
     return () => {
-      unsub();
-      unsubFanOut();
-      unsubRtdbList();
-      unsubCompleted();
-      unsubSync();
-      unsubDeleted();
+      try { unsub(); } catch {}
+      try { unsubFanOut(); } catch {}
+      try { unsubRtdbList(); } catch {}
+      try { unsubCompleted(); } catch {}
+      try { unsubSync(); } catch {}
+      try { unsubDeleted(); } catch {}
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('cricket_matches_updated', handleMatchesUpdated);
       window.removeEventListener('cricket_match_updated', handleMatchesUpdated);
@@ -1963,12 +1973,12 @@ export const SpectatorScoreboardSection = ({
       setTournaments(initialLocal);
     }
 
-    const unsub = onSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
+    const unsub = safeOnSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
       const list: any[] = [];
       const snapSeenIds = new Set<string>();
-      snap.forEach((doc) => {
-        const data = doc.data();
-        const tid = data?.id || doc.id;
+      snap.forEach((docSnap: any) => {
+        const data = docSnap.data();
+        const tid = data?.id || docSnap.id;
         if (tid && !isTournamentDeleted(tid) && !snapSeenIds.has(tid)) {
           snapSeenIds.add(tid);
           list.push({ ...data, id: tid });
@@ -2019,7 +2029,7 @@ export const SpectatorScoreboardSection = ({
       const validTournaments = deduplicateTournaments(merged);
       setTournaments(validTournaments);
     }, (err) => {
-      console.warn("Warning subscribing to cricket_tournaments:", err);
+      console.warn("Warning subscribing to cricket_tournaments:", err?.message || err);
     });
 
     const handleTournamentsUpdate = () => {
@@ -2037,7 +2047,7 @@ export const SpectatorScoreboardSection = ({
     window.addEventListener('storage', handleTournamentsUpdate);
 
     return () => {
-      unsub();
+      try { unsub(); } catch {}
       window.removeEventListener('gully_tournaments_updated', handleTournamentsUpdate);
       window.removeEventListener('one_half_tournament_updated', handleTournamentsUpdate);
       window.removeEventListener('storage', handleTournamentsUpdate);
@@ -2283,11 +2293,11 @@ export const SpectatorScoreboardSection = ({
     });
 
     return () => {
-      unsub();
-      unsubSummary();
-      unsubFanOutMatch();
-      unsubRtdb();
-      unsubSync();
+      try { unsub(); } catch {}
+      try { unsubSummary(); } catch {}
+      try { unsubFanOutMatch(); } catch {}
+      try { unsubRtdb(); } catch {}
+      try { unsubSync(); } catch {}
     };
   }, [matchIdParam, homepageMode, localSelectedMatchId]);
 
@@ -2471,13 +2481,20 @@ export const SpectatorScoreboardSection = ({
   );
 
   useEffect(() => {
+    const viewParam = searchParams.get('view');
+    const tabParam = searchParams.get('tab') as string | null;
+    if (viewParam === 'tournament_hub' || tabParam === 'bracket') {
+      setSpectatorSearchTab('bracket');
+      if (!homepageMode) {
+        setActiveTab('bracket');
+      }
+    }
     if (homepageMode) return;
-    const tabParam = searchParams.get('tab') as SpectatorTargetTab | null;
     if (
       tabParam &&
-      ['arena', 'scorecard', 'overs', 'highlights', 'points-table', 'standing', 'sponsors-prizes'].includes(tabParam)
+      ['arena', 'scorecard', 'overs', 'highlights', 'points-table', 'bracket', 'standing', 'sponsors-prizes'].includes(tabParam)
     ) {
-      setActiveTab(tabParam);
+      setActiveTab(tabParam as any);
     }
     const certParam = searchParams.get('cert');
     if (certParam === 'true') {
@@ -4140,14 +4157,14 @@ export const SpectatorScoreboardSection = ({
             )}
 
             {/* Landing Hub Sub-navigation Tabs */}
-            <div className="flex border border-slate-200/50 dark:border-slate-800 p-1 mb-6 gap-2 w-full max-w-sm bg-slate-100 dark:bg-slate-905 rounded-[1.3rem] shadow-inner">
+            <div className="flex flex-wrap border border-slate-200/50 dark:border-slate-800 p-1 mb-6 gap-1.5 w-full max-w-xl bg-slate-100 dark:bg-slate-905 rounded-[1.3rem] shadow-inner">
               <button
                 type="button"
                 onClick={() => {
                   setSpectatorSearchTab('fixtures');
                   setSelectedTournament(null);
                 }}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2.5 px-3 sm:px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-1.5 ${
                   spectatorSearchTab === 'fixtures'
                     ? 'bg-emerald-600 text-white shadow-md font-extrabold scale-[1.02]'
                     : 'text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
@@ -4157,8 +4174,22 @@ export const SpectatorScoreboardSection = ({
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setSpectatorSearchTab('bracket');
+                  setSelectedTournament(null);
+                }}
+                className={`flex-1 py-2.5 px-3 sm:px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-1.5 ${
+                  spectatorSearchTab === 'bracket'
+                    ? 'bg-emerald-600 text-white shadow-md font-extrabold scale-[1.02]'
+                    : 'text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
+                }`}
+              >
+                🏆 Group 1 Bracket
+              </button>
+              <button
+                type="button"
                 onClick={() => setSpectatorSearchTab('tournaments')}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-2 ${
+                className={`flex-1 py-2.5 px-3 sm:px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-1.5 ${
                   spectatorSearchTab === 'tournaments'
                     ? 'bg-emerald-600 text-white shadow-md font-extrabold scale-[1.02]'
                     : 'text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
@@ -4714,10 +4745,37 @@ export const SpectatorScoreboardSection = ({
                     onExportPDF={(m) => handleExportMatchPDF(m)}
                   />
                 )}
+
+                {/* Read-Only One-Half Tournament — Group 1 Knockout Bracket Section on Spectator Hub */}
+                {!isOneHalfTournamentDeleted() && (
+                  <div className="pt-4">
+                    <SpectatorOneHalfBracketViewer
+                      allMatches={allMatches}
+                      onSelectLiveMatch={(id) => selectMatch(id)}
+                      defaultDay={1}
+                    />
+                  </div>
+                )}
             </>
+            ) : spectatorSearchTab === 'bracket' ? (
+              /* ===================== GROUP 1 KNOCKOUT BRACKET (READ-ONLY SPECTATOR VIEW) ===================== */
+              <div className="space-y-8 animate-fade-in">
+                <SpectatorOneHalfBracketViewer
+                  allMatches={allMatches}
+                  onSelectLiveMatch={(id) => selectMatch(id)}
+                  defaultDay={1}
+                />
+              </div>
             ) : (
               /* ===================== TOURNAMENTS ARENA TAB VIEW ===================== */
               <div className="space-y-8 animate-fade-in">
+                {!isOneHalfTournamentDeleted() && !selectedTournament && (
+                  <SpectatorOneHalfBracketViewer
+                    allMatches={allMatches}
+                    onSelectLiveMatch={(id) => selectMatch(id)}
+                    defaultDay={1}
+                  />
+                )}
                 {!selectedTournament ? (
                   <div className="space-y-6">
                     <div className="flex items-center gap-2">
@@ -6822,7 +6880,8 @@ export const SpectatorScoreboardSection = ({
                     { id: 'scorecard', label: '📊 Full Scorecard' },
                     { id: 'overs', label: '⚾ Overs Analysis' },
                     { id: 'highlights', label: '✨ Highlights & Comm' },
-                    ...(isTournamentMatch ? [{ id: 'points-table', label: '🏆 Points Table' }] : []),
+                    { id: 'bracket', label: '🏆 Group 1 Bracket' },
+                    ...(isTournamentMatch ? [{ id: 'points-table', label: '📋 Points Table' }] : []),
                     { id: 'standing', label: isTournamentMatch ? '👥 Squads XI' : '👥 Squads & Teams' },
                     { id: 'sponsors-prizes', label: '🎁 Sponsors & Prizes' }
                   ].map((tab) => (
@@ -8876,6 +8935,26 @@ export const SpectatorScoreboardSection = ({
                       </div>
 
                     </div>
+
+                    {/* One-Half Group 1 Knockout Bracket (Read-Only Spectator View) */}
+                    {!isOneHalfTournamentDeleted() && (
+                      <SpectatorOneHalfBracketViewer
+                        allMatches={allMatches}
+                        onSelectLiveMatch={(id) => selectMatch(id)}
+                        defaultDay={1}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* ===================== TAB: GROUP 1 KNOCKOUT BRACKET (READ-ONLY) ===================== */}
+                {activeTab === 'bracket' && (
+                  <div className="space-y-6 animate-fade-in">
+                    <SpectatorOneHalfBracketViewer
+                      allMatches={allMatches}
+                      onSelectLiveMatch={(id) => selectMatch(id)}
+                      defaultDay={1}
+                    />
                   </div>
                 )}
 

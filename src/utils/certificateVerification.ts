@@ -3,6 +3,9 @@
  * Gully Scoreboard Championship Certification Engine
  */
 
+import { db } from '../lib/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
 export type AwardType = 
   | 'potm' 
   | 'best_batter' 
@@ -10,7 +13,19 @@ export type AwardType =
   | 'fighter'
   | 'champion_squad'
   | 'runner_up_squad'
-  | 'participation';
+  | 'participation'
+  | 'man_of_series'
+  | 'orange_cap'
+  | 'purple_cap'
+  | 'best_fielder'
+  | 'emerging_player'
+  | 'umpire_official';
+
+export interface CertificateCustomAssets {
+  playerPhotoUrl?: string;
+  teamLogoUrl?: string;
+  signatureImageUrl?: string;
+}
 
 export interface VerifiedAwardDetails {
   certId: string;
@@ -35,11 +50,73 @@ export interface VerifiedAwardDetails {
   founderName: string;
   certifyingAuthority: string;
   issuedAt?: string;
+  isFinalMatch?: boolean;
+  customRoleLabel?: string;
+  playerPhotoUrl?: string;
+  teamLogoUrl?: string;
+  signatureImageUrl?: string;
+}
+
+export function getAwardCodeFromType(awardType: AwardType): string {
+  switch (awardType) {
+    case 'best_batter': return 'BAT';
+    case 'best_bowler': return 'BOWL';
+    case 'fighter': return 'FIGHTER';
+    case 'champion_squad': return 'CHAMP';
+    case 'runner_up_squad': return 'RUNNER';
+    case 'participation': return 'SQUAD';
+    case 'man_of_series': return 'MOS';
+    case 'orange_cap': return 'ORNG';
+    case 'purple_cap': return 'PRPL';
+    case 'best_fielder': return 'FIELD';
+    case 'emerging_player': return 'EMRG';
+    case 'umpire_official': return 'UMP';
+    case 'potm':
+    default:
+      return 'POTM';
+  }
+}
+
+export function parseAwardTypeFromCode(code: string): AwardType {
+  const clean = (code || '').trim().toUpperCase();
+  if (clean === 'BAT') return 'best_batter';
+  if (clean === 'BOWL') return 'best_bowler';
+  if (clean === 'FIGHTER') return 'fighter';
+  if (clean === 'CHAMP') return 'champion_squad';
+  if (clean === 'RUNNER') return 'runner_up_squad';
+  if (clean === 'SQUAD') return 'participation';
+  if (clean === 'MOS') return 'man_of_series';
+  if (clean === 'ORNG') return 'orange_cap';
+  if (clean === 'PRPL') return 'purple_cap';
+  if (clean === 'FIELD') return 'best_fielder';
+  if (clean === 'EMRG') return 'emerging_player';
+  if (clean === 'UMP') return 'umpire_official';
+  return 'potm';
+}
+
+export function getHumanAwardTitle(awardType: AwardType, isFinalMatch: boolean = false): string {
+  switch (awardType) {
+    case 'best_batter': return 'BEST BATSMAN OF THE MATCH';
+    case 'best_bowler': return 'BEST BOWLER OF THE MATCH';
+    case 'fighter': return 'FIGHTER OF THE MATCH';
+    case 'champion_squad': return isFinalMatch ? 'TOURNAMENT CHAMPION TROPHY WINNER' : 'MATCH WINNER CERTIFICATE';
+    case 'runner_up_squad': return isFinalMatch ? 'TOURNAMENT RUNNER-UP FINALIST CERTIFICATION' : 'PARTICIPANT CERTIFICATION';
+    case 'participation': return isFinalMatch ? 'TOURNAMENT FINAL PARTICIPANT CERTIFICATION' : 'MATCH PARTICIPANT CERTIFICATION';
+    case 'man_of_series': return 'MAN OF THE SERIES (TOURNAMENT MVP)';
+    case 'orange_cap': return 'ORANGE CAP WINNER (BEST TOURNAMENT BATSMAN)';
+    case 'purple_cap': return 'PURPLE CAP WINNER (BEST TOURNAMENT BOWLER)';
+    case 'best_fielder': return 'BEST FIELDER OF THE TOURNAMENT';
+    case 'emerging_player': return 'EMERGING PLAYER OF THE TOURNAMENT';
+    case 'umpire_official': return 'OFFICIAL UMPIRE & MATCH REFEREE APPRECIATION';
+    case 'potm':
+    default:
+      return 'PLAYER OF THE MATCH';
+  }
 }
 
 /**
  * Generate an authentic, deterministic Certificate Serial Code
- * Example: GS-2026-M07-POTM-8F2B or GS-2026-M07-FIGHTER-4C19
+ * Example: GS-2026-M07-POTM-8F2B or GS-2026-M07-MOS-4C19
  */
 export function generateCertificateSerial(
   matchId: string = 'M01',
@@ -67,14 +144,7 @@ export function generateCertificateSerial(
     matchCode = `M${String((hash % 90) + 10).padStart(2, '0')}`;
   }
 
-  // Award abbreviation
-  let awardCode = 'POTM';
-  if (awardType === 'best_batter') awardCode = 'BAT';
-  else if (awardType === 'best_bowler') awardCode = 'BOWL';
-  else if (awardType === 'fighter') awardCode = 'FIGHTER';
-  else if (awardType === 'champion_squad') awardCode = 'CHAMP';
-  else if (awardType === 'runner_up_squad') awardCode = 'RUNNER';
-  else if (awardType === 'participation') awardCode = 'SQUAD';
+  const awardCode = getAwardCodeFromType(awardType);
 
   // Deterministic 4-character Hex Checksum
   const cleanPlayer = (playerName || 'Player').trim().toLowerCase();
@@ -1176,4 +1246,357 @@ export function extractSquadPlayersForTournamentTeam(
   }
 
   return squadItems;
+}
+
+// ============================================================================
+// CLOUD + LOCAL CERTIFICATE VERIFICATION REGISTRY
+// ============================================================================
+
+const ISSUED_CERTS_LOCAL_KEY = 'gullyscore_issued_certificates_registry_v1';
+const CERT_SETTINGS_COLLECTION = 'site_settings';
+const CERT_SETTINGS_DOC = 'cricket_certificate_config';
+const ISSUED_CERTS_SUBCOLLECTION = 'issued_certificates';
+
+function readLocalIssuedRegistry(): Record<string, VerifiedAwardDetails> {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const raw = localStorage.getItem(ISSUED_CERTS_LOCAL_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalIssuedRegistry(map: Record<string, VerifiedAwardDetails>): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const keys = Object.keys(map);
+    if (keys.length > 200) {
+      const sorted = keys
+        .map(k => map[k])
+        .sort((a, b) => String(b.issuedAt || '').localeCompare(String(a.issuedAt || '')));
+      const trimmed: Record<string, VerifiedAwardDetails> = {};
+      sorted.slice(0, 150).forEach(item => {
+        if (item && item.certId) trimmed[item.certId.toUpperCase()] = item;
+      });
+      localStorage.setItem(ISSUED_CERTS_LOCAL_KEY, JSON.stringify(trimmed));
+      return;
+    }
+    localStorage.setItem(ISSUED_CERTS_LOCAL_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore storage quota warnings
+  }
+}
+
+/**
+ * Registers an issued or previewed certificate in both localStorage and Firestore
+ * so manual serial number lookups on any device resolve the genuine player and match record.
+ */
+export async function registerIssuedCertificate(details: Partial<VerifiedAwardDetails> & { certId: string }): Promise<VerifiedAwardDetails> {
+  const cleanCertId = details.certId.trim().toUpperCase();
+  const awardType: AwardType = details.awardType || 'potm';
+  const record: VerifiedAwardDetails = {
+    certId: cleanCertId,
+    matchId: details.matchId || 'M07',
+    awardType,
+    awardName: details.awardName || getHumanAwardTitle(awardType, details.isFinalMatch),
+    recipientName: (details.recipientName || 'Star Champion').trim(),
+    tournamentName: details.tournamentName || 'Gully Premier League 2026',
+    matchDate: details.matchDate || new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+    venue: details.venue || 'Official Championship Ground',
+    teamA: details.teamA || 'Team A',
+    teamB: details.teamB || 'Team B',
+    winner: details.winner || '',
+    winReason: details.winReason || '',
+    runs: Number(details.runs) || 0,
+    balls: details.balls !== undefined ? Number(details.balls) : undefined,
+    fours: details.fours !== undefined ? Number(details.fours) : undefined,
+    sixes: details.sixes !== undefined ? Number(details.sixes) : undefined,
+    wickets: Number(details.wickets) || 0,
+    runsConceded: details.runsConceded !== undefined ? Number(details.runsConceded) : undefined,
+    points: Number(details.points) || Math.max((Number(details.runs) || 0) + (Number(details.wickets) || 0) * 25, 35),
+    founderName: details.founderName || 'Shubham Hingane',
+    certifyingAuthority: details.certifyingAuthority || 'Gully Scoreboard Team',
+    issuedAt: details.issuedAt || new Date().toISOString(),
+    isFinalMatch: Boolean(details.isFinalMatch),
+    customRoleLabel: details.customRoleLabel || '',
+    playerPhotoUrl: details.playerPhotoUrl || '',
+    teamLogoUrl: details.teamLogoUrl || '',
+    signatureImageUrl: details.signatureImageUrl || ''
+  };
+
+  // 1. Save immediately in localStorage registry
+  const currentMap = readLocalIssuedRegistry();
+  currentMap[cleanCertId] = record;
+  writeLocalIssuedRegistry(currentMap);
+
+  // 2. Sync to Firestore under /site_settings/cricket_certificate_config/issued_certificates/{certId}
+  try {
+    const firestorePayload: Record<string, any> = { ...record };
+    if (firestorePayload.playerPhotoUrl && firestorePayload.playerPhotoUrl.length > 220000) {
+      delete firestorePayload.playerPhotoUrl;
+    }
+    if (firestorePayload.teamLogoUrl && firestorePayload.teamLogoUrl.length > 150000) {
+      delete firestorePayload.teamLogoUrl;
+    }
+    if (firestorePayload.signatureImageUrl && firestorePayload.signatureImageUrl.length > 150000) {
+      delete firestorePayload.signatureImageUrl;
+    }
+    Object.keys(firestorePayload).forEach(k => {
+      if (firestorePayload[k] === undefined) delete firestorePayload[k];
+    });
+
+    const docRef = doc(db, CERT_SETTINGS_COLLECTION, CERT_SETTINGS_DOC, ISSUED_CERTS_SUBCOLLECTION, cleanCertId);
+    await setDoc(docRef, firestorePayload, { merge: true });
+  } catch (err) {
+    console.warn('Could not sync issued certificate to Firestore, stored locally:', err);
+  }
+
+  return record;
+}
+
+/**
+ * Returns a list of recently issued certificates (from local storage + default sample records)
+ * so users on the verification portal can see and test real serial IDs.
+ */
+export function getRecentIssuedCertificates(maxCount: number = 8): VerifiedAwardDetails[] {
+  const map = readLocalIssuedRegistry();
+  const list = Object.values(map).sort((a, b) =>
+    String(b.issuedAt || '').localeCompare(String(a.issuedAt || ''))
+  );
+
+  if (list.length >= 3) {
+    return list.slice(0, maxCount);
+  }
+
+  const defaults: VerifiedAwardDetails[] = [
+    {
+      certId: generateCertificateSerial('LIVE_GPL_2026_FINALS', '17 Sep 2026', 'potm', 'Rohit Sharma'),
+      matchId: 'LIVE_GPL_2026_FINALS',
+      awardType: 'potm',
+      awardName: 'PLAYER OF THE MATCH',
+      recipientName: 'Rohit Sharma',
+      tournamentName: 'Gully Premier League 2026',
+      matchDate: '17 Sep 2026',
+      venue: 'Chhatrapati Shivaji Stadium, Pune',
+      teamA: 'Shivaji Park Lions',
+      teamB: 'Dadar Warriors',
+      winner: 'Shivaji Park Lions',
+      winReason: 'Won by 18 runs',
+      runs: 87,
+      balls: 42,
+      fours: 8,
+      sixes: 6,
+      wickets: 2,
+      runsConceded: 16,
+      points: 145,
+      founderName: 'Shubham Hingane',
+      certifyingAuthority: 'Gully Scoreboard Team',
+      issuedAt: '2026-09-17T18:30:00.000Z',
+      isFinalMatch: true
+    },
+    {
+      certId: generateCertificateSerial('LIVE_GPL_2026_FINALS', '17 Sep 2026', 'man_of_series', 'Shubham Hingane'),
+      matchId: 'LIVE_GPL_2026_FINALS',
+      awardType: 'man_of_series',
+      awardName: 'MAN OF THE SERIES (TOURNAMENT MVP)',
+      recipientName: 'Shubham Hingane',
+      tournamentName: 'Gully Premier League 2026',
+      matchDate: '17 Sep 2026',
+      venue: 'Chhatrapati Shivaji Stadium, Pune',
+      teamA: 'Shivaji Park Lions',
+      teamB: 'Dadar Warriors',
+      winner: 'Shivaji Park Lions',
+      winReason: 'Tournament Champions',
+      runs: 342,
+      balls: 178,
+      fours: 34,
+      sixes: 21,
+      wickets: 9,
+      runsConceded: 112,
+      points: 567,
+      founderName: 'Shubham Hingane',
+      certifyingAuthority: 'Gully Scoreboard Team',
+      issuedAt: '2026-09-17T18:25:00.000Z',
+      isFinalMatch: true
+    },
+    {
+      certId: generateCertificateSerial('LIVE_GPL_2026_FINALS', '17 Sep 2026', 'best_bowler', 'Jasprit Bumrah'),
+      matchId: 'LIVE_GPL_2026_FINALS',
+      awardType: 'best_bowler',
+      awardName: 'BEST BOWLER OF THE MATCH',
+      recipientName: 'Jasprit Bumrah',
+      tournamentName: 'Gully Premier League 2026',
+      matchDate: '17 Sep 2026',
+      venue: 'Chhatrapati Shivaji Stadium, Pune',
+      teamA: 'Shivaji Park Lions',
+      teamB: 'Dadar Warriors',
+      winner: 'Shivaji Park Lions',
+      winReason: 'Won by 18 runs',
+      runs: 12,
+      balls: 6,
+      fours: 1,
+      sixes: 1,
+      wickets: 4,
+      runsConceded: 14,
+      points: 130,
+      founderName: 'Shubham Hingane',
+      certifyingAuthority: 'Gully Scoreboard Team',
+      issuedAt: '2026-09-17T18:20:00.000Z',
+      isFinalMatch: true
+    }
+  ];
+
+  const merged = [...list];
+  defaults.forEach(d => {
+    if (!merged.some(m => m.certId === d.certId)) {
+      merged.push(d);
+    }
+  });
+
+  return merged.slice(0, maxCount);
+}
+
+/**
+ * Looks up a certificate by its serial number (e.g., GS-2026-M07-POTM-8F2B) across:
+ * 1. Local issued registry
+ * 2. Cloud Firestore issued_certificates subcollection
+ * 3. Deterministic scan across local match & tournament archives
+ */
+export async function lookupCertificateBySerial(rawSerial: string): Promise<VerifiedAwardDetails | null> {
+  if (!rawSerial || !rawSerial.trim()) return null;
+  const cleanCertId = rawSerial.trim().toUpperCase();
+
+  // 1. Check local issued registry first
+  const localMap = readLocalIssuedRegistry();
+  if (localMap[cleanCertId]) {
+    return localMap[cleanCertId];
+  }
+
+  // Check built-in sample records
+  const sampleMatch = getRecentIssuedCertificates(10).find(c => c.certId.toUpperCase() === cleanCertId);
+  if (sampleMatch) {
+    return sampleMatch;
+  }
+
+  // 2. Check Cloud Firestore issued_certificates subcollection
+  try {
+    const docRef = doc(db, CERT_SETTINGS_COLLECTION, CERT_SETTINGS_DOC, ISSUED_CERTS_SUBCOLLECTION, cleanCertId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data() as VerifiedAwardDetails;
+      const resolved: VerifiedAwardDetails = {
+        ...data,
+        certId: cleanCertId
+      };
+      localMap[cleanCertId] = resolved;
+      writeLocalIssuedRegistry(localMap);
+      return resolved;
+    }
+  } catch (err) {
+    console.warn('Firestore certificate lookup fallback to local archive scan:', err);
+  }
+
+  // 3. Deterministic scan across local match archives if serial matches GS-YYYY-MXX-AWARD-HEX
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const parseList = (key: string): any[] => {
+        try {
+          const r = localStorage.getItem(key);
+          if (!r) return [];
+          const p = JSON.parse(r);
+          return Array.isArray(p) ? p : [p];
+        } catch {
+          return [];
+        }
+      };
+
+      const allMatches = [
+        ...parseList('cricket_matches_local_registry'),
+        ...parseList('cricket_custom_past_matches'),
+        ...parseList('cricket_active_match')
+      ];
+
+      const allAwardTypes: AwardType[] = [
+        'potm', 'best_batter', 'best_bowler', 'fighter',
+        'champion_squad', 'runner_up_squad', 'participation',
+        'man_of_series', 'orange_cap', 'purple_cap',
+        'best_fielder', 'emerging_player', 'umpire_official'
+      ];
+
+      for (const m of allMatches) {
+        if (!m) continue;
+        const mId = m.id || m.matchId || 'M07';
+        const mDate = m.date || m.matchDate || '2026';
+        const resolvedPerformers = resolveMatchAwardPerformers(m);
+        const candidates: Array<{ player: AwardPlayer; award: AwardType }> = [
+          { player: resolvedPerformers.playerOfTheMatch, award: 'potm' },
+          { player: resolvedPerformers.bestBatsman, award: 'best_batter' },
+          { player: resolvedPerformers.bestBowler, award: 'best_bowler' },
+          { player: resolvedPerformers.fighterOfTheMatch, award: 'fighter' },
+          { player: resolvedPerformers.playerOfTheMatch, award: 'man_of_series' },
+          { player: resolvedPerformers.bestBatsman, award: 'orange_cap' },
+          { player: resolvedPerformers.bestBowler, award: 'purple_cap' }
+        ];
+
+        resolvedPerformers.squadPlayers.forEach(sp => {
+          const dispName = sp.name + (sp.isCaptain ? ' (C)' : '');
+          allAwardTypes.forEach(aType => {
+            candidates.push({
+              player: {
+                name: dispName,
+                runs: sp.runs || 0,
+                balls: sp.balls,
+                fours: sp.fours,
+                sixes: sp.sixes,
+                wickets: sp.wickets || 0,
+                runsConceded: sp.runsConceded,
+                points: sp.points || 25,
+                team: sp.team
+              },
+              award: aType
+            });
+          });
+        });
+
+        for (const c of candidates) {
+          const candidateSerial = generateCertificateSerial(mId, mDate, c.award, c.player.name);
+          if (candidateSerial.toUpperCase() === cleanCertId) {
+            const foundRecord: VerifiedAwardDetails = {
+              certId: cleanCertId,
+              matchId: mId,
+              awardType: c.award,
+              awardName: getHumanAwardTitle(c.award, Boolean(m.isFinalMatch)),
+              recipientName: c.player.name,
+              tournamentName: m.tournamentName || m.seriesName || 'Gully Premier League 2026',
+              matchDate: mDate,
+              venue: m.venue || 'Official Championship Ground',
+              teamA: m.teamA || 'Team A',
+              teamB: m.teamB || 'Team B',
+              winner: m.winner || '',
+              winReason: m.winReason || '',
+              runs: c.player.runs || 0,
+              balls: c.player.balls,
+              fours: c.player.fours,
+              sixes: c.player.sixes,
+              wickets: c.player.wickets || 0,
+              runsConceded: c.player.runsConceded,
+              points: c.player.points || 45,
+              founderName: 'Shubham Hingane',
+              certifyingAuthority: 'Gully Scoreboard Team',
+              issuedAt: new Date().toISOString()
+            };
+            await registerIssuedCertificate(foundRecord);
+            return foundRecord;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Archive scan error during certificate lookup:', err);
+  }
+
+  return null;
 }

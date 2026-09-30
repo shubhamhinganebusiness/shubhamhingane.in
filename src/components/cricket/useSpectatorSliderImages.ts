@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db } from '../../lib/firebase';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { db, safeOnSnapshot } from '../../lib/firebase';
+import { collection, query, orderBy } from 'firebase/firestore';
 import { DEFAULT_PRESET_SPONSORS } from '../../utils/cricketSponsorsStorage';
 
 export interface SponsorAdSlide {
@@ -56,11 +56,11 @@ export function useSpectatorSliderImages() {
 
     try {
       const q = query(collection(db, 'spectator_slider_images'), orderBy('order', 'asc'));
-      unsub = onSnapshot(
+      unsub = safeOnSnapshot(
         q,
         (snapshot) => {
           const items: SponsorAdSlide[] = [];
-          snapshot.forEach((docSnap) => {
+          snapshot.forEach((docSnap: any) => {
             const data = docSnap.data();
             if (data.isActive !== false && data.imageUrl && typeof data.imageUrl === 'string' && data.imageUrl.trim() !== '') {
               items.push({
@@ -93,7 +93,7 @@ export function useSpectatorSliderImages() {
           setLoading(false);
         },
         (err) => {
-          console.warn('[useSpectatorSliderImages] Firestore read note:', err);
+          console.warn('[useSpectatorSliderImages] Firestore read note:', err?.message || err);
           setLoading(false);
         }
       );
@@ -112,8 +112,7 @@ export function useSpectatorSliderImages() {
       }
     };
 
-    window.addEventListener('spectator_slider_updated', handleCustomUpdate);
-    window.addEventListener('storage', (e) => {
+    const handleStorageUpdate = (e: StorageEvent) => {
       if (e.key === SPECTATOR_SLIDER_CACHE_KEY && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
@@ -122,11 +121,17 @@ export function useSpectatorSliderImages() {
           }
         } catch (_) {}
       }
-    });
+    };
+
+    window.addEventListener('spectator_slider_updated', handleCustomUpdate);
+    window.addEventListener('storage', handleStorageUpdate);
 
     return () => {
-      unsub();
+      try {
+        unsub();
+      } catch {}
       window.removeEventListener('spectator_slider_updated', handleCustomUpdate);
+      window.removeEventListener('storage', handleStorageUpdate);
     };
   }, [syncToLocalCache]);
 

@@ -1,5 +1,5 @@
-import { db, safeSetDoc, safeDeleteDoc as deleteDoc } from '../lib/firebase';
-import { collection, doc, getDocs, onSnapshot } from 'firebase/firestore';
+import { db, safeSetDoc, safeDeleteDoc as deleteDoc, safeOnSnapshot } from '../lib/firebase';
+import { collection, doc, getDocs } from 'firebase/firestore';
 
 export interface LocalCricketSponsor {
   id: string;
@@ -146,9 +146,9 @@ export async function fetchAllSponsors(): Promise<LocalCricketSponsor[]> {
 export function subscribeToSponsors(callback: (sponsors: LocalCricketSponsor[]) => void): () => void {
   if (typeof window === 'undefined') return () => {};
   try {
-    return onSnapshot(collection(db, 'cricket_sponsors'), (snap) => {
+    return safeOnSnapshot(collection(db, 'cricket_sponsors'), (snap) => {
       const remoteList: LocalCricketSponsor[] = [];
-      snap.forEach(d => {
+      snap.forEach((d: any) => {
         const data = d.data() as LocalCricketSponsor;
         if (data && data.name) {
           remoteList.push({ ...data, id: d.id });
@@ -167,7 +167,7 @@ export function subscribeToSponsors(callback: (sponsors: LocalCricketSponsor[]) 
         callback(getLocalSponsors());
       }
     }, (err) => {
-      console.warn('[CricketSponsors] onSnapshot stream note:', err);
+      console.warn('[CricketSponsors] onSnapshot stream note:', err?.message || err);
       callback(getLocalSponsors());
     });
   } catch (e) {

@@ -21,7 +21,9 @@ import {
   Layers,
   Flame,
   Medal,
-  Trophy
+  Trophy,
+  Upload,
+  Crown
 } from 'lucide-react';
 import { 
   CertificateConfigSettings, 
@@ -91,7 +93,7 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
   const [config, setConfig] = useState<CertificateConfigSettings>(DEFAULT_CERTIFICATE_CONFIG);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [activePreviewAward, setActivePreviewAward] = useState<'potm' | 'best_batter' | 'best_bowler'>('potm');
+  const [activePreviewAward, setActivePreviewAward] = useState<'potm' | 'best_batter' | 'best_bowler' | 'man_of_series' | 'orange_cap' | 'umpire'>('potm');
   const [showFullModalPreview, setShowFullModalPreview] = useState(false);
   const [activeSection, setActiveSection] = useState<'theme' | 'branding' | 'content' | 'verification'>('theme');
 
@@ -110,6 +112,38 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
       ...prev,
       [key]: value
     }));
+  };
+
+  const handleImageUpload = (key: 'defaultTeamLogoUrl' | 'defaultSignatureImageUrl' | 'defaultPlayerPhotoUrl', file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = key === 'defaultSignatureImageUrl' ? 420 : 340;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          handleFieldChange(key, canvas.toDataURL('image/png', 0.92));
+        }
+      };
+      img.src = String(ev.target?.result || '');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSave = async () => {
@@ -135,23 +169,37 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
   const currentTheme = CERTIFICATE_THEMES[config.defaultThemeId] || CERTIFICATE_THEMES.classic_ivory;
 
   // Active recipient in sample preview
-  const currentRecipient = activePreviewAward === 'best_batter' 
+  const currentRecipient = (activePreviewAward === 'best_batter' || activePreviewAward === 'orange_cap')
     ? SAMPLE_PREVIEW_DATA.bestBatsman! 
     : activePreviewAward === 'best_bowler' 
     ? SAMPLE_PREVIEW_DATA.bestBowler! 
+    : activePreviewAward === 'umpire'
+    ? { name: 'Official Match Umpire', runs: 0, balls: 0, fours: 0, sixes: 0, wickets: 0, points: 100 }
     : SAMPLE_PREVIEW_DATA.playerOfTheMatch;
 
   const activeAwardTitle = activePreviewAward === 'potm' 
     ? 'PLAYER OF THE MATCH' 
     : activePreviewAward === 'best_batter' 
     ? 'BEST BATSMAN OF THE MATCH' 
-    : 'BEST BOWLER OF THE MATCH';
+    : activePreviewAward === 'best_bowler'
+    ? 'BEST BOWLER OF THE MATCH'
+    : activePreviewAward === 'man_of_series'
+    ? 'MAN OF THE SERIES (MVP)'
+    : activePreviewAward === 'orange_cap'
+    ? 'ORANGE CAP WINNER'
+    : 'OFFICIAL MATCH UMPIRE CITATION';
 
   const activeAwardBadge = activePreviewAward === 'potm' 
     ? '' 
     : activePreviewAward === 'best_batter' 
     ? 'POWER STRIKER' 
-    : 'GOLDEN ARM BOWLER';
+    : activePreviewAward === 'best_bowler'
+    ? 'GOLDEN ARM BOWLER'
+    : activePreviewAward === 'man_of_series'
+    ? 'TOURNAMENT SUPREME MVP'
+    : activePreviewAward === 'orange_cap'
+    ? 'TOURNAMENT TOP RUN SCORER'
+    : 'FAIR PLAY & OFFICIATING HONOR';
 
   return (
     <div className="space-y-6">
@@ -413,6 +461,71 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
                     <span className="text-xs font-bold text-gray-800">Display Dual Signature Blocks (Committee & Federation)</span>
                   </label>
                 </div>
+
+                {/* Custom Default Crest & Signature Uploads */}
+                <div className="pt-3 border-t border-gray-100 space-y-3">
+                  <span className="text-[10px] uppercase font-black tracking-wider text-amber-600 block">
+                    Official Crest & Digital Signature Uploads
+                  </span>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
+                      <span className="text-[10px] font-extrabold uppercase text-gray-600 block">
+                        Club / Tournament Logo
+                      </span>
+                      {config.defaultTeamLogoUrl && (
+                        <div className="flex items-center gap-2">
+                          <img src={config.defaultTeamLogoUrl} alt="Logo" className="w-9 h-9 rounded-full object-contain border border-amber-400 bg-white p-0.5" />
+                          <button
+                            type="button"
+                            onClick={() => handleFieldChange('defaultTeamLogoUrl', '')}
+                            className="text-[10px] text-rose-600 font-bold hover:underline"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                      <label className="w-full py-1.5 px-2.5 rounded-lg bg-white border border-gray-300 hover:border-amber-500 text-gray-800 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                        <Upload size={12} className="text-amber-600" />
+                        <span>{config.defaultTeamLogoUrl ? 'Replace Crest' : 'Upload Crest'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleImageUpload('defaultTeamLogoUrl', e.target.files?.[0])}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 space-y-2">
+                      <span className="text-[10px] font-extrabold uppercase text-gray-600 block">
+                        Authority Signature PNG
+                      </span>
+                      {config.defaultSignatureImageUrl && (
+                        <div className="flex items-center gap-2">
+                          <img src={config.defaultSignatureImageUrl} alt="Signature" className="h-8 max-w-[90px] object-contain border border-gray-200 bg-white px-1 rounded" />
+                          <button
+                            type="button"
+                            onClick={() => handleFieldChange('defaultSignatureImageUrl', '')}
+                            className="text-[10px] text-rose-600 font-bold hover:underline"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      )}
+                      <label className="w-full py-1.5 px-2.5 rounded-lg bg-white border border-gray-300 hover:border-amber-500 text-gray-800 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                        <Upload size={12} className="text-amber-600" />
+                        <span>{config.defaultSignatureImageUrl ? 'Replace Sign' : 'Upload Sign'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleImageUpload('defaultSignatureImageUrl', e.target.files?.[0])}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -565,6 +678,39 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
                 <Medal size={12} />
                 <span>Best Bowl</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setActivePreviewAward('man_of_series')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  activePreviewAward === 'man_of_series' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-gray-100 text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Crown size={12} />
+                <span>Series MVP</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActivePreviewAward('orange_cap')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  activePreviewAward === 'orange_cap' ? 'bg-orange-500 text-slate-950 font-black' : 'bg-gray-100 text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Flame size={12} />
+                <span>Orange Cap</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActivePreviewAward('umpire')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  activePreviewAward === 'umpire' ? 'bg-sky-500 text-slate-950 font-black' : 'bg-gray-100 text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <ShieldCheck size={12} />
+                <span>Umpire</span>
+              </button>
             </div>
 
             <span className="text-[11px] font-bold text-gray-500 flex items-center gap-1">
@@ -604,6 +750,11 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
 
               {/* Header: Co-branding Bar & Tournament Title */}
               <div className="relative z-10 space-y-1">
+                {config.defaultTeamLogoUrl && (
+                  <div className="absolute top-0 left-2 w-11 h-11 rounded-full border-2 border-amber-500 bg-white p-0.5 shadow-md overflow-hidden flex items-center justify-center">
+                    <img src={config.defaultTeamLogoUrl} alt="Crest" className="w-full h-full object-contain rounded-full" />
+                  </div>
+                )}
                 {config.enableSponsorBanner && (
                   <div
                     className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[8px] sm:text-[9px] font-extrabold uppercase tracking-widest border mx-auto mb-0.5 shadow-xs"
@@ -803,10 +954,14 @@ export const CertificateDesignStudioAdmin: React.FC = () => {
 
                 {/* 4. Dual Signatures */}
                 <div className="text-right">
-                  <div className="h-4 flex items-end justify-end">
-                    <span className="font-serif italic text-xs sm:text-sm" style={{ color: currentTheme.accentColor }}>
-                      {config.defaultOrganizerName || 'Organizing Head'}
-                    </span>
+                  <div className="h-5 flex items-end justify-end">
+                    {config.defaultSignatureImageUrl ? (
+                      <img src={config.defaultSignatureImageUrl} alt="Sign" className="max-h-6 w-auto object-contain ml-auto" />
+                    ) : (
+                      <span className="font-serif italic text-xs sm:text-sm" style={{ color: currentTheme.accentColor }}>
+                        {config.defaultOrganizerName || 'Organizing Head'}
+                      </span>
+                    )}
                   </div>
                   <div className="w-20 sm:w-24 border-b ml-auto my-0.5" style={{ borderColor: currentTheme.secondaryBorder }} />
                   <span className="uppercase tracking-wider block text-[7px] font-black" style={{ color: currentTheme.mutedText }}>
