@@ -7,6 +7,7 @@ import {
   isFirestoreQuotaExhausted,
   safeDeleteDoc,
   safeSetDoc,
+  safeOnSnapshot,
   removeMatchFromRealtimeDB
 } from '../lib/firebase';
 import { 

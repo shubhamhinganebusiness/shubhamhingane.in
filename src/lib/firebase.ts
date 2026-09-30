@@ -169,7 +169,7 @@ if (typeof window !== 'undefined') {
 
 export const app = initializeApp(firebaseConfig);
 
-export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-d8b37397-e561-4460-b64b-a158e4a9e9d6';
+export const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-remixshubhamhing-a0ff377c-7ae5-429e-9263-df2bcb690093';
 
 // Initialize Firestore with memory cache and auto-detected long polling to prevent TargetState (ID: ca9) multiplex collisions
 export const db = initializeFirestore(app, {

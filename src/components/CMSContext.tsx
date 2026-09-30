@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { db, safeOnSnapshot } from '../lib/firebase';
+import { doc } from 'firebase/firestore';
 
 interface CMSContextType {
   settings: any;
@@ -28,11 +30,8 @@ export const CMSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     let unsub: (() => void) | undefined;
 
-    const initCMS = async () => {
+    const initCMS = () => {
       try {
-        const { db, safeOnSnapshot } = await import('../lib/firebase');
-        const { doc } = await import('firebase/firestore');
-
         // Only one listener for the entire app, protected by safeOnSnapshot
         unsub = safeOnSnapshot(doc(db, 'site', 'settings'), (snap) => {
           let data = {};

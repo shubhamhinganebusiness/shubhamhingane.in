@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, query, collection, where, getDocs, limit } from 'firebase/firestore';
+import { auth, db, isFirestoreQuotaExhausted, safeSetDoc as setDoc } from '../lib/firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -68,12 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(initial.loading);
 
   useEffect(() => {
-    const checkUserSession = async () => {
-      const { auth, db, isFirestoreQuotaExhausted, safeSetDoc: setDoc } = await import('../lib/firebase');
-      const { onAuthStateChanged } = await import('firebase/auth');
-      const { doc, getDoc, query, collection, where, getDocs, limit } = await import('firebase/firestore');
-
-      const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (user) {
           // Real Firebase user authenticated - clear any conflicting virtual user session
           try {
@@ -330,18 +328,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
       });
 
-      return unsubscribe;
-    };
-
-    let unsubFn: (() => void) | null = null;
-    checkUserSession().then(unsub => {
-      unsubFn = unsub;
-    });
-
-    return () => {
-      if (unsubFn) unsubFn();
-    };
-  }, []);
+      return () => {
+        try {
+          unsubscribe();
+        } catch {}
+      };
+    }, []);
 
   const logout = async () => {
     try {
@@ -361,7 +353,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      const { auth } = await import('../lib/firebase');
       await auth.signOut();
     } catch (signOutErr) {
       console.warn('Firebase auth signOut error during logout:', signOutErr);

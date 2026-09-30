@@ -19,7 +19,10 @@ export type AwardType =
   | 'purple_cap'
   | 'best_fielder'
   | 'emerging_player'
-  | 'umpire_official';
+  | 'umpire_official'
+  | 'umpire'
+  | 'scorer'
+  | 'organizer';
 
 export interface CertificateCustomAssets {
   playerPhotoUrl?: string;
@@ -33,6 +36,8 @@ export interface VerifiedAwardDetails {
   awardType: AwardType;
   awardName: string;
   recipientName: string;
+  playerName?: string;
+  playerTeam?: string;
   tournamentName: string;
   matchDate: string;
   venue?: string;
@@ -47,9 +52,13 @@ export interface VerifiedAwardDetails {
   wickets: number;
   runsConceded?: number;
   points: number;
-  founderName: string;
-  certifyingAuthority: string;
+  founderName?: string;
+  certifyingAuthority?: string;
   issuedAt?: string;
+  verifiedAt?: string;
+  awardTitle?: string;
+  awardSubtitle?: string;
+  badgeText?: string;
   isFinalMatch?: boolean;
   customRoleLabel?: string;
   playerPhotoUrl?: string;
@@ -70,7 +79,10 @@ export function getAwardCodeFromType(awardType: AwardType): string {
     case 'purple_cap': return 'PRPL';
     case 'best_fielder': return 'FIELD';
     case 'emerging_player': return 'EMRG';
+    case 'umpire':
     case 'umpire_official': return 'UMP';
+    case 'scorer': return 'SCR';
+    case 'organizer': return 'ORG';
     case 'potm':
     default:
       return 'POTM';
@@ -90,7 +102,9 @@ export function parseAwardTypeFromCode(code: string): AwardType {
   if (clean === 'PRPL') return 'purple_cap';
   if (clean === 'FIELD') return 'best_fielder';
   if (clean === 'EMRG') return 'emerging_player';
-  if (clean === 'UMP') return 'umpire_official';
+  if (clean === 'UMP') return 'umpire';
+  if (clean === 'SCR') return 'scorer';
+  if (clean === 'ORG') return 'organizer';
   return 'potm';
 }
 
@@ -107,7 +121,10 @@ export function getHumanAwardTitle(awardType: AwardType, isFinalMatch: boolean =
     case 'purple_cap': return 'PURPLE CAP WINNER (BEST TOURNAMENT BOWLER)';
     case 'best_fielder': return 'BEST FIELDER OF THE TOURNAMENT';
     case 'emerging_player': return 'EMERGING PLAYER OF THE TOURNAMENT';
+    case 'umpire':
     case 'umpire_official': return 'OFFICIAL UMPIRE & MATCH REFEREE APPRECIATION';
+    case 'scorer': return 'OFFICIAL DIGITAL SCORER CITATION';
+    case 'organizer': return 'TOURNAMENT ORGANIZER EXCELLENCE';
     case 'potm':
     default:
       return 'PLAYER OF THE MATCH';
@@ -1302,7 +1319,8 @@ export async function registerIssuedCertificate(details: Partial<VerifiedAwardDe
     matchId: details.matchId || 'M07',
     awardType,
     awardName: details.awardName || getHumanAwardTitle(awardType, details.isFinalMatch),
-    recipientName: (details.recipientName || 'Star Champion').trim(),
+    recipientName: (details.recipientName || details.playerName || 'Star Champion').trim(),
+    playerName: (details.playerName || details.recipientName || 'Star Champion').trim(),
     tournamentName: details.tournamentName || 'Gully Premier League 2026',
     matchDate: details.matchDate || new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
     venue: details.venue || 'Official Championship Ground',

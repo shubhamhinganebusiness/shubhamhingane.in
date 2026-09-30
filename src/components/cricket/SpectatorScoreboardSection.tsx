@@ -159,13 +159,16 @@ interface Innings {
     id: string;
     overBall: string;
     description: string;
-    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone';
+    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone' | 'announcement' | 'break' | 'info' | string;
     soundWave?: boolean;
+    announcementType?: string;
+    specialEvent?: string;
     translations?: {
       en?: string;
       hi?: string;
       mr?: string;
     };
+    [key: string]: any;
   }[];
   history?: BallProgress[];
 }

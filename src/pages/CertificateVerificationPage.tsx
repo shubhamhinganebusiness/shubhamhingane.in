@@ -144,7 +144,7 @@ export const CertificateVerificationPage: React.FC = () => {
 
   // Effective fields combining resolved database record with URL parameters
   const effectiveAward: AwardType = resolvedRecord?.awardType || awardParam || 'potm';
-  const effectivePlayer = resolvedRecord?.playerName || playerParam || 'Star Champion';
+  const effectivePlayer = resolvedRecord?.playerName || resolvedRecord?.recipientName || playerParam || 'Star Champion';
   const effectiveRuns = resolvedRecord ? resolvedRecord.runs : runsParam;
   const effectiveBalls = resolvedRecord?.balls !== undefined ? resolvedRecord.balls : ballsParam;
   const effectiveFours = resolvedRecord?.fours !== undefined ? resolvedRecord.fours : foursParam;
@@ -925,7 +925,7 @@ export const CertificateVerificationPage: React.FC = () => {
                   >
                     <div className="truncate">
                       <span className="text-xs font-black text-amber-300 block truncate">
-                        {rc.playerName}
+                        {rc.playerName || rc.recipientName}
                       </span>
                       <span className="text-[10px] font-mono text-slate-400 block truncate">
                         {rc.certId}
