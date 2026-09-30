@@ -2305,7 +2305,7 @@ export const CricketDigitalToss: React.FC = () => {
                 </div>
                 <button
                   onClick={handleFlipCoin}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-300 hover:from-teal-300 text-stone-950 font-black text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 mx-auto cursor-pointer"
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 mx-auto cursor-pointer"
                 >
                   <Play size={14} />
                   <span>{t.resumeTossBtn}</span>
@@ -2586,7 +2586,7 @@ export const CricketDigitalToss: React.FC = () => {
                   </div>
                   <button
                     onClick={handleFlipCoin}
-                    className="px-6 py-3 rounded-xl bg-gradient-to-r from-teal-400 to-emerald-300 text-stone-950 font-black text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 mx-auto cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider shadow-lg flex items-center justify-center gap-2 mx-auto cursor-pointer"
                   >
                     <Play size={14} />
                     <span>{t.resumeTossBtn}</span>
@@ -2643,7 +2643,7 @@ export const CricketDigitalToss: React.FC = () => {
                       onClick={() => handleMakeDecision('bat')}
                       className={`p-5 rounded-2xl border-2 transition-all flex items-center gap-4 text-left group cursor-pointer ${
                         decision === 'bat'
-                          ? 'bg-gradient-to-br from-emerald-600 to-emerald-800 border-white text-white shadow-xl scale-102'
+                          ? 'bg-emerald-600 border-white text-white shadow-xl scale-102'
                           : 'bg-black/60 hover:bg-black/80 border-emerald-600 text-stone-200'
                       }`}
                     >

@@ -173,7 +173,18 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
     };
 
     teams.forEach((t, tIdx) => {
-      const pRoster = t.players && t.players.length > 0 ? t.players : [
+      const rawPlayers = (t.players && t.players.length > 0)
+        ? t.players
+        : ((t as any).squad && (t as any).squad.length > 0 ? (t as any).squad : null);
+      const pRoster = rawPlayers ? rawPlayers.map((rp: any, rIdx: number) => typeof rp === 'string' ? {
+        name: rp,
+        age: 24,
+        role: (rIdx === 0 ? 'All-Rounder' : rIdx <= 3 ? 'Batsman' : rIdx === 4 ? 'Wicket-Keeper' : 'Bowler') as any,
+        battingStyle: 'Right Hand' as const,
+        bowlingStyle: 'Right-Arm Fast' as const,
+        regFeePaid: true,
+        regFeeAmount: 50
+      } : rp) : [
         { name: t.captain || `${t.name} Captain`, age: 25, role: 'All-Rounder' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'Right-Arm Fast' as const, regFeePaid: true, regFeeAmount: 50 },
         { name: `${t.name.split(' ')[0]} Opener`, age: 23, role: 'Batsman' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'None' as const, regFeePaid: true, regFeeAmount: 50 },
         { name: `${t.name.split(' ')[0]} Keeper`, age: 24, role: 'Wicket-Keeper' as const, battingStyle: 'Right Hand' as const, bowlingStyle: 'None' as const, regFeePaid: true, regFeeAmount: 50 },
@@ -183,7 +194,7 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
       ];
 
       const teamMatches = [...completedMatches, ...liveMatchesWithScores].filter(
-        m => m.teamAId === t.id || m.teamBId === t.id || m.teamAName === t.name || m.teamBName === t.name
+        m => m.teamAId === t.id || m.teamBId === t.id || m.teamAName === t.name || m.teamBName === t.name || (m as any).teamA === t.name || (m as any).teamB === t.name
       );
 
       pRoster.forEach((p, idx) => {
@@ -207,20 +218,26 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
 
         if (teamMatches.length > 0) {
           teamMatches.forEach((m, mIdx) => {
+            const mTeamAName = m.teamAName || (m as any).teamA || m.teamAId;
+            const mTeamBName = m.teamBName || (m as any).teamB || m.teamBId;
             // Check live match scorecard in registry first
             const lm = localRegistryMatches.find(x => 
               x.id === m.id || 
               (x.tournamentMatchId && x.tournamentMatchId === m.id) ||
-              (x.teamA === m.teamAName && x.teamB === m.teamBName)
+              (x.teamA === mTeamAName && x.teamB === mTeamBName)
             );
 
-            if (lm) {
-              const isTeamA = lm.teamA === t.name || m.teamAId === t.id;
-              const batInnings = isTeamA ? lm.innings1 : lm.innings2;
-              const bowlInnings = isTeamA ? lm.innings2 : lm.innings1;
+            const isTeamAInLm = lm ? (lm.teamA === t.name || m.teamAId === t.id || mTeamAName === t.name) : false;
+            const batInnings = lm ? (isTeamAInLm ? (lm.mainMatchState?.innings1 || lm.innings1) : (lm.mainMatchState?.innings2 || lm.innings2)) : null;
+            const bowlInnings = lm ? (isTeamAInLm ? (lm.mainMatchState?.innings2 || lm.innings2) : (lm.mainMatchState?.innings1 || lm.innings1)) : null;
+            const batList = batInnings?.batsmen || batInnings?.batsmanList || batInnings?.batters;
+            const bowlList = bowlInnings?.bowlers || bowlInnings?.bowlerList;
+            const hasLmDetailedScorecard =
+              (Array.isArray(batList) && batList.length > 0) ||
+              (Array.isArray(bowlList) && bowlList.length > 0);
 
+            if (lm && hasLmDetailedScorecard) {
               // Batting in this match
-              const batList = batInnings?.batsmen || batInnings?.batsmanList || batInnings?.batters;
               if (Array.isArray(batList) && batList.length > 0) {
                 const b = batList.find((bat: any) => {
                   const bName = (bat.name || bat.batsmanName || bat.playerName || bat.player || '').trim().toLowerCase();
@@ -238,7 +255,6 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
               }
 
               // Bowling in this match
-              const bowlList = bowlInnings?.bowlers || bowlInnings?.bowlerList;
               if (Array.isArray(bowlList) && bowlList.length > 0) {
                 const bw = bowlList.find((bowl: any) => {
                   const bwName = (bowl.name || bowl.bowlerName || bowl.playerName || bowl.player || '').trim().toLowerCase();
@@ -286,7 +302,7 @@ export const TournamentStatsAndLeaderboards: React.FC<TournamentStatsAndLeaderbo
               }
             } else {
               // Distribute based on match summary scores (with fallback when quick-resulted without score string)
-              const isTeamA = m.teamAId === t.id || m.teamAName === t.name;
+              const isTeamA = m.teamAId === t.id || mTeamAName === t.name;
               const rawMyScore = parseScore(isTeamA ? m.scoreA : m.scoreB);
               const rawOppScore = parseScore(isTeamA ? m.scoreB : m.scoreA);
               const winnerStr = String((m as any).winner || m.winnerId || '');

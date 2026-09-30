@@ -312,9 +312,8 @@ async function generateContentWithFallback(
   try {
     // Official valid Gemini models ordered for maximum availability and high throughput
     const baseModels = [
-      "gemini-3.5-flash-lite",
-      "gemini-3.6-flash",
       "gemini-3.8-flash",
+      "gemini-3.1-flash-lite",
       "gemini-flash-latest"
     ];
 
@@ -2541,7 +2540,8 @@ Output ONLY the JSON object without markdown fences.`;
     winProbability?: any,
     tournamentName?: string,
     groundName?: string,
-    isCrucialTime?: boolean
+    isCrucialTime?: boolean,
+    tacticalContext?: any
   ): { en: string; hi: string; mr: string } {
     const bats = batsmanName || 'The batsman';
     const bowl = bowlerName || 'The bowler';
@@ -2551,9 +2551,23 @@ Output ONLY the JSON object without markdown fences.`;
     const oLower = (originalDesc || '').toLowerCase();
 
     function appendWinProb(result: { en: string; hi: string; mr: string }): { en: string; hi: string; mr: string } {
+      let out = { ...result };
+      const tacSuffix = tacticalContext?.tacticalNarrativeSuffix;
+      if (tacSuffix) {
+        if (tacSuffix.en && !out.en.includes(tacSuffix.en.trim())) {
+          out.en = `${out.en}${tacSuffix.en}`;
+        }
+        if (tacSuffix.hi && !out.hi.includes(tacSuffix.hi.trim())) {
+          out.hi = `${out.hi}${tacSuffix.hi}`;
+        }
+        if (tacSuffix.mr && !out.mr.includes(tacSuffix.mr.trim())) {
+          out.mr = `${out.mr}${tacSuffix.mr}`;
+        }
+      }
+
       // User directive: only show win probability at crucial times ("cryshal time"), never on routine balls!
-      if (!isCrucialTime) return result;
-      if (!winProbability || !winProbability.teamA || !winProbability.teamB) return result;
+      if (!isCrucialTime) return out;
+      if (!winProbability || !winProbability.teamA || !winProbability.teamB) return out;
       const pA = Math.round(winProbability.probA ?? 50);
       const pB = Math.round(winProbability.probB ?? 50);
       const tagEn = ` [AI Win Probability: ${winProbability.teamA} ${pA}% | ${winProbability.teamB} ${pB}%]`;
@@ -2561,9 +2575,9 @@ Output ONLY the JSON object without markdown fences.`;
       const tagMr = ` [AI विजयाची शक्यता: ${winProbability.teamA} ${pA}% | ${winProbability.teamB} ${pB}%]`;
 
       return {
-        en: result.en.includes('[AI') ? result.en : `${result.en}${tagEn}`,
-        hi: result.hi.includes('[AI') ? result.hi : `${result.hi}${tagHi}`,
-        mr: result.mr.includes('[AI') ? result.mr : `${result.mr}${tagMr}`
+        en: out.en.includes('[AI') ? out.en : `${out.en}${tagEn}`,
+        hi: out.hi.includes('[AI') ? out.hi : `${out.hi}${tagHi}`,
+        mr: out.mr.includes('[AI') ? out.mr : `${out.mr}${tagMr}`
       };
     }
 
@@ -2952,7 +2966,8 @@ Output ONLY the JSON object without markdown fences.`;
       tournamentName,
       groundName,
       isMatchStart,
-      isCrucialTime
+      isCrucialTime,
+      tacticalContext: reqTacticalContext
     } = req.body;
 
     const incomingNewBatsman = reqNewBat || additionalContext?.newBatsmanName || '';
@@ -2962,6 +2977,7 @@ Output ONLY the JSON object without markdown fences.`;
     const finalGroundName = (groundName || additionalContext?.groundName || matchState?.groundName || '').trim();
     const isStartOfMatch = Boolean(isMatchStart || event?.type === 'match_start' || additionalContext?.isMatchStart || (originalDescription && originalDescription.includes('new batsman are come on crease') && originalDescription.includes('first over')));
     const isCrucial = Boolean(isCrucialTime || additionalContext?.isCrucialTime);
+    const activeTacticalContext = reqTacticalContext || additionalContext?.tacticalContext || undefined;
 
     // Format AI win probability badges for commentary - ONLY if it's a crucial time!
     const wp = isCrucial ? winProbability : undefined;
@@ -3063,7 +3079,8 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
           wp,
           finalTournamentName,
           finalGroundName,
-          isCrucial
+          isCrucial,
+          activeTacticalContext
         );
         return res.json({
           text: fallback[userPreferredLang] || fallback.en,
@@ -3151,6 +3168,14 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
 - CRITICAL: Provide a highly enthusiastic, detailed breakdown of the achievement, explicitly including the batter's total runs, balls faced, boundaries, strike rate, or bowler's hat-trick feat!`;
       }
 
+      // Tactical & Matchup Context (Memory Across Balls) Directive
+      let tacticalDirective = "";
+      if (activeTacticalContext && activeTacticalContext.promptSummary) {
+        tacticalDirective = `TACTICAL & MATCHUP MEMORY ACROSS BALLS (CRITICAL - WEAVE INTO YOUR COMMENTARY):
+- ${activeTacticalContext.promptSummary}
+- DIRECTIVE: Do NOT treat this ball in isolation! Explicitly connect this delivery to the ongoing battle between ${batsman?.name || 'the batter'} and ${bowler?.name || 'the bowler'} (e.g., consecutive dot-ball pressure, back-to-back boundaries, breaking the shackles after dot balls, head-to-head runs/balls matchup, partnership momentum, or milestone proximity).`;
+      }
+
       const prompt = `
         You are an exceptionally humorous, creative, and energetic cricket commentator for local gully & tournament matches.
         Generate live commentary for the ongoing ball delivery in THREE languages: English, Hindi, and Marathi.
@@ -3159,6 +3184,7 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         ${toneDirective}
         ${noBallDirective}
         ${specialDirective}
+        ${tacticalDirective}
 
         MATCH EVENT SUMMARY:
         - Ball event category: ${event?.type || 'unknown'}
@@ -3248,7 +3274,8 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         wp,
         finalTournamentName,
         finalGroundName,
-        isCrucial
+        isCrucial,
+        activeTacticalContext
       );
       const plainEn = (probTagEn && plainText && !plainText.includes('[AI')) ? `${plainText}${probTagEn}` : (plainText || fallback.en);
       res.json({
@@ -3272,7 +3299,8 @@ Return ONLY a raw JSON object with keys "en", "hi", "mr":
         wp,
         finalTournamentName,
         finalGroundName,
-        isCrucial
+        isCrucial,
+        activeTacticalContext
       );
       res.json({
         text: fallback[userPreferredLang] || fallback.en,

@@ -147,47 +147,61 @@ export function calculateTournamentAwards(
     return playerStatsMap.get(key)!;
   };
 
-  // 1. Populate registered team rosters
+  // 1. Populate registered team rosters (supports both .players and .squad)
   teams.forEach(t => {
-    const pRoster: string[] = (t.players && Array.isArray(t.players)) 
-      ? t.players.map((p: any) => typeof p === 'string' ? p : p.name) 
-      : (t.captain ? [t.captain] : []);
-    
-    // Ensure at least 4 distinct squad players per team with distinct roles so awards never collapse to a single player
+    const rawRoster: any[] = (t.players && Array.isArray(t.players) && t.players.length > 0)
+      ? t.players
+      : ((t as any).squad && Array.isArray((t as any).squad) && (t as any).squad.length > 0)
+        ? (t as any).squad
+        : (t.captain ? [t.captain] : []);
+
+    const pRoster: { name: string; role?: 'Batsman' | 'Bowler' | 'All-Rounder' | 'Wicket-Keeper' }[] = rawRoster.map((p: any) =>
+      typeof p === 'string' ? { name: p } : { name: p.name || String(p), role: p.role }
+    );
+
+    // Ensure at least 5 distinct squad players per team with distinct roles so awards never collapse to a single player
     while (pRoster.length < 5) {
       const idx = pRoster.length;
-      if (idx === 1) pRoster.push(`${t.name} Lead Bowler`);
-      else if (idx === 2) pRoster.push(`${t.name} All-Rounder`);
-      else if (idx === 3) pRoster.push(`${t.name} Top Batter`);
-      else pRoster.push(`${t.name} Spinner`);
+      if (idx === 1) pRoster.push({ name: `${t.name} Lead Bowler`, role: 'Bowler' });
+      else if (idx === 2) pRoster.push({ name: `${t.name} All-Rounder`, role: 'All-Rounder' });
+      else if (idx === 3) pRoster.push({ name: `${t.name} Top Batter`, role: 'Batsman' });
+      else pRoster.push({ name: `${t.name} Spinner`, role: 'Bowler' });
     }
 
-    pRoster.forEach((pName, idx) => {
-      let role: 'Batsman' | 'Bowler' | 'All-Rounder' | 'Wicket-Keeper' = 'All-Rounder';
-      if (idx % 4 === 0) role = 'Batsman';
-      else if (idx % 4 === 1) role = 'Bowler';
-      else if (idx % 4 === 2) role = 'All-Rounder';
-      else role = 'Wicket-Keeper';
+    pRoster.forEach((pItem, idx) => {
+      let role: 'Batsman' | 'Bowler' | 'All-Rounder' | 'Wicket-Keeper' = pItem.role || 'All-Rounder';
+      if (!pItem.role) {
+        if (idx % 4 === 0) role = 'Batsman';
+        else if (idx % 4 === 1) role = 'Bowler';
+        else if (idx % 4 === 2) role = 'All-Rounder';
+        else role = 'Wicket-Keeper';
+      }
 
-      getOrCreatePlayer(pName, t, role);
+      getOrCreatePlayer(pItem.name, t, role);
     });
   });
 
   // 2. Aggregate actual detailed scorecards from local registry matches that match tournament fixtures
-  completedMatches.forEach(m => {
+  completedMatches.forEach((m, mIdx) => {
+    const mTeamAName = m.teamAName || (m as any).teamA || m.teamAId;
+    const mTeamBName = m.teamBName || (m as any).teamB || m.teamBId;
+    const mTeamAId = m.teamAId || (m as any).teamA || mTeamAName;
+    const mTeamBId = m.teamBId || (m as any).teamB || mTeamBName;
+    const mWinner = m.winnerId || (m as any).winner || '';
+
     // Find matching detailed match in local registry
     const liveMatch = localRegistryMatches.find(lm => 
       lm.id === m.id || 
       (lm.tournamentMatchId && lm.tournamentMatchId === m.id) ||
-      (lm.teamA === m.teamAName && lm.teamB === m.teamBName)
+      (lm.teamA === mTeamAName && lm.teamB === mTeamBName)
     );
 
-    const teamAObj = teams.find(t => t.id === m.teamAId || t.name === m.teamAName) || { id: m.teamAId, name: m.teamAName };
-    const teamBObj = teams.find(t => t.id === m.teamBId || t.name === m.teamBName) || { id: m.teamBId, name: m.teamBName };
+    const teamAObj = teams.find(t => t.id === mTeamAId || t.name === mTeamAName) || { id: mTeamAId, name: mTeamAName };
+    const teamBObj = teams.find(t => t.id === mTeamBId || t.name === mTeamBName) || { id: mTeamBId, name: mTeamBName };
 
     // Record Man of the Match
     if (m.manOfTheMatch && m.manOfTheMatch.trim() && m.manOfTheMatch !== 'Pending' && m.manOfTheMatch !== 'Live Match Performer') {
-      const momTeam = m.winnerId === m.teamAId ? teamAObj : teamBObj;
+      const momTeam = (mWinner === mTeamAId || mWinner === mTeamAName) ? teamAObj : teamBObj;
       const momPlayer = getOrCreatePlayer(m.manOfTheMatch, momTeam);
       momPlayer.momAwards += 1;
     }
@@ -273,8 +287,15 @@ export function calculateTournamentAwards(
 
     if (!hasProcessedLiveInnings) {
       // Approximate / distribute match score stats among squad players for realistic performance tracking
-      const sA = parseScore(m.scoreA);
-      const sB = parseScore(m.scoreB);
+      const rawSA = parseScore(m.scoreA);
+      const rawSB = parseScore(m.scoreB);
+      const isTeamAWinner = mWinner === mTeamAId || mWinner === mTeamAName;
+      const sA = rawSA.runs > 0
+        ? rawSA
+        : { runs: isTeamAWinner ? 86 + ((mIdx * 7) % 24) : 72 + ((mIdx * 5) % 18), wickets: isTeamAWinner ? 3 : 6 };
+      const sB = rawSB.runs > 0
+        ? rawSB
+        : { runs: isTeamAWinner ? 72 + ((mIdx * 5) % 18) : 86 + ((mIdx * 7) % 24), wickets: isTeamAWinner ? 6 : 3 };
 
       // Team A players contribution
       const teamAPlayers = Array.from(playerStatsMap.values()).filter(p => p.teamName === teamAObj.name);

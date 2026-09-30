@@ -89,7 +89,7 @@ _Powered by Live Cricket Tournament Engine_`;
         className="bg-slate-900 border border-emerald-500/40 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4 flex items-center justify-between text-white shrink-0">
+        <div className="bg-emerald-600 px-6 py-4 flex items-center justify-between text-white shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center text-white border border-white/20">
               <QrCode size={20} />
@@ -166,7 +166,7 @@ _Powered by Live Cricket Tournament Engine_`;
                   />
                   <button
                     onClick={() => copyToClipboard(spectatorUrl)}
-                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl border-none cursor-pointer flex items-center gap-1.5 shadow-md shrink-0"
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl border-none cursor-pointer flex items-center gap-1.5 shadow-md shrink-0"
                   >
                     {copiedLink ? <Check size={14} /> : <Copy size={14} />}
                     <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
@@ -218,7 +218,7 @@ _Powered by Live Cricket Tournament Engine_`;
                 </div>
                 <button
                   onClick={openWhatsAppShare}
-                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl border-none cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-500/20"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl border-none cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-500/20"
                 >
                   <MessageSquare size={14} />
                   <span>Send via WhatsApp</span>

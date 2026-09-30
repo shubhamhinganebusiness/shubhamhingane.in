@@ -324,17 +324,17 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         let type: StarTVBall['type'] = 'dot';
         const lower = item.toLowerCase().trim();
         if (
-          item === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
-          lower.includes('षटकार') || lower.includes('छक्का') || lower.includes('६')
-        ) {
-          type = 'six';
-          return { label: '6', type };
-        } else if (
           item === '4' || lower === '4s' || lower === 'four' ||
           lower.includes('चौकार') || lower.includes('चौका') || lower.includes('४')
         ) {
           type = 'four';
           return { label: '4', type };
+        } else if (
+          item === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
+          lower.includes('षटकार') || lower.includes('छक्का') || lower.includes('६')
+        ) {
+          type = 'six';
+          return { label: '6', type };
         } else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(item) || lower === 'ex') {
           type = 'extra';
         } else if (item === 'W' || /^w$/i.test(item) || /^w\+/i.test(item) || item.toUpperCase() === 'OUT') {
@@ -351,23 +351,23 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       const runsOffBat = Number((item as any).runsOffBat);
       const runs = Number((item as any).runs);
 
-      // Definitively detect Sixes first
+      // Definitively detect Fours FIRST so boundaries and 4 runs are never misclassified as 6
       if (
-        label === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
-        directScore === '6' || runsOffBat === 6 || runs === 6 ||
-        lower.includes('षटकार') || lower.includes('छक्का') || lower.includes('६')
-      ) {
-        label = '6';
-        type = 'six';
-      }
-      // Definitively detect Fours (only if not a six)
-      else if (
-        label === '4' || lower === '4s' || lower === 'four' ||
+        type === 'four' || label === '4' || lower === '4s' || lower === 'four' ||
         directScore === '4' || runsOffBat === 4 || runs === 4 ||
         lower.includes('चौकार') || lower.includes('चौका') || lower.includes('४')
       ) {
         label = '4';
         type = 'four';
+      }
+      // Definitively detect Sixes (only when not a four)
+      else if (
+        type === 'six' || label === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
+        directScore === '6' || runsOffBat === 6 || runs === 6 ||
+        lower.includes('षटकार') || lower.includes('छक्का') || lower.includes('६')
+      ) {
+        label = '6';
+        type = 'six';
       }
       // Resolve Wickets
       else if (label === 'W' || /^w$/i.test(label) || /^w\+/i.test(label) || label.toUpperCase() === 'OUT' || type === 'wicket') {
@@ -548,12 +548,15 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       const directScore = String((b as any).ballScore || '').trim();
       const runsOffBat = Number((b as any).runsOffBat);
 
-      if (b.type === 'six' || lbl === '6' || directScore === '6' || runsOffBat === 6) {
-        sixes += 1;
-        runsInOver += 6;
-      } else if (b.type === 'four' || lbl === '4' || directScore === '4' || runsOffBat === 4) {
+      const isFour = b.type === 'four' || lbl === '4' || directScore === '4' || runsOffBat === 4;
+      const isSix = !isFour && (b.type === 'six' || lbl === '6' || directScore === '6' || runsOffBat === 6);
+
+      if (isFour) {
         fours += 1;
         runsInOver += 4;
+      } else if (isSix) {
+        sixes += 1;
+        runsInOver += 6;
       } else if (b.type === 'wicket' || lbl === 'w') {
         wickets += 1;
         dots += 1;

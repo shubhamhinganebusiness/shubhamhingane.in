@@ -197,105 +197,151 @@ export const CompletedMatchesPage: React.FC = () => {
           }
         });
 
-        // Merge completed tournament matches from localStorage so tournament results appear here
-        try {
-          const rawTour = localStorage.getItem('gully_tournaments_v1');
-          if (rawTour) {
-            const tours = JSON.parse(rawTour);
-            if (Array.isArray(tours)) {
-              tours.forEach((t: any) => {
-                if (!t || !Array.isArray(t.matches)) return;
-                t.matches.forEach((m: any) => {
-                  const isCompleted = m.status === 'completed' || !!m.winner || (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled');
-                  if (!isCompleted) return;
-                  const synthId = m.id && String(m.id).startsWith('tour_') ? m.id : `tour_${t.id}_${m.id}`;
-                  if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
-                  if (loaded.some(x => x.id === synthId || (x.tournamentId === t.id && (x as any).tournamentMatchId === m.id))) return;
-                  
-                  const teamAObj = t.teams?.find((tm: any) => tm.id === m.teamAId || tm.name === m.teamAName);
-                  const teamBObj = t.teams?.find((tm: any) => tm.id === m.teamBId || tm.name === m.teamBName);
-                  const parseRunsWickets = (sc: string) => {
-                    if (!sc) return { runs: 0, wickets: 0 };
-                    const parts = String(sc).split('/');
-                    return { runs: parseInt(parts[0], 10) || 0, wickets: parseInt(parts[1], 10) || 0 };
-                  };
-                  const parseOversToBalls = (ov: string) => {
-                    if (!ov) return 0;
-                    const parts = String(ov).split('.');
-                    return (parseInt(parts[0], 10) || 0) * 6 + (parseInt(parts[1], 10) || 0);
-                  };
-                  const scA = parseRunsWickets(m.scoreA);
-                  const scB = parseRunsWickets(m.scoreB);
-                  const ballsA = parseOversToBalls(m.oversA);
-                  const ballsB = parseOversToBalls(m.oversB);
-                  const oversLimit = t.customOvers || (t.format === 'T20' ? 20 : (t.format === 'ODI' ? 50 : 10));
-                  const potmName = m.manOfTheMatch || '';
-                  const winner = m.winner || (m.winnerId === m.teamAId ? m.teamAName : (m.winnerId === m.teamBId ? m.teamBName : ''));
-                  const winReason = m.winReason || (winner ? `${winner} won the match` : 'Match Completed');
-                  
-                  loaded.push({
-                    id: synthId,
-                    tournamentId: t.id,
-                    tournamentMatchId: m.id,
-                    tournamentName: t.name,
-                    tournamentLogo: t.bannerUrl || t.logo || null,
-                    teamA: m.teamAName,
-                    teamB: m.teamBName,
-                    teamAId: m.teamAId,
-                    teamBId: m.teamBId,
-                    teamALogo: teamAObj?.logo || null,
-                    teamBLogo: teamBObj?.logo || null,
-                    oversLimit,
-                    currentInningsNum: 2,
-                    status: 'completed',
-                    winner,
-                    winReason,
-                    manOfTheMatch: potmName,
-                    date: m.date || new Date().toISOString().split('T')[0],
-                    venue: m.venue || 'Tournament Arena',
-                    playerOfTheMatch: potmName ? {
-                      name: potmName,
-                      runs: 0,
-                      balls: 0,
-                      wickets: 0,
-                      runsConceded: 0,
-                      points: 50
-                    } : undefined,
-                    innings1: {
-                      battingTeam: m.teamAName,
-                      bowlingTeam: m.teamBName,
-                      runs: scA.runs,
-                      wickets: scA.wickets,
-                      overs: oversLimit,
-                      ballsBowled: ballsA,
-                      extras: 0,
-                      batsmen: [],
-                      bowlers: [],
-                      fallOfWickets: []
-                    },
-                    innings2: {
-                      battingTeam: m.teamBName,
-                      bowlingTeam: m.teamAName,
-                      runs: scB.runs,
-                      wickets: scB.wickets,
-                      overs: oversLimit,
-                      ballsBowled: ballsB,
-                      extras: 0,
-                      batsmen: [],
-                      bowlers: [],
-                      fallOfWickets: []
-                    },
-                    isTournamentMatch: true,
-                    updatedAt: m.updatedAt || t.updatedAt || Date.now()
-                  } as any);
+        // Helper to merge local registry completed matches and tournament completed matches (including One-Half 32-Team Tournament)
+        const mergeLocalAndTournamentMatches = (baseList: MatchState[]) => {
+          const result = [...baseList];
+          try {
+            const rawLocal = localStorage.getItem('cricket_matches_local_registry');
+            if (rawLocal) {
+              const localParsed = JSON.parse(rawLocal);
+              if (Array.isArray(localParsed)) {
+                localParsed.forEach((lm: any) => {
+                  if (
+                    lm &&
+                    lm.id &&
+                    lm.status === 'completed' &&
+                    !lm.isHidden &&
+                    !lm.isBlocked &&
+                    !lm.hideResultCard &&
+                    !lm.isDeleted &&
+                    !isMatchDeleted(lm.id) &&
+                    !result.some(x => x.id === lm.id)
+                  ) {
+                    result.push(lm);
+                  }
                 });
-              });
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
 
-        // Remote Firestore snapshot is single source of truth
-        setMatches(loaded);
+          const combinedTours: any[] = [];
+          try {
+            const rawTour = localStorage.getItem('gully_tournaments_v1');
+            if (rawTour) {
+              const tours = JSON.parse(rawTour);
+              if (Array.isArray(tours)) combinedTours.push(...tours);
+            }
+          } catch (_) {}
+          try {
+            const rawOH =
+              localStorage.getItem('cricket_one_half_tournament_32') ||
+              localStorage.getItem('one_half_tournament_v1');
+            if (rawOH) {
+              const parsedOH = JSON.parse(rawOH);
+              if (parsedOH && Array.isArray(parsedOH.matches)) {
+                combinedTours.push({ ...parsedOH, id: parsedOH.id || 'one-half-32-series' });
+              }
+            }
+          } catch (_) {}
+
+          combinedTours.forEach((t: any) => {
+            if (!t || !Array.isArray(t.matches)) return;
+            t.matches.forEach((m: any) => {
+              const isCompleted =
+                m.status === 'completed' ||
+                (!!m.winner && !String(m.winner).startsWith('Winner')) ||
+                (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled');
+              if (!isCompleted) return;
+              const nameA = m.teamAName || m.teamA || 'Team A';
+              const nameB = m.teamBName || m.teamB || 'Team B';
+              if (String(nameA).startsWith('Winner') || String(nameB).startsWith('Winner')) return;
+
+              const synthId = m.id && String(m.id).startsWith('tour_') ? m.id : `tour_${t.id}_${m.id}`;
+              if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
+              if (result.some(x => x.id === synthId || (x.tournamentId === t.id && (x as any).tournamentMatchId === m.id))) return;
+
+              const teamAObj = t.teams?.find((tm: any) => tm.id === m.teamAId || tm.name === nameA);
+              const teamBObj = t.teams?.find((tm: any) => tm.id === m.teamBId || tm.name === nameB);
+              const parseRunsWickets = (sc: string) => {
+                if (!sc) return { runs: 0, wickets: 0 };
+                const parts = String(sc).split('/');
+                return { runs: parseInt(parts[0], 10) || 0, wickets: parseInt(parts[1], 10) || 0 };
+              };
+              const parseOversToBalls = (ov: string) => {
+                if (!ov) return 0;
+                const parts = String(ov).split('.');
+                return (parseInt(parts[0], 10) || 0) * 6 + (parseInt(parts[1], 10) || 0);
+              };
+              const scA = parseRunsWickets(m.scoreA);
+              const scB = parseRunsWickets(m.scoreB);
+              const ballsA = parseOversToBalls(m.oversA);
+              const ballsB = parseOversToBalls(m.oversB);
+              const oversLimit = m.oversLimit || t.customOvers || (t.format === 'T20' ? 20 : (t.format === 'ODI' ? 50 : 10));
+              const potmName = m.manOfTheMatch || m.playerOfTheMatch?.name || '';
+              const winner = m.winner || (m.winnerId === m.teamAId ? nameA : (m.winnerId === m.teamBId ? nameB : ''));
+              const winReason = m.winReason || (winner ? `${winner} won the match` : 'Match Completed');
+
+              result.push({
+                id: synthId,
+                tournamentId: t.id,
+                tournamentMatchId: m.id,
+                tournamentName: t.name,
+                tournamentLogo: t.bannerUrl || t.logo || null,
+                teamA: nameA,
+                teamB: nameB,
+                teamAId: m.teamAId || teamAObj?.id,
+                teamBId: m.teamBId || teamBObj?.id,
+                teamALogo: teamAObj?.logo || null,
+                teamBLogo: teamBObj?.logo || null,
+                oversLimit,
+                currentInningsNum: 2,
+                status: 'completed',
+                winner,
+                winReason,
+                manOfTheMatch: potmName,
+                date: m.date || new Date().toISOString().split('T')[0],
+                venue: m.venue || 'Tournament Arena',
+                playerOfTheMatch: m.playerOfTheMatch || (potmName ? {
+                  name: potmName,
+                  runs: 0,
+                  balls: 0,
+                  wickets: 0,
+                  runsConceded: 0,
+                  points: 50
+                } : undefined),
+                innings1: m.innings1 || {
+                  battingTeam: nameA,
+                  bowlingTeam: nameB,
+                  runs: scA.runs,
+                  wickets: scA.wickets,
+                  overs: oversLimit,
+                  ballsBowled: ballsA,
+                  extras: 0,
+                  batsmen: [],
+                  bowlers: [],
+                  fallOfWickets: []
+                },
+                innings2: m.innings2 || {
+                  battingTeam: nameB,
+                  bowlingTeam: nameA,
+                  runs: scB.runs,
+                  wickets: scB.wickets,
+                  overs: oversLimit,
+                  ballsBowled: ballsB,
+                  extras: 0,
+                  batsmen: [],
+                  bowlers: [],
+                  fallOfWickets: []
+                },
+                isTournamentMatch: true,
+                updatedAt: m.updatedAt || t.updatedAt || Date.now()
+              } as any);
+            });
+          });
+          return result;
+        };
+
+        setMatches(mergeLocalAndTournamentMatches(loaded));
         setLoading(false);
       }, (error) => {
         console.warn('CompletedMatchesPage snapshot notice:', error?.message || error);
@@ -340,107 +386,109 @@ export const CompletedMatchesPage: React.FC = () => {
     };
     window.addEventListener('cricket_match_deleted', handleMatchDeleted);
 
-    const handleStorage = (e: StorageEvent) => {
-      if (
-        e.key === 'cricket_deleted_matches_registry' ||
-        e.key === 'cricket_matches_local_registry' ||
-        e.key === 'gully_tournaments_v1'
-      ) {
-        setMatches(prev => {
-          const filtered = prev.filter(m => !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted');
-          try {
-            const rawTour = localStorage.getItem('gully_tournaments_v1');
-            if (rawTour) {
-              const tours = JSON.parse(rawTour);
-              if (Array.isArray(tours)) {
-                tours.forEach((t: any) => {
-                  if (!t || !Array.isArray(t.matches)) return;
-                  t.matches.forEach((m: any) => {
-                    const isCompleted = m.status === 'completed' || !!m.winner || (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled');
-                    if (!isCompleted) return;
-                    const synthId = m.id && String(m.id).startsWith('tour_') ? m.id : `tour_${t.id}_${m.id}`;
-                    if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
-                    if (filtered.some(x => x.id === synthId || (x.tournamentId === t.id && (x as any).tournamentMatchId === m.id))) return;
-                    const winner = m.winner || (m.winnerId === m.teamAId ? m.teamAName : (m.winnerId === m.teamBId ? m.teamBName : ''));
-                    const winReason = m.winReason || (winner ? `${winner} won the match` : 'Match Completed');
-                    filtered.push({
-                      id: synthId,
-                      tournamentId: t.id,
-                      tournamentMatchId: m.id,
-                      tournamentName: t.name,
-                      teamA: m.teamAName,
-                      teamB: m.teamBName,
-                      teamAId: m.teamAId,
-                      teamBId: m.teamBId,
-                      oversLimit: t.customOvers || 10,
-                      currentInningsNum: 2,
-                      status: 'completed',
-                      winner,
-                      winReason,
-                      manOfTheMatch: m.manOfTheMatch || '',
-                      date: m.date || new Date().toISOString().split('T')[0],
-                      venue: m.venue || 'Tournament Arena',
-                      isTournamentMatch: true,
-                      updatedAt: m.updatedAt || Date.now()
-                    } as any);
-                  });
-                });
-              }
-            }
-          } catch (_) {}
-          return filtered;
-        });
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-
     const handleTournamentUpdate = () => {
       setMatches(prev => {
         const filtered = prev.filter(m => !isMatchDeleted(m.id) && !(m as any).isDeleted && m.status !== 'deleted');
         try {
-          const rawTour = localStorage.getItem('gully_tournaments_v1');
-          if (rawTour) {
-            const tours = JSON.parse(rawTour);
-            if (Array.isArray(tours)) {
-              tours.forEach((t: any) => {
-                if (!t || !Array.isArray(t.matches)) return;
-                t.matches.forEach((m: any) => {
-                  const isCompleted = m.status === 'completed' || !!m.winner || (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled');
-                  if (!isCompleted) return;
-                  const synthId = m.id && String(m.id).startsWith('tour_') ? m.id : `tour_${t.id}_${m.id}`;
-                  if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
-                  if (filtered.some(x => x.id === synthId || (x.tournamentId === t.id && (x as any).tournamentMatchId === m.id))) return;
-                  const winner = m.winner || (m.winnerId === m.teamAId ? m.teamAName : (m.winnerId === m.teamBId ? m.teamBName : ''));
-                  const winReason = m.winReason || (winner ? `${winner} won the match` : 'Match Completed');
-                  filtered.push({
-                    id: synthId,
-                    tournamentId: t.id,
-                    tournamentMatchId: m.id,
-                    tournamentName: t.name,
-                    teamA: m.teamAName,
-                    teamB: m.teamBName,
-                    teamAId: m.teamAId,
-                    teamBId: m.teamBId,
-                    oversLimit: t.customOvers || 10,
-                    currentInningsNum: 2,
-                    status: 'completed',
-                    winner,
-                    winReason,
-                    manOfTheMatch: m.manOfTheMatch || '',
-                    date: m.date || new Date().toISOString().split('T')[0],
-                    venue: m.venue || 'Tournament Arena',
-                    isTournamentMatch: true,
-                    updatedAt: m.updatedAt || Date.now()
-                  } as any);
-                });
+          const rawLocal = localStorage.getItem('cricket_matches_local_registry');
+          if (rawLocal) {
+            const localParsed = JSON.parse(rawLocal);
+            if (Array.isArray(localParsed)) {
+              localParsed.forEach((lm: any) => {
+                if (
+                  lm &&
+                  lm.id &&
+                  lm.status === 'completed' &&
+                  !lm.isHidden &&
+                  !lm.isBlocked &&
+                  !lm.hideResultCard &&
+                  !lm.isDeleted &&
+                  !isMatchDeleted(lm.id) &&
+                  !filtered.some(x => x.id === lm.id)
+                ) {
+                  filtered.push(lm);
+                }
               });
             }
           }
         } catch (_) {}
+
+        const combinedTours: any[] = [];
+        try {
+          const rawTour = localStorage.getItem('gully_tournaments_v1');
+          if (rawTour) {
+            const tours = JSON.parse(rawTour);
+            if (Array.isArray(tours)) combinedTours.push(...tours);
+          }
+        } catch (_) {}
+        try {
+          const rawOH =
+            localStorage.getItem('cricket_one_half_tournament_32') ||
+            localStorage.getItem('one_half_tournament_v1');
+          if (rawOH) {
+            const parsedOH = JSON.parse(rawOH);
+            if (parsedOH && Array.isArray(parsedOH.matches)) {
+              combinedTours.push({ ...parsedOH, id: parsedOH.id || 'one-half-32-series' });
+            }
+          }
+        } catch (_) {}
+
+        combinedTours.forEach((t: any) => {
+          if (!t || !Array.isArray(t.matches)) return;
+          t.matches.forEach((m: any) => {
+            const isCompleted =
+              m.status === 'completed' ||
+              (!!m.winner && !String(m.winner).startsWith('Winner')) ||
+              (!!m.winReason && m.winReason !== 'Scheduled' && m.winReason !== 'Match Scheduled');
+            if (!isCompleted) return;
+            const nameA = m.teamAName || m.teamA || 'Team A';
+            const nameB = m.teamBName || m.teamB || 'Team B';
+            if (String(nameA).startsWith('Winner') || String(nameB).startsWith('Winner')) return;
+            const synthId = m.id && String(m.id).startsWith('tour_') ? m.id : `tour_${t.id}_${m.id}`;
+            if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
+            if (filtered.some(x => x.id === synthId || (x.tournamentId === t.id && (x as any).tournamentMatchId === m.id))) return;
+            const winner = m.winner || (m.winnerId === m.teamAId ? nameA : (m.winnerId === m.teamBId ? nameB : ''));
+            const winReason = m.winReason || (winner ? `${winner} won the match` : 'Match Completed');
+            filtered.push({
+              id: synthId,
+              tournamentId: t.id,
+              tournamentMatchId: m.id,
+              tournamentName: t.name,
+              teamA: nameA,
+              teamB: nameB,
+              teamAId: m.teamAId,
+              teamBId: m.teamBId,
+              oversLimit: m.oversLimit || t.customOvers || 10,
+              currentInningsNum: 2,
+              status: 'completed',
+              winner,
+              winReason,
+              manOfTheMatch: m.manOfTheMatch || m.playerOfTheMatch?.name || '',
+              date: m.date || new Date().toISOString().split('T')[0],
+              venue: m.venue || 'Tournament Arena',
+              isTournamentMatch: true,
+              updatedAt: m.updatedAt || Date.now()
+            } as any);
+          });
+        });
         return filtered;
       });
     };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (
+        e.key === 'cricket_deleted_matches_registry' ||
+        e.key === 'cricket_matches_local_registry' ||
+        e.key === 'gully_tournaments_v1' ||
+        e.key === 'cricket_one_half_tournament_32' ||
+        e.key === 'one_half_tournament_v1'
+      ) {
+        handleTournamentUpdate();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
     window.addEventListener('gully_tournaments_updated', handleTournamentUpdate);
+    window.addEventListener('one_half_tournament_updated', handleTournamentUpdate);
     window.addEventListener('cricket_matches_updated', handleTournamentUpdate);
 
     // Fetch sponsor ads for banners
@@ -511,6 +559,7 @@ export const CompletedMatchesPage: React.FC = () => {
       window.removeEventListener('cricket_match_deleted', handleMatchDeleted);
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('gully_tournaments_updated', handleTournamentUpdate);
+      window.removeEventListener('one_half_tournament_updated', handleTournamentUpdate);
       window.removeEventListener('cricket_matches_updated', handleTournamentUpdate);
     };
   }, []);
@@ -683,7 +732,7 @@ export const CompletedMatchesPage: React.FC = () => {
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <Link
                 to="/cricket-details"
-                className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:shadow-emerald-500/20 transition-all no-underline"
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md hover:shadow-emerald-500/20 transition-all no-underline"
                 id="btn-goto-spectator"
               >
                 <Eye size={12} />

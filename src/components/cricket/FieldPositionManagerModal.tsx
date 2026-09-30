@@ -16,6 +16,7 @@ interface FieldPositionManagerModalProps {
   currentPositions?: FielderPosition[];
   onSavePositions: (positions: FielderPosition[]) => void;
   onShowOnBroadcast: (positions: FielderPosition[]) => void;
+  onHideFromBroadcast?: () => void;
   isLiveOnAir?: boolean;
   fieldingTeamName?: string;
   fieldingPlayers?: string[];
@@ -27,6 +28,7 @@ export const FieldPositionManagerModal: React.FC<FieldPositionManagerModalProps>
   currentPositions,
   onSavePositions,
   onShowOnBroadcast,
+  onHideFromBroadcast,
   isLiveOnAir = false,
   fieldingTeamName = 'FIELDING TEAM',
   fieldingPlayers = []
@@ -191,18 +193,18 @@ export const FieldPositionManagerModal: React.FC<FieldPositionManagerModalProps>
 
   return (
     <div 
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-5 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
-        className="relative w-full max-w-[540px] bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col max-h-[96vh]"
+        className="relative w-full max-w-[500px] bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col max-h-[92vh]"
         onClick={e => e.stopPropagation()}
         id="field-position-modal-container"
       >
         {/* TOP HEADER: Dark Navy matching reference Screenshot */}
-        <div className="bg-[#19275a] text-white px-5 py-3.5 flex items-center justify-between select-none shadow-md shrink-0">
+        <div className="bg-[#19275a] text-white px-4 py-2.5 flex items-center justify-between select-none shadow-md shrink-0">
           <div className="flex items-center gap-2.5">
-            <span className="text-xl font-bold tracking-tight">Field Position</span>
+            <span className="text-base sm:text-lg font-bold tracking-tight">Field Position Manager</span>
             {isLiveOnAir && (
               <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider animate-pulse shadow">
                 LIVE ON AIR
@@ -221,32 +223,32 @@ export const FieldPositionManagerModal: React.FC<FieldPositionManagerModalProps>
 
         {/* NOTIFICATION TOAST */}
         {showNotification && (
-          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-emerald-400 px-4 py-1.5 rounded-full shadow-lg border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="absolute top-12 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-emerald-400 px-4 py-1.5 rounded-full shadow-lg border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 animate-in fade-in slide-in-from-top-2 duration-150">
             <CheckCircle2 size={14} className="text-emerald-400" />
             <span>{showNotification}</span>
           </div>
         )}
 
         {/* MODAL BODY (White Background matching Reference Screenshot) */}
-        <div className="bg-white p-4 sm:p-5 flex-1 overflow-y-auto flex flex-col items-center select-none">
+        <div className="bg-white p-3 sm:p-4 flex-1 overflow-y-auto flex flex-col items-center select-none">
           {/* Top Actions: "Update Positions" bordered button */}
           <div className="w-full flex items-center justify-center mb-1">
             <button
               type="button"
               onClick={handleUpdatePositions}
-              className="px-5 py-1.5 bg-white hover:bg-slate-100 text-slate-900 border border-slate-700 font-semibold text-sm rounded shadow-sm transition-all active:scale-95 cursor-pointer"
+              className="px-4 py-1 bg-white hover:bg-slate-100 text-slate-900 border border-slate-700 font-semibold text-xs sm:text-sm rounded shadow-sm transition-all active:scale-95 cursor-pointer"
             >
               Update Positions
             </button>
           </div>
 
           {/* Subtitle Blue Instruction matching Screenshot */}
-          <p className="text-[#3b82f6] text-sm sm:text-base font-medium mb-3 text-center">
+          <p className="text-[#3b82f6] text-xs sm:text-sm font-medium mb-2 text-center">
             Click or Drag dots to set field positions
           </p>
 
           {/* CRICKET GROUND SVG (1:1 with Reference Screenshot & Overlay) */}
-          <div className="relative w-full aspect-square max-w-[380px] sm:max-w-[400px] mx-auto flex items-center justify-center">
+          <div className="relative w-full aspect-square max-w-[280px] sm:max-w-[310px] mx-auto flex items-center justify-center">
             <svg
               ref={svgRef}
               viewBox="0 0 100 100"
@@ -545,7 +547,7 @@ export const FieldPositionManagerModal: React.FC<FieldPositionManagerModalProps>
         </div>
 
         {/* BOTTOM FOOTER: Dark Navy matching reference Screenshot with Green "SHOW POSITIONS" button */}
-        <div className="bg-[#19275a] text-white px-5 py-3.5 flex items-center justify-between select-none shadow-inner shrink-0">
+        <div className="bg-[#19275a] text-white px-4 py-2.5 flex items-center justify-between gap-2 select-none shadow-inner shrink-0">
           <div className="flex items-center gap-2 text-xs">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             <span className="text-slate-200 font-mono text-[11px]">
@@ -553,14 +555,25 @@ export const FieldPositionManagerModal: React.FC<FieldPositionManagerModalProps>
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={handleShowPositions}
-            className="px-6 py-2 bg-[#22c55e] hover:bg-[#16a34a] text-white font-extrabold uppercase text-xs sm:text-sm tracking-wider rounded transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
-          >
-            <Eye size={16} />
-            <span>SHOW POSITIONS</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {isLiveOnAir && onHideFromBroadcast && (
+              <button
+                type="button"
+                onClick={onHideFromBroadcast}
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold uppercase text-xs tracking-wider rounded transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                HIDE TV
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleShowPositions}
+              className="px-5 py-1.5 bg-[#22c55e] hover:bg-[#16a34a] text-white font-extrabold uppercase text-xs sm:text-sm tracking-wider rounded transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
+            >
+              <Eye size={15} />
+              <span>SHOW POSITIONS</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

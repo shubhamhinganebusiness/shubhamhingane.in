@@ -2332,7 +2332,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                 onClick={() => setActiveTab('squad_batch')}
                 className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
                   activeTab === 'squad_batch'
-                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-md font-black'
+                    ? 'bg-emerald-600 text-white shadow-md font-black'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -2444,12 +2444,12 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                 }}
                 className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
                   selectedAward === 'participation' || selectedAward === 'runner_up_squad'
-                    ? 'bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 shadow-md font-black'
+                    ? 'bg-emerald-600 text-white shadow-md font-black'
                     : 'text-teal-400/90 hover:text-teal-300'
                 }`}
                 title={isFinalMatch ? "Finalist Team - Runner-Up Finalist Certification" : "Losing Team - Participant Certification"}
               >
-                <Medal size={12} className={selectedAward === 'participation' || selectedAward === 'runner_up_squad' ? 'text-slate-950' : 'text-teal-400'} />
+                <Medal size={12} className={selectedAward === 'participation' || selectedAward === 'runner_up_squad' ? 'text-white' : 'text-teal-400'} />
                 <span>{isFinalMatch ? 'Runner-Up Finalist' : 'Participant Team'}</span>
               </button>
             </div>
@@ -3107,7 +3107,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                   type="button"
                   disabled={isExporting || editableSquadList.length === 0}
                   onClick={handleDownloadAllSquadPDF}
-                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-white font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ring-2 ring-emerald-400/40 animate-pulse"
+                  className="px-3 sm:px-4 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-[11px] sm:text-xs uppercase tracking-wider transition-all shadow-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ring-2 ring-amber-400/40 animate-pulse"
                 >
                   {isExporting ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
                   <span>⚡ 1-Click All-Squad PDF ({editableSquadList.length} Players)</span>

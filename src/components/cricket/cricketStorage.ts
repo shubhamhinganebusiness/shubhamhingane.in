@@ -518,7 +518,8 @@ export function getLocalMatches(): MatchState[] {
             !isMatchDeleted(item.id) && 
             !(item as any).isDeleted && 
             item.status !== 'deleted' && 
-            !isDemoOrAIMatch(item)
+            !isDemoOrAIMatch(item) &&
+            !isMatchFromDeletedTournament(item)
           ) {
             list.push(item);
           }
@@ -537,7 +538,8 @@ export function getLocalMatches(): MatchState[] {
     !isMatchDeleted(active.id) && 
     !(active as any).isDeleted && 
     active.status !== 'deleted' && 
-    !isDemoOrAIMatch(active)
+    !isDemoOrAIMatch(active) &&
+    !isMatchFromDeletedTournament(active)
   ) {
     const existingIdx = list.findIndex(m => m.id === active.id);
     if (existingIdx >= 0) {
@@ -686,25 +688,29 @@ export function pruneDeletedMatchesFromStorage(validRemoteIds?: Set<string>): vo
       if (Array.isArray(parsed)) {
         const kept = parsed.filter(item => {
           if (!item || !item.id) return false;
-          // Purge matches that are deleted or AI bot matches
+          // Purge matches that are deleted, AI bot matches, or belong to a deleted tournament
           if (
             item.status === 'deleted' || 
             (item as any).isDeleted === true || 
             isMatchDeleted(item.id) || 
-            isDemoOrAIMatch(item)
+            isDemoOrAIMatch(item) ||
+            isMatchFromDeletedTournament(item)
           ) {
+            markMatchDeleted(item.id);
             return false;
           }
 
           // If validRemoteIds was passed (from a successful Firestore snapshot):
           if (validRemoteIds !== undefined) {
-            // Never prune or mark deleted if it is an official tournament match
+            // Never prune or mark deleted if it is an official tournament match (unless its tournament was deleted)
             if (
-              item.tournamentId || 
-              (item as any).isTournamentMatch || 
-              String(item.id).startsWith('tour_') || 
-              String(item.id).startsWith('one_half_') ||
-              String(item.id).startsWith('live_')
+              !isMatchFromDeletedTournament(item) && (
+                item.tournamentId || 
+                (item as any).isTournamentMatch || 
+                String(item.id).startsWith('tour_') || 
+                String(item.id).startsWith('one_half_') ||
+                String(item.id).startsWith('live_')
+              )
             ) {
               return true;
             }
@@ -876,11 +882,60 @@ export function purgeCachedAIMatches(): void {
 export const DELETED_TOURNAMENTS_REGISTRY_KEY = 'cricket_deleted_tournaments_registry';
 
 /**
+ * Checks whether the One-Half tournament has been deleted
+ */
+export function isOneHalfTournamentDeleted(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (localStorage.getItem('cricket_one_half_tournament_deleted') === 'true') {
+      return true;
+    }
+    const raw = localStorage.getItem(DELETED_TOURNAMENTS_REGISTRY_KEY);
+    if (raw) {
+      const delMap = JSON.parse(raw);
+      if (delMap && typeof delMap === 'object') {
+        if (
+          delMap['one_half_active_championship'] ||
+          delMap['one-half-32-series'] ||
+          delMap['one_half_32_tournament']
+        ) {
+          return true;
+        }
+        for (const k of Object.keys(delMap)) {
+          if (k.startsWith('one_half') || k.startsWith('one-half')) {
+            return true;
+          }
+        }
+      }
+    }
+    if (
+      sessionStorage.getItem('deleted_tour_one_half_active_championship') === 'true' ||
+      sessionStorage.getItem('deleted_tour_one-half-32-series') === 'true' ||
+      sessionStorage.getItem('deleted_tour_one_half_32_tournament') === 'true'
+    ) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+/**
  * Checks whether a tournament has been permanently deleted
  */
 export function isTournamentDeleted(id: string): boolean {
   if (typeof window === 'undefined' || !id) return false;
   const trimmedId = String(id).trim();
+  const isOneHalfId =
+    trimmedId === 'one_half_active_championship' ||
+    trimmedId === 'one-half-32-series' ||
+    trimmedId === 'one_half_32_tournament' ||
+    trimmedId.startsWith('one_half') ||
+    trimmedId.startsWith('one-half');
+
+  if (isOneHalfId && isOneHalfTournamentDeleted()) {
+    return true;
+  }
+
   try {
     if (sessionStorage.getItem(`deleted_tour_${trimmedId}`) === 'true') {
       return true;
@@ -898,6 +953,64 @@ export function isTournamentDeleted(id: string): boolean {
 }
 
 /**
+ * Determines whether a match belongs to a tournament that has been deleted
+ */
+export function isMatchFromDeletedTournament(m: any): boolean {
+  if (!m) return false;
+  const tourId = String(m.tournamentId || '').trim();
+  const matchId = String(m.id || '').trim();
+  const tourName = String(m.tournamentName || '').trim().toLowerCase();
+  const rules = String(m.customRules || '').trim().toLowerCase();
+  const series = String(m.seriesName || '').trim().toLowerCase();
+
+  // 1. Direct tournament ID deleted check
+  if (tourId && isTournamentDeleted(tourId)) {
+    return true;
+  }
+
+  // 2. Check tournament match ID prefix against known deleted tournaments
+  if (matchId.startsWith('tour_')) {
+    if (isOneHalfTournamentDeleted() && (matchId.includes('one_half') || matchId.includes('one-half'))) {
+      return true;
+    }
+    try {
+      const raw = localStorage.getItem(DELETED_TOURNAMENTS_REGISTRY_KEY);
+      if (raw) {
+        const deletedMap = JSON.parse(raw);
+        if (deletedMap && typeof deletedMap === 'object') {
+          for (const dId of Object.keys(deletedMap)) {
+            if (dId && matchId.includes(dId)) return true;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. One-Half tournament matches check
+  const isOneHalf =
+    tourId === 'one_half_active_championship' ||
+    tourId === 'one-half-32-series' ||
+    tourId === 'one_half_32_tournament' ||
+    tourId.startsWith('one_half') ||
+    tourId.startsWith('one-half') ||
+    matchId.includes('one_half') ||
+    matchId.includes('one-half') ||
+    tourName.includes('one-half') ||
+    tourName.includes('one half') ||
+    rules.includes('one-half') ||
+    rules.includes('one half') ||
+    series.includes('one-half') ||
+    series.includes('one half') ||
+    (m as any).tournamentType === 'one-half';
+
+  if (isOneHalf && isOneHalfTournamentDeleted()) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Marks a tournament as deleted in tombstone registry and purges it from local caches
  */
 export function markTournamentDeleted(id: string): void {
@@ -909,6 +1022,19 @@ export function markTournamentDeleted(id: string): void {
     const deletedMap: Record<string, number> = raw ? JSON.parse(raw) : {};
     deletedMap[trimmedId] = Date.now();
     localStorage.setItem(DELETED_TOURNAMENTS_REGISTRY_KEY, JSON.stringify(deletedMap));
+
+    // If one-half tournament was marked deleted, ensure flag is set
+    if (
+      trimmedId === 'one_half_active_championship' ||
+      trimmedId === 'one-half-32-series' ||
+      trimmedId === 'one_half_32_tournament' ||
+      trimmedId.startsWith('one_half') ||
+      trimmedId.startsWith('one-half')
+    ) {
+      localStorage.setItem('cricket_one_half_tournament_deleted', 'true');
+      localStorage.removeItem('cricket_one_half_tournament_32');
+      localStorage.removeItem('one_half_tournament_v1');
+    }
 
     // Remove from gully_tournaments_v1 in localStorage
     const saved = localStorage.getItem('gully_tournaments_v1');
@@ -947,12 +1073,55 @@ export function deleteLocalTournament(id: string): void {
     }).catch(() => {});
   } catch (_) {}
 
+  // Actively purge all matches from local match registry that belong to this tournament
+  if (typeof window !== 'undefined') {
+    try {
+      const rawMatches = localStorage.getItem(LOCAL_REGISTRY_KEY);
+      if (rawMatches) {
+        const parsed = JSON.parse(rawMatches);
+        if (Array.isArray(parsed)) {
+          const purgedMatchIds: string[] = [];
+          const remainingMatches = parsed.filter((m: any) => {
+            if (!m) return false;
+            const matchesTournament =
+              m.tournamentId === trimmedId ||
+              isMatchFromDeletedTournament(m);
+            if (matchesTournament && m.id) {
+              purgedMatchIds.push(m.id);
+              markMatchDeleted(m.id);
+              return false;
+            }
+            return true;
+          });
+          localStorage.setItem(LOCAL_REGISTRY_KEY, JSON.stringify(remainingMatches));
+          purgedMatchIds.forEach((mId) => {
+            deleteLocalMatch(mId);
+          });
+        }
+      }
+
+      // Clear active match if it belonged to this deleted tournament
+      const activeRaw = localStorage.getItem(ACTIVE_MATCH_KEY);
+      if (activeRaw) {
+        const active = JSON.parse(activeRaw);
+        if (active && (active.tournamentId === trimmedId || isMatchFromDeletedTournament(active))) {
+          if (active.id) markMatchDeleted(active.id);
+          localStorage.removeItem(ACTIVE_MATCH_KEY);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to purge matches of deleted tournament:', e);
+    }
+  }
+
   // Dispatch events to refresh all components across window
   if (typeof window !== 'undefined') {
     try {
       window.dispatchEvent(new CustomEvent('gully_tournaments_updated', { detail: { deletedTournamentId: trimmedId } }));
       window.dispatchEvent(new CustomEvent('cricket_tournament_deleted', { detail: { id: trimmedId } }));
+      window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
       window.dispatchEvent(new Event('gully_tournaments_updated'));
+      window.dispatchEvent(new Event('storage'));
     } catch (_) {}
   }
 }

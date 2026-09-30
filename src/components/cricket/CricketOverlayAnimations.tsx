@@ -272,14 +272,14 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
         setPhase(0);
       }, 6400));
     } else if (normalizedType === 'six' || normalizedType === 'four') {
-      timers.push(setTimeout(() => setPhase(2), 100));
-      timers.push(setTimeout(() => setPhase(3), 320));
-      timers.push(setTimeout(() => setPhase(4), 700));
-      timers.push(setTimeout(() => setPhase(5), 1650)); // Outro fade
+      timers.push(setTimeout(() => setPhase(2), 60));
+      timers.push(setTimeout(() => setPhase(3), 180));
+      timers.push(setTimeout(() => setPhase(4), 380));
+      timers.push(setTimeout(() => setPhase(5), 800)); // Outro fade
       timers.push(setTimeout(() => {
         onAnimationComplete();
         setPhase(0);
-      }, 2000)); // Exactly 2.0s
+      }, 1000)); // Exactly 1.0s
     } else if (
       normalizedType === 'bowled' ||
       normalizedType === 'caught' ||
@@ -295,14 +295,14 @@ export const CricketOverlayAnimations: React.FC<CricketOverlayAnimationsProps> =
       normalizedType === 'appeal' ||
       normalizedType === 'not_out'
     ) {
-      timers.push(setTimeout(() => setPhase(2), 100));
-      timers.push(setTimeout(() => setPhase(3), 350));
-      timers.push(setTimeout(() => setPhase(4), 750));
-      timers.push(setTimeout(() => setPhase(5), 1650)); // Outro fade
+      timers.push(setTimeout(() => setPhase(2), 60));
+      timers.push(setTimeout(() => setPhase(3), 180));
+      timers.push(setTimeout(() => setPhase(4), 380));
+      timers.push(setTimeout(() => setPhase(5), 800)); // Outro fade
       timers.push(setTimeout(() => {
         onAnimationComplete();
         setPhase(0);
-      }, 2000)); // Exactly 2.0s
+      }, 1000)); // Exactly 1.0s
     } else if (normalizedType === 'fifty' || normalizedType === 'hundred' || normalizedType === 'hat_trick' || normalizedType === 'five_wickets') {
       timers.push(setTimeout(() => setPhase(2), 200));
       timers.push(setTimeout(() => setPhase(3), 700));

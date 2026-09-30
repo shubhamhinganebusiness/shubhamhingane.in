@@ -911,7 +911,7 @@ export const PlayerRegistrationForm: React.FC<PlayerRegistrationFormProps> = ({ 
                        )}
 
                        <div className="pt-2 flex flex-wrap gap-2 justify-center md:justify-start items-center">
-                         <label className="inline-block px-3.5 py-1.5 bg-slate-900 dark:bg-slate-800 hover:bg-emerald-600 dark:hover:bg-emerald-600 text-white rounded-xl text-[9px] font-black uppercase cursor-pointer transition border border-transparent">
+                         <label className="inline-block px-3.5 py-1.5 bg-slate-900 dark:bg-slate-800 hover:bg-emerald-600 dark:hover:bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase cursor-pointer transition border border-transparent">
                            Choose Portrait
                            <input
                              type="file"
@@ -1216,7 +1216,7 @@ export const PlayerRegistrationForm: React.FC<PlayerRegistrationFormProps> = ({ 
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-widest rounded-xl cursor-pointer border-none shadow-lg shadow-emerald-500/20 transition flex items-center gap-1.5"
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-widest rounded-xl cursor-pointer border-none shadow-lg shadow-emerald-500/20 transition flex items-center gap-1.5"
                 >
                   {isSaving ? (
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />

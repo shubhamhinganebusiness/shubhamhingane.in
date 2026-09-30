@@ -963,7 +963,7 @@ export const CompletedRecordsSlider: React.FC<CompletedRecordsSliderProps> = ({
             {/* View All Matches Page Link */}
             <a
               href="#/completed-matches"
-              className="px-2.5 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-[9px] font-mono font-bold uppercase tracking-wider border border-emerald-400/40 flex items-center gap-1 shadow-sm no-underline transition-all"
+              className="px-2.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[9px] font-mono font-bold uppercase tracking-wider border border-emerald-400/40 flex items-center gap-1 shadow-sm no-underline transition-all"
               title="View all completed match records on dedicated page"
             >
               <span>View All Matches</span>

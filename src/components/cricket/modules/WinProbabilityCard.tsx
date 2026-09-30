@@ -252,7 +252,7 @@ export const WinProbabilityCard: React.FC<WinProbabilityCardProps> = ({
         <button
           onClick={() => refreshCommentary()}
           disabled={isLoading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-black shadow-sm disabled:opacity-50 transition-all cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-black shadow-sm disabled:opacity-50 transition-all cursor-pointer"
           title="Recalculate win percentage and ask AI why the match is tilting"
         >
           {isLoading ? (

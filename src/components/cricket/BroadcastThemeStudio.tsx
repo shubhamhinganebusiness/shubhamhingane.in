@@ -584,7 +584,7 @@ export const BroadcastThemeStudio: React.FC = () => {
             disabled={isSaving}
             className={`flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-white font-extrabold text-xs tracking-wide shadow-lg transition-all cursor-pointer border-none ${
               saveSuccess 
-                ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/25' 
+                ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/25' 
                 : 'bg-gradient-to-r from-sky-500 via-blue-600 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 shadow-sky-500/25'
             }`}
           >

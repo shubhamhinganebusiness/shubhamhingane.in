@@ -399,7 +399,7 @@ export const HeroCricketLiveScore: React.FC = () => {
             {/* Team Crests & Names */}
             <div className="flex items-center gap-3.5 min-w-0">
               <div className="relative shrink-0">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-0.5 shadow-lg shadow-emerald-500/20">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-600 p-0.5 shadow-lg shadow-emerald-600/20">
                   <div className="w-full h-full bg-slate-950 rounded-[0.85rem] flex items-center justify-center font-black text-white text-base">
                     {battingTeam.slice(0, 2).toUpperCase()}
                   </div>
@@ -521,7 +521,7 @@ export const HeroCricketLiveScore: React.FC = () => {
                 e.stopPropagation();
                 handleOpenDetailScoreboard(activeMatch?.id);
               }}
-              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-500/20 active:scale-[0.99] cursor-pointer border-none"
+              className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-[0.99] cursor-pointer border-none"
               title="View full detailed scorecard in the Spectator Scoreboard Section"
             >
               <span>View Detail Scoreboard</span>

@@ -200,12 +200,12 @@ export function extractLiveSummary(match: MatchState): MatchLiveSummary | null {
       if (comm?.id) {
         // Find simple label
         if (comm.type === 'wicket') recentMini.unshift('W');
-        else if (comm.description?.includes('SIX')) recentMini.unshift('6');
-        else if (comm.description?.includes('FOUR')) recentMini.unshift('4');
+        else if (comm.ballScore === '4' || (comm as any).runsOffBat === 4 || (comm as any).runs === 4 || comm.description?.includes('FOUR') || comm.description?.includes('four') || comm.description?.includes('boundary')) recentMini.unshift('4');
+        else if (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || comm.description?.includes('SIX') || comm.description?.includes('six') || comm.description?.includes('maximum')) recentMini.unshift('6');
         else if (comm.description?.includes('WIDE') || comm.description?.includes('Wide')) recentMini.unshift('WD');
         else if (comm.description?.includes('NO BALL') || comm.description?.includes('No ball')) recentMini.unshift('NB');
-        else if (comm.description?.includes('DOT') || comm.description?.includes('dot')) recentMini.unshift('0');
-        else recentMini.unshift(comm.overBall ? `${comm.overBall}` : '•');
+        else if (comm.description?.includes('DOT') || comm.description?.includes('dot') || comm.ballScore === '0') recentMini.unshift('0');
+        else recentMini.unshift(comm.ballScore ? `${comm.ballScore}` : comm.overBall ? `${comm.overBall}` : '•');
       }
     }
   }

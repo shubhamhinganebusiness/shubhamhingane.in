@@ -2728,7 +2728,7 @@ export const CricketAuction: React.FC = () => {
                   disabled={highestBidderId === null}
                   className={`px-4 py-2 text-[9.5px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-1 cursor-pointer border-none shadow-md outline-none ${
                     highestBidderId !== null
-                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-emerald-500/10'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-rose-900/10'
                       : 'bg-slate-950 text-slate-600 cursor-not-allowed border border-slate-800'
                   }`}
                 >

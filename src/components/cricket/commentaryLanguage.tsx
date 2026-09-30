@@ -827,7 +827,7 @@ export const CommentaryLanguageSelector: React.FC<CommentaryLanguageSelectorProp
               onClick={() => handleSelect(l.id)}
               className={`px-2 py-1 rounded-lg text-[9.5px] font-extrabold tracking-wide transition-all border-none cursor-pointer flex items-center gap-1 ${
                 isActive
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm scale-102'
+                  ? 'bg-emerald-600 text-white shadow-sm scale-102'
                   : 'text-slate-400 hover:text-slate-200 bg-transparent hover:bg-slate-800/50'
               }`}
             >

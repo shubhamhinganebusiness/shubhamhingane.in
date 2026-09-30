@@ -102,7 +102,18 @@ import {
   interceptSpecialEvent,
   ContextualToneShifterBadge,
   MatchContextualTone,
-  ContextualToneInfo
+  ContextualToneInfo,
+  EndOfOverSummaryCard,
+  isEndOfOverCommentary,
+  resolveOverMiniSummary,
+  injectMissingOverSummaries,
+  OverMiniSummaryData,
+  buildTacticalMatchupContext,
+  resolveDeliveryTacticalContext,
+  DeliveryTacticalChip,
+  TacticalMatchupMemoryBanner,
+  TacticalMatchupContext,
+  KeyMomentsTimelineBar
 } from './modules/commentaryLanguage';
 import { calculateWinProbabilityDetails } from './modules/winProbabilityEngine';
 import { OfflineSyncStatusBadge } from './OfflineSyncStatusBadge';
@@ -202,8 +213,18 @@ export interface Innings {
     id: string;
     overBall: string;
     description: string;
-    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone';
+    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone' | 'announcement';
     soundWave?: boolean;
+    announcementType?: string;
+    specialEvent?: string;
+    playerName?: string;
+    overSummary?: OverMiniSummaryData;
+    ballScore?: string;
+    runsOffBat?: number;
+    extraType?: string;
+    batterName?: string;
+    bowlerName?: string;
+    tacticalContext?: TacticalMatchupContext;
     translations?: {
       en?: string;
       hi?: string;
@@ -249,6 +270,9 @@ interface OverlayConfig {
   youtubeChannelName?: string;
   youtubeChannelLogoScale?: number;
   youtubeChannelLogoOpacity?: number;
+  activePowerPlay?: 'PP1' | 'PP2' | 'PP3' | null;
+  commentatorName?: string;
+  autoLoopPanels?: boolean;
 }
 
 export interface MatchState {
@@ -909,21 +933,36 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
       syncTournamentToRealtimeDB(updatedTournamentData).catch(() => {});
     }
 
-    // 3. Also sync live/completed match result to One-Half 32-Team Tournament ('one_half_tournament_v1') if applicable
+    // 3. Also sync live/completed match result to One-Half 32-Team Tournament ('cricket_one_half_tournament_32' / 'one_half_tournament_v1') if applicable
     if (typeof window !== 'undefined') {
       try {
-        const oneHalfRaw = localStorage.getItem('one_half_tournament_v1');
+        const oneHalfRaw =
+          localStorage.getItem('cricket_one_half_tournament_32') ||
+          localStorage.getItem('one_half_tournament_v1');
         if (oneHalfRaw) {
           const oneHalfTour = JSON.parse(oneHalfRaw);
           if (oneHalfTour && Array.isArray(oneHalfTour.matches)) {
             const targetMatchId = matchId || matchState.tournamentMatchId;
+            const normStateA = (matchState.teamA || '').toLowerCase().trim();
+            const normStateB = (matchState.teamB || '').toLowerCase().trim();
+            const hasMatchingTeamsInOneHalf = Boolean(
+              normStateA &&
+                normStateB &&
+                oneHalfTour.matches.some((m: any) => {
+                  const mA = (m.teamA || '').toLowerCase().trim();
+                  const mB = (m.teamB || '').toLowerCase().trim();
+                  return (mA === normStateA && mB === normStateB) || (mA === normStateB && mB === normStateA);
+                })
+            );
             const isOneHalfTourMatch =
               Boolean(targetMatchId && oneHalfTour.matches.some((m: any) => m.id === targetMatchId)) ||
               tournamentId === oneHalfTour.id ||
               tournamentId === 'one_half_active_championship' ||
+              Boolean(tournamentId && String(tournamentId).startsWith('one_half_')) ||
               (matchState.tournamentName &&
                 oneHalfTour.name &&
-                matchState.tournamentName.toLowerCase().trim() === oneHalfTour.name.toLowerCase().trim());
+                matchState.tournamentName.toLowerCase().trim() === oneHalfTour.name.toLowerCase().trim()) ||
+              hasMatchingTeamsInOneHalf;
 
             if (isOneHalfTourMatch) {
               const isCompleted = matchState.status === 'completed';
@@ -934,13 +973,24 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
                 (m: any) => targetMatchId && m.id === targetMatchId
               );
               if (matchedIdx === -1) {
+                // Prefer non-completed match first if same pair plays again, otherwise any matching pair
                 matchedIdx = updatedOneHalfMatches.findIndex(
                   (m: any) =>
-                    (m.teamA?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim() &&
-                      m.teamB?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim()) ||
-                    (m.teamA?.toLowerCase().trim() === matchState.teamB?.toLowerCase().trim() &&
-                      m.teamB?.toLowerCase().trim() === matchState.teamA?.toLowerCase().trim())
+                    m.status !== 'completed' &&
+                    ((m.teamA?.toLowerCase().trim() === normStateA &&
+                      m.teamB?.toLowerCase().trim() === normStateB) ||
+                      (m.teamA?.toLowerCase().trim() === normStateB &&
+                        m.teamB?.toLowerCase().trim() === normStateA))
                 );
+                if (matchedIdx === -1) {
+                  matchedIdx = updatedOneHalfMatches.findIndex(
+                    (m: any) =>
+                      (m.teamA?.toLowerCase().trim() === normStateA &&
+                        m.teamB?.toLowerCase().trim() === normStateB) ||
+                      (m.teamA?.toLowerCase().trim() === normStateB &&
+                        m.teamB?.toLowerCase().trim() === normStateA)
+                  );
+                }
               }
 
               if (matchedIdx !== -1) {
@@ -1016,7 +1066,7 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
                     ? 'Match Completed'
                     : m.winReason || '');
                 const potm = isCompleted
-                  ? computePotmName(matchState) || matchState.manOfTheMatch || m.manOfTheMatch || ''
+                  ? computePotmName(matchState) || matchState.playerOfTheMatch?.name || matchState.manOfTheMatch || m.manOfTheMatch || ''
                   : m.manOfTheMatch || '';
 
                 m.status = isCompleted ? 'completed' : 'live';
@@ -1096,12 +1146,54 @@ const syncLiveScoreToTournament = async (tournamentId: string, matchId: string, 
                   updatedAt: Date.now()
                 };
 
+                localStorage.setItem('cricket_one_half_tournament_32', JSON.stringify(updatedOneHalf));
                 localStorage.setItem('one_half_tournament_v1', JSON.stringify(updatedOneHalf));
+
+                // Also persist completed match into cricket_matches_local_registry so it appears in all Result / Completed sections immediately
+                if (isCompleted) {
+                  try {
+                    const regRaw = localStorage.getItem('cricket_matches_local_registry');
+                    const regList = regRaw ? JSON.parse(regRaw) : [];
+                    const synthId = matchState.id || `tour_${oneHalfTour.id}_${m.id}`;
+                    const synthMatch: MatchState = {
+                      ...matchState,
+                      id: synthId,
+                      tournamentId: oneHalfTour.id,
+                      tournamentMatchId: m.id,
+                      tournamentName: oneHalfTour.name,
+                      status: 'completed',
+                      winner: m.winner || winnerName,
+                      winReason: m.winReason || effectiveWinReason,
+                      manOfTheMatch: m.manOfTheMatch || potm,
+                      isTournamentMatch: true,
+                      updatedAt: Date.now()
+                    };
+                    const regIdx = regList.findIndex(
+                      (x: any) =>
+                        x.id === synthId ||
+                        (x.tournamentId === oneHalfTour.id && x.tournamentMatchId === m.id) ||
+                        x.tournamentMatchId === m.id
+                    );
+                    if (regIdx >= 0) {
+                      regList[regIdx] = { ...regList[regIdx], ...synthMatch };
+                    } else {
+                      regList.unshift(synthMatch);
+                    }
+                    localStorage.setItem('cricket_matches_local_registry', JSON.stringify(regList));
+                  } catch (_) {}
+                }
+
                 window.dispatchEvent(new CustomEvent('one_half_tournament_updated', { detail: updatedOneHalf }));
+                window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
+                window.dispatchEvent(new Event('storage'));
 
                 const activeOneHalfRef = doc(db, 'cricket_tournaments', 'one_half_active_championship');
-                await safeSetDoc(activeOneHalfRef, updatedOneHalf, { merge: true });
-                await syncOneHalfTournamentToRealtimeDB(updatedOneHalf);
+                safeSetDoc(activeOneHalfRef, updatedOneHalf, { merge: true }).catch(() => {});
+                if (updatedOneHalf.id && updatedOneHalf.id !== 'one_half_active_championship') {
+                  const customOneHalfRef = doc(db, 'cricket_tournaments', updatedOneHalf.id);
+                  safeSetDoc(customOneHalfRef, updatedOneHalf, { merge: true }).catch(() => {});
+                }
+                syncOneHalfTournamentToRealtimeDB(updatedOneHalf).catch(() => {});
               }
             }
           }
@@ -1256,6 +1348,9 @@ export const CricketScoreboard: React.FC = () => {
 
   // Team Management state vectors
   const [showTeamModal, setShowTeamModal] = useState(false);
+  const [showSquadSettingsModal, setShowSquadSettingsModal] = useState(false);
+  const [squadModalBatInput, setSquadModalBatInput] = useState('');
+  const [squadModalBowlInput, setSquadModalBowlInput] = useState('');
   const [teamModalTab, setTeamModalTab] = useState<'presets' | 'invite_captain' | 'direct_add'>('presets');
   const [savedTeams, setSavedTeams] = useState<CricketTeam[]>([]);
   const [newTeamName, setNewTeamName] = useState('');
@@ -1780,7 +1875,9 @@ export const CricketScoreboard: React.FC = () => {
 
   // Extra Runs modal states
   const [showExtraRunsModal, setShowExtraRunsModal] = useState(false);
-  const [extraRunsBallType, setExtraRunsBallType] = useState<'wide' | 'noball' | 'bye' | 'legbye' | null>(null);
+  const [extraRunsBallType, setExtraRunsBallType] = useState<'wide' | 'noball' | 'bye' | 'legbye' | 'penalty' | null>(null);
+  const [customPenaltyRuns, setCustomPenaltyRuns] = useState<string>('5');
+  const [penaltyReason, setPenaltyReason] = useState<string>('');
   const [bowlerSelectedForOver, setBowlerSelectedForOver] = useState<number>(-1);
 
   // Audio simulation trigger
@@ -1798,6 +1895,7 @@ export const CricketScoreboard: React.FC = () => {
   const [isAiCommentaryLoading, setIsAiCommentaryLoading] = useState(false);
   const [userCommentaryLang, setUserCommentaryLang] = useCommentaryLanguage('en');
   const [commentaryDeskSubTab, setCommentaryDeskSubTab] = useState<'feed' | 'podium'>('feed');
+  const [highlightedCommentaryId, setHighlightedCommentaryId] = useState<string | null>(null);
 
   // Copy Overlay Link state
   const [copiedOverlayLink, setCopiedOverlayLink] = useState(false);
@@ -1822,6 +1920,26 @@ export const CricketScoreboard: React.FC = () => {
   const [sequenceDuration, setSequenceDuration] = useState<number>(5);
   const [isSequencePlaying, setIsSequencePlaying] = useState<boolean>(false);
   const [currentQueueIndex, setCurrentQueueIndex] = useState<number>(-1);
+  const isAutoTourRunning = isSequencePlaying;
+  const startGraphicsAutoTour = () => {
+    setIsSequencePlaying(true);
+    setCurrentQueueIndex(0);
+  };
+  const stopGraphicsAutoTour = () => {
+    setIsSequencePlaying(false);
+    setCurrentQueueIndex(-1);
+  };
+  const setShowTossModal = (val: boolean) => setShowSpinCoinModal(val);
+  const setShowAwardsModal = (val: boolean) => setShowCertificateModal(val);
+  const setShowSponsorsModal = (val: boolean) => setShowSponsorModal(val);
+  const setShowShareModal = (val: boolean) => setShowObsModal(val);
+  const setShowFullScorecardModal = (val: boolean) => {
+    if (val) {
+      setActiveMobileTab('stats');
+      setActiveScorecardTab('bat');
+    }
+  };
+  const setPlayerPhotos = (_updater: any) => {};
   const [streamKey, setStreamKey] = useState<string>(() => {
     try {
       return localStorage.getItem('cricket_stream_key') || 'live_cr_obs_9fb54495';
@@ -2418,6 +2536,15 @@ export const CricketScoreboard: React.FC = () => {
         return;
       }
 
+      // Always keep local & cloud tournament scores synchronized in real-time (even if Firestore quota is reached)
+      if (stateToSave.tournamentId || stateToSave.tournamentMatchId || stateToSave.tournamentName) {
+        syncLiveScoreToTournament(
+          stateToSave.tournamentId || '',
+          stateToSave.tournamentMatchId || stateToSave.id,
+          stateToSave
+        ).catch(() => {});
+      }
+
       // Check if network is offline -> immediately store in IndexedDB offline queue
       if (!isNetworkOnline()) {
         try {
@@ -2443,11 +2570,6 @@ export const CricketScoreboard: React.FC = () => {
 
         // Sanitize object to eliminate any undefined values before Firestore persistence
         const sanitized = sanitizeForFirestore(stateToSave);
-
-        // Keep tournament scores synchronized in real-time in the background
-        if (stateToSave.tournamentId && stateToSave.tournamentMatchId) {
-          syncLiveScoreToTournament(stateToSave.tournamentId, stateToSave.tournamentMatchId, stateToSave).catch(() => {});
-        }
 
         // Separate Write Pipeline: Publish ultra-lightweight (< 1.5 KB) summary for spectators
         try {
@@ -2830,21 +2952,113 @@ export const CricketScoreboard: React.FC = () => {
         }
       }
 
-      // Merge any local drafts from local registry
+      // Merge any local drafts and local/tournament completed matches from local registry
       try {
         const rawLocal = localStorage.getItem('cricket_matches_local_registry');
         if (rawLocal) {
           const parsed = JSON.parse(rawLocal);
           if (Array.isArray(parsed)) {
             parsed.forEach((lm: any) => {
-              if (lm && lm.status === 'draft' && !isMatchDeleted(lm.id) && !isDemoOrAIMatch(lm)) {
+              if (!lm || !lm.id || isMatchDeleted(lm.id) || isDemoOrAIMatch(lm)) return;
+              if (lm.status === 'draft') {
                 if (isScoreManager && !isMatchOwnedByCurrentManager(lm)) {
                   return;
                 }
                 if (!draftList.some(d => d.id === lm.id)) {
                   draftList.push(lm);
                 }
+              } else if (lm.status === 'completed') {
+                const isTourMatch = Boolean(lm.tournamentId || lm.tournamentMatchId || lm.isTournamentMatch || String(lm.id).startsWith('tour_'));
+                if (!isTourMatch && isScoreManager && !isMatchOwnedByCurrentManager(lm)) {
+                  return;
+                }
+                if (!historyList.some(h => h.id === lm.id || (lm.tournamentMatchId && h.tournamentMatchId === lm.tournamentMatchId))) {
+                  historyList.push(lm);
+                }
               }
+            });
+          }
+        }
+      } catch (_) {}
+
+      // Also merge completed matches from One-Half 32-Team Tournament ('cricket_one_half_tournament_32')
+      try {
+        const rawOneHalf =
+          localStorage.getItem('cricket_one_half_tournament_32') ||
+          localStorage.getItem('one_half_tournament_v1');
+        if (rawOneHalf) {
+          const ohTour = JSON.parse(rawOneHalf);
+          if (ohTour && Array.isArray(ohTour.matches)) {
+            ohTour.matches.forEach((m: any) => {
+              const isDone = m.status === 'completed' || (Boolean(m.winner) && !String(m.winner).startsWith('Winner') && !String(m.winner).startsWith('Loser') && !String(m.winner).startsWith('Day '));
+              if (!isDone) return;
+              const synthId = `tour_${ohTour.id || 'one_half'}_${m.id}`;
+              if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
+              if (historyList.some(h => h.id === synthId || h.id === m.id || h.tournamentMatchId === m.id)) return;
+              const parseSc = (sc?: string) => {
+                if (!sc) return { runs: 0, wickets: 0 };
+                const pts = String(sc).split('/');
+                return { runs: parseInt(pts[0], 10) || 0, wickets: parseInt(pts[1], 10) || 0 };
+              };
+              const parseOv = (ov?: string) => {
+                if (!ov) return 0;
+                const pts = String(ov).split('.');
+                return (parseInt(pts[0], 10) || 0) * 6 + (parseInt(pts[1], 10) || 0);
+              };
+              const scA = parseSc(m.scoreA);
+              const scB = parseSc(m.scoreB);
+              const ovLim = ohTour.overs || 8;
+              historyList.push({
+                id: synthId,
+                teamA: m.teamA,
+                teamB: m.teamB,
+                oversLimit: ovLim,
+                tossWinner: m.teamA,
+                tossChoice: 'bat',
+                currentInningsNum: 2,
+                status: 'completed',
+                winner: m.winner || '',
+                winReason: m.winReason || (m.winner ? `${m.winner} won the match` : 'Match Completed'),
+                manOfTheMatch: m.manOfTheMatch || '',
+                date: m.date || new Date().toISOString().split('T')[0],
+                freeHitNext: false,
+                tournamentId: ohTour.id,
+                tournamentMatchId: m.id,
+                tournamentName: ohTour.name,
+                groundName: m.pitchVenue || ohTour.groundName,
+                innings1: {
+                  battingTeam: m.teamA,
+                  bowlingTeam: m.teamB,
+                  runs: scA.runs,
+                  wickets: scA.wickets,
+                  ballsBowled: parseOv(m.oversA),
+                  extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 },
+                  batsmen: [],
+                  bowlers: [],
+                  strikerIndex: 0,
+                  nonStrikerIndex: 1,
+                  currentBowlerIndex: 0,
+                  fallOfWickets: [],
+                  commentaryList: []
+                },
+                innings2: {
+                  battingTeam: m.teamB,
+                  bowlingTeam: m.teamA,
+                  runs: scB.runs,
+                  wickets: scB.wickets,
+                  ballsBowled: parseOv(m.oversB),
+                  extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 },
+                  batsmen: [],
+                  bowlers: [],
+                  strikerIndex: 0,
+                  nonStrikerIndex: 1,
+                  currentBowlerIndex: 0,
+                  fallOfWickets: [],
+                  commentaryList: []
+                },
+                isTournamentMatch: true,
+                updatedAt: ohTour.updatedAt || Date.now()
+              } as any);
             });
           }
         }
@@ -2856,7 +3070,12 @@ export const CricketScoreboard: React.FC = () => {
       draftList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
       liveList.sort((a, b) => getMatchTime(b) - getMatchTime(a));
 
-      const cleanHistory = historyList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && isMatchOwnedByCurrentManager(m));
+      const cleanHistory = historyList.filter(
+        m =>
+          !isMatchDeleted(m.id) &&
+          !isDemoOrAIMatch(m) &&
+          (isMatchOwnedByCurrentManager(m) || Boolean(m.tournamentId || m.tournamentMatchId || (m as any).isTournamentMatch))
+      );
       const cleanDrafts = draftList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && isMatchOwnedByCurrentManager(m));
       const cleanLive = liveList.filter(m => !isMatchDeleted(m.id) && !isDemoOrAIMatch(m) && isMatchOwnedByCurrentManager(m));
 
@@ -2866,6 +3085,118 @@ export const CricketScoreboard: React.FC = () => {
     }, (error) => {
       console.warn("Realtime subscription notice for cricket_matches:", error?.message || error);
     });
+
+    const handleLocalHistoryRefresh = () => {
+      try {
+        const localCompleted: MatchState[] = [];
+        const rawLocal = localStorage.getItem('cricket_matches_local_registry');
+        if (rawLocal) {
+          const parsed = JSON.parse(rawLocal);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((lm: any) => {
+              if (lm && lm.status === 'completed' && !isMatchDeleted(lm.id) && !isDemoOrAIMatch(lm)) {
+                localCompleted.push(lm);
+              }
+            });
+          }
+        }
+        const rawOneHalf =
+          localStorage.getItem('cricket_one_half_tournament_32') ||
+          localStorage.getItem('one_half_tournament_v1');
+        if (rawOneHalf) {
+          const ohTour = JSON.parse(rawOneHalf);
+          if (ohTour && Array.isArray(ohTour.matches)) {
+            ohTour.matches.forEach((m: any) => {
+              const isDone = m.status === 'completed' || (Boolean(m.winner) && !String(m.winner).startsWith('Winner') && !String(m.winner).startsWith('Loser') && !String(m.winner).startsWith('Day '));
+              if (!isDone) return;
+              const synthId = `tour_${ohTour.id || 'one_half'}_${m.id}`;
+              if (isMatchDeleted(synthId) || isMatchDeleted(m.id)) return;
+              if (localCompleted.some(h => h.id === synthId || h.id === m.id || h.tournamentMatchId === m.id)) return;
+              const parseSc = (sc?: string) => {
+                if (!sc) return { runs: 0, wickets: 0 };
+                const pts = String(sc).split('/');
+                return { runs: parseInt(pts[0], 10) || 0, wickets: parseInt(pts[1], 10) || 0 };
+              };
+              const parseOv = (ov?: string) => {
+                if (!ov) return 0;
+                const pts = String(ov).split('.');
+                return (parseInt(pts[0], 10) || 0) * 6 + (parseInt(pts[1], 10) || 0);
+              };
+              const scA = parseSc(m.scoreA);
+              const scB = parseSc(m.scoreB);
+              const ovLim = ohTour.overs || 8;
+              localCompleted.push({
+                id: synthId,
+                teamA: m.teamA,
+                teamB: m.teamB,
+                oversLimit: ovLim,
+                tossWinner: m.teamA,
+                tossChoice: 'bat',
+                currentInningsNum: 2,
+                status: 'completed',
+                winner: m.winner || '',
+                winReason: m.winReason || (m.winner ? `${m.winner} won the match` : 'Match Completed'),
+                manOfTheMatch: m.manOfTheMatch || '',
+                date: m.date || new Date().toISOString().split('T')[0],
+                freeHitNext: false,
+                tournamentId: ohTour.id,
+                tournamentMatchId: m.id,
+                tournamentName: ohTour.name,
+                groundName: m.pitchVenue || ohTour.groundName,
+                innings1: {
+                  battingTeam: m.teamA,
+                  bowlingTeam: m.teamB,
+                  runs: scA.runs,
+                  wickets: scA.wickets,
+                  ballsBowled: parseOv(m.oversA),
+                  extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 },
+                  batsmen: [],
+                  bowlers: [],
+                  strikerIndex: 0,
+                  nonStrikerIndex: 1,
+                  currentBowlerIndex: 0,
+                  fallOfWickets: [],
+                  commentaryList: []
+                },
+                innings2: {
+                  battingTeam: m.teamB,
+                  bowlingTeam: m.teamA,
+                  runs: scB.runs,
+                  wickets: scB.wickets,
+                  ballsBowled: parseOv(m.oversB),
+                  extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 },
+                  batsmen: [],
+                  bowlers: [],
+                  strikerIndex: 0,
+                  nonStrikerIndex: 1,
+                  currentBowlerIndex: 0,
+                  fallOfWickets: [],
+                  commentaryList: []
+                },
+                isTournamentMatch: true,
+                updatedAt: ohTour.updatedAt || Date.now()
+              } as any);
+            });
+          }
+        }
+        if (localCompleted.length > 0) {
+          setMatchHistory(prev => {
+            const combined = [...prev];
+            localCompleted.forEach(lc => {
+              const idx = combined.findIndex(p => p.id === lc.id || (lc.tournamentMatchId && p.tournamentMatchId === lc.tournamentMatchId));
+              if (idx >= 0) {
+                combined[idx] = { ...combined[idx], ...lc };
+              } else {
+                combined.unshift(lc);
+              }
+            });
+            const getMatchTime = (m: MatchState) => m.updatedAt || (m.date ? new Date(m.date).getTime() : 0) || 0;
+            combined.sort((a, b) => getMatchTime(b) - getMatchTime(a));
+            return combined;
+          });
+        }
+      } catch (_) {}
+    };
 
     const handleMatchDeletedEvent = (e: any) => {
       const id = e?.detail?.id;
@@ -2904,10 +3235,14 @@ export const CricketScoreboard: React.FC = () => {
       }
     };
     window.addEventListener('cricket_match_deleted', handleMatchDeletedEvent);
+    window.addEventListener('cricket_matches_updated', handleLocalHistoryRefresh);
+    window.addEventListener('one_half_tournament_updated', handleLocalHistoryRefresh);
 
     return () => {
       unsub();
       window.removeEventListener('cricket_match_deleted', handleMatchDeletedEvent);
+      window.removeEventListener('cricket_matches_updated', handleLocalHistoryRefresh);
+      window.removeEventListener('one_half_tournament_updated', handleLocalHistoryRefresh);
     };
   }, [user]);
 
@@ -2933,9 +3268,14 @@ export const CricketScoreboard: React.FC = () => {
     const activeMatchId = matchIdParam || (match && match.id && match.status === 'live' ? match.id : '');
 
     if (!activeMatchId) {
-      // If no active match ID and we are not currently playing a live match, reset to setup
+      // If no active match ID and we are not currently playing a live match or setting up a configured tournament match, reset to setup
       setMatch((prev) => {
-        if (prev && prev.id && prev.status === 'live' && prev.id === latestStateToSaveRef.current?.id) {
+        if (
+          prev &&
+          prev.id &&
+          (prev.status === 'live' || prev.status === 'setup' || prev.status === 'completed') &&
+          (prev.id === latestStateToSaveRef.current?.id || prev.tournamentId || prev.tournamentMatchId)
+        ) {
           return prev;
         }
         return {
@@ -3829,6 +4169,65 @@ export const CricketScoreboard: React.FC = () => {
 
   const currentInnings = (match.currentInningsNum === 1 ? match.innings1 : (match.innings2 || match.innings1)) || match.innings1;
 
+  // Combined commentary list across both innings (so 1st innings commentary remains visible after 1st innings completes)
+  // while filtering out Tournament Prize Details & Sponsors from the commentary feed
+  const combinedCommentaryList = useMemo(() => {
+    const isSponsorOrPrizeComm = (c: any) => {
+      if (!c) return false;
+      if (c.announcementType === 'sponsor_announcement') return true;
+      const idStr = String(c.id || '');
+      if (
+        idStr.startsWith('comm-sponsor-') ||
+        idStr.startsWith('comm-over-sponsor-') ||
+        idStr.startsWith('comm-inn-break-sponsor-') ||
+        idStr.startsWith('comm-match-complete-sponsor-')
+      ) {
+        return true;
+      }
+      const desc = String(c.description || '').toLowerCase();
+      if (
+        desc.includes('tournament prize & sponsor') ||
+        desc.includes('tournament prize details & sponsors') ||
+        desc.includes('sponsor spotlight') ||
+        desc.includes('tournament sponsors & prize details')
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    const rawInn1List = (match.innings1?.commentaryList || [])
+      .filter((c: any) => !isSponsorOrPrizeComm(c))
+      .map((c: any) => ({
+        ...c,
+        _inningsNum: (c as any)._inningsNum || 1,
+        _battingTeam: (c as any)._battingTeam || match.innings1?.battingTeam || match.teamA
+      }));
+    const inn1List = injectMissingOverSummaries(rawInn1List, match.innings1, match, 1);
+
+    const rawInn2List = (match.innings2?.commentaryList || [])
+      .filter((c: any) => !isSponsorOrPrizeComm(c))
+      .map((c: any) => ({
+        ...c,
+        _inningsNum: (c as any)._inningsNum || 2,
+        _battingTeam: (c as any)._battingTeam || match.innings2?.battingTeam || match.teamB
+      }));
+    const inn2List = injectMissingOverSummaries(rawInn2List, match.innings2, match, 2);
+
+    const combined: any[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const item of [...inn2List, ...inn1List]) {
+      const key = item.id || `${item.overBall}-${item.description}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        combined.push(item);
+      }
+    }
+
+    return combined;
+  }, [match.innings1, match.innings2, match.teamA, match.teamB]);
+
   const cleanPlayerName = (name: any): string => {
     if (!name) return '';
     const str = typeof name === 'string' ? name : (name.name || name.displayName || '');
@@ -4172,6 +4571,112 @@ export const CricketScoreboard: React.FC = () => {
     return list;
   };
 
+  const isCurrentBattingTeamA = () => {
+    const tA = (match?.teamA || '').toLowerCase().trim();
+    const tB = (match?.teamB || '').toLowerCase().trim();
+    const currentBattingName = (currentInnings?.battingTeam || match?.teamA || '').toLowerCase().trim();
+    if (currentBattingName) {
+      if (tB && (currentBattingName === tB || currentBattingName.includes(tB) || tB.includes(currentBattingName))) {
+        return false;
+      }
+      if (tA && (currentBattingName === tA || currentBattingName.includes(tA) || tA.includes(currentBattingName))) {
+        return true;
+      }
+    }
+    return true;
+  };
+
+  const handleQuickAddSquadPlayers = (rawInput: string, side: 'batting' | 'bowling') => {
+    const names = rawInput
+      .split(/[,;\n]+/)
+      .map(s => cleanPlayerName(s).trim())
+      .filter(Boolean);
+    if (names.length === 0) return;
+
+    const batIsA = isCurrentBattingTeamA();
+    const targetIsTeamA = side === 'batting' ? batIsA : !batIsA;
+    const teamLabel = side === 'batting'
+      ? (currentInnings?.battingTeam || match.teamA || 'Batting Team')
+      : (currentInnings?.bowlingTeam || match.teamB || 'Bowling Team');
+
+    if (targetIsTeamA) {
+      setSelectedTeamARoster(prev => {
+        const next = [...prev];
+        for (const n of names) {
+          if (!next.some(x => cleanPlayerName(x).toLowerCase() === n.toLowerCase())) {
+            next.push(n);
+          }
+        }
+        return next;
+      });
+    } else {
+      setSelectedTeamBRoster(prev => {
+        const next = [...prev];
+        for (const n of names) {
+          if (!next.some(x => cleanPlayerName(x).toLowerCase() === n.toLowerCase())) {
+            next.push(n);
+          }
+        }
+        return next;
+      });
+    }
+
+    syncMatch(prev => {
+      let nextASquad = prev.teamASquad || [];
+      let nextBSquad = prev.teamBSquad || [];
+      for (const n of names) {
+        if (targetIsTeamA) {
+          nextASquad = appendPlayerToSquadIfMissing(nextASquad, n);
+        } else {
+          nextBSquad = appendPlayerToSquadIfMissing(nextBSquad, n);
+        }
+      }
+      return {
+        ...prev,
+        teamASquad: nextASquad,
+        teamBSquad: nextBSquad,
+      };
+    });
+
+    showNotification(
+      names.length === 1
+        ? `Added ${names[0]} to ${teamLabel} squad!`
+        : `Added ${names.length} players to ${teamLabel} squad!`,
+      'success'
+    );
+  };
+
+  const handleQuickRemoveSquadPlayer = (playerName: string, side: 'batting' | 'bowling') => {
+    const cleanTarget = cleanPlayerName(playerName).toLowerCase().trim();
+    if (!cleanTarget) return;
+    const batIsA = isCurrentBattingTeamA();
+    const targetIsTeamA = side === 'batting' ? batIsA : !batIsA;
+
+    if (targetIsTeamA) {
+      setSelectedTeamARoster(prev => prev.filter(p => cleanPlayerName(p).toLowerCase().trim() !== cleanTarget));
+    } else {
+      setSelectedTeamBRoster(prev => prev.filter(p => cleanPlayerName(p).toLowerCase().trim() !== cleanTarget));
+    }
+
+    syncMatch(prev => ({
+      ...prev,
+      teamASquad: targetIsTeamA
+        ? (prev.teamASquad || []).filter((item: any) => {
+            const nm = typeof item === 'string' ? cleanPlayerName(item) : cleanPlayerName(item?.name || '');
+            return nm.toLowerCase().trim() !== cleanTarget;
+          })
+        : prev.teamASquad,
+      teamBSquad: !targetIsTeamA
+        ? (prev.teamBSquad || []).filter((item: any) => {
+            const nm = typeof item === 'string' ? cleanPlayerName(item) : cleanPlayerName(item?.name || '');
+            return nm.toLowerCase().trim() !== cleanTarget;
+          })
+        : prev.teamBSquad,
+    }));
+
+    showNotification(`Removed ${playerName} from squad`, 'info');
+  };
+
   const handleSelectNewBowlerForOver = (bowlerIndex: number) => {
     handleChangeActiveBowler(bowlerIndex);
     setBowlerSelectedForOver(Math.floor((currentInnings?.ballsBowled || 0) / 6));
@@ -4200,13 +4705,13 @@ export const CricketScoreboard: React.FC = () => {
 
     // 1. Swap check: if selecting the batsman already on the opposite end, swap them!
     if (role === 'striker' && currentNonStriker && cleanPlayerName(currentNonStriker.name).toLowerCase() === cleanName.toLowerCase()) {
-      handleSwapBatsmen();
+      handleSwapStrikers();
       showNotification(`Swapped strike: ${cleanName} is now on strike`, 'info');
       setEditStrikerIndex(null);
       return;
     }
     if (role === 'non-striker' && currentStriker && cleanPlayerName(currentStriker.name).toLowerCase() === cleanName.toLowerCase()) {
-      handleSwapBatsmen();
+      handleSwapStrikers();
       showNotification(`Swapped strike: ${cleanName} is now at non-striker end`, 'info');
       setEditNonStrikerIndex(null);
       return;
@@ -4357,7 +4862,8 @@ export const CricketScoreboard: React.FC = () => {
       id: `comm-bat-upd-${Date.now()}`,
       overBall: formatOvers(currentInnings.ballsBowled),
       description: commDesc,
-      type: 'normal' as const,
+      type: 'announcement' as any,
+      announcementType: 'new_batsman' as const,
       translations: {
         en: commDesc,
         hi: `${trimmedName} नए बल्लेबाज क्रीज पर आए हैं.`,
@@ -4427,7 +4933,8 @@ export const CricketScoreboard: React.FC = () => {
       id: `comm-bowl-upd-${Date.now()}`,
       overBall: formatOvers(currentInnings.ballsBowled),
       description: `${bowlerDesc}`,
-      type: 'normal' as const
+      type: 'announcement' as any,
+      announcementType: 'new_bowler' as const
     };
 
     const updatedInnings = { 
@@ -4679,6 +5186,7 @@ export const CricketScoreboard: React.FC = () => {
         bowlerName?: string;
         howOut?: string;
       };
+      tacticalContext?: TacticalMatchupContext;
     },
     targetCommentaryId?: string
   ) => {
@@ -4737,7 +5245,8 @@ export const CricketScoreboard: React.FC = () => {
             language: userCommentaryLang,
             contextualTone: toneInfo.tone,
             specialTrigger: additionalContext?.specialTrigger,
-            winProbability: additionalContext?.isCrucialTime ? winProbData : undefined
+            winProbability: additionalContext?.isCrucialTime ? winProbData : undefined,
+            tacticalContext: additionalContext?.tacticalContext
           })
         });
         clearTimeout(timeoutId);
@@ -4817,7 +5326,9 @@ export const CricketScoreboard: React.FC = () => {
       commEntry = createOverFinishedAndBowlerChangeAnnouncement(
         completedOverNo,
         newBowlerName,
-        overStr
+        overStr,
+        currentInnings,
+        match
       );
     } else {
       commEntry = createBowlerAnnouncement(
@@ -4950,22 +5461,32 @@ export const CricketScoreboard: React.FC = () => {
     showNotification(`🎙️ Voice Scorer: Set opening pair "${cStriker}" & "${cNonStriker}"`, 'success');
   };
 
-  const handleAddPenaltyRuns = (runsToAdd: number) => {
-    if (!currentInnings) return;
+  const handleAddPenaltyRuns = (runsToAdd: number, reason?: string) => {
+    if (!currentInnings || !runsToAdd || isNaN(runsToAdd)) return;
+    playSoundEffect('click');
     pushStateToUndoStack(match);
+    const reasonText = reason?.trim() ? ` (${reason.trim()})` : '';
+    const descEn = `⚖️ PENALTY RUNS: +${runsToAdd} penalty run${runsToAdd === 1 ? '' : 's'} awarded to ${currentInnings.battingTeam}${reasonText}.`;
+    const descHi = `⚖️ पेनल्टी रन: ${currentInnings.battingTeam} को +${runsToAdd} पेनल्टी रन दिए गए${reasonText}।`;
+    const descMr = `⚖️ पेनल्टी धावा: ${currentInnings.battingTeam} संघाला +${runsToAdd} पेनल्टी धावा दिल्या गेल्या${reasonText}.`;
     const updatedInnings = {
       ...currentInnings,
       runs: currentInnings.runs + runsToAdd,
       extras: {
         ...currentInnings.extras,
-        penalty: currentInnings.extras.penalty + runsToAdd
+        penalty: (currentInnings.extras.penalty || 0) + runsToAdd
       },
       commentaryList: [
         {
           id: `c-${Date.now()}`,
           overBall: formatOvers(currentInnings.ballsBowled),
-          description: `Scoreboard override: Penalty of ${runsToAdd} runs awarded to ${currentInnings.battingTeam}.`,
-          type: 'extra'
+          description: descEn,
+          type: 'extra' as const,
+          translations: {
+            en: descEn,
+            hi: descHi,
+            mr: descMr
+          }
         },
         ...currentInnings.commentaryList
       ]
@@ -4974,6 +5495,7 @@ export const CricketScoreboard: React.FC = () => {
     syncMatch(prev => {
       const updatedMatch = {
         ...prev,
+        lastBallResult: `PEN+${runsToAdd}`,
         innings1: prev.currentInningsNum === 1 ? updatedInnings : prev.innings1,
         innings2: prev.currentInningsNum === 2 ? updatedInnings : prev.innings2
       };
@@ -4981,7 +5503,7 @@ export const CricketScoreboard: React.FC = () => {
       // Auto re-evaluate match condition
       return checkMatchEndCondition(updatedMatch);
     });
-    showNotification(`Added ${runsToAdd} penalty runs.`, 'success');
+    showNotification(`⚖️ Added +${runsToAdd} penalty runs to ${currentInnings.battingTeam}${reasonText}.`, 'success');
   };
 
   // Main Score scoring dispatcher
@@ -4989,6 +5511,7 @@ export const CricketScoreboard: React.FC = () => {
     type: 'dot' | 'runs' | 'wide' | 'noball' | 'wicket' | 'bye' | 'legbye';
     val?: number;
     extraType?: 'wide' | 'noball' | 'bye' | 'legbye';
+    isDeclaredOne?: boolean;
   }) => {
     if (!currentInnings || match.status === 'completed') return;
     playSoundEffect('click');
@@ -5044,12 +5567,12 @@ export const CricketScoreboard: React.FC = () => {
 
       if (type === 'dot') {
         const dots = [
-          `${bwl} fires a ${rdAdj} delivery, and ${str} defends it resolutely ${rdStreet}. No run. (${rdSound})`,
-          `High-class bowling by ${bwl}! ${str} gets beaten on the off-stump. (${rdReact})`,
-          `No room given by ${bwl}. ${str} pats it with flat-bat back to the bowler. (${rdSound})`,
-          `A lovely tight line ${rdStreet} from ${bwl}. ${str} leaves it safely.`,
-          `${str} attempts a big swing but gets only air against ${bwl}'s clever spin! (${rdReact})`,
-          `Excellent defense from ${str} against a ${rdAdj} ball from ${bwl}. Close keeping!`
+          `${bwl} fires a ${rdAdj} delivery, and ${str} defends it resolutely ${rdStreet}. 0 runs (dot ball). (${rdSound})`,
+          `High-class bowling by ${bwl}! ${str} gets beaten on the off-stump. No run (0 runs). (${rdReact})`,
+          `No room given by ${bwl}. ${str} pats it with flat-bat back to the bowler for 0 runs. (${rdSound})`,
+          `A lovely tight line ${rdStreet} from ${bwl}. ${str} leaves it safely. No run (0 runs).`,
+          `${str} attempts a big swing but gets only air against ${bwl}'s clever spin! Dot ball (0 runs). (${rdReact})`,
+          `Excellent defense from ${str} against a ${rdAdj} ball from ${bwl}. 0 runs, close keeping!`
         ];
         return dots[Math.floor(Math.random() * dots.length)];
       }
@@ -5057,30 +5580,30 @@ export const CricketScoreboard: React.FC = () => {
       if (type === 'runs') {
         if (val === 1) {
           const ones = [
-            `${str} works the ${rdAdj} ball from ${bwl} ${rdStreet} for a single. (${rdSound})`,
-            `Quick single taken as ${str} tucks it into the cover gap. Beautiful running! (${rdReact})`,
-            `${str} guides this one down to third-man area. Soft hands, comfortable run.`,
-            `Excellent rotation! ${str} taps a tight ball and runs immediately. (${rdSound})`,
-            `A gentle tap from ${str} towards mid-off, easy single. ${rdReact}`
+            `${str} works the ${rdAdj} ball from ${bwl} ${rdStreet} for a single (1 run). (${rdSound})`,
+            `Quick single (1 run) taken as ${str} tucks it into the cover gap. Beautiful running! (${rdReact})`,
+            `${str} guides this one down to third-man area for 1 run. Soft hands, comfortable single.`,
+            `Excellent rotation! ${str} taps a tight ball and runs immediately for 1 run. (${rdSound})`,
+            `A gentle tap from ${str} towards mid-off, easy single (1 run). ${rdReact}`
           ];
           return ones[Math.floor(Math.random() * ones.length)];
         }
         if (val === 2) {
           const twos = [
-            `Shot! ${str} drives deep ${rdStreet}, pushing hard with great hustle to complete two! (${rdSound})`,
-            `${str} flicks ${bwl} through mid-wicket. Splendid speed gets them a couple. (${rdReact})`,
-            `Two runs taken! ${str} plays with soft hands into vacant deep space.`,
-            `${bwl}'s delivery is cut past point. Fielder chases hard, ${str} safely back for two!`,
-            `Excellent placement by ${str}! Swept away towards deep leg-side, double completed.`
+            `Shot! ${str} drives deep ${rdStreet}, pushing hard with great hustle to complete 2 runs! (${rdSound})`,
+            `${str} flicks ${bwl} through mid-wicket. Splendid speed gets them a couple (2 runs). (${rdReact})`,
+            `Two runs (2 runs) taken! ${str} plays with soft hands into vacant deep space.`,
+            `${bwl}'s delivery is cut past point. Fielder chases hard, ${str} safely back for 2 runs!`,
+            `Excellent placement by ${str}! Swept away towards deep leg-side, double (2 runs) completed.`
           ];
           return twos[Math.floor(Math.random() * twos.length)];
         }
         if (val === 3) {
           const threes = [
-            `Phenomenal running! ${str} punches it through the off-side gap and scampers for three. (${rdReact})`,
-            `Slick placement as ${str} sweeps ${bwl} fine. They push hard and complete three runs! (${rdSound})`,
-            `${str} launches this into the empty corner of the street. Terrific endurance to get three!`,
-            `A misfield gives ${str} and partner enough confidence to sprint back for a hard-earned three.`
+            `Phenomenal running! ${str} punches it through the off-side gap and scampers for 3 runs. (${rdReact})`,
+            `Slick placement as ${str} sweeps ${bwl} fine. They push hard and complete 3 runs! (${rdSound})`,
+            `${str} launches this into the empty corner of the street. Terrific endurance to get 3 runs!`,
+            `A misfield gives ${str} and partner enough confidence to sprint back for a hard-earned 3 runs.`
           ];
           return threes[Math.floor(Math.random() * threes.length)];
         }
@@ -5162,6 +5685,8 @@ export const CricketScoreboard: React.FC = () => {
             }
           }
         };
+      } else if (event.isDeclaredOne && ballRuns === 1) {
+        outcomeDescription = `${striker.name} taps it into the declared 1-run zone off ${bowler.name}! 1 Declared Run (1D - No strike rotation).`;
       } else {
         outcomeDescription = getSlickDescription('runs', ballRuns, striker.name, bowler.name);
       }
@@ -5172,8 +5697,8 @@ export const CricketScoreboard: React.FC = () => {
       bowler.runsConceded += ballRuns;
       isCalculatedOverBall = true;
 
-      // Swap batsman if odd number of runs scored
-      if (ballRuns % 2 !== 0) {
+      // Swap batsman if odd number of runs scored (unless it is a 1 Declared Run)
+      if (!event.isDeclaredOne && ballRuns % 2 !== 0) {
         const temp = inn.strikerIndex;
         inn.strikerIndex = inn.nonStrikerIndex;
         inn.nonStrikerIndex = temp;
@@ -5394,7 +5919,7 @@ export const CricketScoreboard: React.FC = () => {
     // Set last ball result string helper
     let ballLabel = '';
     if (event.type === 'dot') ballLabel = '0';
-    else if (event.type === 'runs') ballLabel = String(event.val);
+    else if (event.type === 'runs') ballLabel = event.isDeclaredOne ? '1D' : String(event.val);
     else if (event.type === 'wide') ballLabel = (event.val && event.val > 0) ? `WD+${event.val}` : 'WD';
     else if (event.type === 'noball') ballLabel = (event.val && event.val > 0) ? `NB+${event.val}` : 'NB';
     else if (event.type === 'bye') ballLabel = event.val ? `${event.val}b` : '1b';
@@ -5440,13 +5965,30 @@ export const CricketScoreboard: React.FC = () => {
       isSuperOver: Boolean(nextMatchState.isSuperOver)
     });
 
+    const deliveryTacticalContext = buildTacticalMatchupContext(inn, nextMatchState, {
+      strikerName: striker.name,
+      bowlerName: bowler.name,
+      nonStrikerName: nonStriker?.name,
+      eventType: localizedEventCat,
+      runsOffBat: runsOffBatFromDelivery,
+      extraType: effectiveExtraType,
+      isWicket: false,
+      alreadyInCommentaryList: false
+    });
+
     const generatedHi = generateLocalizedCricketCommentary(
       localizedEventCat,
       runsOffBatFromDelivery,
       striker.name,
       bowler.name,
       'hi',
-      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
+      {
+        extraType: effectiveExtraType,
+        runsOffBat: runsOffBatFromDelivery,
+        winProbability: deliveryWinProb,
+        isCrucialTime: isCrucialMoment,
+        tacticalContext: deliveryTacticalContext
+      }
     );
     const generatedMr = generateLocalizedCricketCommentary(
       localizedEventCat,
@@ -5454,18 +5996,36 @@ export const CricketScoreboard: React.FC = () => {
       striker.name,
       bowler.name,
       'mr',
-      { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
+      {
+        extraType: effectiveExtraType,
+        runsOffBat: runsOffBatFromDelivery,
+        winProbability: deliveryWinProb,
+        isCrucialTime: isCrucialMoment,
+        tacticalContext: deliveryTacticalContext
+      }
     );
-    const generatedEn = (effectiveExtraType === 'legbye' || effectiveExtraType === 'bye' || effectiveExtraType === 'noball')
+    const baseGeneratedEn = (effectiveExtraType === 'legbye' || effectiveExtraType === 'bye' || effectiveExtraType === 'noball')
       ? generateLocalizedCricketCommentary(
           'extra',
           runsOffBatFromDelivery,
           striker.name,
           bowler.name,
           'en',
-          { extraType: effectiveExtraType, runsOffBat: runsOffBatFromDelivery, winProbability: deliveryWinProb, isCrucialTime: isCrucialMoment }
+          {
+            extraType: effectiveExtraType,
+            runsOffBat: runsOffBatFromDelivery,
+            winProbability: deliveryWinProb,
+            isCrucialTime: isCrucialMoment,
+            tacticalContext: deliveryTacticalContext
+          }
         )
       : ballDesc;
+
+    const tacEnSuffix = deliveryTacticalContext.tacticalNarrativeSuffix?.en;
+    const generatedEn =
+      tacEnSuffix && !baseGeneratedEn.includes(tacEnSuffix.trim())
+        ? `${baseGeneratedEn}${tacEnSuffix}`
+        : baseGeneratedEn;
 
     const localizedEnWithProb = generatedEn;
 
@@ -5478,6 +6038,9 @@ export const CricketScoreboard: React.FC = () => {
       isNoBall: event.type === 'noball',
       runsOffBat: runsOffBatFromDelivery,
       ballScore: ballLabel,
+      batterName: striker.name,
+      bowlerName: bowler.name,
+      tacticalContext: deliveryTacticalContext,
       translations: {
         en: localizedEnWithProb,
         hi: generatedHi,
@@ -5541,32 +6104,12 @@ export const CricketScoreboard: React.FC = () => {
       const overFinishComm = createOverFinishedAndBowlerChangeAnnouncement(
         completedOverNo,
         nextBowlerCandidate,
-        formatOvers(inn.ballsBowled)
+        formatOvers(inn.ballsBowled),
+        inn,
+        nextMatchState
       );
 
-      // Automated Tournament Sponsor Details after completing every over
-      // Condition: if score manager not added prize details then don't add anything
-      const overPrizes = getValidActivePrizes(
-        nextMatchState.tournamentPrizes ||
-        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
-        getTournamentPrizes(nextMatchState.id)
-      );
-
-      let overSponsorComm: any = null;
-      if (overPrizes.length > 0) {
-        const rotatingPrize = overPrizes[(completedOverNo - 1) % overPrizes.length];
-        overSponsorComm = createOverSponsorCommentary(
-          completedOverNo,
-          rotatingPrize,
-          formatOvers(inn.ballsBowled)
-        );
-        try {
-          const sponsorTxt = formatPrizeSponsorText(rotatingPrize);
-          updateOverlayProp({ sponsorText: `🤝 Over ${completedOverNo} Sponsor: ${sponsorTxt}` });
-        } catch (_) {}
-      }
-
-      const commsToPrepend = overSponsorComm ? [overFinishComm, overSponsorComm] : [overFinishComm];
+      const commsToPrepend = [overFinishComm];
       const activeInningsKey = nextMatchState.currentInningsNum === 1 ? 'innings1' : 'innings2';
       if (nextMatchState[activeInningsKey]) {
         nextMatchState[activeInningsKey] = {
@@ -5624,7 +6167,8 @@ export const CricketScoreboard: React.FC = () => {
             batterName: striker.name,
             batterRuns: striker.runs,
             batterBalls: striker.balls
-          } : undefined
+          } : undefined,
+          tacticalContext: deliveryTacticalContext
         },
         ballCommEntry.id
       );
@@ -6005,15 +6549,41 @@ export const CricketScoreboard: React.FC = () => {
       isSuperOver: Boolean(nextMatchState.isSuperOver)
     });
 
+    const wicketTacticalContext = !isRetiredHurt
+      ? buildTacticalMatchupContext(inn, nextMatchState, {
+          strikerName: dismissedBatter.name,
+          bowlerName: detailedBowler,
+          nonStrikerName: remainingPartner?.name,
+          eventType: 'wicket',
+          runsOffBat: 0,
+          isWicket: true,
+          alreadyInCommentaryList: false
+        })
+      : undefined;
+
     const wktHi = isRetiredHurt
       ? `रिटायर्ड हर्ट: ${dismissedBatter.name} चोटिल होकर मैदान से बाहर गए हैं (${dismissedBatter.runs} रन, ${dismissedBatter.balls} गेंद). ${finalBatsmanName} नए बल्लेबाज क्रीज पर आए हैं.`
-      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb, isCrucialTime: isWicketCrucial });
+      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'hi', {
+          newBatsman: finalBatsmanName,
+          winProbability: deliveryWinProb,
+          isCrucialTime: isWicketCrucial,
+          tacticalContext: wicketTacticalContext
+        });
 
     const wktMr = isRetiredHurt
       ? `रिटायर्ड हर्ट: ${dismissedBatter.name} दुखापतीमुळे मैदानाबाहेर गेले आहेत (${dismissedBatter.runs} धावा, ${dismissedBatter.balls} चेंडू). ${finalBatsmanName} नवीन फलंदाज क्रीजवर आले आहेत.`
-      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', { newBatsman: finalBatsmanName, winProbability: deliveryWinProb, isCrucialTime: isWicketCrucial });
+      : generateLocalizedCricketCommentary('wicket', 0, dismissedBatter.name, detailedBowler, 'mr', {
+          newBatsman: finalBatsmanName,
+          winProbability: deliveryWinProb,
+          isCrucialTime: isWicketCrucial,
+          tacticalContext: wicketTacticalContext
+        });
 
-    const localizedEnWithProb = commentaryDescription;
+    const wktTacEn = wicketTacticalContext?.tacticalNarrativeSuffix?.en || '';
+    const localizedEnWithProb =
+      wktTacEn && !commentaryDescription.includes(wktTacEn.trim())
+        ? `${commentaryDescription}${wktTacEn}`
+        : commentaryDescription;
 
     const deliveryCommId = `c-${Date.now()}`;
     const normalWicketComm = {
@@ -6022,6 +6592,9 @@ export const CricketScoreboard: React.FC = () => {
       description: localizedEnWithProb,
       type: isRetiredHurt ? ('announcement' as const) : ('wicket' as const),
       specialEvent: isRetiredHurt ? ('retire_hurt' as const) : undefined,
+      batterName: dismissedBatter.name,
+      bowlerName: detailedBowler,
+      tacticalContext: wicketTacticalContext,
       translations: {
         en: localizedEnWithProb,
         hi: `${wktHi}${overCompletionSuffix}`,
@@ -6135,32 +6708,12 @@ export const CricketScoreboard: React.FC = () => {
       const overFinishComm = createOverFinishedAndBowlerChangeAnnouncement(
         completedOverNo,
         nextBowlerCandidate,
-        formatOvers(inn.ballsBowled)
+        formatOvers(inn.ballsBowled),
+        inn,
+        nextMatchState
       );
 
-      // Automated Tournament Sponsor Details after completing every over
-      // Condition: if score manager not added prize details then don't add anything
-      const overPrizes = getValidActivePrizes(
-        nextMatchState.tournamentPrizes ||
-        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
-        getTournamentPrizes(nextMatchState.id)
-      );
-
-      let overSponsorComm: any = null;
-      if (overPrizes.length > 0) {
-        const rotatingPrize = overPrizes[(completedOverNo - 1) % overPrizes.length];
-        overSponsorComm = createOverSponsorCommentary(
-          completedOverNo,
-          rotatingPrize,
-          formatOvers(inn.ballsBowled)
-        );
-        try {
-          const sponsorTxt = formatPrizeSponsorText(rotatingPrize);
-          updateOverlayProp({ sponsorText: `🤝 Over ${completedOverNo} Sponsor: ${sponsorTxt}` });
-        } catch (_) {}
-      }
-
-      const commsToPrepend = overSponsorComm ? [overFinishComm, overSponsorComm] : [overFinishComm];
+      const commsToPrepend = [overFinishComm];
       const activeInningsKey = nextMatchState.currentInningsNum === 1 ? 'innings1' : 'innings2';
       if (nextMatchState[activeInningsKey]) {
         nextMatchState[activeInningsKey] = {
@@ -6241,7 +6794,8 @@ export const CricketScoreboard: React.FC = () => {
             batterBalls: dismissedBatter.balls,
             bowlerName: detailedBowler,
             howOut: isRetiredHurt ? 'Retired Hurt' : detailedHowOut
-          }
+          },
+          tacticalContext: wicketTacticalContext
         },
         deliveryCommId
       );
@@ -6350,24 +6904,16 @@ export const CricketScoreboard: React.FC = () => {
           modifiedState.oversLimit
         );
 
-        // Automated Tournament Sponsor Details during inning break
-        // Condition: if score manager not added prize details then don't add anything
-        const innBreakPrizes = getValidActivePrizes(
-          modifiedState.tournamentPrizes ||
-          (modifiedState.tournamentId ? getTournamentPrizesByTournamentId(modifiedState.tournamentId) : null) ||
-          getTournamentPrizes(modifiedState.id)
-        );
-        const innBreakSponsorComm = createInningsBreakSponsorCommentary(
-          innBreakPrizes,
-          formatOvers(inn1.ballsBowled),
-          modifiedState.tournamentName
-        );
+        const previousInn1Comms = (inn1.commentaryList || []).map(c => ({
+          ...c,
+          _inningsNum: 1,
+          _battingTeam: inn1.battingTeam
+        }));
 
         inn1.commentaryList = [
-          ...(innBreakSponsorComm ? [innBreakSponsorComm] : []),
           chaseEquationComm,
           innSummaryComm,
-          ...(inn1.commentaryList || [])
+          ...previousInn1Comms
         ];
         modifiedState.innings1 = inn1;
         
@@ -6412,9 +6958,9 @@ export const CricketScoreboard: React.FC = () => {
                 : `Innings 2 Started! ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs in ${modifiedState.oversLimit} overs.`, 
               type: 'milestone' 
             },
-            ...(innBreakSponsorComm ? [innBreakSponsorComm] : []),
             chaseEquationComm,
-            innSummaryComm
+            innSummaryComm,
+            ...previousInn1Comms
           ],
           history: [
             { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -6484,26 +7030,8 @@ export const CricketScoreboard: React.FC = () => {
         // Requirement 1: after match winning add match result in ai commentary and also add the player of the match name in the ai commentary.also add their match summary
         const matchWinComm = createMatchWinningCommentary(modifiedState, potm);
 
-        // Automated Tournament Sponsor Details after match complete
-        // Condition: if score manager not added prize details then don't add anything
-        const matchFinishPrizes = getValidActivePrizes(
-          modifiedState.tournamentPrizes ||
-          (modifiedState.tournamentId ? getTournamentPrizesByTournamentId(modifiedState.tournamentId) : null) ||
-          getTournamentPrizes(modifiedState.id)
-        );
-        const matchCompleteSponsorComm = createMatchCompleteSponsorCommentary(
-          matchFinishPrizes,
-          formatOvers(inn2.ballsBowled),
-          modifiedState.winner,
-          modifiedState.tournamentName
-        );
-
-        const matchCommsToPrepend = matchCompleteSponsorComm
-          ? [matchWinComm, matchCompleteSponsorComm]
-          : [matchWinComm];
-
         inn2.commentaryList = [
-          ...matchCommsToPrepend,
+          matchWinComm,
           ...(inn2.commentaryList || [])
         ];
         modifiedState.innings2 = inn2;
@@ -6762,24 +7290,16 @@ export const CricketScoreboard: React.FC = () => {
         nextMatchState.oversLimit
       );
 
-      // Automated Tournament Sponsor Details during inning break declaration
-      // Condition: if score manager not added prize details then don't add anything
-      const declInnBreakPrizes = getValidActivePrizes(
-        nextMatchState.tournamentPrizes ||
-        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
-        getTournamentPrizes(nextMatchState.id)
-      );
-      const declInnBreakSponsorComm = createInningsBreakSponsorCommentary(
-        declInnBreakPrizes,
-        formatOvers(inn1.ballsBowled),
-        nextMatchState.tournamentName
-      );
+      const previousInn1Comms = (inn1.commentaryList || []).map(c => ({
+        ...c,
+        _inningsNum: 1,
+        _battingTeam: inn1.battingTeam
+      }));
 
       inn1.commentaryList = [
-        ...(declInnBreakSponsorComm ? [declInnBreakSponsorComm] : []),
         chaseEquationComm,
         innSummaryComm,
-        ...(inn1.commentaryList || [])
+        ...previousInn1Comms
       ];
       nextMatchState.innings1 = inn1;
 
@@ -6803,9 +7323,9 @@ export const CricketScoreboard: React.FC = () => {
         fallOfWickets: [],
         commentaryList: [
           { id: `c-${Date.now()}`, overBall: '0.0', description: `Innings declared. ${chBatsman1Name} and ${chBatsman2Name} new batsman are come on crease and ${chBowler1Name} will bowl the first over. Target: ${targetRunsValue} runs.`, type: 'milestone' },
-          ...(declInnBreakSponsorComm ? [declInnBreakSponsorComm] : []),
           chaseEquationComm,
-          innSummaryComm
+          innSummaryComm,
+          ...previousInn1Comms
         ],
         history: [
           { over: 0, overStr: '0.0', cumulativeRuns: 0, cumulativeWickets: 0 }
@@ -6853,25 +7373,7 @@ export const CricketScoreboard: React.FC = () => {
       }
       const matchWinComm = createMatchWinningCommentary(nextMatchState, potm);
 
-      // Automated Tournament Sponsor Details after match complete (declared)
-      // Condition: if score manager not added prize details then don't add anything
-      const declMatchFinishPrizes = getValidActivePrizes(
-        nextMatchState.tournamentPrizes ||
-        (nextMatchState.tournamentId ? getTournamentPrizesByTournamentId(nextMatchState.tournamentId) : null) ||
-        getTournamentPrizes(nextMatchState.id)
-      );
-      const declMatchCompleteSponsorComm = createMatchCompleteSponsorCommentary(
-        declMatchFinishPrizes,
-        formatOvers(inn2.ballsBowled),
-        nextMatchState.winner,
-        nextMatchState.tournamentName
-      );
-
-      const declMatchCommsToPrepend = declMatchCompleteSponsorComm
-        ? [matchWinComm, declMatchCompleteSponsorComm]
-        : [matchWinComm];
-
-      inn2.commentaryList = [...declMatchCommsToPrepend, ...(inn2.commentaryList || [])];
+      inn2.commentaryList = [matchWinComm, ...(inn2.commentaryList || [])];
       nextMatchState.innings2 = inn2;
 
       // Auto trigger match presentation in overlay so tournament name shows automatically first
@@ -6892,9 +7394,20 @@ export const CricketScoreboard: React.FC = () => {
     if (!skipSync) {
       syncMatch(completedMatch);
     }
+
+    // Immediately add to local matchHistory state so Completed Matches section updates without delay
+    setMatchHistory(prev => {
+      const filtered = prev.filter(
+        m =>
+          m.id !== completedMatch.id &&
+          !(completedMatch.tournamentMatchId && m.tournamentMatchId === completedMatch.tournamentMatchId)
+      );
+      return [completedMatch, ...filtered];
+    });
+
     showNotification('Match concluded and saved to History records.', 'success');
 
-    // Immediately synchronize to tournament fixture and standings
+    // Immediately synchronize to tournament fixture and standings (both Gully Tournaments and One-Half 32 Tournament)
     let tourIdToSync = completedMatch.tournamentId;
     const matchIdToSync = completedMatch.tournamentMatchId || completedMatch.id;
     if (!tourIdToSync && completedMatch.tournamentName && typeof window !== 'undefined') {
@@ -6909,29 +7422,57 @@ export const CricketScoreboard: React.FC = () => {
             if (found) tourIdToSync = found.id;
           }
         }
+        if (!tourIdToSync) {
+          const rawOneHalf =
+            localStorage.getItem('cricket_one_half_tournament_32') ||
+            localStorage.getItem('one_half_tournament_v1');
+          if (rawOneHalf) {
+            const ohTour = JSON.parse(rawOneHalf);
+            if (ohTour && ohTour.name?.toLowerCase().trim() === completedMatch.tournamentName?.toLowerCase().trim()) {
+              tourIdToSync = ohTour.id;
+            }
+          }
+        }
       } catch (_) {}
     }
 
-    if (tourIdToSync || completedMatch.tournamentName) {
-      syncLiveScoreToTournament(tourIdToSync || '', matchIdToSync, completedMatch);
-    }
+    // Always invoke syncLiveScoreToTournament so One-Half or Gully tournament matches sync by ID or team names
+    syncLiveScoreToTournament(tourIdToSync || '', matchIdToSync, completedMatch);
 
     if (tournamentCallbackRef.current && completedMatch.status === 'completed') {
-      const runsA = completedMatch.innings1?.runs || 0;
-      const wicketsA = completedMatch.innings1?.wickets || 0;
-      const runsB = completedMatch.innings2?.runs || 0;
-      const wicketsB = completedMatch.innings2?.wickets || 0;
+      const normTeamA = (completedMatch.teamA || '').toLowerCase().trim();
+      const normTeamB = (completedMatch.teamB || '').toLowerCase().trim();
+      const inn1Bat = (completedMatch.innings1?.battingTeam || '').toLowerCase().trim();
+      const isInn1TeamB = Boolean(normTeamB && (inn1Bat === normTeamB || inn1Bat.includes(normTeamB)));
+
+      const innForA = isInn1TeamB ? completedMatch.innings2 : completedMatch.innings1;
+      const innForB = isInn1TeamB ? completedMatch.innings1 : completedMatch.innings2;
+
+      const runsA = innForA?.runs || 0;
+      const wicketsA = innForA?.wickets || 0;
+      const oversA = innForA ? formatOvers(innForA.ballsBowled || 0) : `${completedMatch.oversLimit || 8}.0`;
+      const runsB = innForB?.runs || 0;
+      const wicketsB = innForB?.wickets || 0;
+      const oversB = innForB ? formatOvers(innForB.ballsBowled || 0) : `${completedMatch.oversLimit || 8}.0`;
       const winner = completedMatch.winner || "Tie";
       const winReason = completedMatch.winReason || "Tie Match";
+      const manOfTheMatch =
+        completedMatch.playerOfTheMatch?.name ||
+        completedMatch.manOfTheMatch ||
+        computePotmName(completedMatch) ||
+        undefined;
 
       try {
         tournamentCallbackRef.current({
           runsA,
           wicketsA,
+          oversA,
           runsB,
           wicketsB,
+          oversB,
           winner,
-          winReason
+          winReason,
+          manOfTheMatch
         });
       } catch (cbErr) {
         console.warn("Tournament callback execution notice:", cbErr);
@@ -8427,7 +8968,8 @@ export const CricketScoreboard: React.FC = () => {
           let badgeType = "Ball";
           if (comm.type === 'wicket') badgeType = "WICKET 🔴";
           else if (comm.type === 'boundary') {
-            const isSix = comm.description.toLowerCase().includes('six') || comm.description.toLowerCase().includes('6 runs');
+            const isFour = comm.ballScore === '4' || (comm as any).runsOffBat === 4 || (comm as any).runs === 4;
+            const isSix = !isFour && (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || comm.description.toLowerCase().includes('six') || comm.description.toLowerCase().includes('6 runs'));
             badgeType = isSix ? "SIXER 🚀" : "FOUR 🏏";
           } else if (comm.type === 'milestone') badgeType = "MILESTONE 🎉";
           else if (comm.type === 'extra') badgeType = "EXTRA ⚡";
@@ -8803,6 +9345,15 @@ export const CricketScoreboard: React.FC = () => {
                 setShowFieldPositionModal(false);
                 showNotification('Field Position Overlay is now LIVE ON AIR!', 'success');
               }}
+              onHideFromBroadcast={() => {
+                const updated = {
+                  ...(match.overlayConfig || {}),
+                  activeGraphic: 'none'
+                };
+                syncMatch({ ...match, overlayConfig: updated });
+                setShowFieldPositionModal(false);
+                showNotification('Field Position Overlay hidden from TV.', 'info');
+              }}
               isLiveOnAir={
                 match.overlayConfig?.activeGraphic === 'field_positions' ||
                 match.overlayConfig?.activeGraphic === 'field_position' ||
@@ -8920,8 +9471,8 @@ export const CricketScoreboard: React.FC = () => {
 
     return (
       <div className="h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden flex flex-col font-sans select-none relative dark">
-        {/* TOP COMPACT NAV (Height: 3rem / 48px) */}
-        <header className="h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-2 sm:px-4 shrink-0 shadow-lg select-none">
+        {/* TOP COMPACT NAV (Height: 2.5rem / 40px) */}
+        <header className="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-2 sm:px-3 shrink-0 shadow-md select-none">
           <div className="flex items-center gap-1.5 shrink-0">
             <span className="flex h-2 w-2 relative">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -8935,64 +9486,30 @@ export const CricketScoreboard: React.FC = () => {
               onClick={() => {
                 showNotification('Scoreboard Management console is active. Live scoring and TV graphics in sync.', 'info');
               }}
-              className="hidden md:inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0 cursor-pointer hover:bg-emerald-500/30 transition-all shadow-xs"
+              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shrink-0 cursor-pointer hover:bg-emerald-500/30 transition-all shadow-xs"
               title="Cricket Scoreboard Management Console"
             >
-              <ShieldCheck size={11} className="text-amber-300 shrink-0" />
+              <ShieldCheck size={10} className="text-amber-300 shrink-0" />
               <span>Scoreboard Management</span>
             </button>
-            
-            {saveStatus && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (saveStatus === 'error') {
-                    retrySaveNow();
-                  }
-                }}
-                className={`text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-1 ml-0.5 sm:ml-2 border border-slate-800 transition-all duration-300 shrink-0 ${
-                  saveStatus === 'saving' 
-                    ? 'bg-amber-500/10 text-amber-400' 
-                    : saveStatus === 'saved'
-                    ? 'bg-emerald-500/10 text-emerald-400'
-                    : 'bg-rose-500/10 text-rose-400 cursor-pointer hover:bg-rose-500/20'
-                }`}
-                title={saveStatus === 'error' ? 'Sync error - Click to retry saving to cloud' : saveStatus === 'saved' ? 'Real-time score synced to cloud' : 'Saving score to cloud...'}
-              >
-                <span className={`w-1 h-1 rounded-full ${
-                  saveStatus === 'saving' 
-                    ? 'bg-amber-400 animate-pulse' 
-                    : saveStatus === 'saved'
-                    ? 'bg-emerald-400'
-                    : 'bg-rose-400 animate-bounce'
-                }`} />
-                <span className="hidden sm:inline">
-                  {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Cloud Synced' : 'Retry Sync ⚠️'}
-                </span>
-                <span className="sm:hidden">
-                  {saveStatus === 'saving' ? '...' : saveStatus === 'saved' ? 'Synced' : 'Retry'}
-                </span>
-              </button>
-            )}
-
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-1.5 font-sans overflow-x-auto flex-1 justify-end min-w-0 pr-1">
-            {/* Instant Undo Action - Primary action prominently accessible on mobile and desktop */}
+          <div className="flex items-center gap-1 font-sans overflow-x-auto flex-1 justify-end min-w-0 pr-1">
+            {/* Instant Undo Action - Visible on mobile/tablet; on desktop lg+ Undo is in the primary keypad */}
             <button
               onClick={handleUndoAction}
               disabled={undoStack.length === 0}
               id="header-undo-btn"
-              className={`h-8 sm:h-9 px-2 sm:px-3 border rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 ${
+              className={`lg:hidden h-7 px-2 border rounded-lg text-[9.5px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 ${
                 undoStack.length === 0 
                   ? 'bg-slate-800/80 text-slate-500 border-slate-700/60 cursor-not-allowed opacity-60' 
                   : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 border-amber-300 font-black shadow-md shadow-amber-500/25 active:scale-95'
               }`}
               title="Undo last action (Instant without confirmation prompt)"
             >
-              <Undo size={13} className="shrink-0 stroke-[2.5]" />
+              <Undo size={12} className="shrink-0 stroke-[2.5]" />
               <span className="font-black">Undo</span>
-              <span className={`text-[9.5px] font-mono px-1 rounded font-black ${undoStack.length === 0 ? 'text-slate-500' : 'bg-slate-950 text-amber-300'}`}>
+              <span className={`text-[9px] font-mono px-1 rounded font-black ${undoStack.length === 0 ? 'text-slate-500' : 'bg-slate-950 text-amber-300'}`}>
                 ({undoStack.length})
               </span>
             </button>
@@ -9018,7 +9535,7 @@ export const CricketScoreboard: React.FC = () => {
             {match.id && (
               <button
                 onClick={() => setShowLivePreview(prev => !prev)}
-                className={`h-8 sm:h-9 px-1.5 sm:px-3 border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 ${
+                className={`h-7 px-2 border-none rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0 ${
                   showLivePreview 
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold shadow-lg shadow-emerald-500/15' 
                     : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
@@ -9026,7 +9543,7 @@ export const CricketScoreboard: React.FC = () => {
                 id="toggle-live-preview-pane"
                 title="Toggle Live Spectator Preview Panel right here"
               >
-                {showLivePreview ? <Eye className="w-3.5 h-3.5 text-amber-300 animate-pulse" /> : <Eye className="w-3.5 h-3.5" />}
+                {showLivePreview ? <Eye className="w-3 h-3 text-amber-300 animate-pulse" /> : <Eye className="w-3 h-3" />}
                 <span className="hidden sm:inline">Live View {showLivePreview ? '◀' : '📊'}</span>
                 <span className="sm:hidden">{showLivePreview ? '◀' : '📊'}</span>
               </button>
@@ -9038,9 +9555,9 @@ export const CricketScoreboard: React.FC = () => {
                 <OfflineSyncStatusBadge className="shrink-0" />
 
                 {/* DESKTOP & TABLET SCOREBOARD ACTIONS (Visible on sm: and up) */}
-                <div className="hidden sm:flex items-center gap-1 sm:gap-1.5 shrink-0">
+                <div className="hidden sm:flex items-center gap-1 shrink-0">
                   {declareInningsConfirm ? (
-                    <div className="flex items-center gap-1 shrink-0 bg-slate-950 p-1 border border-amber-500/30 rounded-lg">
+                    <div className="flex items-center gap-1 shrink-0 bg-slate-950 p-0.5 border border-amber-500/30 rounded-lg">
                       <span className="text-[8px] font-black text-amber-500 uppercase px-1">Lock Innings?</span>
                       <button
                         onClick={() => {
@@ -9048,13 +9565,13 @@ export const CricketScoreboard: React.FC = () => {
                           setIsInningsLocked(true);
                           setDeclareInningsConfirm(false);
                         }}
-                        className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded font-extrabold text-[8px] uppercase cursor-pointer border-none"
+                        className="px-1.5 py-0.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded font-extrabold text-[8px] uppercase cursor-pointer border-none"
                       >
                         Confirm
                       </button>
                       <button
                         onClick={() => setDeclareInningsConfirm(false)}
-                        className="px-1.5 py-1 bg-slate-800 text-slate-350 rounded font-extrabold text-[8px] uppercase cursor-pointer border-none"
+                        className="px-1 py-0.5 bg-slate-800 text-slate-350 rounded font-extrabold text-[8px] uppercase cursor-pointer border-none"
                       >
                         ✕
                       </button>
@@ -9062,22 +9579,22 @@ export const CricketScoreboard: React.FC = () => {
                   ) : (
                     <button
                       onClick={() => setDeclareInningsConfirm(true)}
-                      className="h-8 sm:h-9 px-2 sm:px-3 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
+                      className="h-7 px-2 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
                       title="End Innings / Lock Innings"
                       id="header-end-innings-btn"
                     >
-                      <Lock size={11} />
+                      <Lock size={10} />
                       <span>End Innings</span>
                     </button>
                   )}
 
                   <button
                     onClick={handleSaveDraftAction}
-                    className="h-8 sm:h-9 px-2 sm:px-3 bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold border-none rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
+                    className="h-7 px-2 bg-amber-500 hover:bg-amber-400 text-slate-900 font-extrabold border-none rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
                     title="Save Match as Draft & Exit"
                     id="header-save-draft-btn"
                   >
-                    <Save size={12} />
+                    <Save size={11} />
                     <span>Save Draft</span>
                   </button>
 
@@ -9085,31 +9602,31 @@ export const CricketScoreboard: React.FC = () => {
                     <>
                       <button
                         onClick={handleOpenEditSetupModal}
-                        className="h-8 sm:h-9 px-2 sm:px-3 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white font-extrabold border border-indigo-500/30 rounded-lg sm:rounded-xl text-[10px] uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
+                        className="h-7 px-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white font-extrabold border border-indigo-500/30 rounded-lg text-[9px] uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
                         title="Edit Match Details (Team Names, Overs limit)"
                         id="header-edit-setup-btn"
                       >
-                        <Edit size={12} />
+                        <Edit size={11} />
                         <span>Edit Setup</span>
                       </button>
 
                       <button
                         onClick={() => setShowDlsCalculator(true)}
-                        className="h-8 sm:h-9 px-2 sm:px-3 bg-teal-600/20 hover:bg-teal-600 text-teal-400 hover:text-white border border-teal-500/20 rounded-lg sm:rounded-xl text-[10px] font-extrabold uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
+                        className="h-7 px-2 bg-teal-600/20 hover:bg-teal-600 text-teal-400 hover:text-white border border-teal-500/20 rounded-lg text-[9px] font-extrabold uppercase tracking-wider cursor-pointer flex items-center gap-1 transition-all shrink-0"
                         title="Rain Target DLS Calculator Tool"
                         id="header-dls-btn"
                       >
-                        <CloudRain size={12} className="animate-pulse" />
+                        <CloudRain size={11} className="animate-pulse" />
                         <span>DLS Tool</span>
                       </button>
 
                       <button
                         onClick={handleResetMatch}
-                        className="h-8 sm:h-9 px-2 sm:px-2.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg sm:rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center gap-1 shrink-0"
+                        className="h-7 px-2 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center gap-1 shrink-0"
                         title="Discard & Reset Match"
                         id="header-reset-btn"
                       >
-                        <Trash2 size={12} />
+                        <Trash2 size={11} />
                         <span>Reset</span>
                       </button>
                     </>
@@ -9484,12 +10001,10 @@ export const CricketScoreboard: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className={`flex-1 min-h-0 p-1 sm:p-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-1 sm:gap-2 custom-scrollbar lg:h-full ${
-              activeMobileTab === 'scorer' ? 'overflow-hidden h-full max-h-[calc(100dvh-5rem-2.75rem)] sm:max-h-[calc(100dvh-3rem-2.75rem)]' : 'overflow-y-auto'
-            } lg:overflow-hidden`}>
+            <div className="flex-1 w-full h-full min-h-0 p-1.5 sm:p-2 flex flex-col lg:grid lg:grid-cols-12 gap-1.5 sm:gap-2 custom-scrollbar overflow-hidden">
           
           {/* COLUMN 1: TV Graphics Cockpit / Overlay Controller */}
-          <div className={`flex flex-col gap-1.5 min-h-0 overflow-hidden lg:h-full ${
+          <div className={`flex-1 flex-col gap-1.5 min-h-0 h-full overflow-hidden ${
             activeMobileTab === 'feed' ? 'flex' : 'hidden lg:flex'
           } lg:col-span-3`}>
             {/* Integrated Live Broadcast Overlay Graphics Control Panel */}
@@ -9622,7 +10137,7 @@ export const CricketScoreboard: React.FC = () => {
 
                 return (
                   <>
-                    <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-slate-800/60 shrink-0">
+                    <div className="flex justify-between items-center mb-1.5 pb-1 border-b border-slate-800/60 shrink-0">
                       <div className="flex items-center gap-1.5">
                         <span className="flex h-2 w-2 relative">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
@@ -9631,91 +10146,93 @@ export const CricketScoreboard: React.FC = () => {
                         <span className="text-[8px] font-black uppercase text-slate-300 tracking-widest leading-none">TV Graphics Cockpit</span>
                       </div>
                       
-                      {/* Live Sync Status Indicator */}
-                      {Date.now() - lastOverlayPing < 4500 ? (
-                        <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-mono text-[7px] font-black uppercase tracking-wider animate-pulse leading-none">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                          <span>📡 Sync Active</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono text-[7px] font-black uppercase tracking-wider leading-none">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                          <span>📡 Sync Offline</span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {/* Live Sync Status Indicator */}
+                        {Date.now() - lastOverlayPing < 4500 ? (
+                          <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-mono text-[7px] font-black uppercase tracking-wider animate-pulse leading-none">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            <span>📡 Sync</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono text-[7px] font-black uppercase tracking-wider leading-none">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                            <span>📡 Ready</span>
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateOverlayProp({
+                              activeGraphic: 'none',
+                              customBanner: 'none',
+                              customBannerText: '',
+                              customMilestone: null
+                            });
+                            showNotification('Cleared all live graphic overlays from broadcast feed.', 'info');
+                          }}
+                          className="px-1.5 py-0.5 bg-rose-600/15 hover:bg-rose-600/30 active:scale-95 transition-all border border-rose-500/30 rounded text-rose-300 font-black text-[7.5px] uppercase tracking-wider cursor-pointer flex items-center gap-0.5"
+                          title="Clear All Live Graphics"
+                        >
+                          <span>🧹 Clear TV</span>
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Controller Mode Tabs */}
-                    <div className="grid grid-cols-4 gap-1 mb-2 bg-slate-950 p-1 rounded-xl shrink-0">
+                    {/* Controller Mode Tabs (Merged Alerts & Display into Single Option) */}
+                    <div className="grid grid-cols-3 gap-1 mb-1.5 bg-slate-950 p-0.5 rounded-lg shrink-0">
                       {[
-                        { id: 'alerts', label: '🚀 Alerts' },
-                        { id: 'graphics', label: '📊 Display' },
+                        { id: 'alerts', label: '📺 Display' },
                         { id: 'templates', label: '🎨 Theme' },
                         { id: 'media', label: '🖼️ Media' }
-                      ].map(tab => (
-                        <button
-                          key={tab.id}
-                          onClick={() => setActiveControlTab(tab.id as any)}
-                          className={`py-1 text-[8px] font-black uppercase tracking-wider rounded-lg border-none cursor-pointer transition-all ${
-                            activeControlTab === tab.id
-                              ? 'bg-rose-500/15 text-rose-400 font-extrabold'
-                              : 'text-slate-500 bg-transparent hover:text-slate-350'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
+                      ].map(tab => {
+                        const isTabActive = tab.id === 'alerts'
+                          ? (activeControlTab === 'alerts' || activeControlTab === 'graphics')
+                          : activeControlTab === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={() => setActiveControlTab(tab.id as any)}
+                            className={`py-1 text-[8px] font-black uppercase tracking-wider rounded-md border-none cursor-pointer transition-all ${
+                              isTabActive
+                                ? 'bg-rose-500/20 text-rose-300 font-extrabold shadow-xs'
+                                : 'text-slate-500 bg-transparent hover:text-slate-300'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        );
+                      })}
                     </div>
 
-                    {/* Quick Screen Clean All overlays button */}
-                    <div className="mb-2 shrink-0">
-                      <button
-                        onClick={() => {
-                          updateOverlayProp({
-                            activeGraphic: 'none',
-                            customBanner: 'none',
-                            customBannerText: '',
-                            customMilestone: null
-                          });
-                          showNotification('Cleared all live graphic overlays from broadcast feed.', 'info');
-                        }}
-                        className="w-full py-1 bg-rose-600/10 hover:bg-rose-600/20 active:scale-[0.98] transition-all border border-rose-500/20 hover:border-rose-500/30 rounded-lg text-rose-400 font-black text-[8px] uppercase tracking-widest cursor-pointer flex items-center justify-center gap-1"
-                      >
-                        🧹 Clear All Graphics
-                      </button>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar text-left text-xs">
-                      {/* --- ALERTS TAB --- */}
-                      {activeControlTab === 'alerts' && (
-                        <div className="space-y-3">
-                          {/* 🏆 Tournament Prize Money & Grand Prize Presentation Board Options */}
-                          <div className="border border-amber-500/40 bg-gradient-to-br from-amber-950/50 via-slate-950 to-yellow-950/40 p-2.5 rounded-xl shadow-lg space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[8px] font-black text-amber-300 uppercase tracking-widest flex items-center gap-1.5">
-                                <span>🏆 Tournament Prizes & Grand Presentation</span>
+                    <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5 custom-scrollbar text-left text-xs">
+                      {/* --- UNIFIED DISPLAY & OVERLAYS TAB (Merged Alerts + Display, Zero Duplicates) --- */}
+                      {(activeControlTab === 'alerts' || activeControlTab === 'graphics') && (
+                        <div className="space-y-1.5">
+                          {/* 1. Unified Broadcast Overlays Grid */}
+                          <div className="border border-slate-800 bg-slate-950/80 p-1.5 rounded-xl space-y-1 shadow-md">
+                            <div className="flex items-center justify-between px-0.5">
+                              <span className="text-[7.5px] font-black text-amber-300 uppercase tracking-widest">
+                                📺 Live TV Broadcast Overlays
                               </span>
-                              {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) && (
-                                <span className="px-1.5 py-0.2 rounded bg-red-600/30 text-red-400 border border-red-500/40 text-[7px] font-black uppercase animate-pulse flex items-center gap-1 font-mono">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                                  Live on Air
+                              {currentActiveGraphic !== 'none' && (
+                                <span className="px-1 py-0.2 rounded bg-rose-600/30 text-rose-300 border border-rose-500/40 text-[6.5px] font-black uppercase animate-pulse font-mono">
+                                  ● ON AIR
                                 </span>
                               )}
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2">
-                              {/* Prize Money Settings Button */}
+                            {/* Row A: Prizes & Grand Presentation */}
+                            <div className="grid grid-cols-2 gap-1">
                               <button
                                 type="button"
                                 onClick={() => setShowPrizeModal(true)}
-                                className="py-2 px-2 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500 hover:to-yellow-400 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg text-[8px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95"
-                                title="Manage Tournament Prize Money (Best Batsman, Best Bowler, Man of the Series, 4th Prize Above Scorebug)"
+                                className="py-1.5 px-1.5 bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg text-[7.5px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95"
+                                title="Manage Tournament Prize Money"
                               >
-                                <Trophy size={13} className="text-yellow-400 shrink-0" />
-                                <span className="truncate font-bold">Prize Money</span>
+                                <Trophy size={11} className="shrink-0" />
+                                <span className="truncate">Prize Money</span>
                               </button>
 
-                              {/* Grand Prize Presentation Board Button */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -9723,1670 +10240,386 @@ export const CricketScoreboard: React.FC = () => {
                                   updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
                                   showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
                                 }}
-                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95 ${
+                                className={`py-1.5 px-1.5 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1 transition-all active:scale-95 ${
                                   ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic)
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                    : 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black border-amber-300 hover:brightness-110 shadow-amber-500/20'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black border-amber-300'
                                 }`}
-                                title="Toggle Full-Screen Grand Presentation Board on Broadcast (Toss, Innings Break, Post-Match)"
+                                title="Toggle Full-Screen Grand Presentation Board on Broadcast"
                               >
-                                <Crown size={13} className={['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? 'text-white' : 'text-slate-950 shrink-0'} />
-                                <span className="truncate font-extrabold">
-                                  {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? '🔴 Dismiss Grand Board' : '📺 Grand Prize Board'}
+                                <Crown size={11} className="shrink-0" />
+                                <span className="truncate">
+                                  {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? 'Dismiss Board' : 'Grand Board'}
                                 </span>
                               </button>
                             </div>
-                          </div>
 
-                          {/* 1. Team Squad List (Team A & Team B) */}
-                          <div className="border border-blue-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            <div className="grid grid-cols-2 gap-2">
-                              {/* Team A */}
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[8px] font-black uppercase text-blue-300 truncate">
-                                  {match.teamA || 'Team A'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const nextState = currentActiveGraphic === 'squad_a' ? 'none' : 'squad_a';
-                                    updateOverlayProp({ activeGraphic: nextState });
-                                    showNotification(
-                                      nextState === 'squad_a' ? `${match.teamA || 'Team A'} squad live on air!` : 'Squad dismissed.',
-                                      nextState === 'squad_a' ? 'success' : 'info'
-                                    );
-                                  }}
-                                  className={`py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-sm ${
-                                    currentActiveGraphic === 'squad_a'
-                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.6)] animate-pulse'
-                                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/40'
-                                  }`}
-                                >
-                                  <span>{currentActiveGraphic === 'squad_a' ? '🔴 Dismiss Team A' : '📺 Show Team A'}</span>
-                                </button>
-                              </div>
-
-                              {/* Team B */}
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[8px] font-black uppercase text-indigo-300 truncate">
-                                  {match.teamB || 'Team B'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const nextState = currentActiveGraphic === 'squad_b' ? 'none' : 'squad_b';
-                                    updateOverlayProp({ activeGraphic: nextState });
-                                    showNotification(
-                                      nextState === 'squad_b' ? `${match.teamB || 'Team B'} squad live on air!` : 'Squad dismissed.',
-                                      nextState === 'squad_b' ? 'success' : 'info'
-                                    );
-                                  }}
-                                  className={`py-1.5 px-2 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-sm ${
-                                    currentActiveGraphic === 'squad_b'
-                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.6)] animate-pulse'
-                                      : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border-indigo-400/40'
-                                  }`}
-                                >
-                                  <span>{currentActiveGraphic === 'squad_b' ? '🔴 Dismiss Team B' : '📺 Show Team B'}</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* 2. Team A VS Team B Overlay */}
-                          <div className="border border-rose-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const nextState = currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team';
-                                updateOverlayProp({ activeGraphic: nextState });
-                                showNotification(
-                                  nextState === 'team_vs_team' ? 'Team A VS Team B overlay live on air!' : 'Team A VS Team B overlay dismissed.',
-                                  nextState === 'team_vs_team' ? 'success' : 'info'
-                                );
-                              }}
-                              className={`w-full py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
-                                currentActiveGraphic === 'team_vs_team'
-                                  ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                  : 'bg-gradient-to-r from-blue-600 via-purple-600 to-rose-600 hover:from-blue-500 hover:to-rose-500 text-white border-white/20'
-                              }`}
-                            >
-                              <span>⚔️</span>
-                              <span>
-                                {currentActiveGraphic === 'team_vs_team' ? '🔴 DISMISS ' : '📺 '}
-                                {(match.teamA || 'TEAM A').toUpperCase()} VS {(match.teamB || 'TEAM B').toUpperCase()}
-                              </span>
-                            </button>
-                          </div>
-
-                          {/* 3. Field Position */}
-                          <div className="border border-emerald-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            <div className="grid grid-cols-2 gap-2">
+                            {/* Row B: Squads & VS Matchup */}
+                            <div className="grid grid-cols-3 gap-1">
                               <button
                                 type="button"
-                                onClick={() => setShowFieldPositionModal(true)}
-                                className="py-2 px-2.5 rounded-lg border border-emerald-500/40 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                onClick={() => {
+                                  const nextState = currentActiveGraphic === 'squad_a' ? 'none' : 'squad_a';
+                                  updateOverlayProp({ activeGraphic: nextState });
+                                  showNotification(nextState === 'squad_a' ? `${match.teamA || 'Team A'} squad live!` : 'Squad dismissed.', 'info');
+                                }}
+                                className={`py-1.5 px-1 rounded-lg border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate ${
+                                  currentActiveGraphic === 'squad_a'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-blue-600/25 hover:bg-blue-600 text-blue-200 hover:text-white border-blue-500/40'
+                                }`}
+                                title={`Show ${match.teamA || 'Team A'} Squad`}
                               >
-                                <span>🎯</span>
-                                <span>Set Field Position</span>
+                                {currentActiveGraphic === 'squad_a' ? '🔴 Dismiss A' : `📺 ${match.teamA || 'Team A'}`}
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => {
-                                  const nextState = (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? 'none' : 'field_positions';
+                                  const nextState = currentActiveGraphic === 'squad_b' ? 'none' : 'squad_b';
                                   updateOverlayProp({ activeGraphic: nextState });
-                                  showNotification(
-                                    nextState === 'field_positions' ? 'Field Position overlay LIVE ON AIR!' : 'Field Position overlay dismissed.',
-                                    nextState === 'field_positions' ? 'success' : 'info'
-                                  );
+                                  showNotification(nextState === 'squad_b' ? `${match.teamB || 'Team B'} squad live!` : 'Squad dismissed.', 'info');
                                 }}
-                                className={`py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
-                                  (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                    : 'bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border-emerald-500/40'
+                                className={`py-1.5 px-1 rounded-lg border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate ${
+                                  currentActiveGraphic === 'squad_b'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-indigo-600/25 hover:bg-indigo-600 text-indigo-200 hover:text-white border-indigo-500/40'
                                 }`}
+                                title={`Show ${match.teamB || 'Team B'} Squad`}
                               >
-                                <span>{(currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? '🔴 Dismiss' : '📺 Show On TV'}</span>
+                                {currentActiveGraphic === 'squad_b' ? '🔴 Dismiss B' : `📺 ${match.teamB || 'Team B'}`}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const nextState = currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team';
+                                  updateOverlayProp({ activeGraphic: nextState });
+                                  showNotification(nextState === 'team_vs_team' ? 'Team VS Team live!' : 'VS overlay dismissed.', 'info');
+                                }}
+                                className={`py-1.5 px-1 rounded-lg border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate ${
+                                  currentActiveGraphic === 'team_vs_team'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-gradient-to-r from-blue-600/40 to-rose-600/40 hover:from-blue-600 hover:to-rose-600 text-white border-white/20'
+                                }`}
+                                title="Show Team A VS Team B Overlay"
+                              >
+                                {currentActiveGraphic === 'team_vs_team' ? '🔴 Dismiss VS' : '⚔️ Team VS'}
                               </button>
                             </div>
-                          </div>
 
-                          {/* 4. Batting Match Summary */}
-                          <div className="border border-amber-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            <div className="grid grid-cols-2 gap-2">
+                            {/* Row C: Batting & Bowling Full / Mini Summaries */}
+                            <div className="grid grid-cols-4 gap-1">
                               <button
                                 type="button"
                                 onClick={() => {
                                   const isFullActive = currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full';
-                                  const next = isFullActive ? 'none' : 'batting_summary';
-                                  updateOverlayProp({ activeGraphic: next });
-                                  showNotification(
-                                    next === 'batting_summary' ? 'Full Screen Batting Summary LIVE ON AIR!' : 'Batting Summary dismissed.',
-                                    next === 'batting_summary' ? 'success' : 'info'
-                                  );
+                                  updateOverlayProp({ activeGraphic: isFullActive ? 'none' : 'batting_summary' });
                                 }}
-                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
                                   (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full')
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                    : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white border-amber-400/40'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-amber-600/25 hover:bg-amber-600 text-amber-200 hover:text-white border-amber-500/40'
                                 }`}
+                                title="Full Screen Batting Summary"
                               >
-                                <span>{(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full') ? '🔴 Dismiss Full' : '🏏 Batting Full Screen Summary'}</span>
+                                {(currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_full') ? '🔴 Bat Full' : '🏏 Bat Full'}
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => {
                                   const isMiniActive = currentActiveGraphic === 'batting_summary_mini';
-                                  const next = isMiniActive ? 'none' : 'batting_summary_mini';
-                                  updateOverlayProp({ activeGraphic: next });
-                                  showNotification(
-                                    next === 'batting_summary_mini' ? 'Mini Batting Summary LIVE ON AIR!' : 'Mini Batting Summary dismissed.',
-                                    next === 'batting_summary_mini' ? 'success' : 'info'
-                                  );
+                                  updateOverlayProp({ activeGraphic: isMiniActive ? 'none' : 'batting_summary_mini' });
                                 }}
-                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
                                   currentActiveGraphic === 'batting_summary_mini'
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
                                     : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/30'
                                 }`}
+                                title="Mini Batting Summary"
                               >
-                                <span>{currentActiveGraphic === 'batting_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Batting Mini Summary'}</span>
+                                {currentActiveGraphic === 'batting_summary_mini' ? '🔴 Bat Mini' : '🏷️ Bat Mini'}
                               </button>
-                            </div>
-                          </div>
 
-                          {/* 5. Bowling Match Summary */}
-                          <div className="border border-cyan-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            <div className="grid grid-cols-2 gap-2">
                               <button
                                 type="button"
                                 onClick={() => {
                                   const isFullActive = currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full';
-                                  const next = isFullActive ? 'none' : 'bowling_summary';
-                                  updateOverlayProp({ activeGraphic: next });
-                                  showNotification(
-                                    next === 'bowling_summary' ? 'Full Screen Bowling Summary LIVE ON AIR!' : 'Bowling Summary dismissed.',
-                                    next === 'bowling_summary' ? 'success' : 'info'
-                                  );
+                                  updateOverlayProp({ activeGraphic: isFullActive ? 'none' : 'bowling_summary' });
                                 }}
-                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
                                   (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full')
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                    : 'bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white border-cyan-400/40'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-emerald-600/25 hover:bg-emerald-600 text-emerald-200 hover:text-white border-emerald-500/40'
                                 }`}
+                                title="Full Screen Bowling Summary"
                               >
-                                <span>{(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full') ? '🔴 Dismiss Full' : '🎯 Bowling Full Screen Summary'}</span>
+                                {(currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_full') ? '🔴 Bowl Full' : '🎯 Bowl Full'}
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => {
                                   const isMiniActive = currentActiveGraphic === 'bowling_summary_mini';
-                                  const next = isMiniActive ? 'none' : 'bowling_summary_mini';
-                                  updateOverlayProp({ activeGraphic: next });
-                                  showNotification(
-                                    next === 'bowling_summary_mini' ? 'Mini Bowling Summary LIVE ON AIR!' : 'Mini Bowling Summary dismissed.',
-                                    next === 'bowling_summary_mini' ? 'success' : 'info'
-                                  );
+                                  updateOverlayProp({ activeGraphic: isMiniActive ? 'none' : 'bowling_summary_mini' });
                                 }}
-                                className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
+                                className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
                                   currentActiveGraphic === 'bowling_summary_mini'
-                                    ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
                                     : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border-cyan-500/30'
                                 }`}
+                                title="Mini Bowling Summary"
                               >
-                                <span>{currentActiveGraphic === 'bowling_summary_mini' ? '🔴 Dismiss Mini' : '🏷️ Bowling Mini Summary'}</span>
+                                {currentActiveGraphic === 'bowling_summary_mini' ? '🔴 Bowl Mini' : '🏷️ Bowl Mini'}
+                              </button>
+                            </div>
+
+                            {/* Row D: Tourney Logo, Chase Board & Wagon Wheel */}
+                            <div className="grid grid-cols-3 gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isActive = currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand';
+                                  updateOverlayProp({ activeGraphic: isActive ? 'none' : 'tournament_logo' });
+                                }}
+                                className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
+                                  (currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand')
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-blue-950/80 hover:bg-blue-900 text-blue-300 border-blue-500/40'
+                                }`}
+                                title="Tournament Logo Overlay"
+                              >
+                                {(currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand') ? '🔴 Logo' : '🏆 Logo TV'}
+                              </button>
+
+                              {(() => {
+                                const isChasing = match.currentInnings === 2 && ((match.target !== undefined && match.target > 0) || (match.innings?.[0]?.runs !== undefined && match.innings[0].runs > 0));
+                                const isActive = currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board';
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!isChasing && !isActive) {
+                                        showNotification('Chase Board is available during 2nd innings run chase.', 'warning');
+                                        return;
+                                      }
+                                      updateOverlayProp({ activeGraphic: isActive ? 'none' : 'black_board_scoreboard' });
+                                    }}
+                                    className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
+                                      isActive
+                                        ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                        : isChasing
+                                        ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                        : 'bg-slate-900/80 text-slate-500 border-white/5 cursor-not-allowed'
+                                    }`}
+                                    title="2nd Innings Run Chase Board"
+                                  >
+                                    {isActive ? '🔴 Chase' : '📋 Chase'}
+                                  </button>
+                                );
+                              })()}
+
+                              <button
+                                type="button"
+                                onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wagon_wheel' ? 'none' : 'wagon_wheel' })}
+                                className={`py-1.5 px-1 rounded-lg border text-[7px] font-black uppercase cursor-pointer transition-all truncate ${
+                                  currentActiveGraphic === 'wagon_wheel'
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border-cyan-500/40'
+                                }`}
+                                title="Toggle Wagon Wheel Overlay"
+                              >
+                                {currentActiveGraphic === 'wagon_wheel' ? '🔴 Wagon' : '🎡 Wagon'}
+                              </button>
+                            </div>
+
+                            {/* Row E: Field TV & Interactive Field Position Manager (Set Field Positions) */}
+                            <div className="grid grid-cols-2 gap-1 pt-0.5 border-t border-white/5">
+                              <button
+                                type="button"
+                                id="btn-open-field-tv-manager"
+                                onClick={() => setShowFieldPositionModal(true)}
+                                className="py-1.5 px-1.5 rounded-lg border bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 shadow-xs active:scale-95 truncate"
+                                title="Open Field TV Manager to Set & Drag 11 Fielder Positions"
+                              >
+                                <span>⚙️ Field TV Manager</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                id="btn-toggle-field-tv"
+                                onClick={() => {
+                                  const nextState = (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? 'none' : 'field_positions';
+                                  updateOverlayProp({ activeGraphic: nextState });
+                                  showNotification(nextState === 'field_positions' ? '🎯 Field Positions LIVE on TV!' : 'Field Positions hidden from TV.', 'info');
+                                }}
+                                className={`py-1.5 px-1.5 rounded-lg border text-[7.5px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1 active:scale-95 truncate ${
+                                  (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
+                                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                    : 'bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-500/40'
+                                }`}
+                                title="Show or Hide Field Positions on Broadcast TV"
+                              >
+                                <span>{(currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? '🔴 Hide Field TV' : '🎯 Show Field TV'}</span>
                               </button>
                             </div>
                           </div>
 
-                          {/* 6. Tournament Logo Overlay */}
-                          <div className="border border-blue-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const isActive = currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand';
-                                const next = isActive ? 'none' : 'tournament_logo';
-                                updateOverlayProp({ activeGraphic: next });
-                                showNotification(
-                                  next === 'tournament_logo' ? 'Tournament Logo Overlay LIVE ON AIR!' : 'Tournament Logo Overlay dismissed.',
-                                  next === 'tournament_logo' ? 'success' : 'info'
-                                );
-                              }}
-                              className={`w-full py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
-                                (currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand')
-                                  ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white border-blue-400/40'
-                              }`}
-                            >
-                              <span>🏆</span>
-                              <span>{(currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand') ? 'Dismiss Tournament Logo' : 'Tournament Logo'}</span>
-                            </button>
-                          </div>
-
-                          {/* 7. Black Board Scoreboard Overlay (Only available during 2nd innings run chase) */}
-                          <div className="border border-amber-500/20 bg-slate-950/60 p-2 rounded-xl shadow-md">
-                            {(() => {
-                              const isChasing = match.currentInnings === 2 && ((match.target !== undefined && match.target > 0) || (match.innings?.[0]?.runs !== undefined && match.innings[0].runs > 0));
-                              const isActive = currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board';
-
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!isChasing && !isActive) {
-                                      showNotification('Black Board Scoreboard is only available during 2nd innings run chase.', 'warning');
-                                      return;
-                                    }
-                                    const next = isActive ? 'none' : 'black_board_scoreboard';
-                                    updateOverlayProp({ activeGraphic: next });
-                                    showNotification(
-                                      next === 'black_board_scoreboard' ? 'Black Board Scoreboard LIVE ON AIR!' : 'Black Board Scoreboard dismissed.',
-                                      next === 'black_board_scoreboard' ? 'success' : 'info'
-                                    );
-                                  }}
-                                  className={`w-full py-2 px-2.5 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer transition-all flex items-center justify-center gap-1.5 shadow-sm ${
-                                    isActive
-                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                      : isChasing
-                                      ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black border-amber-400/50'
-                                      : 'bg-slate-900/80 text-slate-500 border-white/5 cursor-not-allowed'
-                                  }`}
-                                  title={!isChasing ? 'Only available during 2nd innings run chase' : 'Show Black Board Scoreboard'}
-                                >
-                                  <span>📋</span>
-                                  <span>{isActive ? 'Dismiss Black Board Scoreboard' : 'Show Black Board Scoreboard'}</span>
-                                </button>
-                              );
-                            })()}
-                          </div>
-
-                          {/* =========================================================================
-                              TV GRAPHICS COCKPIT: ANIMATED EVENTS, DISMISSALS, HIGH TENSION & GULLY RULES
-                              ========================================================================= */}
-                          <div className="border border-indigo-500/30 bg-gradient-to-b from-slate-950 via-[#060919] to-slate-950 p-2.5 rounded-2xl space-y-2 shadow-2xl">
-                            {/* Header with category selector */}
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-1 border-b border-white/5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                                <span className="text-[8.5px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                                  <span>📺 TV Graphics Cockpit & Animated Stingers</span>
-                                </span>
-                              </div>
-
-                              {/* Quick category filter pills */}
-                              <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
-                                {(
-                                  [
-                                    { id: 'all', label: 'All' },
-                                    { id: 'prizes', label: '🏆 Prizes' },
-                                    { id: 'dismissals', label: 'Dismissals' },
-                                    { id: 'tension', label: 'High Tension' },
-                                    { id: 'gully', label: 'Gully Rules' },
-                                    { id: 'milestones', label: 'Milestones' },
-                                  ] as const
-                                ).map(tab => (
-                                  <button
-                                    key={tab.id}
-                                    type="button"
-                                    onClick={() => setCockpitAnimationFilter(tab.id)}
-                                    className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase font-mono transition-all whitespace-nowrap cursor-pointer border ${
-                                      cockpitAnimationFilter === tab.id
-                                        ? 'bg-rose-500 text-white border-rose-400 shadow-sm'
-                                        : 'bg-white/5 text-slate-400 border-white/5 hover:text-white hover:bg-white/10'
-                                    }`}
-                                  >
-                                    {tab.label}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* --- 0. PRIZES & GRAND PRESENTATION BOARD --- */}
-                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'prizes') && (
-                              <div className="space-y-1.5 p-2 rounded-xl bg-amber-950/20 border border-amber-500/30">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[7.5px] font-black text-amber-300 uppercase tracking-widest flex items-center gap-1">
-                                    <Crown size={11} className="text-yellow-400" />
-                                    <span>🏆 Grand Presentation Board & Prize Money</span>
-                                  </span>
-                                  {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) && (
-                                    <span className="px-1.5 py-0.2 rounded bg-red-600/30 text-red-400 border border-red-500/40 text-[6.5px] font-black uppercase animate-pulse flex items-center gap-1 font-mono">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                                      Live on Air
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  {/* Grand Prize Presentation Board Button */}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
-                                      updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
-                                      showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
-                                    }}
-                                    className={`py-2 px-2 rounded-lg border text-[8px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95 ${
-                                      ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic)
-                                        ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.6)] animate-pulse'
-                                        : 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black border-amber-300 hover:brightness-110 shadow-amber-500/20'
-                                    }`}
-                                    title="Toggle Full-Screen Grand Presentation Board on Broadcast (Toss, Innings Break, Post-Match)"
-                                  >
-                                    <Crown size={13} className={['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? 'text-white' : 'text-slate-950 shrink-0'} />
-                                    <span className="truncate font-extrabold">
-                                      {['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic) ? '🔴 Dismiss Grand Board' : '📺 Grand Prize Board'}
-                                    </span>
-                                  </button>
-
-                                  {/* Prize Money Settings Button */}
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowPrizeModal(true)}
-                                    className="py-2 px-2 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500 hover:to-yellow-400 text-amber-300 hover:text-slate-950 border border-amber-500/40 rounded-lg text-[8px] font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95"
-                                    title="Manage Tournament Prize Money (Best Batsman, Best Bowler, Man of the Series, 4th Prize Above Scorebug)"
-                                  >
-                                    <Trophy size={13} className="text-yellow-400 shrink-0" />
-                                    <span className="truncate font-bold">Prize Money Settings</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* --- 2. DISMISSAL STRINGS --- */}
-                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'dismissals') && (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[7px] font-black text-rose-400 uppercase tracking-widest flex items-center gap-1">
-                                    <span>🪵 Dismissal Strings & Out Alerts</span>
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-rose-500/70">Wicket Animations & Slates</span>
-                                </div>
-                                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'bowled',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            bowlerName: liveBowler?.name || 'Bowler',
-                                            runs: liveStriker?.runs || 0,
-                                            balls: liveStriker?.balls || 0,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('🪵 CLEAN BOWLED Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-1 rounded-xl border border-red-500/30 bg-gradient-to-b from-red-500/20 to-slate-950 text-red-300 hover:border-red-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
-                                    title="Trigger CLEAN BOWLED Stinger with Flying Stumps"
-                                  >
-                                    <span className="text-[10px]">🪵</span>
-                                    <span>BOWLED</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'caught',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            bowlerName: liveBowler?.name || 'Bowler',
-                                            runs: liveStriker?.runs || 0,
-                                            balls: liveStriker?.balls || 0,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('🧤 CAUGHT OUT Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-1 rounded-xl border border-rose-500/30 bg-slate-950 text-rose-300 hover:bg-rose-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
-                                    title="Trigger CAUGHT OUT Stinger"
-                                  >
-                                    <span className="text-[10px]">🧤</span>
-                                    <span>CAUGHT</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'run_out',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            runs: liveStriker?.runs || 0,
-                                            balls: liveStriker?.balls || 0,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('🏃 RUN OUT Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-1 rounded-xl border border-orange-500/30 bg-slate-950 text-orange-300 hover:bg-orange-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
-                                    title="Trigger RUN OUT Stinger"
-                                  >
-                                    <span className="text-[10px]">🏃</span>
-                                    <span>RUN OUT</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'lbw',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            bowlerName: liveBowler?.name || 'Bowler',
-                                            runs: liveStriker?.runs || 0,
-                                            balls: liveStriker?.balls || 0,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('🎯 LBW Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-1 rounded-xl border border-pink-500/30 bg-slate-950 text-pink-300 hover:bg-pink-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
-                                    title="Trigger LBW Stinger"
-                                  >
-                                    <span className="text-[10px]">🎯</span>
-                                    <span>LBW</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'stumped',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            bowlerName: liveBowler?.name || 'Bowler',
-                                            runs: liveStriker?.runs || 0,
-                                            balls: liveStriker?.balls || 0,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('⚡ STUMPED Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-1 rounded-xl border border-yellow-500/30 bg-slate-950 text-yellow-300 hover:bg-yellow-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
-                                    title="Trigger STUMPED Stinger"
-                                  >
-                                    <span className="text-[10px]">⚡</span>
-                                    <span>STUMPED</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'wicket',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            bowlerName: liveBowler?.name || 'Bowler',
-                                            runs: liveStriker?.runs || 0,
-                                            balls: liveStriker?.balls || 0,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('💥 WICKET Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-1 rounded-xl border border-rose-500/40 bg-gradient-to-b from-rose-600/20 to-slate-950 text-rose-200 hover:border-rose-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 active:scale-95"
-                                    title="Trigger General WICKET Stinger"
-                                  >
-                                    <span className="text-[10px]">🏏</span>
-                                    <span>WICKET</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_wicket' ? 'none' : 'event_wicket' })}
-                                    className={`py-1.5 px-1 rounded-xl border text-[7.5px] font-black uppercase flex flex-col items-center justify-center gap-0.5 transition-all truncate active:scale-95 ${
-                                      currentActiveGraphic === 'event_wicket'
-                                        ? 'bg-rose-500/30 border-rose-400 text-rose-200 shadow-md font-black'
-                                        : 'bg-slate-950 border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
-                                    }`}
-                                    title="Toggle Full-Screen Animated Wicket Slate"
-                                  >
-                                    <span className="text-[10px]">📺</span>
-                                    <span>OUT SLATE</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* --- 3. HIGH TENSION (DRAMA & CLIMAX) --- */}
-                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'tension') && (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[7px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
-                                    <span>⚡ High Tension & Match Climax</span>
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-amber-500/70">Heartbeat Siren + Pressure VFX</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const target = match.target || (match.innings?.[0]?.runs ? match.innings[0].runs + 1 : 0);
-                                      const runsNeed = match.currentInnings === 2 ? Math.max(0, target - (curInn?.runs || 0)) : 24;
-                                      const totalB = (match.totalOvers || 20) * 6;
-                                      const bBowled = (curInn?.overs || 0) * 6 + (curInn?.balls || 0);
-                                      const ballsRem = match.currentInnings === 2 ? Math.max(0, totalB - bBowled) : 6;
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'high_tension',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            runsNeed,
-                                            ballsRem,
-                                            equation: `NEED ${runsNeed} RUNS FROM ${ballsRem} BALLS`,
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('🔥 HIGH TENSION Alert Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-rose-500/40 bg-gradient-to-r from-rose-950/60 via-red-950/40 to-slate-950 text-rose-200 hover:border-rose-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger HIGH TENSION Stinger with Heartbeat & Warning Siren"
-                                  >
-                                    <span className="text-[11px] animate-ping">🔥</span>
-                                    <span>HIGH TENSION</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'hat_trick_ball',
-                                          timestamp: Date.now(),
-                                          meta: { bowlerName: liveBowler?.name || 'Bowler' },
-                                        } as any,
-                                      });
-                                      showNotification('⚠️ HAT-TRICK BALL Pressure Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-950/60 via-yellow-950/40 to-slate-950 text-amber-200 hover:border-amber-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger Hat-Trick Ball Delivery Alert"
-                                  >
-                                    <span className="text-[11px] animate-bounce">⚠️</span>
-                                    <span>HAT-TRICK BALL</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'super_over',
-                                          timestamp: Date.now(),
-                                        } as any,
-                                      });
-                                      showNotification('⚡ SUPER OVER Showdown Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-gradient-to-r from-cyan-950/60 via-blue-950/40 to-slate-950 text-cyan-200 hover:border-cyan-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger SUPER OVER Showdown Stinger"
-                                  >
-                                    <span className="text-[11px] animate-pulse">⚔️</span>
-                                    <span>SUPER OVER</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const target = match.target || (match.innings?.[0]?.runs ? match.innings[0].runs + 1 : 0);
-                                      const runsNeed = match.currentInnings === 2 ? Math.max(0, target - (curInn?.runs || 0)) : 24;
-                                      const totalB = (match.totalOvers || 20) * 6;
-                                      const bBowled = (curInn?.overs || 0) * 6 + (curInn?.balls || 0);
-                                      const ballsRem = match.currentInnings === 2 ? Math.max(0, totalB - bBowled) : 6;
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'high_tension',
-                                          timestamp: Date.now(),
-                                          meta: { equation: `NEED ${runsNeed} RUNS FROM ${ballsRem} BALLS` },
-                                        } as any,
-                                      });
-                                      showNotification(`⏱️ NEED ${runsNeed} R / ${ballsRem} B Alert Triggered!`, 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-orange-500/40 bg-slate-950 text-orange-300 hover:bg-orange-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger Climax Equation Stinger"
-                                  >
-                                    <span className="text-[11px]">⏱️</span>
-                                    <span>EQUATION ALERT</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* --- 4. GULLY RULES --- */}
-                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'gully') && (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[7px] font-black text-sky-400 uppercase tracking-widest flex items-center gap-1">
-                                    <span>🏏 Gully Cricket Rules & Penalties</span>
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-sky-500/70">Street & Box Cricket Rules</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'one_tip_hand',
-                                          timestamp: Date.now(),
-                                          meta: { batterName: liveStriker?.name || 'Striker' },
-                                        } as any,
-                                      });
-                                      showNotification('🖐️ 1-TIP 1-HAND OUT Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-sky-500/30 bg-slate-950 text-sky-300 hover:bg-sky-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Trigger 1-Tip 1-Hand Out Rule"
-                                  >
-                                    <span className="text-[11px]">✋</span>
-                                    <span>1-TIP 1-HAND</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'lost_ball',
-                                          timestamp: Date.now(),
-                                          meta: { batterName: liveStriker?.name || 'Striker' },
-                                        } as any,
-                                      });
-                                      showNotification('🏠 BALL IN HOUSE (6 & OUT) Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-orange-500/30 bg-slate-950 text-orange-300 hover:bg-orange-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Trigger Lost Ball / Ball In House (6 & Out)"
-                                  >
-                                    <span className="text-[11px]">🏠</span>
-                                    <span>LOST BALL (6 & OUT)</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'car_hit',
-                                          timestamp: Date.now(),
-                                        } as any,
-                                      });
-                                      showNotification('🚗 CAR HIT PENALTY (-5 RUNS) Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-rose-500/30 bg-slate-950 text-rose-300 hover:bg-rose-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Trigger Direct Car Hit (-5 Runs Penalty)"
-                                  >
-                                    <span className="text-[11px]">🚗💥</span>
-                                    <span>CAR HIT (-5)</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'direct_hit',
-                                          timestamp: Date.now(),
-                                        } as any,
-                                      });
-                                      showNotification('🎯 DIRECT HIT OUT Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-cyan-500/30 bg-slate-950 text-cyan-300 hover:bg-cyan-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Trigger Direct Hit Stumps Out"
-                                  >
-                                    <span className="text-[11px]">🎯💥</span>
-                                    <span>DIRECT HIT</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'box_cricket_out',
-                                          timestamp: Date.now(),
-                                        } as any,
-                                      });
-                                      showNotification('📦 BOX CRICKET OUT Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-purple-500/30 bg-slate-950 text-purple-300 hover:bg-purple-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 active:scale-95"
-                                    title="Trigger Box Cricket Over Net Out"
-                                  >
-                                    <span className="text-[11px]">📦🚫</span>
-                                    <span>BOX OUT</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* --- 5. PLAYER MILESTONE CELEBRATIONS --- */}
-                            {(cockpitAnimationFilter === 'all' || cockpitAnimationFilter === 'milestones') && (
-                              <div className="space-y-1">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-[7px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
-                                    <span>🏆 Player Milestone Celebrations</span>
-                                  </span>
-                                  <span className="text-[6.5px] font-mono text-amber-500/70">Fanfare + Golden Confetti</span>
-                                </div>
-                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'fifty',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            runs: liveStriker?.runs || 50,
-                                            balls: liveStriker?.balls || 28,
-                                            fours: liveStriker?.fours || 5,
-                                            sixes: liveStriker?.sixes || 3,
-                                            strikeRate: liveStriker?.balls ? ((liveStriker.runs / liveStriker.balls) * 100).toFixed(1) : '150.0',
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('🎖️ 50 RUNS HALF-CENTURY Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-950/60 to-slate-950 text-amber-300 hover:border-amber-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger 50 Runs Half-Century Celebration"
-                                  >
-                                    <span className="text-[11px]">🎖️</span>
-                                    <span>50 RUNS</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveStriker = curInn?.batsmen?.[curInn.strikerIndex];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'hundred',
-                                          timestamp: Date.now(),
-                                          meta: {
-                                            batterName: liveStriker?.name || 'Striker',
-                                            runs: liveStriker?.runs || 100,
-                                            balls: liveStriker?.balls || 52,
-                                            fours: liveStriker?.fours || 9,
-                                            sixes: liveStriker?.sixes || 6,
-                                            strikeRate: liveStriker?.balls ? ((liveStriker.runs / liveStriker.balls) * 100).toFixed(1) : '180.0',
-                                          },
-                                        } as any,
-                                      });
-                                      showNotification('👑 100 RUNS CENTURY Stinger Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-yellow-500/40 bg-gradient-to-r from-yellow-950/60 to-slate-950 text-yellow-300 hover:border-yellow-400 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger 100 Runs Century Celebration"
-                                  >
-                                    <span className="text-[11px]">👑</span>
-                                    <span>100 RUNS</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'hat_trick',
-                                          timestamp: Date.now(),
-                                          meta: { bowlerName: liveBowler?.name || 'Bowler' },
-                                        } as any,
-                                      });
-                                      showNotification('🎩 HAT-TRICK Milestone Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-slate-950 text-cyan-300 hover:bg-cyan-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger HAT-TRICK (3 in 3) Celebration"
-                                  >
-                                    <span className="text-[11px]">🎩</span>
-                                    <span>HAT-TRICK</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const curInn = match.currentInnings === 2 ? match.innings?.[1] : match.innings?.[0];
-                                      const liveBowler = curInn?.bowlers?.[curInn.currentBowlerIndex ?? curInn.bowlerIndex ?? 0];
-                                      updateOverlayProp({
-                                        manualAlertTrigger: {
-                                          type: 'five_wickets',
-                                          timestamp: Date.now(),
-                                          meta: { bowlerName: liveBowler?.name || 'Bowler' },
-                                        } as any,
-                                      });
-                                      showNotification('⭐ 5-WICKET HAUL Milestone Triggered!', 'success');
-                                    }}
-                                    className="py-1.5 px-2 rounded-xl border border-blue-500/40 bg-slate-950 text-blue-300 hover:bg-blue-950/40 hover:text-white transition-all text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                    title="Trigger 5-Wicket Haul (Fifer) Celebration"
-                                  >
-                                    <span className="text-[11px]">⭐</span>
-                                    <span>5-WKTS</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_milestone' ? 'none' : 'event_milestone' })}
-                                    className={`py-1.5 px-2 rounded-xl border text-[7.5px] font-black uppercase flex items-center justify-center gap-1.5 transition-all truncate active:scale-95 ${
-                                      currentActiveGraphic === 'event_milestone'
-                                        ? 'bg-amber-500/30 border-amber-400 text-amber-200 shadow-md font-black'
-                                        : 'bg-slate-950 border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
-                                    }`}
-                                    title="Toggle Full-Screen Milestone Slate"
-                                  >
-                                    <span className="text-[11px]">📺</span>
-                                    <span>FULL SLATE</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* --- 6. MATCH CARDS & UTILITIES --- */}
-                            <div className="pt-1 border-t border-white/5 space-y-1">
-                              <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest block">
-                                📊 Match Cards & In-Game Overlays
+                          {/* 2. Scorebug Right Slot Controls & Boundary Pop-Up Toggle */}
+                          <div className="space-y-1 bg-slate-950/90 p-1.5 border border-indigo-500/30 rounded-xl shadow-md">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[7.5px] font-black text-indigo-400 uppercase tracking-widest">
+                                📺 Scorebug Right Slot
                               </span>
-                              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini') ? 'none' : 'batting_summary' })}
-                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
-                                    (currentActiveGraphic === 'batting_summary' || currentActiveGraphic === 'batting_summary_mini')
-                                      ? 'bg-amber-500/25 border-amber-500/50 text-amber-300 font-black shadow-md'
-                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                  }`}
-                                  title="Toggle Batting Summary Overlay"
-                                >
-                                  <span className="text-[9px]">🏏</span>
-                                  <span>Bat Sum</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini') ? 'none' : 'bowling_summary' })}
-                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
-                                    (currentActiveGraphic === 'bowling_summary' || currentActiveGraphic === 'bowling_summary_mini')
-                                      ? 'bg-cyan-500/25 border-cyan-500/50 text-cyan-300 font-black shadow-md'
-                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                  }`}
-                                  title="Toggle Bowling Summary Overlay"
-                                >
-                                  <span className="text-[9px]">🎯</span>
-                                  <span>Bowl Sum</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'wagon_wheel' ? 'none' : 'wagon_wheel' })}
-                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
-                                    currentActiveGraphic === 'wagon_wheel'
-                                      ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 font-bold shadow-md'
-                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                  }`}
-                                  title="Toggle Wagon Wheel Overlay"
-                                >
-                                  <span className="text-[9px]">🎡</span>
-                                  <span>Wagon</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })}
-                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
-                                    currentActiveGraphic === 'team_vs_team'
-                                      ? 'bg-gradient-to-r from-blue-600/40 to-rose-600/40 border-rose-400 text-white font-black shadow-md'
-                                      : 'bg-slate-950 border-white/5 text-slate-400 hover:bg-white/5'
-                                  }`}
-                                  title="Toggle 3D VS Shield Matchup"
-                                >
-                                  <span className="text-[9px]">⚔️</span>
-                                  <span>VS Shield</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => setShowFieldPositionModal(true)}
-                                  className={`py-1.5 rounded-xl border text-[7.5px] font-black uppercase cursor-pointer transition-all truncate flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
-                                    (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position')
-                                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400 font-bold shadow-md'
-                                      : 'bg-slate-950 border-emerald-500/20 text-emerald-400/90 hover:bg-emerald-950/40'
-                                  }`}
-                                  title="Open Field Position Popup (11 Players Setup)"
-                                >
-                                  <span className="text-[9px]">🎯</span>
-                                  <span>Field Pos</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* --- GRAPHICS DISPLAY TAB --- */}
-                      {activeControlTab === 'graphics' && (
-                        <div className="space-y-2.5">
-                          {/* Star TV Pro Scorebug Over-Section Detail Overlays */}
-                          <div className="space-y-2 bg-gradient-to-br from-indigo-950/40 via-slate-950/80 to-purple-950/30 p-3 border border-indigo-500/30 rounded-2xl shadow-lg">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
-                                <span>📺 Star TV Pro Scorebug Overlays</span>
-                                <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[6.5px] font-mono font-bold">
-                                  REPLACES "THIS OVER"
-                                </span>
-                              </span>
-                              <span className="text-[7px] font-mono text-slate-400 uppercase">
-                                Active: <strong className="text-amber-300">{activeOverlayConfig.scorebugOverlayMode && activeOverlayConfig.scorebugOverlayMode !== 'this_over' ? activeOverlayConfig.scorebugOverlayMode.replace('_', ' ').toUpperCase() : 'THIS OVER'}</strong>
-                              </span>
-                            </div>
-                            
-                            <p className="text-[7.5px] text-slate-300/80 leading-relaxed">
-                              Click any button below to display tournament details, toss/target, last out batsman, partnership, or projected score in place of "THIS OVER" on the Star TV scorebug. Clicking an active button returns to This Over balls.
-                            </p>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                              {[
-                                {
-                                  id: 'tournament',
-                                  label: '🏆 Tournament Overlay',
-                                  desc: 'Shows tournament name & match stage in scorebug over section',
-                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'tournament',
-                                  onToggle: () => {
-                                    const next = activeOverlayConfig.scorebugOverlayMode === 'tournament' ? 'this_over' : 'tournament';
-                                    updateOverlayProp({ scorebugOverlayMode: next });
-                                    showNotification(next === 'tournament' ? 'Star TV: Tournament Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
-                                  }
-                                },
-                                {
-                                  id: 'toss_equation',
-                                  label: '🪙 Toss / Need Runs / Winner',
-                                  desc: 'Shows toss decision, target chase equation, or match winner',
-                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'toss_equation',
-                                  onToggle: () => {
-                                    const next = activeOverlayConfig.scorebugOverlayMode === 'toss_equation' ? 'this_over' : 'toss_equation';
-                                    updateOverlayProp({ scorebugOverlayMode: next });
-                                    showNotification(next === 'toss_equation' ? 'Star TV: Toss/Target Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
-                                  }
-                                },
-                                {
-                                  id: 'last_batsman',
-                                  label: '⚡ Last Out Batsman',
-                                  desc: 'Shows last dismissed batsman, runs, balls, dismissal & FoW',
-                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'last_batsman',
-                                  onToggle: () => {
-                                    const next = activeOverlayConfig.scorebugOverlayMode === 'last_batsman' ? 'this_over' : 'last_batsman';
-                                    updateOverlayProp({ scorebugOverlayMode: next });
-                                    showNotification(next === 'last_batsman' ? 'Star TV: Last Out Batsman ON AIR' : 'Star TV: Returned to Over Balls', 'info');
-                                  }
-                                },
-                                {
-                                  id: 'partnership',
-                                  label: '🤝 Current Partnership',
-                                  desc: 'Shows current stand runs, balls, and batter split contributions',
-                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'partnership',
-                                  onToggle: () => {
-                                    const next = activeOverlayConfig.scorebugOverlayMode === 'partnership' ? 'this_over' : 'partnership';
-                                    updateOverlayProp({ scorebugOverlayMode: next });
-                                    showNotification(next === 'partnership' ? 'Star TV: Partnership Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
-                                  }
-                                },
-                                {
-                                  id: 'projected_crr',
-                                  label: '📈 Projected Score / CRR / Target',
-                                  desc: 'Shows projected innings total, current run rate & chase equation',
-                                  isActive: activeOverlayConfig.scorebugOverlayMode === 'projected_crr',
-                                  onToggle: () => {
-                                    const next = activeOverlayConfig.scorebugOverlayMode === 'projected_crr' ? 'this_over' : 'projected_crr';
-                                    updateOverlayProp({ scorebugOverlayMode: next });
-                                    showNotification(next === 'projected_crr' ? 'Star TV: Projections/CRR Overlay ON AIR' : 'Star TV: Returned to Over Balls', 'info');
-                                  }
-                                },
-                                {
-                                  id: 'this_over',
-                                  label: '🎯 This Over Balls (Default)',
-                                  desc: 'Standard live ball-by-ball dots, boundaries & extras pills',
-                                  isActive: !activeOverlayConfig.scorebugOverlayMode || activeOverlayConfig.scorebugOverlayMode === 'this_over',
-                                  onToggle: () => {
-                                    updateOverlayProp({ scorebugOverlayMode: 'this_over' });
-                                    showNotification('Star TV: This Over Balls ON AIR', 'info');
-                                  }
-                                }
-                              ].map(item => (
-                                <div
-                                  key={item.id}
-                                  onClick={item.onToggle}
-                                  className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all border select-none ${
-                                    item.isActive
-                                      ? 'bg-gradient-to-r from-indigo-900/50 to-purple-900/50 border-indigo-400/70 shadow-[0_0_14px_rgba(99,102,241,0.3)] ring-1 ring-indigo-400/40'
-                                      : 'bg-slate-950/70 border-white/5 hover:border-white/15 hover:bg-slate-900/60'
-                                  }`}
-                                >
-                                  <div className="text-left min-w-0 pr-1.5">
-                                    <span className={`text-[8.5px] font-black uppercase tracking-wider block truncate ${
-                                      item.isActive ? 'text-indigo-200 font-bold' : 'text-slate-200'
-                                    }`}>
-                                      {item.label}
-                                    </span>
-                                    <span className="text-[7px] text-slate-400 block font-mono truncate">
-                                      {item.desc}
-                                    </span>
-                                  </div>
-                                  <span className={`text-[6.5px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none shrink-0 font-mono ${
-                                    item.isActive ? 'bg-indigo-500 text-white animate-pulse shadow-sm' : 'bg-slate-900 text-slate-500'
-                                  }`}>
-                                    {item.isActive ? 'ON AIR' : 'OFF'}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Tournament 4s & 6s Boundary Counter Pop-Up Automation Control */}
-                          <div className="space-y-2 bg-gradient-to-br from-amber-950/25 via-slate-950/40 to-slate-950/20 p-2.5 border border-amber-500/25 rounded-2xl">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[8.5px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
-                                  <span>💥</span>
-                                  <span>Tournament Boundary Counter Pop-Up</span>
-                                </span>
-                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[6.5px] font-mono font-bold">
-                                  AUTO-TRIGGER 4s & 6s
-                                </span>
-                              </div>
-                              <span className={`text-[6.5px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none font-mono ${
-                                activeOverlayConfig.showBoundaryCounter !== false ? 'bg-amber-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'
-                              }`}>
-                                {activeOverlayConfig.showBoundaryCounter !== false ? 'ENABLED' : 'MUTED'}
-                              </span>
-                            </div>
-
-                            <p className="text-[7.5px] text-slate-300/80 leading-relaxed">
-                              Automatically fires the broadcast popup animation (e.g. Karjat Big Bash League 4s & 6s tally) whenever a batsman strikes a 4 or 6. Includes sound effects and countdown auto-dismiss.
-                            </p>
-
-                            <div className="flex items-center justify-between p-2 bg-slate-950/80 border border-white/5 rounded-xl">
-                              <div className="text-left">
-                                <span className="text-[8px] font-black uppercase tracking-wider text-slate-200 block">
-                                  Auto-Pop on Boundaries
-                                </span>
-                                <span className="text-[6.5px] text-slate-400 block font-mono">
-                                  Show animated 4s & 6s counter on boundary strikes
-                                </span>
-                              </div>
                               <button
+                                type="button"
                                 onClick={() => {
                                   const next = activeOverlayConfig.showBoundaryCounter === false;
                                   updateOverlayProp({ showBoundaryCounter: next });
                                   showNotification(next ? 'Boundary Counter Pop-Up Enabled' : 'Boundary Counter Pop-Up Muted', 'info');
                                 }}
-                                className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
-                                  activeOverlayConfig.showBoundaryCounter !== false ? 'bg-amber-500' : 'bg-slate-800'
+                                className={`px-1.5 py-0.5 rounded text-[6.5px] font-black uppercase cursor-pointer border ${
+                                  activeOverlayConfig.showBoundaryCounter !== false
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                    : 'bg-slate-900 text-slate-500 border-slate-800'
                                 }`}
+                                title="Toggle Automatic 4s & 6s Boundary Counter Pop-Up"
                               >
-                                <div
-                                  className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
-                                    activeOverlayConfig.showBoundaryCounter !== false ? 'left-[13px]' : 'left-0.5'
-                                  }`}
-                                />
+                                💥 4s/6s Pop: {activeOverlayConfig.showBoundaryCounter !== false ? 'ON' : 'OFF'}
                               </button>
                             </div>
 
-                            {/* Manual Test Trigger Buttons */}
-                            <div className="grid grid-cols-2 gap-1.5">
-                              <button
-                                onClick={() => {
-                                  const currStriker = currentInnings?.batsmen?.[currentInnings.strikerIndex];
-                                  updateOverlayProp({
-                                    manualAlertTrigger: {
-                                      type: 'boundary_counter_four',
-                                      timestamp: Date.now(),
-                                      meta: {
-                                        batterName: currStriker?.name || 'Striker'
-                                      }
-                                    }
-                                  });
-                                  showNotification('Fired Tournament 4s Counter Pop-Up on Broadcast', 'success');
-                                }}
-                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-gradient-to-r from-blue-600/30 to-cyan-500/30 border border-cyan-400/40 text-cyan-300 hover:brightness-125 transition-all text-[8px] font-black uppercase tracking-wider cursor-pointer shadow-sm"
-                              >
-                                <span>⚡</span>
-                                <span>Test 4s Pop-up</span>
-                              </button>
-
-                              <button
-                                onClick={() => {
-                                  const currStriker = currentInnings?.batsmen?.[currentInnings.strikerIndex];
-                                  updateOverlayProp({
-                                    manualAlertTrigger: {
-                                      type: 'boundary_counter_six',
-                                      timestamp: Date.now(),
-                                      meta: {
-                                        batterName: currStriker?.name || 'Striker'
-                                      }
-                                    }
-                                  });
-                                  showNotification('Fired Tournament 6s Counter Pop-Up on Broadcast', 'success');
-                                }}
-                                className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-gradient-to-r from-amber-600/30 to-yellow-500/30 border border-amber-400/40 text-amber-300 hover:brightness-125 transition-all text-[8px] font-black uppercase tracking-wider cursor-pointer shadow-sm"
-                              >
-                                <span>🚀</span>
-                                <span>Test 6s Pop-up</span>
-                              </button>
-                            </div>
-
-                            {/* Pop-Up Screen Position Selector */}
-                            <div className="flex items-center justify-between gap-1 pt-1 border-t border-white/5">
-                              <span className="text-[7px] font-mono font-bold text-slate-400 uppercase">
-                                Position:
-                              </span>
-                              <div className="flex items-center gap-1">
-                                {[
-                                  { id: 'bottom-right', label: 'Bottom-Right' },
-                                  { id: 'bottom-center', label: 'Center' },
-                                  { id: 'top-right', label: 'Top-Right' }
-                                ].map(pos => (
+                            <div className="grid grid-cols-3 gap-1">
+                              {[
+                                { id: 'this_over', label: '🎯 This Over' },
+                                { id: 'tournament', label: '🏆 Tourney' },
+                                { id: 'toss_equation', label: '🪙 Toss/Eq' },
+                                { id: 'last_batsman', label: '⚡ Last Out' },
+                                { id: 'partnership', label: '🤝 Stand' },
+                                { id: 'projected_crr', label: '📈 Proj/CRR' },
+                              ].map(item => {
+                                const isAct = item.id === 'this_over'
+                                  ? (!activeOverlayConfig.scorebugOverlayMode || activeOverlayConfig.scorebugOverlayMode === 'this_over')
+                                  : activeOverlayConfig.scorebugOverlayMode === item.id;
+                                return (
                                   <button
-                                    key={pos.id}
-                                    onClick={() => {
-                                      updateOverlayProp({ boundaryCounterPosition: pos.id as any });
-                                      showNotification(`Popup position: ${pos.label}`, 'info');
-                                    }}
-                                    className={`px-1.5 py-0.5 rounded text-[7px] font-mono font-bold uppercase transition-all cursor-pointer ${
-                                      (activeOverlayConfig.boundaryCounterPosition || 'bottom-right') === pos.id
-                                        ? 'bg-amber-500 text-slate-950 shadow-sm'
-                                        : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
+                                    key={item.id}
+                                    type="button"
+                                    onClick={() => updateOverlayProp({ scorebugOverlayMode: isAct ? 'this_over' : (item.id as any) })}
+                                    className={`py-1.5 px-1 rounded-lg cursor-pointer transition-all border text-[7px] font-black uppercase truncate ${
+                                      isAct
+                                        ? 'bg-indigo-600/35 border-indigo-400 text-indigo-200'
+                                        : 'bg-slate-900 border-white/5 text-slate-400 hover:text-white'
                                     }`}
                                   >
-                                    {pos.label}
+                                    {item.label}
                                   </button>
-                                ))}
-                              </div>
+                                );
+                              })}
                             </div>
                           </div>
 
-                          {/* Beautiful Custom Toggle Switches for the 8 defined overlay types */}
-                          <div className="space-y-1.5 bg-slate-950/20 p-2.5 border border-white/5 rounded-2xl">
-                            <span className="text-[7.5px] font-black text-rose-450 uppercase tracking-widest block mb-1.5">Live Displays Toggle Room</span>
-                            
-                            <div className="space-y-1.5">
+                          {/* 3. Broadcast Analytics & Match Slates (Single Unified Grid) */}
+                          <div className="bg-slate-950/80 p-1.5 border border-white/5 rounded-xl space-y-1 shadow-md">
+                            <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest block">
+                              📊 Broadcast Panels & Analytics
+                            </span>
+                            <div className="grid grid-cols-2 gap-1">
                               {[
                                 {
-                                  id: 'score_bug',
-                                  label: 'Main Scoreboard',
-                                  desc: 'Live score bug overlay in corner',
-                                  isActive: activeOverlayConfig.showScoreBug !== false,
-                                  onToggle: () => updateOverlayProp({ showScoreBug: activeOverlayConfig.showScoreBug === false })
-                                },
-                                {
-                                  id: 'tournament_prize_money',
-                                  label: '🏆 Tournament Prize Money (Above Scorebug)',
-                                  desc: 'Best Batsman, Best Bowler, Man of the Series & 4th Prize sponsor display continuously above scorebug',
-                                  isActive: true,
-                                  onToggle: () => setShowPrizeModal(true)
-                                },
-                                {
-                                  id: 'grand_presentation',
-                                  label: '🏆 Grand Prize Presentation Board (Full-Screen 3D)',
-                                  desc: '3D 4-Prize Podium: 1st, 2nd, 3rd, 4th prizes, sponsors, photos & total purse for toss, innings break & post-match presentation',
-                                  isActive: ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic),
-                                  onToggle: () => {
-                                    const isCurrentlyActive = ['grand_presentation', 'grand_presentation_board', 'presentation_board', 'prize_presentation', 'tournament_prizes_fullscreen', 'prizes_board'].includes(currentActiveGraphic);
-                                    updateOverlayProp({ activeGraphic: isCurrentlyActive ? 'none' : 'grand_presentation_board' });
-                                    showNotification(isCurrentlyActive ? 'Grand Presentation Board Hidden' : '🏆 Grand Presentation Board LIVE on Broadcast!', 'success');
-                                  }
-                                },
-                                {
-                                  id: 'win_probability_meter',
-                                  label: 'Win Probability Meter (Scorebug)',
-                                  desc: 'Live probability percentage meter floating above the scoreboard',
-                                  isActive: activeOverlayConfig.showWinProbability === true,
-                                  onToggle: () => updateOverlayProp({ showWinProbability: !activeOverlayConfig.showWinProbability })
-                                },
-                                {
                                   id: 'batsman_bowler_brush',
-                                  label: 'Batter & Bowler Pro (Image 1)',
-                                  desc: 'Slanted stats, paint brush splatter, team crest & bowler banner',
-                                  isActive: ['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['batsman_bowler_brush', 'batsman_bowler_broadcast', 'brush_batsman_bowler', 'image_batsman_bowler', 'batsman_bowler_pro'].includes(currentActiveGraphic) ? 'none' : 'batsman_bowler_brush' })
+                                  label: '🏏 Batter vs Bowler',
+                                  isActive: ['batsman_bowler_brush', 'batsman_bowler_broadcast'].includes(currentActiveGraphic),
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'batsman_bowler_brush' ? 'none' : 'batsman_bowler_brush' })
                                 },
                                 {
                                   id: 'player_profile_card',
-                                  label: 'Player Profile Pro (Image 2)',
-                                  desc: 'Virat Kohli style star profile with giant typography & icon stats',
-                                  isActive: ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['player_profile_card', 'player_profile_pro', 'player_profile_kohli', 'virat_profile', 'player_profile'].includes(currentActiveGraphic) ? 'none' : 'player_profile_card' })
-                                },
-                                {
-                                  id: 'individual_stats',
-                                  label: 'Individual Batting & Bowling Stats',
-                                  desc: 'Live dynamic batting & bowling statistics alongside main scoreboard with timer auto-close',
-                                  isActive: ['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['individual_stats', 'player_stats', 'individual_batting_bowling'].includes(currentActiveGraphic) ? 'none' : 'individual_stats' })
-                                },
-                                {
-                                  id: 'batting_summary',
-                                  label: '🏏 Batting Summary (Full & Mini)',
-                                  desc: 'Star TV broadcast batting summary breakdown with full screen & mini lower-third modes',
-                                  isActive: ['batting_summary', 'batting_summary_full', 'batting_summary_mini', 'batting_summary_alert', 'batting_summary_mini_alert'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['batting_summary', 'batting_summary_full', 'batting_summary_mini', 'batting_summary_alert', 'batting_summary_mini_alert'].includes(currentActiveGraphic) ? 'none' : 'batting_summary' })
-                                },
-                                {
-                                  id: 'bowling_summary',
-                                  label: '🎯 Bowling Summary (Full & Mini)',
-                                  desc: 'Star TV broadcast bowling spell breakdown with full screen & mini lower-third modes',
-                                  isActive: ['bowling_summary', 'bowling_summary_full', 'bowling_summary_mini', 'bowling_summary_alert', 'bowling_summary_mini_alert'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['bowling_summary', 'bowling_summary_full', 'bowling_summary_mini', 'bowling_summary_alert', 'bowling_summary_mini_alert'].includes(currentActiveGraphic) ? 'none' : 'bowling_summary' })
-                                },
-                                {
-                                  id: 'batsman_stats',
-                                  label: 'Batsman Stats',
-                                  desc: 'Current strikers scores/match data',
-                                  isActive: currentActiveGraphic === 'batsman_stats',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'batsman_stats' ? 'none' : 'batsman_stats' })
-                                },
-                                {
-                                  id: 'bowler_stats',
-                                  label: 'Bowler Stats',
-                                  desc: 'Bowlers stats record table card',
-                                  isActive: currentActiveGraphic === 'bowler_stats',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'bowler_stats' ? 'none' : 'bowler_stats' })
+                                  label: '⭐ Player Profile',
+                                  isActive: currentActiveGraphic === 'player_profile_card',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'player_profile_card' ? 'none' : 'player_profile_card' })
                                 },
                                 {
                                   id: 'manhattan_graph',
-                                  label: 'Manhattan Graph',
-                                  desc: 'Over-by-over runs bar chart with wicket markers & powerplay',
-                                  isActive: ['manhattan_graph', 'manhattan'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['manhattan_graph', 'manhattan'].includes(currentActiveGraphic) ? 'none' : 'manhattan_graph' })
+                                  label: '📊 Manhattan Chart',
+                                  isActive: currentActiveGraphic === 'manhattan_graph',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'manhattan_graph' ? 'none' : 'manhattan_graph' })
                                 },
                                 {
                                   id: 'worm_graph',
-                                  label: 'Runs Worm Graph',
-                                  desc: 'Innings 1 vs Innings 2 cumulative progression curve',
-                                  isActive: ['worm_graph', 'worm'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['worm_graph', 'worm'].includes(currentActiveGraphic) ? 'none' : 'worm_graph' })
+                                  label: '📈 Runs Worm',
+                                  isActive: currentActiveGraphic === 'worm_graph',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'worm_graph' ? 'none' : 'worm_graph' })
                                 },
                                 {
                                   id: 'run_rate_graph',
-                                  label: 'Run Rate & Projections',
-                                  desc: 'CRR vs RRR momentum curve, phase split & projected totals',
-                                  isActive: ['run_rate_graph', 'run_rate'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['run_rate_graph', 'run_rate'].includes(currentActiveGraphic) ? 'none' : 'run_rate_graph' })
+                                  label: '⚡ Run Rate Curve',
+                                  isActive: currentActiveGraphic === 'run_rate_graph',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'run_rate_graph' ? 'none' : 'run_rate_graph' })
                                 },
                                 {
                                   id: 'partnership',
-                                  label: 'Partnerships Profile',
-                                  desc: 'Active stand & chronological wicket partnerships breakdown',
-                                  isActive: ['partnership', 'partnerships_all', 'partnerships'].includes(currentActiveGraphic),
-                                  onToggle: () => updateOverlayProp({ activeGraphic: ['partnership', 'partnerships_all', 'partnerships'].includes(currentActiveGraphic) ? 'none' : 'partnership' })
-                                },
-                                {
-                                  id: 'match_summary',
-                                  label: 'Match Summary',
-                                  desc: 'Innings scores details splitting sheet',
-                                  isActive: currentActiveGraphic === 'match_summary',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'match_summary' ? 'none' : 'match_summary' })
-                                },
-                                {
-                                  id: 'team_comparison',
-                                  label: 'Team Comparison',
-                                  desc: 'Roster lineups head-to-head ratios',
-                                  isActive: currentActiveGraphic === 'team_comparison',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_comparison' ? 'none' : 'team_comparison' })
-                                },
-                                {
-                                  id: 'lower_third',
-                                  label: 'Lower Third Bar',
-                                  desc: 'Elegant ticker statistics bar at bottom',
-                                  isActive: currentActiveGraphic === 'lower_third',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'lower_third' ? 'none' : 'lower_third' })
-                                },
-                                {
-                                  id: 'black_board_scoreboard',
-                                  label: 'Black Board Scoreboard (Need Runs / Balls)',
-                                  desc: 'Dark board with yellow chamfered badges: NEED [runs] RUNS FROM [balls] BALLS',
-                                  isActive: currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'black_board_scoreboard' || currentActiveGraphic === 'black_board' || currentActiveGraphic === 'need_board') ? 'none' : 'black_board_scoreboard' })
-                                }
-                              ].map(item => (
-                                <div key={item.id} className="flex items-center justify-between p-1.5 bg-slate-950/80 border border-white/5 hover:border-white/10 rounded-xl transition-all">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="relative flex shrink-0">
-                                      <span className={`w-2 h-2 rounded-full ${item.isActive ? 'bg-emerald-500 animate-pulse shadow-[0_0_6px_rgba(16,185,129,0.5)]' : 'bg-slate-700'}`}></span>
-                                    </div>
-                                    <div className="text-left min-w-0">
-                                      <span className="text-[8px] font-black uppercase tracking-wider text-slate-200 block truncate leading-none">{item.label}</span>
-                                      <span className="text-[6px] text-slate-555 block font-mono truncate leading-normal">{item.desc}</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <span className={`text-[6px] font-black uppercase tracking-widest px-1 py-0.5 rounded leading-none ${item.isActive ? 'bg-emerald-500/10 text-emerald-450' : 'bg-slate-900 text-slate-500'}`}>
-                                      {item.isActive ? 'ON AIR' : 'OFF'}
-                                    </span>
-                                    {/* Styled Switch Button */}
-                                    <button
-                                      onClick={() => {
-                                        item.onToggle();
-                                        showNotification(`Toggled broadcast: ${item.label}`, 'info');
-                                      }}
-                                      className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
-                                        item.isActive ? 'bg-rose-500' : 'bg-slate-800'
-                                      }`}
-                                    >
-                                      <div
-                                        className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
-                                          item.isActive ? 'left-[13px]' : 'left-0.5'
-                                        }`}
-                                      />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Pre-Match & Toss Cards (The Build-Up) Room */}
-                          <div className="space-y-1.5 bg-gradient-to-br from-blue-950/20 via-slate-950/40 to-slate-950/20 p-2.5 border border-sky-500/20 rounded-2xl">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[8px] font-black text-sky-400 uppercase tracking-widest block">
-                                Pre-Match & Toss Cards (The Build-Up)
-                              </span>
-                              <span className="text-[6.5px] font-mono text-sky-300/60 uppercase">
-                                Broadcast Preshow
-                              </span>
-                            </div>
-                            
-                            <div className="space-y-1.5">
-                              {[
-                                {
-                                  id: 'tournament_logo',
-                                  label: 'Tournament Logo Overlay (Reference Chevron Ribbon)',
-                                  desc: 'Official tournament logo, brand shields, chevron flanks & matchup details',
-                                  icon: '🏆',
-                                  isActive: currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'tournament_logo' || currentActiveGraphic === 'tournament_brand') ? 'none' : 'tournament_logo' })
-                                },
-                                {
-                                  id: 'squad_a',
-                                  label: `${match.teamA || 'Team A'} Squad (XI) with Images`,
-                                  desc: `Official 11 playing squad card with player photos/avatars & gold TV broadcast bar`,
-                                  icon: '👥',
-                                  isActive: currentActiveGraphic === 'squad_a' || currentActiveGraphic === 'team_a_squad',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'squad_a' || currentActiveGraphic === 'team_a_squad') ? 'none' : 'squad_a' })
-                                },
-                                {
-                                  id: 'squad_b',
-                                  label: `${match.teamB || 'Team B'} Squad (XI) with Images`,
-                                  desc: `Official 11 playing squad card with player photos/avatars & gold TV broadcast bar`,
-                                  icon: '👥',
-                                  isActive: currentActiveGraphic === 'squad_b' || currentActiveGraphic === 'team_b_squad',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'squad_b' || currentActiveGraphic === 'team_b_squad') ? 'none' : 'squad_b' })
-                                },
-                                {
-                                  id: 'field_positions',
-                                  label: 'Field Position Overlay (11 Players Ground)',
-                                  desc: 'Interactive broadcast cricket ground graphic with 11 draggable fielders, 30-yard ring & tactical card',
-                                  icon: '🎯',
-                                  isActive: currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'field_positions' || currentActiveGraphic === 'field_position') ? 'none' : 'field_positions' })
-                                },
-                                {
-                                  id: 'team_vs_team',
-                                  label: 'Team A VS Team B 3D Shield',
-                                  desc: 'Official tournament VS overlay: dual metallic shields, center league medallion & team bars',
-                                  icon: '🛡️',
-                                  isActive: currentActiveGraphic === 'team_vs_team',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'team_vs_team' ? 'none' : 'team_vs_team' })
-                                },
-                                {
-                                  id: 'prematch_matchup',
-                                  label: 'The Matchup Card',
-                                  desc: 'Split full-screen or large lower-third: team logos, tournament branding & match details',
-                                  icon: '⚔️',
-                                  isActive: currentActiveGraphic === 'prematch_matchup',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'prematch_matchup' ? 'none' : 'prematch_matchup' })
-                                },
-                                {
-                                  id: 'toss_result',
-                                  label: 'Toss Result Card',
-                                  desc: 'Official toss winner & election: e.g. MUMBAI WON THE TOSS & ELECTED TO BAT FIRST',
-                                  icon: '🪙',
-                                  isActive: currentActiveGraphic === 'toss_result',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'toss_result' ? 'none' : 'toss_result' })
-                                },
-                                {
-                                  id: 'pitch_weather_report',
-                                  label: 'Pitch & Weather Report',
-                                  desc: 'Pitch conditions (Dry, Grass cover, Cracks) and overhead weather/temperature conditions',
-                                  icon: '🌤️',
-                                  isActive: currentActiveGraphic === 'pitch_weather_report',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'pitch_weather_report' ? 'none' : 'pitch_weather_report' })
-                                }
-                              ].map(item => (
-                                <div key={item.id} className="flex items-center justify-between p-2 bg-slate-950/80 border border-sky-500/10 hover:border-sky-500/30 rounded-xl transition-all">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="w-6 h-6 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-xs shrink-0">
-                                      {item.icon}
-                                    </div>
-                                    <div className="text-left min-w-0">
-                                      <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-100 block truncate leading-none">{item.label}</span>
-                                      <span className="text-[6.5px] text-slate-400 block font-mono truncate leading-normal">{item.desc}</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {item.id === 'field_positions' && (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setShowFieldPositionModal(true);
-                                        }}
-                                        className="px-2 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded text-[7.5px] font-black uppercase tracking-wider flex items-center gap-1 border border-emerald-400/40 cursor-pointer shadow-sm active:scale-95"
-                                        title="Open popup to set 11 player field positions"
-                                      >
-                                        <span>🎯</span>
-                                        <span>Set Field</span>
-                                      </button>
-                                    )}
-                                    <span className={`text-[6px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none ${item.isActive ? 'bg-sky-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'}`}>
-                                      {item.isActive ? 'ON AIR' : 'STANDBY'}
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        item.onToggle();
-                                        showNotification(`Pre-match broadcast: ${item.label}`, 'info');
-                                      }}
-                                      className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
-                                        item.isActive ? 'bg-sky-500' : 'bg-slate-800'
-                                      }`}
-                                    >
-                                      <div
-                                        className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
-                                          item.isActive ? 'left-[13px]' : 'left-0.5'
-                                        }`}
-                                      />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Full-Screen Overlays (Match Transitions) Room */}
-                          <div className="space-y-1.5 bg-gradient-to-br from-amber-950/20 via-slate-950/40 to-slate-950/20 p-2.5 border border-amber-500/20 rounded-2xl">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest block">
-                                Full-Screen Overlays (Match Transitions)
-                              </span>
-                              <span className="text-[6.5px] font-mono text-amber-300/60 uppercase">
-                                Broadcast TV Breaks
-                              </span>
-                            </div>
-                            
-                            <div className="space-y-1.5">
-                              {[
-                                {
-                                  id: 'team_lineups',
-                                  label: 'Both Squads / Playing XI (Gold TV Overlay)',
-                                  desc: "Both teams' playing 11, team logos, VS emblem & tournament banner in 3D Gold TV overlay",
-                                  icon: '👥',
-                                  isActive: currentActiveGraphic === 'team_lineups' || currentActiveGraphic === 'both_squads',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: (currentActiveGraphic === 'team_lineups' || currentActiveGraphic === 'both_squads') ? 'none' : 'team_lineups' })
-                                },
-                                {
-                                  id: 'innings_scorecard',
-                                  label: 'Innings Scorecard',
-                                  desc: 'Detailed breakdown: all batsmen, dismissals, scores, extras & bowling',
-                                  icon: '📋',
-                                  isActive: currentActiveGraphic === 'innings_scorecard',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'innings_scorecard' ? 'none' : 'innings_scorecard' })
-                                },
-                                {
-                                  id: 'match_presentation',
-                                  label: 'Match Presentation / Results',
-                                  desc: 'Final summary: winner, margin of victory & Player of the Match card',
-                                  icon: '🏆',
-                                  isActive: currentActiveGraphic === 'match_presentation',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'match_presentation' ? 'none' : 'match_presentation' })
+                                  label: '🤝 Partnerships',
+                                  isActive: currentActiveGraphic === 'partnership',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'partnership' ? 'none' : 'partnership' })
                                 },
                                 {
                                   id: 'tournament_standings',
-                                  label: 'Tournament Standings / Points Table',
-                                  desc: 'Full-screen table: group rankings, points, matches played & Net Run Rate',
-                                  icon: '📊',
+                                  label: '🏆 Points Table',
                                   isActive: currentActiveGraphic === 'tournament_standings',
                                   onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'tournament_standings' ? 'none' : 'tournament_standings' })
                                 },
                                 {
                                   id: 'captains_faceoff',
-                                  label: 'Clash of Titans: Dual Captains Face-Off',
-                                  desc: 'Star TV head-to-head captains duel, career records, strike rates & 3D VS badge',
-                                  icon: '⚔️',
+                                  label: '⚔️ Captains Duel',
                                   isActive: currentActiveGraphic === 'captains_faceoff',
                                   onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'captains_faceoff' ? 'none' : 'captains_faceoff' })
                                 },
                                 {
-                                  id: 'broadcast_wipe_stinger',
-                                  label: '3D Broadcast Wipe Stinger ("Star TV / IPL Wipe")',
-                                  desc: 'Angled polygonal chevron wipe, rotating 3D gold tournament medallion & whoosh FX',
-                                  icon: '💫',
-                                  isActive: currentActiveGraphic === 'broadcast_wipe_stinger',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'broadcast_wipe_stinger' ? 'none' : 'broadcast_wipe_stinger' })
+                                  id: 'toss_result',
+                                  label: '🪙 Toss Result',
+                                  isActive: currentActiveGraphic === 'toss_result',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'toss_result' ? 'none' : 'toss_result' })
                                 },
                                 {
-                                  id: 'event_six',
-                                  label: 'Holographic SIX! (Maximum Radar Slate)',
-                                  desc: '3D ball trajectory arc, distance radar (104m), exit velocity (148 km/h) & batter card',
-                                  icon: '🔥',
-                                  isActive: currentActiveGraphic === 'event_six',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_six' ? 'none' : 'event_six' })
-                                },
-                                {
-                                  id: 'event_wicket',
-                                  label: 'OUT / WICKET Dramatic Slate',
-                                  desc: 'Giant red & gold impact stamp, dismissal breakdown pill, batsman innings recap & FOW',
-                                  icon: '⚡',
-                                  isActive: currentActiveGraphic === 'event_wicket',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_wicket' ? 'none' : 'event_wicket' })
-                                },
-                                {
-                                  id: 'event_milestone',
-                                  label: 'Player Milestone (50 / 100 Celebration Slate)',
-                                  desc: 'Gold celebration aura, 50* or 100* headline, boundary breakdown & strike rate meter',
-                                  icon: '💯',
-                                  isActive: currentActiveGraphic === 'event_milestone',
-                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_milestone' ? 'none' : 'event_milestone' })
+                                  id: 'pitch_weather_report',
+                                  label: '🌤️ Pitch & Weather',
+                                  isActive: currentActiveGraphic === 'pitch_weather_report',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'pitch_weather_report' ? 'none' : 'pitch_weather_report' })
                                 },
                                 {
                                   id: 'event_innings_break',
-                                  label: 'Innings Break & Target Summary Slate',
-                                  desc: '1st innings total score, target equation for chasing team, top batter & bowler recap',
-                                  icon: '🎯',
+                                  label: '🎯 Innings Break',
                                   isActive: currentActiveGraphic === 'event_innings_break',
                                   onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'event_innings_break' ? 'none' : 'event_innings_break' })
+                                },
+                                {
+                                  id: 'lower_third',
+                                  label: '📢 Lower Third',
+                                  isActive: currentActiveGraphic === 'lower_third',
+                                  onToggle: () => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'lower_third' ? 'none' : 'lower_third' })
                                 }
                               ].map(item => (
-                                <div key={item.id} className="flex items-center justify-between p-2 bg-slate-950/80 border border-amber-500/10 hover:border-amber-500/30 rounded-xl transition-all">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="w-6 h-6 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-xs shrink-0">
-                                      {item.icon}
-                                    </div>
-                                    <div className="text-left min-w-0">
-                                      <span className="text-[8.5px] font-black uppercase tracking-wider text-slate-100 block truncate leading-none">{item.label}</span>
-                                      <span className="text-[6.5px] text-slate-400 block font-mono truncate leading-normal">{item.desc}</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <span className={`text-[6px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded leading-none ${item.isActive ? 'bg-amber-500 text-slate-950 font-black animate-pulse' : 'bg-slate-900 text-slate-500'}`}>
-                                      {item.isActive ? 'ON AIR' : 'STANDBY'}
-                                    </span>
-                                    <button
-                                      onClick={() => {
-                                        item.onToggle();
-                                        showNotification(`Broadcast transition: ${item.label}`, 'info');
-                                      }}
-                                      className={`w-7 h-4 rounded-full p-0.5 transition-all relative border-none cursor-pointer outline-none flex items-center ${
-                                        item.isActive ? 'bg-amber-500' : 'bg-slate-800'
-                                      }`}
-                                    >
-                                      <div
-                                        className={`w-3 h-3 bg-white rounded-full transition-all absolute top-0.5 ${
-                                          item.isActive ? 'left-[13px]' : 'left-0.5'
-                                        }`}
-                                      />
-                                    </button>
-                                  </div>
-                                </div>
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  onClick={item.onToggle}
+                                  className={`py-1.5 px-1.5 rounded-lg border text-[7px] font-black uppercase flex items-center justify-between gap-1 cursor-pointer transition-all truncate ${
+                                    item.isActive
+                                      ? 'bg-emerald-600/25 border-emerald-400 text-emerald-200'
+                                      : 'bg-slate-900/90 border-white/5 text-slate-300 hover:bg-slate-800'
+                                  }`}
+                                >
+                                  <span className="truncate">{item.label}</span>
+                                  <span className={`text-[6px] px-1 rounded font-mono shrink-0 ${item.isActive ? 'bg-emerald-500 text-slate-950 font-black' : 'bg-slate-950 text-slate-500'}`}>
+                                    {item.isActive ? 'ON' : 'OFF'}
+                                  </span>
+                                </button>
                               ))}
                             </div>
-                          </div>
 
-                          {currentActiveGraphic === 'lower_third' && (
-                            <div className="border border-white/5 bg-slate-950/40 p-2 rounded-xl space-y-1.5 font-sans mt-2">
-                              <span className="text-[7.5px] font-black text-rose-450 uppercase tracking-widest block text-left">Configure Lower Third Bar:</span>
-                              <div className="grid grid-cols-3 gap-1">
+                            {currentActiveGraphic === 'lower_third' && (
+                              <div className="pt-1 border-t border-white/5 grid grid-cols-3 gap-1">
                                 {[
                                   { id: 'intro', label: 'Intro' },
                                   { id: 'equation', label: 'Equation' },
@@ -11395,7 +10628,7 @@ export const CricketScoreboard: React.FC = () => {
                                   <button
                                     key={mode.id}
                                     onClick={() => updateOverlayProp({ lowerThirdMode: mode.id as any })}
-                                    className={`py-1 text-[7px] font-black uppercase tracking-wider rounded border-none cursor-pointer transition-all ${
+                                    className={`py-0.5 text-[7px] font-black uppercase tracking-wider rounded border-none cursor-pointer transition-all ${
                                       (activeOverlayConfig.lowerThirdMode || 'intro') === mode.id
                                         ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold'
                                         : 'bg-slate-900 text-slate-500 hover:text-slate-350'
@@ -11405,48 +10638,30 @@ export const CricketScoreboard: React.FC = () => {
                                   </button>
                                 ))}
                               </div>
-
-                              {(activeOverlayConfig.lowerThirdMode || 'intro') === 'umpires' && (
-                                <div className="flex flex-wrap gap-1 justify-center pt-1 border-t border-white/5">
-                                  {['out', 'noball', 'freehit', 'deadball', 'wide'].map((sig) => (
-                                    <button
-                                      key={sig}
-                                      onClick={() => updateOverlayProp({ selectedUmpireSignal: sig as any })}
-                                      className={`py-0.5 px-1.5 rounded text-[6.5px] uppercase font-black cursor-pointer transition-all border ${
-                                        (activeOverlayConfig.selectedUmpireSignal || 'out') === sig
-                                          ? 'bg-rose-550/20 text-rose-400 border-rose-500/20 font-bold'
-                                          : 'bg-slate-900 text-slate-500 border-transparent'
-                                      }`}
-                                    >
-                                      {sig}
-                                    </button>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
                       )}
 
-                      {/* --- THEME TAB --- */}
+                      {/* --- THEME TAB (Compact Single-Screen Fit) --- */}
                       {activeControlTab === 'templates' && (
-                        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                        <div className="space-y-2 pr-0.5">
                           {/* 1. BROADCAST TV THEMES */}
                           <div>
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
-                              <span>🎨 Broadcast TV Color Theme</span>
-                              <span className="text-amber-400 font-mono text-[7px]">8 STYLES</span>
+                            <span className="text-[7.5px] font-black text-slate-300 uppercase tracking-widest block mb-1 flex items-center justify-between">
+                              <span>🎨 Broadcast Theme</span>
+                              <span className="text-amber-400 font-mono text-[6.5px]">8 STYLES</span>
                             </span>
-                            <div className="grid grid-cols-2 gap-1.5">
+                            <div className="grid grid-cols-2 gap-1">
                               {[
-                                { id: 'star-tv-broadcast', label: '⭐ Star TV Pro', desc: 'Royal Blue, Crimson & Gold' },
-                                { id: 'broadcast-pro', label: '📺 Broadcast Pro', desc: 'ESPN Navy & Amber' },
-                                { id: 'ipl-style', label: '🏏 IPL 2025 Purple/Gold', desc: 'Premium Royal League' },
-                                { id: 'cricheroes-dark', label: '⚡ CricHeroes Elite', desc: 'Cyan Tech Dark' },
-                                { id: 'neon-sport', label: '🟢 Neon Cyberpunk', desc: 'Fuchsia & Electric Lime' },
-                                { id: 'clean-white', label: '⚪ Clean Minimal', desc: 'Daylight High-Contrast' },
-                                { id: 'retro-gold', label: '🏆 Classic Gold', desc: 'Heritage Championship' },
-                                { id: 'carbon-modern', label: '🔥 Carbon Modern', desc: 'Matte Black & Crimson' }
+                                { id: 'star-tv-broadcast', label: '⭐ Star TV Pro' },
+                                { id: 'broadcast-pro', label: '📺 Broadcast Pro' },
+                                { id: 'ipl-style', label: '🏏 IPL Royal' },
+                                { id: 'cricheroes-dark', label: '⚡ CricHeroes' },
+                                { id: 'neon-sport', label: '🟢 Neon Sport' },
+                                { id: 'clean-white', label: '⚪ Clean White' },
+                                { id: 'retro-gold', label: '🏆 Classic Gold' },
+                                { id: 'carbon-modern', label: '🔥 Carbon Dark' }
                               ].map(t => {
                                 const isCurrent = (activeOverlayConfig.theme || activeOverlayConfig.template) === t.id;
                                 return (
@@ -11457,14 +10672,13 @@ export const CricketScoreboard: React.FC = () => {
                                       template: t.id as any,
                                       ...(t.id === 'star-tv-broadcast' ? { layout: 'star-tv-broadcast' as any } : {})
                                     })}
-                                    className={`p-2 text-left rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                                    className={`py-1.5 px-2 text-left rounded-lg border cursor-pointer transition-all truncate text-[7.5px] font-black ${
                                       isCurrent
-                                        ? 'bg-rose-500/15 border-rose-500/40 text-white shadow-md'
-                                        : 'bg-slate-950/70 border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10'
+                                        ? 'bg-rose-500/20 border-rose-500/50 text-white'
+                                        : 'bg-slate-950/70 border-white/5 text-slate-400 hover:text-slate-200'
                                     }`}
                                   >
-                                    <span className="text-[8.5px] font-black tracking-tight block truncate">{t.label}</span>
-                                    <span className="text-[7px] text-slate-400 opacity-75 truncate block mt-0.5">{t.desc}</span>
+                                    {t.label}
                                   </button>
                                 );
                               })}
@@ -11472,21 +10686,21 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
 
                           {/* 2. SCOREBOARD GRAPHIC LAYOUT */}
-                          <div className="pt-2 border-t border-white/5">
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5 flex items-center justify-between">
-                              <span>📐 Scoreboard Graphic Layout</span>
-                              <span className="text-rose-400 font-mono text-[7px]">8 DESIGNS</span>
+                          <div className="pt-1.5 border-t border-white/5">
+                            <span className="text-[7.5px] font-black text-slate-300 uppercase tracking-widest block mb-1 flex items-center justify-between">
+                              <span>📐 Graphic Layout</span>
+                              <span className="text-rose-400 font-mono text-[6.5px]">8 DESIGNS</span>
                             </span>
-                            <div className="grid grid-cols-2 gap-1.5">
+                            <div className="grid grid-cols-2 gap-1">
                               {[
-                                { id: 'star-tv-broadcast', label: '⭐ Star TV Pro', desc: 'Official Reference TV Bug' },
-                                { id: 'single-line', label: '⚡ Single-Line Scorebug', desc: 'All details in 1 continuous TV line' },
-                                { id: 'ribbon-full', label: '👑 Full Edge Ribbon', desc: 'Modern IPL Lower Third' },
-                                { id: 'slanted-pro-design', label: '📐 Slanted Modern', desc: 'Angled Polygon Panels' },
-                                { id: 'docked-corner', label: '📦 Docked Corner Bug', desc: 'ESPN/Sky Sports Corner Box' },
-                                { id: 'mobile-vertical', label: '📱 9:16 Vertical Live', desc: 'Safe for Reels / TikTok' },
-                                { id: 'minimal-pill', label: '💊 Floating Pill Capsule', desc: 'Streamlined Slim Bug' },
-                                { id: 'score-bug-1900-200', label: '🎮 Giant Centered Bug', desc: '1900x200 Massive Banner' }
+                                { id: 'star-tv-broadcast', label: '⭐ Star TV Pro' },
+                                { id: 'single-line', label: '⚡ Single-Line' },
+                                { id: 'ribbon-full', label: '👑 Full Ribbon' },
+                                { id: 'slanted-pro-design', label: '📐 Slanted Pro' },
+                                { id: 'docked-corner', label: '📦 Corner Box' },
+                                { id: 'mobile-vertical', label: '📱 9:16 Reels' },
+                                { id: 'minimal-pill', label: '💊 Slim Pill' },
+                                { id: 'score-bug-1900-200', label: '🎮 Giant Banner' }
                               ].map(l => {
                                 const isCurrent = (activeOverlayConfig.layout || activeOverlayConfig.template) === l.id;
                                 return (
@@ -11497,14 +10711,13 @@ export const CricketScoreboard: React.FC = () => {
                                       template: l.id as any,
                                       ...(l.id === 'star-tv-broadcast' ? { theme: 'star-tv-broadcast' as any } : {})
                                     })}
-                                    className={`p-2 text-left rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
+                                    className={`py-1.5 px-2 text-left rounded-lg border cursor-pointer transition-all truncate text-[7.5px] font-black ${
                                       isCurrent
-                                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-md font-bold'
-                                        : 'bg-slate-950/70 border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10'
+                                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-200'
+                                        : 'bg-slate-950/70 border-white/5 text-slate-400 hover:text-slate-200'
                                     }`}
                                   >
-                                    <span className="text-[8.5px] font-black tracking-tight block truncate">{l.label}</span>
-                                    <span className="text-[7px] text-slate-400 opacity-75 truncate block mt-0.5">{l.desc}</span>
+                                    {l.label}
                                   </button>
                                 );
                               })}
@@ -11512,16 +10725,16 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
 
                           {/* 3. BUG SCREEN PLACEMENT */}
-                          <div className="pt-2 border-t border-white/5">
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1.5">
-                              📍 Screen Alignment / Position
+                          <div className="pt-1.5 border-t border-white/5">
+                            <span className="text-[7.5px] font-black text-slate-300 uppercase tracking-widest block mb-1">
+                              📍 Screen Position
                             </span>
                             <div className="grid grid-cols-3 gap-1">
                               {[
-                                { id: 'bottom-full', label: 'Bottom Edge' },
+                                { id: 'bottom-full', label: 'Bottom Full' },
                                 { id: 'bottom-left', label: 'Bottom Left' },
                                 { id: 'bottom-right', label: 'Bottom Right' },
-                                { id: 'bottom-center', label: 'Bottom Center' },
+                                { id: 'bottom-center', label: 'Bottom Ctr' },
                                 { id: 'top-full', label: 'Top Bar' }
                               ].map(pos => {
                                 const isCurrent = (activeOverlayConfig.bugPosition || 'bottom-full') === pos.id;
@@ -11529,9 +10742,9 @@ export const CricketScoreboard: React.FC = () => {
                                   <button
                                     key={pos.id}
                                     onClick={() => updateOverlayProp({ bugPosition: pos.id as any })}
-                                    className={`py-1 px-1.5 text-center rounded-lg border text-[7.5px] font-mono font-bold cursor-pointer transition-all ${
+                                    className={`py-1 px-1 text-center rounded-lg border text-[7px] font-mono font-bold cursor-pointer transition-all ${
                                       isCurrent
-                                        ? 'bg-sky-500/20 border-sky-500/50 text-sky-300 shadow-sm'
+                                        ? 'bg-sky-500/20 border-sky-500/50 text-sky-300'
                                         : 'bg-slate-950 border-white/5 text-slate-400 hover:text-slate-300'
                                     }`}
                                   >
@@ -11543,20 +10756,18 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
 
                           {/* 4. TELEMETRY & HUD METRICS TOGGLES */}
-                          <div className="pt-2 border-t border-white/5 space-y-1.5">
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block mb-1">
-                              📊 HUD Telemetry & Display Elements
+                          <div className="pt-1.5 border-t border-white/5 space-y-1">
+                            <span className="text-[7.5px] font-black text-slate-300 uppercase tracking-widest block">
+                              📊 HUD Display Elements
                             </span>
-                            <div className="grid grid-cols-2 gap-1.5">
+                            <div className="grid grid-cols-2 gap-1">
                               {[
-                                { key: 'showScoreBug', label: 'Main Score Bug', default: true },
-                                { key: 'showBallByBallDots', label: 'Ball-by-Ball Dots', default: true },
-                                { key: 'showStrikeRates', label: 'Batting SR & Bowler Econ', default: true },
-                                { key: 'showWinProbability', label: 'Win Probability Metric', default: false },
-                                { key: 'showSponsorBadge', label: 'Sponsor / League Badge', default: true },
-                                { key: 'showStatsPanel', label: 'Match Stats Summary', default: true },
-                                { key: 'showTicker', label: 'Scrolling News Ticker', default: true },
-                                { key: 'boundaryBlast', label: '⚡ Animated Stingers', default: true }
+                                { key: 'showScoreBug', label: 'Main Scorebug', default: true },
+                                { key: 'showBallByBallDots', label: 'Ball Dots', default: true },
+                                { key: 'showStrikeRates', label: 'SR & Econ', default: true },
+                                { key: 'showWinProbability', label: 'Win Prob %', default: false },
+                                { key: 'showSponsorBadge', label: 'League Tag', default: true },
+                                { key: 'showTicker', label: 'News Ticker', default: true },
                               ].map(item => {
                                 const isChecked = (activeOverlayConfig as any)[item.key] !== undefined 
                                   ? !!(activeOverlayConfig as any)[item.key] 
@@ -11564,7 +10775,7 @@ export const CricketScoreboard: React.FC = () => {
                                 return (
                                   <label
                                     key={item.key}
-                                    className={`flex items-center gap-1.5 p-1.5 rounded-lg border text-[7.5px] font-bold cursor-pointer transition-all select-none ${
+                                    className={`flex items-center gap-1.5 p-1 rounded-lg border text-[7px] font-bold cursor-pointer transition-all select-none ${
                                       isChecked
                                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                                         : 'bg-slate-950 border-white/5 text-slate-500'
@@ -11574,7 +10785,7 @@ export const CricketScoreboard: React.FC = () => {
                                       type="checkbox"
                                       checked={isChecked}
                                       onChange={(e) => updateOverlayProp({ [item.key]: e.target.checked } as any)}
-                                      className="w-3 h-3 rounded accent-emerald-500 cursor-pointer"
+                                      className="w-2.5 h-2.5 rounded accent-emerald-500 cursor-pointer"
                                     />
                                     <span className="truncate">{item.label}</span>
                                   </label>
@@ -11584,16 +10795,13 @@ export const CricketScoreboard: React.FC = () => {
                           </div>
 
                           {/* 5. SPONSOR / LEAGUE BRANDING */}
-                          <div className="pt-2 border-t border-white/5 space-y-1">
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest block">
-                              🏏 League / Sponsor Branding Tag
-                            </span>
+                          <div className="pt-1 border-t border-white/5">
                             <input
                               type="text"
                               value={activeOverlayConfig.sponsorText || 'GULLY PREMIER LEAGUE'}
                               onChange={(e) => updateOverlayProp({ sponsorText: e.target.value })}
-                              placeholder="e.g. TATA IPL 2025 • DLF CUP"
-                              className="w-full bg-slate-950 text-white rounded-lg text-[8.5px] px-2.5 py-1.5 border border-white/10 focus:border-amber-400 font-mono uppercase focus:outline-none"
+                              placeholder="League / Sponsor Tag..."
+                              className="w-full bg-slate-950 text-white rounded-lg text-[8px] px-2 py-1 border border-white/10 focus:border-amber-400 font-mono uppercase focus:outline-none"
                             />
                           </div>
                         </div>
@@ -11936,14 +11144,14 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           {/* COLUMN 2: Crease Batsmen, Bowlers and Tactile Scoring Panels - Single-Screen View on Mobile & Laptop */}
-          <div className={`flex flex-col gap-1 sm:gap-1.5 min-h-0 lg:h-full justify-between relative ${
-            activeMobileTab === 'scorer' ? 'flex h-full max-h-[calc(100dvh-5rem-2.75rem)] sm:max-h-[calc(100dvh-3rem-2.75rem)] overflow-hidden' : 'hidden lg:flex'
+          <div className={`flex-1 flex-col gap-1.5 min-h-0 h-full justify-between relative ${
+            activeMobileTab === 'scorer' ? 'flex h-full overflow-hidden' : 'hidden lg:flex'
           } lg:col-span-5 pb-0 lg:pb-0 overflow-hidden`}>
 
             {/* ========================================================================= */}
-            {/* 1. DEDICATED MOBILE VIEW: 100% Single-Screen Fit (Zero Scroll in Any Direction) */}
+            {/* 1. DEDICATED MOBILE VIEW: 100% Full-Height Fit (Zero Bottom Empty Space) */}
             {/* ========================================================================= */}
-            <div className="flex lg:hidden flex-col justify-start h-full min-h-0 overflow-hidden gap-1.5 p-1 select-none touch-manipulation">
+            <div className="flex lg:hidden flex-col justify-between flex-1 h-full min-h-0 overflow-hidden gap-1.5 p-0.5 select-none touch-manipulation">
               
               {/* A. Compact Match Overview Strip */}
               <div className="bg-slate-900/95 border border-slate-800 rounded-xl px-2 py-1 flex items-center justify-between shrink-0 shadow-xs">
@@ -11985,24 +11193,14 @@ export const CricketScoreboard: React.FC = () => {
                             <span>★ STRIKER</span>
                           </span>
                           {!isSpectator && (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => openRetireHurtModal('striker')}
-                                className="px-1 py-0.2 rounded bg-amber-600/80 text-white font-black text-[7px] uppercase cursor-pointer"
-                                title="Retire Hurt"
-                              >
-                                RETD
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openWicketModal('striker')}
-                                className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-black text-[7.5px] uppercase cursor-pointer shadow-xs active:scale-95"
-                                title="Out"
-                              >
-                                🔴 OUT
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openRetireHurtModal('striker')}
+                              className="px-1.5 py-0.2 rounded bg-amber-600/80 text-white font-black text-[7px] uppercase cursor-pointer"
+                              title="Retire Hurt"
+                            >
+                              🩹 RETD
+                            </button>
                           )}
                         </div>
 
@@ -12063,39 +11261,29 @@ export const CricketScoreboard: React.FC = () => {
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex items-center gap-1">
-                                <select
-                                  value={st ? st.name : ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === '__add_custom__') {
-                                      setQuickAddCustomStriker(true);
-                                    } else if (val && val !== st?.name) {
-                                      handleSelectOrSwapBatsman(val, 'striker');
-                                    }
-                                  }}
-                                  className="bg-slate-950/90 text-emerald-300 border border-emerald-500/30 text-[8px] font-bold rounded px-1 py-0.5 outline-none flex-1 min-w-0 truncate cursor-pointer"
-                                  title="Change Batsman from Team List"
-                                >
-                                  <option value={st ? st.name : ''} disabled>🏏 {st ? st.name : 'Select'} (Striker)</option>
-                                  {activeBattingSquadPlayers.length > 0 && (
-                                    <optgroup label={`${currentInnings.battingTeam || 'Batting'} Squad (${activeBattingSquadPlayers.length})`}>
-                                      {activeBattingSquadPlayers.map((p, idx) => (
-                                        <option key={idx} value={p.name}>👤 {p.displayName || p.name}</option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  <option value="__add_custom__">➕ + Add Batsman to Team...</option>
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => setQuickAddCustomStriker(true)}
-                                  className="px-1 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 rounded text-[7.5px] font-black uppercase cursor-pointer shrink-0"
-                                  title="Add new batsman to team list"
-                                >
-                                  + Add
-                                </button>
-                              </div>
+                              <select
+                                value={st ? st.name : ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__add_custom__') {
+                                    setQuickAddCustomStriker(true);
+                                  } else if (val && val !== st?.name) {
+                                    handleSelectOrSwapBatsman(val, 'striker');
+                                  }
+                                }}
+                                className="w-full bg-slate-950/90 text-emerald-300 border border-emerald-500/30 text-[8px] font-bold rounded px-1 py-0.5 outline-none truncate cursor-pointer"
+                                title="Change Batsman from Team List"
+                              >
+                                <option value={st ? st.name : ''} disabled>🏏 {st ? st.name : 'Select'} (Striker)</option>
+                                {activeBattingSquadPlayers.length > 0 && (
+                                  <optgroup label={`${currentInnings.battingTeam || 'Batting'} Squad (${activeBattingSquadPlayers.length})`}>
+                                    {activeBattingSquadPlayers.map((p, idx) => (
+                                      <option key={idx} value={p.name}>👤 {p.displayName || p.name}</option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                                <option value="__add_custom__">➕ + Add Batsman to Team...</option>
+                              </select>
                             )}
                           </div>
                         )}
@@ -12113,24 +11301,14 @@ export const CricketScoreboard: React.FC = () => {
                             NON-STRIKER
                           </span>
                           {!isSpectator && (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => openRetireHurtModal('non-striker')}
-                                className="px-1 py-0.2 rounded bg-amber-600/80 text-white font-black text-[7px] uppercase cursor-pointer"
-                                title="Retire Hurt"
-                              >
-                                RETD
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openWicketModal('non-striker')}
-                                className="px-1.5 py-0.2 rounded bg-rose-600/80 text-white font-black text-[7.5px] uppercase cursor-pointer shadow-xs active:scale-95"
-                                title="Out"
-                              >
-                                🔴 OUT
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              onClick={() => openRetireHurtModal('non-striker')}
+                              className="px-1.5 py-0.2 rounded bg-amber-600/80 text-white font-black text-[7px] uppercase cursor-pointer"
+                              title="Retire Hurt"
+                            >
+                              🩹 RETD
+                            </button>
                           )}
                         </div>
 
@@ -12191,39 +11369,29 @@ export const CricketScoreboard: React.FC = () => {
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex items-center gap-1">
-                                <select
-                                  value={nst ? nst.name : ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === '__add_custom__') {
-                                      setQuickAddCustomNonStriker(true);
-                                    } else if (val && val !== nst?.name) {
-                                      handleSelectOrSwapBatsman(val, 'non-striker');
-                                    }
-                                  }}
-                                  className="bg-slate-950/90 text-slate-300 border border-slate-800 text-[8px] font-bold rounded px-1 py-0.5 outline-none flex-1 min-w-0 truncate cursor-pointer"
-                                  title="Change Non-Striker from Team List"
-                                >
-                                  <option value={nst ? nst.name : ''} disabled>🏏 {nst ? nst.name : 'Select'} (Non-Striker)</option>
-                                  {activeBattingSquadPlayers.length > 0 && (
-                                    <optgroup label={`${currentInnings.battingTeam || 'Batting'} Squad (${activeBattingSquadPlayers.length})`}>
-                                      {activeBattingSquadPlayers.map((p, idx) => (
-                                        <option key={idx} value={p.name}>👤 {p.displayName || p.name}</option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  <option value="__add_custom__">➕ + Add Batsman to Team...</option>
-                                </select>
-                                <button
-                                  type="button"
-                                  onClick={() => setQuickAddCustomNonStriker(true)}
-                                  className="px-1 py-0.5 bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 rounded text-[7.5px] font-black uppercase cursor-pointer shrink-0"
-                                  title="Add new batsman to team list"
-                                >
-                                  + Add
-                                </button>
-                              </div>
+                              <select
+                                value={nst ? nst.name : ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '__add_custom__') {
+                                    setQuickAddCustomNonStriker(true);
+                                  } else if (val && val !== nst?.name) {
+                                    handleSelectOrSwapBatsman(val, 'non-striker');
+                                  }
+                                }}
+                                className="w-full bg-slate-950/90 text-slate-300 border border-slate-800 text-[8px] font-bold rounded px-1 py-0.5 outline-none truncate cursor-pointer"
+                                title="Change Non-Striker from Team List"
+                              >
+                                <option value={nst ? nst.name : ''} disabled>🏏 {nst ? nst.name : 'Select'} (Non-Striker)</option>
+                                {activeBattingSquadPlayers.length > 0 && (
+                                  <optgroup label={`${currentInnings.battingTeam || 'Batting'} Squad (${activeBattingSquadPlayers.length})`}>
+                                    {activeBattingSquadPlayers.map((p, idx) => (
+                                      <option key={idx} value={p.name}>👤 {p.displayName || p.name}</option>
+                                    ))}
+                                  </optgroup>
+                                )}
+                                <option value="__add_custom__">➕ + Add Batsman to Team...</option>
+                              </select>
                             )}
                           </div>
                         )}
@@ -12249,17 +11417,6 @@ export const CricketScoreboard: React.FC = () => {
                             {bw ? ` (E: ${bw.ballsBowled > 0 ? ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(1) : '0.0'})` : ''}
                           </span>
                         </div>
-                        {!isSpectator && (
-                          <button
-                            type="button"
-                            onClick={handleSwapStrikers}
-                            className="px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-300 text-[8px] font-black uppercase rounded flex items-center gap-0.5 cursor-pointer border border-slate-700 shrink-0"
-                            title="Swap Strike"
-                          >
-                            <ArrowLeftRight size={9} />
-                            <span>Swap</span>
-                          </button>
-                        )}
                       </div>
 
                       {/* Bowler Selection & Add to Squad */}
@@ -12304,34 +11461,24 @@ export const CricketScoreboard: React.FC = () => {
                               </button>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1">
-                              <select
-                                value={bw ? bw.name : ''}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (val === '__add_custom__') {
-                                    setQuickAddCustomBowler(true);
-                                  } else if (val) {
-                                    handleSelectOrAddNewBowler(val);
-                                  }
-                                }}
-                                className="bg-slate-900 text-amber-300 border border-amber-500/30 text-[8px] font-bold rounded px-1.5 py-0.5 outline-none flex-1 min-w-0 truncate cursor-pointer"
-                              >
-                                <option value={bw ? bw.name : ''} disabled>Change 🥎 {bw ? bw.name : 'Select Bowler'}</option>
-                                {activeBowlingSquadPlayers.map((p, idx) => (
-                                  <option key={idx} value={p.name}>🥎 {p.displayName || p.name}</option>
-                                ))}
-                                <option value="__add_custom__">➕ + Add Bowler to Team...</option>
-                              </select>
-                              <button
-                                type="button"
-                                onClick={() => setQuickAddCustomBowler(true)}
-                                className="px-1.5 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded text-[7.5px] font-black uppercase cursor-pointer shrink-0"
-                                title="Add new bowler to team list"
-                              >
-                                + Add
-                              </button>
-                            </div>
+                            <select
+                              value={bw ? bw.name : ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '__add_custom__') {
+                                  setQuickAddCustomBowler(true);
+                                } else if (val) {
+                                  handleSelectOrAddNewBowler(val);
+                                }
+                              }}
+                              className="w-full bg-slate-900 text-amber-300 border border-amber-500/30 text-[8px] font-bold rounded px-1.5 py-0.5 outline-none truncate cursor-pointer"
+                            >
+                              <option value={bw ? bw.name : ''} disabled>Change 🥎 {bw ? bw.name : 'Select Bowler'}</option>
+                              {activeBowlingSquadPlayers.map((p, idx) => (
+                                <option key={idx} value={p.name}>🥎 {p.displayName || p.name}</option>
+                              ))}
+                              <option value="__add_custom__">➕ + Add Bowler to Team...</option>
+                            </select>
                           )}
                         </div>
                       )}
@@ -12406,60 +11553,122 @@ export const CricketScoreboard: React.FC = () => {
                 />
               </div>
 
-              {/* D. CRICHEROES & CRICBUZZ PRO SCORING KEYPAD (Tight, Tactile, No Gap Waste) */}
-              <div className="flex-1 flex flex-col justify-start min-h-0 gap-1.5 sm:gap-2">
-                {/* CricHeroes / Cricbuzz This Over Ball-by-Ball Strip */}
-                <div className="bg-slate-900/90 border border-slate-800 rounded-xl px-2 py-1 flex items-center justify-between gap-1 shrink-0 shadow-xs">
-                  <div className="flex items-center gap-1.5 min-w-0">
+              {/* D. CRICHEROES & CRICBUZZ PRO SCORING KEYPAD (Full-Height Proportional Fit, Zero Bottom Space) */}
+              <div className="flex-1 flex flex-col justify-between min-h-0 gap-1.5">
+                {/* CricHeroes / Cricbuzz This Over Ball-by-Ball Strip + PowerPlay Toggles */}
+                <div className="bg-slate-900/95 border border-slate-800 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-1.5 shrink-0 shadow-xs">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     <span className="text-[7.5px] font-sans font-black text-amber-400 uppercase tracking-widest flex items-center gap-1 shrink-0">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                      THIS OVER:
+                      OVER:
                     </span>
                     <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar py-0.5">
                       {(() => {
+                        const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
+                        const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
+                        const isBallInCurrentOver = (overBallStr: string) => {
+                          if (!overBallStr || overBallStr === '0.0') return false;
+                          const parts = overBallStr.split('.');
+                          if (parts.length !== 2) return false;
+                          const overPart = parseInt(parts[0], 10);
+                          const ballPart = parseInt(parts[1], 10);
+                          if (isNaN(overPart) || isNaN(ballPart)) return false;
+                          if (overPart === 0 && ballPart === 0) return false;
+                          const overIndex = ballPart === 0 ? overPart - 1 : overPart;
+                          return overIndex === currentOverNo;
+                        };
                         const comms = (currentInnings.commentaryList || [])
-                          .filter(c => !c.description?.includes('[NEWS BULLETIN]') && !c.description?.includes('come on crease') && !c.description?.includes('Draft Match') && !c.description?.includes('Innings declared'));
-                        const ballsInOver = (currentInnings.ballsBowled % 6) || (currentInnings.ballsBowled > 0 ? 6 : 0);
-                        const recent = comms.slice(0, Math.max(ballsInOver, 6)).reverse();
+                          .filter((c: any) => {
+                            if (!c || !c.overBall || c.overBall === '0.0') return false;
+                            if (
+                              c.type === 'milestone' ||
+                              c.type === 'announcement' ||
+                              c.type === 'break' ||
+                              c.type === 'info' ||
+                              c.specialEvent === 'retire_hurt' ||
+                              c.announcementType === 'new_batsman' ||
+                              c.announcementType === 'new_bowler' ||
+                              c.id?.startsWith('comm-bat-upd-') ||
+                              c.id?.startsWith('comm-bowl-upd-') ||
+                              c.id?.startsWith('comm-over-finish-')
+                            ) return false;
+                            const d = (c.description || '').toLowerCase();
+                            if (
+                              d.includes('[news bulletin]') ||
+                              d.includes('come on crease') ||
+                              d.includes('new batsman') ||
+                              d.includes('will bowl the') ||
+                              d.includes('bowler into the attack') ||
+                              d.includes('draft match') ||
+                              d.includes('innings declared') ||
+                              d.includes('started') ||
+                              d.includes('created') ||
+                              d.includes('toss') ||
+                              d.includes('match launched') ||
+                              d.includes('retired hurt')
+                            ) return false;
+                            return hasBowled ? isBallInCurrentOver(c.overBall) : false;
+                          });
+                        const recent = comms.slice(0, 12).reverse();
                         if (recent.length === 0) {
-                          return <span className="text-[8px] text-slate-500 font-mono italic">Yet to bowl</span>;
+                          return <span className="text-[8px] text-slate-500 font-mono italic">Ready to bowl</span>;
                         }
-                        return recent.map((c, idx) => {
-                          let label = '•';
-                          let pillStyle = 'bg-slate-850 text-slate-300 border-slate-700';
+                        return recent.map((c: any, idx: number) => {
+                          let label = '0';
+                          let pillStyle = 'bg-slate-800 text-slate-200 border-slate-700 font-bold';
                           const d = (c.description || '').toLowerCase();
-                          if (c.type === 'wicket' || d.includes('wicket') || d.includes('bowled') || d.includes('caught') || d.includes('lbw') || d.includes('run out')) {
+                          const bScore = String(c.ballScore || '').trim().toUpperCase();
+                          const runsOffBat = typeof c.runsOffBat === 'number' && !isNaN(c.runsOffBat) ? c.runsOffBat : null;
+
+                          if (c.type === 'wicket' || bScore === 'W' || d.includes('wicket') || d.includes('bowled') || d.includes('caught') || d.includes('lbw') || d.includes('run out') || d.includes('stumped')) {
                             label = 'W';
                             pillStyle = 'bg-rose-600 text-white border-rose-400 font-black shadow-xs';
-                          } else if (d.includes('six') || d.includes('6 run') || d.includes('maximum')) {
-                            label = '6';
-                            pillStyle = 'bg-purple-600 text-white border-purple-400 font-black shadow-xs';
-                          } else if (d.includes('four') || d.includes('4 run') || d.includes('boundary')) {
+                          } else if (c.isNoBall || c.extraType === 'noball' || bScore.startsWith('NB') || d.includes('no ball') || d.includes('no-ball') || d.includes('noball')) {
+                            const nbRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (bScore.includes('+') ? parseInt(bScore.split('+')[1], 10) || 0 : 0);
+                            label = nbRuns > 0 ? `NB+${nbRuns}` : 'Nb';
+                            pillStyle = 'bg-amber-900/90 text-amber-200 border-amber-500/60 font-black';
+                          } else if (c.extraType === 'wide' || bScore.startsWith('WD') || d.includes('wide') || d.includes('+1 wide')) {
+                            const wdRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (bScore.includes('+') ? parseInt(bScore.split('+')[1], 10) || 0 : 0);
+                            label = wdRuns > 0 ? `WD+${wdRuns}` : 'Wd';
+                            pillStyle = 'bg-purple-900/90 text-purple-200 border-purple-500/60 font-black';
+                          } else if (c.extraType === 'legbye' || bScore.endsWith('LB') || d.includes('leg-bye') || d.includes('leg bye')) {
+                            const lbRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (parseInt(bScore, 10) || 1);
+                            label = `${lbRuns}lb`;
+                            pillStyle = 'bg-emerald-900/80 text-emerald-200 border-emerald-500/50 font-bold';
+                          } else if (c.extraType === 'bye' || bScore.endsWith('B') || d.includes('bye run')) {
+                            const byeRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (parseInt(bScore, 10) || 1);
+                            label = `${byeRuns}b`;
+                            pillStyle = 'bg-sky-900/80 text-sky-200 border-sky-500/50 font-bold';
+                          } else if (bScore === '4' || runsOffBat === 4 || (c as any).runs === 4 || d.includes('four') || d.includes('4 run') || d.includes('boundary') || d.includes('चौकार') || d.includes('चौका') || d.includes('४') || /\b4\s*runs?\b/i.test(d)) {
                             label = '4';
                             pillStyle = 'bg-emerald-600 text-white border-emerald-400 font-black shadow-xs';
-                          } else if (d.includes('wide') || d.includes('+1 wide')) {
-                            label = 'Wd';
-                            pillStyle = 'bg-purple-900/90 text-purple-200 border-purple-500/60 font-black';
-                          } else if (d.includes('no ball') || d.includes('noball')) {
-                            label = 'Nb';
-                            pillStyle = 'bg-amber-900/90 text-amber-200 border-amber-500/60 font-black';
-                          } else if (d.includes('1 run') || d.includes('single')) {
-                            label = '1';
-                            pillStyle = 'bg-slate-800 text-cyan-300 border-slate-700 font-bold';
-                          } else if (d.includes('2 run')) {
-                            label = '2';
-                            pillStyle = 'bg-slate-800 text-cyan-300 border-slate-700 font-bold';
-                          } else if (d.includes('3 run')) {
+                          } else if (bScore === '6' || runsOffBat === 6 || (c as any).runs === 6 || d.includes('six') || d.includes('6 run') || d.includes('maximum') || d.includes('षटकार') || d.includes('छक्का') || d.includes('६') || /\b6\s*runs?\b/i.test(d)) {
+                            label = '6';
+                            pillStyle = 'bg-purple-600 text-white border-purple-400 font-black shadow-xs';
+                          } else if (bScore === '1D' || d.includes('declared run') || d.includes('1d')) {
+                            label = '1d';
+                            pillStyle = 'bg-cyan-900 text-cyan-200 border-cyan-400 font-black';
+                          } else if (bScore === '3' || runsOffBat === 3 || d.includes('3 run') || d.includes('three') || d.includes('triple')) {
                             label = '3';
-                            pillStyle = 'bg-slate-800 text-cyan-300 border-slate-700 font-bold';
-                          } else if (d.includes('no run') || d.includes('dot')) {
-                            label = '•';
-                            pillStyle = 'bg-slate-850 text-slate-400 border-slate-800 font-black';
+                            pillStyle = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+                          } else if (bScore === '2' || runsOffBat === 2 || d.includes('2 run') || d.includes('two') || d.includes('couple') || d.includes('double')) {
+                            label = '2';
+                            pillStyle = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+                          } else if (bScore === '1' || runsOffBat === 1 || d.includes('1 run') || d.includes('single') || d.includes('one run') || d.includes('comfortable run') || d.includes('runs immediately')) {
+                            label = '1';
+                            pillStyle = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+                          } else if (d.includes('penalty')) {
+                            const penMatch = d.match(/\+?(\d+)\s*penalty/i) || d.match(/penalty\s*of\s*(\d+)/i);
+                            label = penMatch ? `P${penMatch[1]}` : 'Pen';
+                            pillStyle = 'bg-rose-900/90 text-rose-200 border-rose-500/60 font-black';
+                          } else if (bScore === '0' || runsOffBat === 0 || c.type === 'dot' || d.includes('no run') || d.includes('0 run') || d.includes('dot')) {
+                            label = '0';
+                            pillStyle = 'bg-slate-800 text-slate-300 border-slate-700 font-bold';
                           }
                           return (
                             <span
                               key={c.id || idx}
-                              className={`w-5 h-5 rounded-full border flex items-center justify-center text-[9px] font-mono shrink-0 select-none ${pillStyle}`}
+                              className={`min-w-5 h-5 px-1 rounded-full border flex items-center justify-center text-[9px] font-mono shrink-0 select-none ${pillStyle}`}
                               title={c.description}
                             >
                               {label}
@@ -12469,20 +11678,46 @@ export const CricketScoreboard: React.FC = () => {
                       })()}
                     </div>
                   </div>
-                  <div className="shrink-0 text-[8px] font-mono text-slate-400">
-                    Ball <strong className="text-amber-300">{(currentInnings.ballsBowled % 6) || (currentInnings.ballsBowled > 0 ? 6 : 0)}</strong>/6
+                  <div className="flex items-center gap-1 shrink-0">
+                    {(['PP1', 'PP2', 'PP3'] as const).map((pp) => {
+                      const isAct = match.overlayConfig?.activePowerPlay === pp;
+                      return (
+                        <button
+                          key={pp}
+                          type="button"
+                          onClick={() => {
+                            const nextPP = isAct ? null : pp;
+                            syncMatch(prev => ({
+                              ...prev,
+                              overlayConfig: { ...(prev.overlayConfig || {}), activePowerPlay: nextPP } as any
+                            }));
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase cursor-pointer border transition-all ${
+                            isAct
+                              ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-xs'
+                              : 'bg-slate-950 text-slate-400 border-slate-800'
+                          }`}
+                        >
+                          {pp}
+                        </button>
+                      );
+                    })}
+                    <span className="text-[8px] font-mono text-slate-400 ml-0.5">
+                      <strong className="text-amber-300">{(currentInnings.ballsBowled % 6) || (currentInnings.ballsBowled > 0 ? 6 : 0)}</strong>/6
+                    </span>
                   </div>
                 </div>
 
-                {/* Industrial Scoring Pad Keypad Card */}
-                <div className="bg-slate-900/95 border border-slate-800/90 rounded-2xl p-1.5 sm:p-2 shadow-xl flex flex-col gap-1.5 sm:gap-2 justify-start shrink-0">
-                  {/* 1. Run Buttons (0, 1, 2, 3, 4, 6) */}
-                  <div className="grid grid-cols-6 gap-1 sm:gap-1.5 h-11 sm:h-13">
-                    {[0, 1, 2, 3, 4, 6].map((rCount) => {
+                {/* Industrial Scoring Pad Keypad Card — Stretches to fill 100% remaining height */}
+                <div className="flex-1 min-h-0 bg-slate-900/95 border border-slate-800/90 rounded-2xl p-2 shadow-xl flex flex-col justify-between gap-1.5">
+                  {/* 1. Run Buttons (0, 1, 1D, 2, 3, 4, 6) */}
+                  <div className="grid grid-cols-7 gap-1.5 flex-1 min-h-[44px]">
+                    {([0, 1, '1D', 2, 3, 4, 6] as const).map((rCount) => {
                       let buttonStyle = 'bg-slate-800 hover:bg-slate-750 text-white border border-slate-700/70 shadow-xs';
                       if (rCount === 4) buttonStyle = 'bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white border border-emerald-400 shadow-md shadow-emerald-950/40 ring-1 ring-emerald-400/30';
                       if (rCount === 6) buttonStyle = 'bg-gradient-to-b from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white border border-purple-400 shadow-md shadow-purple-950/40 ring-1 ring-purple-400/30';
                       if (rCount === 0) buttonStyle = 'bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750';
+                      if (rCount === '1D') buttonStyle = 'bg-cyan-950/90 hover:bg-cyan-900 text-cyan-200 border border-cyan-500/50 shadow-xs';
 
                       return (
                         <button
@@ -12491,7 +11726,9 @@ export const CricketScoreboard: React.FC = () => {
                           id={rCount === 6 ? 'btn-six-mobile' : rCount === 4 ? 'btn-four-mobile' : undefined}
                           disabled={isScoringDisabled}
                           onClick={() => {
-                            if (rCount === 6) {
+                            if (rCount === '1D') {
+                              handleScoreEvent({ type: 'runs', val: 1, isDeclaredOne: true });
+                            } else if (rCount === 6) {
                               setActiveAnimation('six');
                               handleScoreEvent({ type: 'runs', val: 6 });
                             } else if (rCount === 4) {
@@ -12504,10 +11741,11 @@ export const CricketScoreboard: React.FC = () => {
                             }
                           }}
                           className={`h-full w-full flex flex-col items-center justify-center rounded-xl font-mono font-black cursor-pointer active:scale-95 transition-transform duration-75 select-none ${buttonStyle}`}
+                          title={rCount === '1D' ? '1 Declared Run (No strike rotation)' : undefined}
                         >
-                          <span className="text-base sm:text-lg font-black leading-none">{rCount}</span>
+                          <span className="text-base sm:text-lg font-black leading-none">{rCount === '1D' ? '1d' : rCount}</span>
                           <span className="text-[6.5px] font-sans font-black uppercase opacity-85 mt-0.5 leading-none">
-                            {rCount === 4 ? 'FOUR' : rCount === 6 ? 'SIX' : rCount === 0 ? 'DOT' : 'RUN'}
+                            {rCount === '1D' ? 'DECL' : rCount === 4 ? 'FOUR' : rCount === 6 ? 'SIX' : rCount === 0 ? 'DOT' : 'RUN'}
                           </span>
                         </button>
                       );
@@ -12515,7 +11753,7 @@ export const CricketScoreboard: React.FC = () => {
                   </div>
 
                   {/* 2. Extras & Byes Buttons (Wide, No Ball, Byes, Leg Byes) */}
-                  <div className="grid grid-cols-4 gap-1 sm:gap-1.5 h-9 sm:h-10">
+                  <div className="grid grid-cols-4 gap-1.5 flex-1 min-h-[38px]">
                     <button
                       type="button"
                       disabled={isScoringDisabled}
@@ -12573,8 +11811,34 @@ export const CricketScoreboard: React.FC = () => {
                     </button>
                   </div>
 
+                  {/* 2.5. Direct 1-Tap Byes (B1-B4) & Leg Byes (LB1-LB4) Strip */}
+                  <div className="grid grid-cols-8 gap-1 shrink-0 h-7.5">
+                    {[1, 2, 3, 4].map((bVal) => (
+                      <button
+                        key={`mob-b-${bVal}`}
+                        type="button"
+                        disabled={isScoringDisabled}
+                        onClick={() => handleScoreEvent({ type: 'bye', val: bVal })}
+                        className="h-full bg-fuchsia-950/85 hover:bg-fuchsia-800 border border-fuchsia-500/40 text-fuchsia-200 rounded-lg text-[8.5px] font-black uppercase cursor-pointer active:scale-95 flex items-center justify-center"
+                      >
+                        B{bVal}
+                      </button>
+                    ))}
+                    {[1, 2, 3, 4].map((lbVal) => (
+                      <button
+                        key={`mob-lb-${lbVal}`}
+                        type="button"
+                        disabled={isScoringDisabled}
+                        onClick={() => handleScoreEvent({ type: 'legbye', val: lbVal })}
+                        className="h-full bg-indigo-950/85 hover:bg-indigo-800 border border-indigo-500/40 text-indigo-200 rounded-lg text-[8.5px] font-black uppercase cursor-pointer active:scale-95 flex items-center justify-center"
+                      >
+                        LB{lbVal}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* 3. Wicket & Undo Buttons */}
-                  <div className="grid grid-cols-12 gap-1 sm:gap-1.5 h-11 sm:h-12">
+                  <div className="grid grid-cols-12 gap-1.5 flex-1 min-h-[42px]">
                     <button
                       type="button"
                       disabled={isScoringDisabled}
@@ -12605,40 +11869,53 @@ export const CricketScoreboard: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* 4. Quick Action Strip: Swap Strike, Free Hit, +5 Penalty */}
-                  <div className="grid grid-cols-3 gap-1 sm:gap-1.5 h-7.5 sm:h-8">
+                  {/* 4. Quick Action Strip: Swap Strike, Free Hit, +5 Penalty, Field Radar */}
+                  <div className="grid grid-cols-4 gap-1.5 shrink-0 h-8.5">
                     <button
                       type="button"
                       disabled={isScoringDisabled}
                       onClick={handleSwapStrikers}
-                      className="h-full flex items-center justify-center gap-1 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 font-black text-[9px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none"
+                      className="h-full flex items-center justify-center gap-1 rounded-xl bg-slate-850 hover:bg-slate-800 text-slate-200 border border-slate-750 font-black text-[8.5px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none"
                     >
                       <ArrowLeftRight size={10} className="text-amber-400 shrink-0" />
-                      <span>Swap Strike</span>
+                      <span>Swap</span>
                     </button>
 
                     <button
                       type="button"
                       disabled={isScoringDisabled}
                       onClick={() => setMatch(prev => ({ ...prev, freeHitNext: !prev.freeHitNext }))}
-                      className={`h-full flex items-center justify-center gap-1 rounded-lg border font-black text-[9px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none ${
+                      className={`h-full flex items-center justify-center gap-1 rounded-xl border font-black text-[8.5px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none ${
                         match.freeHitNext
                           ? 'bg-amber-500/20 text-amber-300 border-amber-400 animate-pulse'
-                          : 'bg-slate-850 hover:bg-slate-800 text-slate-400 border-slate-750'
+                          : 'bg-slate-850 hover:bg-slate-800 text-slate-300 border-slate-750'
                       }`}
                     >
                       <Zap size={10} className={match.freeHitNext ? 'text-amber-400 animate-bounce shrink-0' : 'text-slate-500 shrink-0'} />
-                      <span>{match.freeHitNext ? '⚡ Free Hit: ON' : 'Free Hit'}</span>
+                      <span>{match.freeHitNext ? 'Free Hit ON' : 'Free Hit'}</span>
                     </button>
 
                     <button
                       type="button"
                       disabled={isScoringDisabled}
-                      onClick={() => handleAddPenaltyRuns(5)}
-                      className="h-full flex items-center justify-center gap-1 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 font-black text-[9px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none"
-                      title="Add 5 penalty runs"
+                      id="btn-mobile-penalty"
+                      onClick={() => {
+                        setExtraRunsBallType('penalty');
+                        setShowExtraRunsModal(true);
+                      }}
+                      className="h-full flex items-center justify-center gap-1 rounded-xl bg-rose-950/90 hover:bg-rose-900 text-rose-200 border border-rose-500/60 font-black text-[8.5px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none shadow-xs"
+                      title="Award Penalty Runs (+5 ICC or Custom)"
                     >
-                      <span>⚖️ +5 Pen</span>
+                      <span>⚖️ Penalty</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowFieldPositionModal(true)}
+                      className="h-full flex items-center justify-center gap-1 rounded-xl bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/50 font-black text-[8.5px] uppercase cursor-pointer active:scale-95 transition-transform duration-75 select-none shadow-xs"
+                      title="Open Field Position Manager"
+                    >
+                      <span>🎯 Field</span>
                     </button>
                   </div>
                 </div>
@@ -12648,279 +11925,178 @@ export const CricketScoreboard: React.FC = () => {
             {/* ========================================================================= */}
             {/* 2. DESKTOP VIEW: Full Studio Controls (Hidden on Mobile)                  */}
             {/* ========================================================================= */}
-            <div className="hidden lg:flex flex-col gap-1 sm:gap-1.5 min-h-0 lg:h-full justify-between overflow-hidden">
+            <div className="hidden lg:flex flex-col gap-1.5 min-h-0 lg:h-full justify-between overflow-y-auto custom-scrollbar pr-0.5">
               
               {/* UPPER COMPACT SCORER CONTROLS CONTAINER */}
-              <div className="flex flex-col gap-1 sm:gap-1.5 min-h-0 overflow-y-auto custom-scrollbar flex-1 justify-start">
+              <div className="flex flex-col gap-1 shrink-0 justify-start">
               {/* Direct crease details card */}
-              <div className="p-1.5 sm:p-2 bg-slate-900 border border-slate-800 rounded-xl shrink-0 space-y-1 sm:space-y-1.5 shadow-md">
-                <div className="flex items-center justify-between">
-                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none font-sans">ACTIVE CREASE MATCHUP</span>
+              <div className="p-1.5 bg-slate-900 border border-slate-800 rounded-xl shrink-0 space-y-1 shadow-md">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none font-sans">ACTIVE CREASE MATCHUP</span>
+                    {(() => {
+                      const lastFow = currentInnings.fallOfWickets?.[currentInnings.fallOfWickets.length - 1];
+                      const partRuns = lastFow ? Math.max(0, currentInnings.runs - lastFow.score) : currentInnings.runs;
+                      const stBalls = currentInnings.batsmen[currentInnings.strikerIndex]?.balls || 0;
+                      const nstBalls = currentInnings.batsmen[currentInnings.nonStrikerIndex]?.balls || 0;
+                      const partBalls = lastFow ? stBalls : (stBalls + nstBalls);
+                      return (
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-600/20 border border-emerald-500/40 text-emerald-300 text-[7.5px] font-black font-mono leading-none">
+                          Partnership: {partRuns} ({partBalls})
+                        </span>
+                      );
+                    })()}
+                  </div>
                   {!isSpectator && (
                     <button
                       type="button"
                       onClick={handleSwapStrikers}
-                      className="h-6 px-2 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-750 rounded-lg font-black uppercase text-[8.5px] tracking-wider gap-1 active:scale-95 transition-all cursor-pointer select-none"
-                      title="Swap Strike / Rotate Batters"
+                      className="h-5 px-2 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-750 rounded-md font-black uppercase text-[8px] tracking-wider gap-1 active:scale-95 transition-all cursor-pointer select-none"
+                      title="Change Strike / Rotate Batters"
                     >
-                      <ArrowLeftRight size={10} className="text-amber-400" />
-                      <span>SWAP STRIKE</span>
+                      <ArrowLeftRight size={9} className="text-amber-400" />
+                      <span>CHANGE STRIKE</span>
                     </button>
                   )}
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {/* Striker batsman card */}
                   {(() => {
                     const st = currentInnings.batsmen[currentInnings.strikerIndex];
-                    if (!st) return <div className="text-center py-2 bg-slate-955 rounded-lg text-xs leading-none">Batsman not set</div>;
+                    if (!st) return <div className="text-center py-1.5 bg-slate-955 rounded-lg text-xs leading-none">Batsman not set</div>;
+                    const isStShownOnTv = match.overlayConfig?.activeGraphic === 'batsman_stats';
                     return (
-                      <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-1.5 sm:p-2 relative flex flex-col justify-between">
-                        <span className="absolute top-1 right-1 text-[7px] text-emerald-400 bg-emerald-500/10 px-1 py-0.2 rounded font-black uppercase tracking-widest leading-none">
-                          Striker ★
-                        </span>
-                        
-                        {editStrikerIndex === null ? (
-                          <div className="flex gap-1.5 sm:gap-2 items-center mr-8">
-                            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden bg-slate-950 shrink-0 border border-white/5 flex items-center justify-center">
-                              {match?.playerPhotos?.[st.name.toLowerCase().trim()] ? (
-                                <img src={match.playerPhotos[st.name.toLowerCase().trim()]} alt={st.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                              ) : (
-                                <span className="text-[10px]">👤</span>
-                              )}
-                            </div>
-                            <div className="truncate min-w-0 flex-1 text-left">
-                              <h5 className="font-extrabold text-xs text-white flex items-center gap-1 truncate leading-none">
-                                <button
-                                  type="button"
-                                  onClick={() => openCareerCardByName(st.name, currentInnings.battingTeam)}
-                                  className="hover:underline hover:text-emerald-300 text-left font-extrabold text-xs text-white truncate cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
-                                  title="View Career Stats & Gully Badges"
-                                >
-                                  {st.name}
-                                  <span className="text-[8px] text-amber-400">★</span>
-                                </button>
-                                {!isSpectator && (
-                                  <button onClick={() => setEditStrikerIndex(currentInnings.strikerIndex)} className="text-slate-500 hover:text-emerald-400 p-0 bg-transparent border-none cursor-pointer" title="Edit Batsman Name">
-                                    <Edit size={9} />
-                                  </button>
-                                )}
-                              </h5>
-
-                              {/* Batting squad selector dropdown */}
-                              {!isSpectator && (
-                                <div className="mt-1">
-                                  <select
-                                    value={st.name}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      if (val === '__custom__') {
-                                        setEditStrikerIndex(currentInnings.strikerIndex);
-                                      } else if (val && val !== st.name) {
-                                        handleSelectOrSwapBatsman(val, 'striker');
-                                      }
-                                    }}
-                                    className="w-full max-w-[130px] bg-slate-950 border border-emerald-500/30 text-emerald-300 text-[8px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer truncate"
-                                    title={`Select Striker from ${currentInnings.battingTeam || 'Batting Team'} Squad`}
-                                  >
-                                    <option value={st.name}>🏏 {st.name} (Striker)</option>
-                                    <optgroup label={`${currentInnings.battingTeam || 'Batting Team'} Squad (${activeBattingSquadPlayers.length})`}>
-                                      {activeBattingSquadPlayers.map((p, idx) => {
-                                        const isSt = p.name.toLowerCase().trim() === st.name.toLowerCase().trim();
-                                        const isNst = p.name.toLowerCase().trim() === currentInnings.batsmen[currentInnings.nonStrikerIndex]?.name?.toLowerCase().trim();
-                                        return (
-                                          <option key={idx} value={p.name} disabled={isSt}>
-                                            {isNst ? `⇄ ${p.displayName || p.name} (Swap Crease)` : `👤 ${p.displayName || p.name}`}
-                                          </option>
-                                        );
-                                      })}
-                                    </optgroup>
-                                    <option value="__custom__">✏️ Custom / Edit Name...</option>
-                                  </select>
-                                </div>
-                              )}
-
-                              <p className="text-[7.5px] font-bold text-slate-455 mt-0.5 uppercase font-mono">
-                                SR: {st.balls === 0 ? '0.0' : ((st.runs / st.balls) * 100).toFixed(0)} %
-                              </p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            <div className="flex gap-1 items-center">
-                              <input
-                                type="text"
-                                defaultValue={st.name}
-                                id="cockpit-st-input"
-                                placeholder="Batsman name"
-                                className="bg-slate-900 border border-emerald-500/30 rounded px-1.5 py-0.5 text-xs text-white font-bold outline-none flex-1 w-20 leading-none"
-                              />
-                              <button
-                                onClick={() => {
-                                  const val = (document.getElementById('cockpit-st-input') as HTMLInputElement)?.value;
-                                  if (val && val.trim()) {
-                                    handleUpdateBatsmanName(currentInnings.strikerIndex, val.trim());
-                                  }
-                                  setEditStrikerIndex(null);
-                                }}
-                                className="bg-emerald-500 text-slate-950 font-black rounded px-1.5 py-0.5 border-none cursor-pointer text-[9px] uppercase leading-none"
-                              >
-                                Save
-                              </button>
-                              <button
-                                onClick={() => setEditStrikerIndex(null)}
-                                className="bg-slate-800 text-slate-400 rounded px-1 py-0.5 border-none cursor-pointer text-[9px] leading-none"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                            {activeBattingSquadPlayers.length > 0 && (
-                              <select
-                                defaultValue=""
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (val) handleSelectOrSwapBatsman(val, 'striker');
-                                }}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-300 outline-none cursor-pointer"
-                              >
-                                <option value="" disabled>-- Or choose from {currentInnings.battingTeam || 'Batting'} Squad --</option>
-                                {activeBattingSquadPlayers.map((p, idx) => (
-                                  <option key={idx} value={p.name}>👤 {p.displayName || p.name}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        )}
-
-                        <div className="flex justify-between items-center mt-1 pt-1 border-t border-slate-800/60 gap-1">
-                          <span className="text-[8px] font-mono text-slate-500">{st.fours}x4 / {st.sixes}x6</span>
-                          <div className="flex items-center gap-1.5">
-                            <div className="text-right">
-                              <strong className="text-sm font-black text-emerald-400 font-mono leading-none">{st.runs}</strong>
-                              <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({st.balls}b)</span>
-                            </div>
+                      <div className="bg-emerald-500/5 border border-emerald-500/25 rounded-lg p-1.5 relative flex flex-col justify-between gap-1">
+                        <div className="flex items-center justify-between gap-1 leading-none">
+                          <span className="text-[7px] text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded font-black uppercase tracking-widest leading-none">
+                            🏏 ★ Striker
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextState = isStShownOnTv ? 'none' : 'batsman_stats';
+                                syncMatch(prev => ({
+                                  ...prev,
+                                  overlayConfig: { ...(prev.overlayConfig || {}), activeGraphic: nextState } as any
+                                }));
+                                showNotification(nextState === 'batsman_stats' ? `Showing ${st.name} stats on TV` : 'Batsman card hidden', 'info');
+                              }}
+                              className={`px-1.5 py-0.5 rounded font-black text-[7px] uppercase cursor-pointer border transition-all ${
+                                isStShownOnTv
+                                  ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                  : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/50'
+                              }`}
+                              title="Show Striker Stats Card on Live TV"
+                            >
+                              {isStShownOnTv ? 'Hide' : 'Show'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openCareerCardByName(st.name, currentInnings.battingTeam)}
+                              className="px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-black text-[7px] uppercase cursor-pointer border border-blue-400/40 transition-all"
+                              title="Open Career Profile Card"
+                            >
+                              Profile
+                            </button>
                             {!isSpectator && (
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  disabled={isScoringDisabled}
-                                  onClick={() => openRetireHurtModal('striker')}
-                                  className="px-1.5 py-0.5 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[7.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
-                                  title="Retire Hurt (Injury)"
-                                >
-                                  🩹 RETD
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={isScoringDisabled}
-                                  id="btn-striker-out-quick"
-                                  onClick={() => openWicketModal('striker')}
-                                  className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
-                                  title="Dismiss Striker (Wicket / Out)"
-                                >
-                                  🔴 OUT
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                disabled={isScoringDisabled}
+                                onClick={() => openRetireHurtModal('striker')}
+                                className="px-1 py-0.5 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[6.5px] uppercase rounded border-none cursor-pointer transition-all shrink-0"
+                                title="Retire Hurt (Injury)"
+                              >
+                                RETD
+                              </button>
                             )}
                           </div>
                         </div>
-
-                        {/* Visual 1-Tap Batting Squad Chips for Striker - Collapsible for single-screen view */}
-                        {!isSpectator && activeBattingSquadPlayers.length > 0 && (
-                          <details className="group mt-1 pt-1 border-t border-emerald-500/20">
-                            <summary className="text-[7.5px] font-black uppercase tracking-wider text-emerald-400 cursor-pointer list-none flex items-center justify-between hover:text-emerald-300 select-none py-0.5">
-                              <span className="flex items-center gap-1">
-                                <span>⚡ 1-TAP STRIKER CHIPS</span>
-                                <span className="text-[7px] text-slate-500 font-normal">({activeBattingSquadPlayers.length})</span>
-                              </span>
-                              <span className="text-[7px] text-emerald-400/80 bg-emerald-500/10 px-1 py-0.2 rounded border border-emerald-500/20 group-open:hidden">+ Show</span>
-                              <span className="text-[7px] text-slate-400 bg-slate-800 px-1 py-0.2 rounded hidden group-open:inline">✕ Hide</span>
-                            </summary>
-
-                            <div className="pt-1">
-                              <div className="flex items-center justify-end mb-1">
-                                <button
-                                  type="button"
-                                  onClick={() => setQuickAddCustomStriker(prev => !prev)}
-                                  className="text-[7.5px] font-extrabold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.2 rounded border border-emerald-500/30 cursor-pointer"
-                                >
-                                  {quickAddCustomStriker ? '✕ Cancel' : '+ Custom'}
-                                </button>
+                        
+                        {editStrikerIndex === null ? (
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex gap-1.5 items-center min-w-0 flex-1">
+                              <div className="w-5 h-5 rounded-full overflow-hidden bg-slate-950 shrink-0 border border-white/10 flex items-center justify-center">
+                                {match?.playerPhotos?.[st.name.toLowerCase().trim()] ? (
+                                  <img src={match.playerPhotos[st.name.toLowerCase().trim()]} alt={st.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <span className="text-[8px]">👤</span>
+                                )}
                               </div>
+                              <span className="font-extrabold text-[11px] text-white truncate leading-none">
+                                {st.name}
+                              </span>
+                            </div>
+                            <div className="text-right shrink-0 leading-none">
+                              <strong className="text-xs font-black text-emerald-400 font-mono">{st.runs}</strong>
+                              <span className="text-slate-400 text-[8.5px] ml-0.5 font-mono">({st.balls})</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-1 items-center">
+                            <input
+                              type="text"
+                              defaultValue={st.name}
+                              id="cockpit-st-input"
+                              placeholder="Batsman name"
+                              className="bg-slate-900 border border-emerald-500/30 rounded px-1.5 py-0.5 text-xs text-white font-bold outline-none flex-1 w-20 leading-none"
+                            />
+                            <button
+                              onClick={() => {
+                                const val = (document.getElementById('cockpit-st-input') as HTMLInputElement)?.value;
+                                if (val && val.trim()) {
+                                  handleUpdateBatsmanName(currentInnings.strikerIndex, val.trim());
+                                }
+                                setEditStrikerIndex(null);
+                              }}
+                              className="bg-emerald-500 text-slate-950 font-black rounded px-1.5 py-0.5 border-none cursor-pointer text-[8.5px] uppercase leading-none"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditStrikerIndex(null)}
+                              className="bg-slate-800 text-slate-400 rounded px-1 py-0.5 border-none cursor-pointer text-[8.5px] leading-none"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
 
-                              {quickAddCustomStriker && (
-                                <div className="flex items-center gap-1 mb-1.5">
-                                  <input
-                                    type="text"
-                                    value={customStrikerInput}
-                                    onChange={(e) => setCustomStrikerInput(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter' && customStrikerInput.trim()) {
-                                        handleSelectOrSwapBatsman(customStrikerInput.trim(), 'striker');
-                                        setCustomStrikerInput('');
-                                        setQuickAddCustomStriker(false);
-                                      }
-                                    }}
-                                    placeholder="Type striker name..."
-                                    className="bg-slate-950 border border-emerald-500/40 rounded px-1.5 py-0.5 text-[9px] text-white font-bold outline-none flex-1 min-w-0"
-                                    autoFocus
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (customStrikerInput.trim()) {
-                                        handleSelectOrSwapBatsman(customStrikerInput.trim(), 'striker');
-                                        setCustomStrikerInput('');
-                                        setQuickAddCustomStriker(false);
-                                      }
-                                    }}
-                                    className="px-2 py-0.5 bg-emerald-500 text-slate-950 text-[8px] font-black rounded border-none cursor-pointer"
-                                  >
-                                    Set
-                                  </button>
-                                </div>
-                              )}
-
-                              <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-0.5 max-w-full">
+                        <div className="flex justify-between items-center pt-0.5 border-t border-slate-800/60 gap-1">
+                          {!isSpectator ? (
+                            <select
+                              value={st.name}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '__custom__') {
+                                  setEditStrikerIndex(currentInnings.strikerIndex);
+                                } else if (val && val !== st.name) {
+                                  handleSelectOrSwapBatsman(val, 'striker');
+                                }
+                              }}
+                              className="w-full max-w-[125px] bg-slate-950 border border-emerald-500/30 text-emerald-300 text-[7.5px] font-bold rounded px-1 py-0.5 outline-none cursor-pointer truncate"
+                              title={`Select Striker from ${currentInnings.battingTeam || 'Batting Team'} Squad`}
+                            >
+                              <option value={st.name}>🏏 {st.name} (Striker)</option>
+                              <optgroup label={`${currentInnings.battingTeam || 'Batting Team'} Squad (${activeBattingSquadPlayers.length})`}>
                                 {activeBattingSquadPlayers.map((p, idx) => {
                                   const isSt = p.name.toLowerCase().trim() === st.name.toLowerCase().trim();
                                   const isNst = p.name.toLowerCase().trim() === currentInnings.batsmen[currentInnings.nonStrikerIndex]?.name?.toLowerCase().trim();
-                                  if (isSt) {
-                                    return (
-                                      <span key={`st-chip-${idx}`} className="px-1.5 py-0.5 bg-emerald-500 text-slate-950 text-[8px] font-black rounded whitespace-nowrap shadow-sm shrink-0 flex items-center gap-0.5">
-                                        ✓ {p.displayName || p.name}
-                                      </span>
-                                    );
-                                  }
-                                  if (isNst) {
-                                    return (
-                                      <button
-                                        key={`st-chip-${idx}`}
-                                        type="button"
-                                        onClick={() => handleSelectOrSwapBatsman(p.name, 'striker')}
-                                        className="px-1.5 py-0.5 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 text-[8px] font-bold rounded whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-0.5"
-                                        title="Swap strike with Non-Striker"
-                                      >
-                                        ⇄ {p.displayName || p.name}
-                                      </button>
-                                    );
-                                  }
                                   return (
-                                    <button
-                                      key={`st-chip-${idx}`}
-                                      type="button"
-                                      onClick={() => handleSelectOrSwapBatsman(p.name, 'striker')}
-                                      className="px-1.5 py-0.5 bg-slate-900 hover:bg-emerald-600 text-slate-200 hover:text-white border border-slate-800 hover:border-emerald-500 text-[8px] font-bold rounded whitespace-nowrap shrink-0 transition-all active:scale-95 cursor-pointer flex items-center gap-0.5"
-                                      title={`Put ${p.name} on strike`}
-                                    >
-                                      🏏 {p.displayName || p.name}
-                                    </button>
+                                    <option key={idx} value={p.name} disabled={isSt}>
+                                      {isNst ? `⇄ ${p.displayName || p.name} (Swap Crease)` : `👤 ${p.displayName || p.name}`}
+                                    </option>
                                   );
                                 })}
-                              </div>
-                            </div>
-                          </details>
-                        )}
+                              </optgroup>
+                              <option value="__custom__">✏️ Custom / Edit Name...</option>
+                            </select>
+                          ) : <span />}
+                          <span className="text-[7px] font-mono text-slate-400 shrink-0">
+                            4s: {st.fours} • 6s: {st.sixes} • SR: {st.balls === 0 ? '0.00' : ((st.runs / st.balls) * 100).toFixed(0)}
+                          </span>
+                        </div>
                       </div>
                     );
                   })()}
@@ -12928,254 +12104,139 @@ export const CricketScoreboard: React.FC = () => {
                 {/* Non striker batsman card */}
                 {(() => {
                   const nst = currentInnings.batsmen[currentInnings.nonStrikerIndex];
-                  if (!nst) return <div className="text-center py-2 bg-slate-955 rounded-lg text-xs leading-none">Batsman not set</div>;
+                  if (!nst) return <div className="text-center py-1.5 bg-slate-955 rounded-lg text-xs leading-none">Batsman not set</div>;
+                  const isNstShownOnTv = match.overlayConfig?.activeGraphic === 'player_profile_card';
                   return (
-                    <div className="bg-slate-955 border border-slate-850 rounded-xl p-1.5 sm:p-2 relative flex flex-col justify-between">
-                      <span className="absolute top-1 right-1 text-[7px] text-slate-400 bg-white/5 px-1 py-0.2 rounded font-black uppercase tracking-widest leading-none">
-                        Non-Striker
-                      </span>
-                      
-                      {editNonStrikerIndex === null ? (
-                        <div className="flex gap-1.5 sm:gap-2 items-center mr-8">
-                          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden bg-slate-950 shrink-0 border border-white/5 flex items-center justify-center">
-                            {match?.playerPhotos?.[nst.name.toLowerCase().trim()] ? (
-                              <img src={match.playerPhotos[nst.name.toLowerCase().trim()]} alt={nst.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              <span className="text-[10px]">👤</span>
-                            )}
-                          </div>
-                          <div className="truncate min-w-0 flex-1 text-left">
-                            <h5 className="font-extrabold text-xs text-slate-300 flex items-center gap-1 truncate leading-none">
-                              <button
-                                type="button"
-                                onClick={() => openCareerCardByName(nst.name, currentInnings.battingTeam)}
-                                className="hover:underline hover:text-emerald-300 text-left font-extrabold text-xs text-slate-300 truncate cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
-                                title="View Career Stats & Gully Badges"
-                              >
-                                {nst.name}
-                                <span className="text-[8px] text-amber-400">★</span>
-                              </button>
-                              {!isSpectator && (
-                                <button onClick={() => setEditNonStrikerIndex(currentInnings.nonStrikerIndex)} className="text-slate-500 hover:text-emerald-400 p-0 bg-transparent border-none cursor-pointer" title="Edit Batsman Name">
-                                  <Edit size={9} />
-                                </button>
-                              )}
-                            </h5>
-
-                            {/* Batting squad selector dropdown */}
-                            {!isSpectator && (
-                              <div className="mt-1">
-                                <select
-                                  value={nst.name}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === '__custom__') {
-                                      setEditNonStrikerIndex(currentInnings.nonStrikerIndex);
-                                    } else if (val && val !== nst.name) {
-                                      handleSelectOrSwapBatsman(val, 'non-striker');
-                                    }
-                                  }}
-                                  className="w-full max-w-[130px] bg-slate-950 border border-slate-700 text-slate-300 text-[8px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer truncate"
-                                  title={`Select Non-Striker from ${currentInnings.battingTeam || 'Batting Team'} Squad`}
-                                >
-                                  <option value={nst.name}>🏏 {nst.name} (Non-Striker)</option>
-                                  <optgroup label={`${currentInnings.battingTeam || 'Batting Team'} Squad (${activeBattingSquadPlayers.length})`}>
-                                    {activeBattingSquadPlayers.map((p, idx) => {
-                                      const isNst = p.name.toLowerCase().trim() === nst.name.toLowerCase().trim();
-                                      const isSt = p.name.toLowerCase().trim() === currentInnings.batsmen[currentInnings.strikerIndex]?.name?.toLowerCase().trim();
-                                      return (
-                                        <option key={idx} value={p.name} disabled={isNst}>
-                                          {isSt ? `⇄ ${p.displayName || p.name} (Swap Crease)` : `👤 ${p.displayName || p.name}`}
-                                        </option>
-                                      );
-                                    })}
-                                  </optgroup>
-                                  <option value="__custom__">✏️ Custom / Edit Name...</option>
-                                </select>
-                              </div>
-                            )}
-
-                            <p className="text-[7.5px] font-bold text-slate-455 mt-0.5 uppercase font-mono">
-                              SR: {nst.balls === 0 ? '0.0' : ((nst.runs / nst.balls) * 100).toFixed(0)} %
-                            </p>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-1">
-                          <div className="flex gap-1 items-center">
-                            <input
-                              type="text"
-                              defaultValue={nst.name}
-                              id="cockpit-nst-input"
-                              placeholder="Batsman name"
-                              className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white font-bold outline-none flex-1 w-20 leading-none"
-                            />
-                            <button
-                              onClick={() => {
-                                const val = (document.getElementById('cockpit-nst-input') as HTMLInputElement)?.value;
-                                if (val && val.trim()) {
-                                  handleUpdateBatsmanName(currentInnings.nonStrikerIndex, val.trim());
-                                }
-                                setEditNonStrikerIndex(null);
-                              }}
-                              className="bg-emerald-500 text-slate-950 font-black rounded px-1.5 py-0.5 border-none cursor-pointer text-[9px] uppercase leading-none"
-                            >
-                              Save
-                            </button>
-                            <button
-                              onClick={() => setEditNonStrikerIndex(null)}
-                              className="bg-slate-800 text-slate-400 rounded px-1 py-0.5 border-none cursor-pointer text-[9px] leading-none"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                          {activeBattingSquadPlayers.length > 0 && (
-                            <select
-                              defaultValue=""
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (val) handleSelectOrSwapBatsman(val, 'non-striker');
-                              }}
-                              className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-300 outline-none cursor-pointer"
-                            >
-                              <option value="" disabled>-- Or choose from {currentInnings.battingTeam || 'Batting'} Squad --</option>
-                              {activeBattingSquadPlayers.map((p, idx) => (
-                                <option key={idx} value={p.name}>👤 {p.displayName || p.name}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-slate-800/60 gap-1.5">
-                        <span className="text-[8.5px] font-mono text-slate-505">{nst.fours}x4 / {nst.sixes}x6</span>
-                        <div className="flex items-center gap-1.5">
-                          <div className="text-right">
-                            <strong className="text-sm font-black text-slate-205 font-mono leading-none">{nst.runs}</strong>
-                            <span className="text-slate-450 text-[9px] ml-0.5 font-mono">({nst.balls}b)</span>
-                          </div>
+                    <div className="bg-slate-955 border border-slate-850 rounded-lg p-1.5 relative flex flex-col justify-between gap-1">
+                      <div className="flex items-center justify-between gap-1 leading-none">
+                        <span className="text-[7px] text-slate-400 bg-white/5 px-1 py-0.5 rounded font-black uppercase tracking-widest leading-none">
+                          🏏 Non-Striker
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextState = isNstShownOnTv ? 'none' : 'player_profile_card';
+                              syncMatch(prev => ({
+                                ...prev,
+                                overlayConfig: { ...(prev.overlayConfig || {}), activeGraphic: nextState } as any
+                              }));
+                              showNotification(nextState === 'player_profile_card' ? `Showing ${nst.name} card on TV` : 'Player card hidden', 'info');
+                            }}
+                            className={`px-1.5 py-0.5 rounded font-black text-[7px] uppercase cursor-pointer border transition-all ${
+                              isNstShownOnTv
+                                ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/50'
+                            }`}
+                            title="Show Non-Striker Card on Live TV"
+                          >
+                            {isNstShownOnTv ? 'Hide' : 'Show'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openCareerCardByName(nst.name, currentInnings.battingTeam)}
+                            className="px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-black text-[7px] uppercase cursor-pointer border border-blue-400/40 transition-all"
+                            title="Open Career Profile Card"
+                          >
+                            Profile
+                          </button>
                           {!isSpectator && (
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={isScoringDisabled}
-                                onClick={() => openRetireHurtModal('non-striker')}
-                                className="px-1.5 py-1 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[7.5px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
-                                title="Retire Hurt (Injury)"
-                              >
-                                🩹 RETD
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isScoringDisabled}
-                                id="btn-nonstriker-out-quick"
-                                onClick={() => openWicketModal('non-striker')}
-                                className="px-2 py-1 bg-rose-600/90 hover:bg-rose-500 active:scale-95 text-white font-black text-[8px] uppercase tracking-wider rounded-lg border-none cursor-pointer flex items-center gap-0.5 shadow transition-all shrink-0"
-                                title="Dismiss Non-Striker (Run Out / Mankad)"
-                              >
-                                🔴 OUT
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              disabled={isScoringDisabled}
+                              onClick={() => openRetireHurtModal('non-striker')}
+                              className="px-1 py-0.5 bg-amber-600/90 hover:bg-amber-500 active:scale-95 text-white font-black text-[6.5px] uppercase rounded border-none cursor-pointer transition-all shrink-0"
+                              title="Retire Hurt (Injury)"
+                            >
+                              RETD
+                            </button>
                           )}
                         </div>
                       </div>
-
-                      {/* Visual 1-Tap Batting Squad Chips for Non-Striker - Collapsible for single-screen view */}
-                      {!isSpectator && activeBattingSquadPlayers.length > 0 && (
-                        <details className="group mt-1 pt-1 border-t border-slate-800">
-                          <summary className="text-[7.5px] font-black uppercase tracking-wider text-slate-400 cursor-pointer list-none flex items-center justify-between hover:text-slate-300 select-none py-0.5">
-                            <span className="flex items-center gap-1">
-                              <span>⚡ 1-TAP NON-STRIKER CHIPS</span>
-                              <span className="text-[7px] text-slate-500 font-normal">({activeBattingSquadPlayers.length})</span>
-                            </span>
-                            <span className="text-[7px] text-slate-400/80 bg-white/5 px-1 py-0.2 rounded border border-white/10 group-open:hidden">+ Show</span>
-                            <span className="text-[7px] text-slate-400 bg-slate-800 px-1 py-0.2 rounded hidden group-open:inline">✕ Hide</span>
-                          </summary>
-
-                          <div className="pt-1">
-                            <div className="flex items-center justify-end mb-1">
-                              <button
-                                type="button"
-                                onClick={() => setQuickAddCustomNonStriker(prev => !prev)}
-                                className="text-[7.5px] font-extrabold text-slate-400 hover:text-slate-300 bg-white/5 hover:bg-white/10 px-1.5 py-0.2 rounded border border-white/10 cursor-pointer"
-                              >
-                                {quickAddCustomNonStriker ? '✕ Cancel' : '+ Custom'}
-                              </button>
+                      
+                      {editNonStrikerIndex === null ? (
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex gap-1.5 items-center min-w-0 flex-1">
+                            <div className="w-5 h-5 rounded-full overflow-hidden bg-slate-950 shrink-0 border border-white/10 flex items-center justify-center">
+                              {match?.playerPhotos?.[nst.name.toLowerCase().trim()] ? (
+                                <img src={match.playerPhotos[nst.name.toLowerCase().trim()]} alt={nst.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-[8px]">👤</span>
+                              )}
                             </div>
+                            <span className="font-extrabold text-[11px] text-slate-200 truncate leading-none">
+                              {nst.name}
+                            </span>
+                          </div>
+                          <div className="text-right shrink-0 leading-none">
+                            <strong className="text-xs font-black text-slate-200 font-mono">{nst.runs}</strong>
+                            <span className="text-slate-400 text-[8.5px] ml-0.5 font-mono">({nst.balls})</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1 items-center">
+                          <input
+                            type="text"
+                            defaultValue={nst.name}
+                            id="cockpit-nst-input"
+                            placeholder="Batsman name"
+                            className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-xs text-white font-bold outline-none flex-1 w-20 leading-none"
+                          />
+                          <button
+                            onClick={() => {
+                              const val = (document.getElementById('cockpit-nst-input') as HTMLInputElement)?.value;
+                              if (val && val.trim()) {
+                                handleUpdateBatsmanName(currentInnings.nonStrikerIndex, val.trim());
+                              }
+                              setEditNonStrikerIndex(null);
+                            }}
+                            className="bg-emerald-500 text-slate-950 font-black rounded px-1.5 py-0.5 border-none cursor-pointer text-[8.5px] uppercase leading-none"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => setEditNonStrikerIndex(null)}
+                            className="bg-slate-800 text-slate-400 rounded px-1 py-0.5 border-none cursor-pointer text-[8.5px] leading-none"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
 
-                            {quickAddCustomNonStriker && (
-                              <div className="flex items-center gap-1 mb-1.5">
-                                <input
-                                  type="text"
-                                  value={customNonStrikerInput}
-                                  onChange={(e) => setCustomNonStrikerInput(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && customNonStrikerInput.trim()) {
-                                      handleSelectOrSwapBatsman(customNonStrikerInput.trim(), 'non-striker');
-                                      setCustomNonStrikerInput('');
-                                      setQuickAddCustomNonStriker(false);
-                                    }
-                                  }}
-                                  placeholder="Type non-striker name..."
-                                  className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[9px] text-white font-bold outline-none flex-1 min-w-0"
-                                  autoFocus
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (customNonStrikerInput.trim()) {
-                                      handleSelectOrSwapBatsman(customNonStrikerInput.trim(), 'non-striker');
-                                      setCustomNonStrikerInput('');
-                                      setQuickAddCustomNonStriker(false);
-                                    }
-                                  }}
-                                  className="px-2 py-0.5 bg-slate-700 text-white text-[8px] font-black rounded border-none cursor-pointer"
-                                >
-                                  Set
-                                </button>
-                              </div>
-                            )}
-
-                            <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-0.5 max-w-full">
+                      <div className="flex justify-between items-center pt-0.5 border-t border-slate-800/60 gap-1">
+                        {!isSpectator ? (
+                          <select
+                            value={nst.name}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === '__custom__') {
+                                setEditNonStrikerIndex(currentInnings.nonStrikerIndex);
+                              } else if (val && val !== nst.name) {
+                                handleSelectOrSwapBatsman(val, 'non-striker');
+                              }
+                            }}
+                            className="w-full max-w-[125px] bg-slate-950 border border-slate-700 text-slate-300 text-[7.5px] font-bold rounded px-1 py-0.5 outline-none cursor-pointer truncate"
+                            title={`Select Non-Striker from ${currentInnings.battingTeam || 'Batting Team'} Squad`}
+                          >
+                            <option value={nst.name}>🏏 {nst.name} (Non-Striker)</option>
+                            <optgroup label={`${currentInnings.battingTeam || 'Batting Team'} Squad (${activeBattingSquadPlayers.length})`}>
                               {activeBattingSquadPlayers.map((p, idx) => {
                                 const isNst = p.name.toLowerCase().trim() === nst.name.toLowerCase().trim();
                                 const isSt = p.name.toLowerCase().trim() === currentInnings.batsmen[currentInnings.strikerIndex]?.name?.toLowerCase().trim();
-                                if (isNst) {
-                                  return (
-                                    <span key={`nst-chip-${idx}`} className="px-1.5 py-0.5 bg-slate-700 text-white text-[8px] font-black rounded whitespace-nowrap shadow-sm shrink-0 flex items-center gap-0.5">
-                                      ✓ {p.displayName || p.name}
-                                    </span>
-                                  );
-                                }
-                                if (isSt) {
-                                  return (
-                                    <button
-                                      key={`nst-chip-${idx}`}
-                                      type="button"
-                                      onClick={() => handleSelectOrSwapBatsman(p.name, 'non-striker')}
-                                      className="px-1.5 py-0.5 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 text-[8px] font-bold rounded whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-0.5"
-                                      title="Swap strike with Striker"
-                                    >
-                                      ⇄ {p.displayName || p.name}
-                                    </button>
-                                  );
-                                }
                                 return (
-                                  <button
-                                    key={`nst-chip-${idx}`}
-                                    type="button"
-                                    onClick={() => handleSelectOrSwapBatsman(p.name, 'non-striker')}
-                                    className="px-1.5 py-0.5 bg-slate-900 hover:bg-emerald-600 text-slate-200 hover:text-white border border-slate-800 hover:border-emerald-500 text-[8px] font-bold rounded whitespace-nowrap shrink-0 transition-all active:scale-95 cursor-pointer flex items-center gap-0.5"
-                                    title={`Put ${p.name} at non-striker end`}
-                                  >
-                                    🏏 {p.displayName || p.name}
-                                  </button>
+                                  <option key={idx} value={p.name} disabled={isNst}>
+                                    {isSt ? `⇄ ${p.displayName || p.name} (Swap Crease)` : `👤 ${p.displayName || p.name}`}
+                                  </option>
                                 );
                               })}
-                            </div>
-                          </div>
-                        </details>
-                      )}
+                            </optgroup>
+                            <option value="__custom__">✏️ Custom / Edit Name...</option>
+                          </select>
+                        ) : <span />}
+                        <span className="text-[7px] font-mono text-slate-400 shrink-0">
+                          4s: {nst.fours} • 6s: {nst.sixes} • SR: {nst.balls === 0 ? '0.00' : ((nst.runs / nst.balls) * 100).toFixed(0)}
+                        </span>
+                      </div>
                     </div>
                   );
                 })()}
@@ -13184,27 +12245,20 @@ export const CricketScoreboard: React.FC = () => {
               {/* Bowler Details card */}
               {(() => {
                 const bw = currentInnings.bowlers[currentInnings.currentBowlerIndex];
-                if (!bw) return <div className="text-center py-1.5 bg-slate-955 rounded-lg text-xs leading-none">Bowler not assigned</div>;
+                if (!bw) return <div className="text-center py-1 bg-slate-955 rounded-lg text-xs leading-none">Bowler not assigned</div>;
+                const isBwShownOnTv = match.overlayConfig?.activeGraphic === 'bowler_stats';
                 return (
-                  <div className="bg-slate-950 p-2 border border-slate-850 rounded-xl space-y-1.5">
+                  <div className="bg-slate-950 px-2 py-1 border border-slate-850 rounded-lg">
                     <div className="flex justify-between items-center gap-2">
-                      <div className="truncate flex-1">
-                        <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest block leading-none mb-1">CURRENT ACTIVE BOWLER</span>
-                        {editBowlerIndex === null ? (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <strong className="text-xs font-black text-amber-300 flex items-center gap-1 truncate">
-                              <button
-                                type="button"
-                                onClick={() => openCareerCardByName(bw.name, currentInnings.bowlingTeam)}
-                                className="hover:underline hover:text-amber-200 text-left font-black text-xs text-amber-300 truncate cursor-pointer bg-transparent border-none p-0 flex items-center gap-1"
-                                title="View Career Stats & Gully Badges"
-                              >
+                      <div className="truncate flex-1 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest shrink-0">🥎 BOWLER:</span>
+                          {editBowlerIndex === null ? (
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <strong className="text-[11px] font-black text-amber-300 truncate">
                                 {bw.name}
-                                <span className="text-[8px] text-emerald-400">★</span>
-                              </button>
-                            </strong>
-                            {!isSpectator && (
-                              <div className="flex items-center gap-1">
+                              </strong>
+                              {!isSpectator && (
                                 <select
                                   value={bw.name}
                                   onChange={(e) => {
@@ -13215,7 +12269,7 @@ export const CricketScoreboard: React.FC = () => {
                                       handleSelectOrAddNewBowler(val);
                                     }
                                   }}
-                                  className="bg-slate-900 border border-amber-500/30 text-amber-300 text-[8px] font-bold rounded px-1.5 py-0.5 outline-none cursor-pointer max-w-[135px] truncate"
+                                  className="bg-slate-900 border border-amber-500/30 text-amber-300 text-[7.5px] font-bold rounded px-1 py-0.5 outline-none cursor-pointer max-w-[120px] truncate"
                                   title={`Change Active Bowler from ${currentInnings.bowlingTeam || 'Bowling Team'} Squad`}
                                 >
                                   <option value={bw.name}>🥎 {bw.name} (Active)</option>
@@ -13239,14 +12293,9 @@ export const CricketScoreboard: React.FC = () => {
                                   </optgroup>
                                   <option value="__custom__">✏️ Custom / Edit Name...</option>
                                 </select>
-                                <button onClick={() => setEditBowlerIndex(currentInnings.currentBowlerIndex)} className="text-slate-500 hover:text-emerald-400 p-0 bg-transparent border-none cursor-pointer" title="Edit Bowler Name">
-                                  <Edit size={9} />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
+                              )}
+                            </div>
+                          ) : (
                             <div className="flex gap-1 items-center">
                               <input
                                 type="text"
@@ -13274,149 +12323,50 @@ export const CricketScoreboard: React.FC = () => {
                                 ✕
                               </button>
                             </div>
-                            {activeBowlingSquadPlayers.length > 0 && (
-                              <select
-                                defaultValue=""
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (val) handleSelectOrAddNewBowler(val);
-                                }}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[8px] font-bold text-slate-300 outline-none cursor-pointer"
-                              >
-                                <option value="" disabled>-- Or pick from {currentInnings.bowlingTeam || 'Bowling'} Squad --</option>
-                                {activeBowlingSquadPlayers.map((p, idx) => (
-                                  <option key={idx} value={p.name}>🥎 {p.displayName || p.name}</option>
-                                ))}
-                              </select>
-                            )}
-                          </div>
-                        )}
-                        
-                        <div className="flex gap-2 items-center mt-1 font-mono text-[9px] text-slate-400">
-                          <span>Ovs: <strong className="text-white">{formatOvers(bw.ballsBowled)}</strong></span>
-                          <span>Runs: <strong className="text-white">{bw.runsConceded}</strong></span>
-                          <span>Econ: <strong className="text-white">{bw.ballsBowled === 0 ? '0.0' : ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(2)}</strong></span>
+                          )}
                         </div>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-[7px] font-black text-slate-500 uppercase tracking-widest block leading-none mb-0.5">WKTS</span>
-                        <strong className="text-xl font-black text-rose-500 font-mono leading-none">{bw.wickets}</strong>
+                        
+                        <div className="flex gap-1.5 items-center font-mono text-[8.5px] text-slate-400 shrink-0">
+                          <span className="text-white font-black">{formatOvers(bw.ballsBowled)} - {bw.maidens || 0} - {bw.runsConceded} - <strong className="text-rose-500">{bw.wickets}</strong></span>
+                          <span>Econ:<strong className="text-white ml-0.5">{bw.ballsBowled === 0 ? '0.0' : ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(1)}</strong></span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextState = isBwShownOnTv ? 'none' : 'bowler_stats';
+                              syncMatch(prev => ({
+                                ...prev,
+                                overlayConfig: { ...(prev.overlayConfig || {}), activeGraphic: nextState } as any
+                              }));
+                              showNotification(nextState === 'bowler_stats' ? `Showing ${bw.name} bowling figures on TV` : 'Bowler card hidden', 'info');
+                            }}
+                            className={`px-1.5 py-0.5 rounded font-sans font-black text-[7px] uppercase cursor-pointer border transition-all ${
+                              isBwShownOnTv
+                                ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/50'
+                            }`}
+                            title="Show Bowler Figures on Live TV"
+                          >
+                            {isBwShownOnTv ? 'Hide' : 'Show'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openCareerCardByName(bw.name, currentInnings.bowlingTeam)}
+                            className="px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-sans font-black text-[7px] uppercase cursor-pointer border border-blue-400/40 transition-all"
+                            title="Open Bowler Career Profile"
+                          >
+                            Profile
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowFieldPositionModal(true)}
+                            className="px-1.5 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white font-sans font-black text-[7px] uppercase cursor-pointer border border-teal-400/40 transition-all"
+                            title="Open Field TV Manager to Set Field Positions"
+                          >
+                            🎯 Set Field
+                          </button>
+                        </div>
                       </div>
                     </div>
-
-                    {/* Visual 1-Tap Bowler Chips - Collapsible for single-screen view */}
-                    {!isSpectator && (
-                      <details className="group mt-1 pt-1 border-t border-slate-800/80">
-                        <summary className="text-[7.5px] font-black uppercase tracking-wider text-amber-400 cursor-pointer list-none flex items-center justify-between hover:text-amber-300 select-none py-0.5">
-                          <span className="flex items-center gap-1">
-                            <span>⚡ 1-TAP BOWLER CHIPS</span>
-                            <span className="text-[7px] text-slate-500 font-normal">
-                              ({currentInnings.bowlers.length} active • {activeBowlingSquadPlayers.length} squad)
-                            </span>
-                          </span>
-                          <span className="text-[7px] text-amber-400/80 bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20 group-open:hidden">+ Show</span>
-                          <span className="text-[7px] text-slate-400 bg-slate-800 px-1 py-0.2 rounded hidden group-open:inline">✕ Hide</span>
-                        </summary>
-
-                        <div className="pt-1">
-                          <div className="flex items-center justify-end mb-1">
-                            <button
-                              type="button"
-                              onClick={() => setQuickAddCustomBowler(prev => !prev)}
-                              className="text-[7.5px] font-extrabold text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-1.5 py-0.2 rounded border border-amber-500/30 cursor-pointer"
-                            >
-                              {quickAddCustomBowler ? '✕ Cancel' : '+ Custom'}
-                            </button>
-                          </div>
-
-                          {quickAddCustomBowler && (
-                            <div className="flex items-center gap-1 mb-1.5">
-                              <input
-                                type="text"
-                                value={customBowlerInput}
-                                onChange={(e) => setCustomBowlerInput(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && customBowlerInput.trim()) {
-                                    handleSelectOrAddNewBowler(customBowlerInput.trim());
-                                    setCustomBowlerInput('');
-                                    setQuickAddCustomBowler(false);
-                                  }
-                                }}
-                                placeholder="Type new bowler name..."
-                                className="bg-slate-900 border border-amber-500/40 rounded px-1.5 py-0.5 text-[9px] text-white font-bold outline-none flex-1 min-w-0"
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (customBowlerInput.trim()) {
-                                    handleSelectOrAddNewBowler(customBowlerInput.trim());
-                                    setCustomBowlerInput('');
-                                    setQuickAddCustomBowler(false);
-                                  }
-                                }}
-                                className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[8px] font-black rounded border-none cursor-pointer"
-                              >
-                                Add & Bowl
-                              </button>
-                            </div>
-                          )}
-
-                          <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-0.5 max-w-full">
-                            {/* 1. Active match bowlers */}
-                            {currentInnings.bowlers.map((b, idx) => {
-                              const isCurrent = idx === currentInnings.currentBowlerIndex;
-                              const isOverEnd = currentInnings.ballsBowled > 0 && currentInnings.ballsBowled % 6 === 0;
-                              const isConsecutiveRestricted = isOverEnd && idx === currentInnings.currentBowlerIndex;
-
-                              if (isCurrent) {
-                                return (
-                                  <span key={`b-act-${idx}`} className="px-1.5 py-0.5 bg-amber-500 text-slate-950 text-[8px] font-black rounded whitespace-nowrap shadow-sm shrink-0 flex items-center gap-0.5">
-                                    ✓ 🥎 {b.name} ({formatOvers(b.ballsBowled)}ov, {b.wickets}w)
-                                  </span>
-                                );
-                              }
-
-                              if (isConsecutiveRestricted) {
-                                return (
-                                  <span key={`b-act-${idx}`} className="px-1.5 py-0.5 bg-slate-900 border border-slate-800 text-slate-500 text-[8px] font-bold rounded whitespace-nowrap shrink-0 opacity-60 cursor-not-allowed flex items-center gap-0.5" title="Consecutive over limit">
-                                    🚫 {b.name} (Just Bowled)
-                                  </span>
-                                );
-                              }
-
-                              return (
-                                <button
-                                  key={`b-act-${idx}`}
-                                  type="button"
-                                  onClick={() => handleSelectOrAddNewBowler(b.name)}
-                                  className="px-1.5 py-0.5 bg-slate-800 hover:bg-amber-500 text-amber-200 hover:text-slate-950 border border-amber-500/30 text-[8px] font-bold rounded whitespace-nowrap shrink-0 transition-all active:scale-95 cursor-pointer flex items-center gap-0.5"
-                                  title={`Switch active bowler to ${b.name}`}
-                                >
-                                  🥎 {b.name} ({formatOvers(b.ballsBowled)}ov, {b.wickets}w)
-                                </button>
-                              );
-                            })}
-
-                            {/* 2. Squad bowlers who haven't bowled yet */}
-                            {activeBowlingSquadPlayers
-                              .filter(p => !currentInnings.bowlers.some(b => cleanPlayerName(b.name).toLowerCase() === cleanPlayerName(p.name).toLowerCase()))
-                              .map((p, idx) => (
-                                <button
-                                  key={`b-sq-${idx}`}
-                                  type="button"
-                                  onClick={() => handleSelectOrAddNewBowler(p.name)}
-                                  className="px-1.5 py-0.5 bg-slate-900 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 text-[8px] font-bold rounded whitespace-nowrap shrink-0 transition-all active:scale-95 cursor-pointer flex items-center gap-0.5"
-                                  title={`Bring ${p.name} to bowl`}
-                                >
-                                  + 🥎 {p.displayName || p.name}
-                                </button>
-                              ))}
-                          </div>
-                        </div>
-                      </details>
-                    )}
                   </div>
                 );
               })()}
@@ -13486,26 +12436,183 @@ export const CricketScoreboard: React.FC = () => {
                 });
                 showNotification('Voice Command: Dismissed broadcast overlay.', 'info');
               }}
+              onAddPenalty={handleAddPenaltyRuns}
+              onToggleFreeHit={() => {
+                setMatch(prev => ({ ...prev, freeHitNext: !prev.freeHitNext }));
+              }}
             />
+
+            {/* Live Over Timeline & PowerPlay Strip (Single-Line Compact Bar) */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-2 py-1 flex items-center justify-between gap-1.5 shrink-0 shadow-xs">
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <span className="text-[7.5px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1 shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  THIS OVER:
+                </span>
+                <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar py-0.5">
+                  {(() => {
+                    const hasBowled = Boolean(currentInnings.ballsBowled && currentInnings.ballsBowled > 0);
+                    const currentOverNo = hasBowled ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
+                    const isBallInCurrentOver = (overBallStr: string) => {
+                      if (!overBallStr || overBallStr === '0.0') return false;
+                      const parts = overBallStr.split('.');
+                      if (parts.length !== 2) return false;
+                      const overPart = parseInt(parts[0], 10);
+                      const ballPart = parseInt(parts[1], 10);
+                      if (isNaN(overPart) || isNaN(ballPart)) return false;
+                      if (overPart === 0 && ballPart === 0) return false;
+                      const overIndex = ballPart === 0 ? overPart - 1 : overPart;
+                      return overIndex === currentOverNo;
+                    };
+                    const comms = (currentInnings.commentaryList || [])
+                      .filter((c: any) => {
+                        if (!c || !c.overBall || c.overBall === '0.0') return false;
+                        if (
+                          c.type === 'milestone' ||
+                          c.type === 'announcement' ||
+                          c.type === 'break' ||
+                          c.type === 'info' ||
+                          c.specialEvent === 'retire_hurt' ||
+                          c.announcementType === 'new_batsman' ||
+                          c.announcementType === 'new_bowler' ||
+                          c.id?.startsWith('comm-bat-upd-') ||
+                          c.id?.startsWith('comm-bowl-upd-') ||
+                          c.id?.startsWith('comm-over-finish-')
+                        ) return false;
+                        const d = (c.description || '').toLowerCase();
+                        if (
+                          d.includes('[news bulletin]') ||
+                          d.includes('come on crease') ||
+                          d.includes('new batsman') ||
+                          d.includes('will bowl the') ||
+                          d.includes('bowler into the attack') ||
+                          d.includes('draft match') ||
+                          d.includes('innings declared') ||
+                          d.includes('started') ||
+                          d.includes('created') ||
+                          d.includes('toss') ||
+                          d.includes('match launched') ||
+                          d.includes('retired hurt')
+                        ) return false;
+                        return hasBowled ? isBallInCurrentOver(c.overBall) : false;
+                      });
+                    const recent = comms.slice(0, 12).reverse();
+                    if (recent.length === 0) {
+                      return <span className="text-[8px] text-slate-500 font-mono italic">0 runs (0 balls)</span>;
+                    }
+                    return recent.map((c: any, idx: number) => {
+                      let label = '0';
+                      let pillStyle = 'bg-slate-800 text-slate-200 border-slate-700 font-bold';
+                      const d = (c.description || '').toLowerCase();
+                      const bScore = String(c.ballScore || '').trim().toUpperCase();
+                      const runsOffBat = typeof c.runsOffBat === 'number' && !isNaN(c.runsOffBat) ? c.runsOffBat : null;
+
+                      if (c.type === 'wicket' || bScore === 'W' || d.includes('wicket') || d.includes('bowled') || d.includes('caught') || d.includes('lbw') || d.includes('run out') || d.includes('stumped')) {
+                        label = 'W';
+                        pillStyle = 'bg-rose-600 text-white border-rose-400 font-black';
+                      } else if (c.isNoBall || c.extraType === 'noball' || bScore.startsWith('NB') || d.includes('no ball') || d.includes('no-ball') || d.includes('noball')) {
+                        const nbRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (bScore.includes('+') ? parseInt(bScore.split('+')[1], 10) || 0 : 0);
+                        label = nbRuns > 0 ? `NB+${nbRuns}` : 'Nb';
+                        pillStyle = 'bg-amber-900/90 text-amber-200 border-amber-500/60 font-black';
+                      } else if (c.extraType === 'wide' || bScore.startsWith('WD') || d.includes('wide')) {
+                        const wdRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (bScore.includes('+') ? parseInt(bScore.split('+')[1], 10) || 0 : 0);
+                        label = wdRuns > 0 ? `WD+${wdRuns}` : 'Wd';
+                        pillStyle = 'bg-purple-900/90 text-purple-200 border-purple-500/60 font-black';
+                      } else if (c.extraType === 'legbye' || bScore.endsWith('LB') || d.includes('leg-bye') || d.includes('leg bye')) {
+                        const lbRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (parseInt(bScore, 10) || 1);
+                        label = `${lbRuns}lb`;
+                        pillStyle = 'bg-emerald-900/80 text-emerald-200 border-emerald-500/50 font-bold';
+                      } else if (c.extraType === 'bye' || bScore.endsWith('B') || d.includes('bye run')) {
+                        const byeRuns = runsOffBat && runsOffBat > 0 ? runsOffBat : (parseInt(bScore, 10) || 1);
+                        label = `${byeRuns}b`;
+                        pillStyle = 'bg-sky-900/80 text-sky-200 border-sky-500/50 font-bold';
+                      } else if (bScore === '4' || runsOffBat === 4 || (c as any).runs === 4 || d.includes('four') || d.includes('4 run') || d.includes('boundary') || d.includes('चौकार') || d.includes('चौका') || d.includes('४') || /\b4\s*runs?\b/i.test(d)) {
+                        label = '4';
+                        pillStyle = 'bg-emerald-600 text-white border-emerald-400 font-black';
+                      } else if (bScore === '6' || runsOffBat === 6 || (c as any).runs === 6 || d.includes('six') || d.includes('6 run') || d.includes('maximum') || d.includes('षटकार') || d.includes('छक्का') || d.includes('६') || /\b6\s*runs?\b/i.test(d)) {
+                        label = '6';
+                        pillStyle = 'bg-purple-600 text-white border-purple-400 font-black';
+                      } else if (bScore === '1D' || d.includes('declared run') || d.includes('1d')) {
+                        label = '1d';
+                        pillStyle = 'bg-cyan-900 text-cyan-200 border-cyan-400 font-black';
+                      } else if (bScore === '3' || runsOffBat === 3 || d.includes('3 run') || d.includes('three') || d.includes('triple')) {
+                        label = '3';
+                        pillStyle = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+                      } else if (bScore === '2' || runsOffBat === 2 || d.includes('2 run') || d.includes('two') || d.includes('couple') || d.includes('double')) {
+                        label = '2';
+                        pillStyle = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+                      } else if (bScore === '1' || runsOffBat === 1 || d.includes('1 run') || d.includes('single') || d.includes('one run') || d.includes('comfortable run') || d.includes('runs immediately')) {
+                        label = '1';
+                        pillStyle = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+                      } else if (d.includes('penalty')) {
+                        const penMatch = d.match(/\+?(\d+)\s*penalty/i) || d.match(/penalty\s*of\s*(\d+)/i);
+                        label = penMatch ? `P${penMatch[1]}` : 'Pen';
+                        pillStyle = 'bg-rose-900/90 text-rose-200 border-rose-500/60 font-black';
+                      } else if (bScore === '0' || runsOffBat === 0 || c.type === 'dot' || d.includes('no run') || d.includes('0 run') || d.includes('dot')) {
+                        label = '0';
+                        pillStyle = 'bg-slate-800 text-slate-300 border-slate-700 font-bold';
+                      }
+                      return (
+                        <span
+                          key={c.id || idx}
+                          className={`min-w-4.5 h-4.5 px-1 rounded-full border flex items-center justify-center text-[8px] font-mono shrink-0 select-none ${pillStyle}`}
+                          title={c.description}
+                        >
+                          {label}
+                        </span>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+
+              {/* PowerPlay PP1 / PP2 / PP3 + Field Radar */}
+              <div className="flex items-center gap-1 shrink-0">
+                {(['PP1', 'PP2', 'PP3'] as const).map((pp) => {
+                  const isAct = match.overlayConfig?.activePowerPlay === pp;
+                  return (
+                    <button
+                      key={pp}
+                      type="button"
+                      onClick={() => {
+                        const nextPP = isAct ? null : pp;
+                        syncMatch(prev => ({
+                          ...prev,
+                          overlayConfig: { ...(prev.overlayConfig || {}), activePowerPlay: nextPP } as any
+                        }));
+                      }}
+                      className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase cursor-pointer border transition-all ${
+                        isAct
+                          ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-xs animate-pulse'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                    >
+                      {pp}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setShowFieldPositionModal(true)}
+                  className="px-1.5 py-0.5 rounded bg-emerald-950/90 hover:bg-emerald-800 text-emerald-200 border border-emerald-500/40 text-[7.5px] font-black uppercase cursor-pointer"
+                >
+                  🎯 Field
+                </button>
+              </div>
+            </div>
             </div>
 
-            {/* BALL SCORING PAD - Tactile buttons of 100% compliant dimensions - Always visible on single laptop screen */}
-            <div className="shrink-0 bg-slate-900/98 backdrop-blur-md border border-slate-750 rounded-xl p-1.5 sm:p-2 flex flex-col justify-between relative overflow-visible min-h-0 shadow-2xl select-none mt-auto">
+            {/* COMPACT PROFESSIONAL BALL OUTCOME RUN CHANNELS KEYPAD (No vertical stretching!) */}
+            <div className="shrink-0 bg-slate-900/98 backdrop-blur-md border border-slate-750 rounded-xl p-2 flex flex-col gap-1.5 relative overflow-visible shadow-lg select-none">
               
               {/* Overlay padlock cover */}
               {isScoringDisabled && (
-                <div className="absolute inset-0 bg-slate-950/85 z-40 flex flex-col items-center justify-center p-4 text-center animate-fadeIn select-none">
-                  <div className="bg-slate-900 border border-amber-500/20 p-4 rounded-xl max-w-xs space-y-2 shadow-xl">
-                    <div className="w-9 h-9 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto">
-                      <Lock size={18} />
-                    </div>
-                    <h5 className="font-black uppercase tracking-wider text-amber-500 text-xs">Scoring Panel is Locked</h5>
-                    <p className="text-[9.5px] text-slate-400 leading-relaxed font-bold">
-                      All run-scoring inputs are currently locked since this innings has concluded or declared.
-                    </p>
+                <div className="absolute inset-0 bg-slate-950/85 z-40 flex flex-col items-center justify-center p-2 text-center animate-fadeIn select-none rounded-xl">
+                  <div className="bg-slate-900 border border-amber-500/20 p-2 rounded-xl max-w-xs space-y-1 shadow-xl">
+                    <h5 className="font-black uppercase tracking-wider text-amber-500 text-[10px]">Scoring Panel is Locked</h5>
                     <button
                       onClick={() => setIsInningsLocked(false)}
-                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[8.5px] font-black tracking-widest uppercase cursor-pointer border-none"
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[8px] font-black tracking-widest uppercase cursor-pointer border-none"
                     >
                       Override Lock Check
                     </button>
@@ -13515,123 +12622,63 @@ export const CricketScoreboard: React.FC = () => {
 
               {/* Overlay Select New Bowler cover */}
               {!isScoringDisabled && isOverCompletedNeedsBowler && (
-                <div className="absolute inset-0 bg-slate-950/95 z-45 flex flex-col items-center justify-center p-4 text-center animate-fadeIn select-none overflow-y-auto">
-                  <div className="bg-slate-900 border border-emerald-500/30 p-4 rounded-xl w-full max-w-sm space-y-3 shadow-xl">
-                    <div className="w-10 h-10 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center mx-auto">
-                      <UserPlus size={20} />
-                    </div>
-                    <div>
-                      <h5 className="font-black uppercase tracking-wider text-emerald-400 text-xs">Select New Bowler</h5>
-                      <p className="text-[10px] text-slate-400 leading-normal font-bold mt-1">
-                        Over {Math.floor((currentInnings?.ballsBowled || 0) / 6)} has finished. Select a bowler for Over {Math.floor((currentInnings?.ballsBowled || 0) / 6) + 1} to continue scoring.
-                      </p>
+                <div className="absolute inset-0 bg-slate-950/95 z-45 flex flex-col items-center justify-center p-2 text-center animate-fadeIn select-none overflow-y-auto rounded-xl">
+                  <div className="bg-slate-900 border border-emerald-500/30 p-2.5 rounded-xl w-full max-w-sm space-y-1.5 shadow-xl">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <UserPlus size={14} className="text-emerald-400" />
+                      <h5 className="font-black uppercase tracking-wider text-emerald-400 text-[10px]">Select Bowler for Over {Math.floor((currentInnings?.ballsBowled || 0) / 6) + 1}</h5>
                     </div>
 
-                    {/* Bowler select picker dropdown with Bowling Team Squad */}
-                    <div className="space-y-2 text-left">
-                      <div className="flex justify-between items-center">
-                        <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider">
-                          Choose Bowler from {currentInnings?.bowlingTeam || 'Bowling Team'}
-                        </label>
-                        {activeBowlingSquadPlayers.length > 0 && (
-                          <span className="text-[7.5px] font-mono text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded font-black">
-                            {activeBowlingSquadPlayers.length} in Squad
-                          </span>
-                        )}
-                      </div>
-                      <select 
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (!val) return;
-                          if (val.startsWith('idx:')) {
-                            const idx = Number(val.replace('idx:', ''));
-                            if (idx >= 0) handleSelectNewBowlerForOver(idx);
-                          } else if (val.startsWith('name:')) {
-                            const name = val.replace('name:', '');
-                            if (name) handleAddNewBowlerAndProgress(name);
-                          }
-                        }}
-                        defaultValue=""
-                        className="w-full bg-slate-955 border border-emerald-500/30 hover:border-emerald-400 focus:border-emerald-400 rounded-lg py-2 px-3 text-xs text-white font-bold tracking-tight outline-none cursor-pointer transition-all"
-                      >
-                        <option value="" disabled>-- Select Bowler from Squad --</option>
-                        {currentInnings && currentInnings.bowlers.length > 0 && (
-                          <optgroup label="Active Bowlers in Match">
-                            {currentInnings.bowlers.map((b, idx) => {
-                              const isPrevBowler = idx === currentInnings.currentBowlerIndex;
-                              return (
-                                <option key={`active-${idx}`} value={`idx:${idx}`} disabled={isPrevBowler}>
-                                  🥎 {b.name} {isPrevBowler ? '(consecutive over limit)' : `(${formatOvers(b.ballsBowled)} ov, ${b.wickets}w, ${b.runsConceded}r)`}
-                                </option>
-                              );
-                            })}
-                          </optgroup>
-                        )}
-                        {activeBowlingSquadPlayers.length > 0 && (
-                          <optgroup label={`${currentInnings?.bowlingTeam || 'Bowling Team'} Squad Players`}>
-                            {activeBowlingSquadPlayers.map((p, idx) => {
-                              const existingIdx = currentInnings?.bowlers.findIndex(b => cleanPlayerName(b.name).toLowerCase() === cleanPlayerName(p.name).toLowerCase()) ?? -1;
-                              const isPrevBowler = existingIdx !== -1 && existingIdx === currentInnings?.currentBowlerIndex;
-                              const val = existingIdx !== -1 ? `idx:${existingIdx}` : `name:${p.name}`;
-                              return (
-                                <option key={`squad-${idx}`} value={val} disabled={isPrevBowler}>
-                                  👤 {p.displayName || p.name} {isPrevBowler ? '(consecutive limit)' : existingIdx !== -1 ? '(already bowled)' : '(new)'}
-                                </option>
-                              );
-                            })}
-                          </optgroup>
-                        )}
-                      </select>
-                    </div>
+                    <select 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        if (val.startsWith('idx:')) {
+                          const idx = Number(val.replace('idx:', ''));
+                          if (idx >= 0) handleSelectNewBowlerForOver(idx);
+                        } else if (val.startsWith('name:')) {
+                          const name = val.replace('name:', '');
+                          if (name) handleAddNewBowlerAndProgress(name);
+                        }
+                      }}
+                      defaultValue=""
+                      className="w-full bg-slate-955 border border-emerald-500/30 hover:border-emerald-400 focus:border-emerald-400 rounded-lg py-1 px-2 text-[10px] text-white font-bold tracking-tight outline-none cursor-pointer transition-all"
+                    >
+                      <option value="" disabled>-- Select Bowler from Squad --</option>
+                      {currentInnings && currentInnings.bowlers.length > 0 && (
+                        <optgroup label="Active Bowlers in Match">
+                          {currentInnings.bowlers.map((b, idx) => {
+                            const isPrevBowler = idx === currentInnings.currentBowlerIndex;
+                            return (
+                              <option key={`active-${idx}`} value={`idx:${idx}`} disabled={isPrevBowler}>
+                                🥎 {b.name} {isPrevBowler ? '(consecutive over limit)' : `(${formatOvers(b.ballsBowled)} ov, ${b.wickets}w, ${b.runsConceded}r)`}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                      {activeBowlingSquadPlayers.length > 0 && (
+                        <optgroup label={`${currentInnings?.bowlingTeam || 'Bowling Team'} Squad Players`}>
+                          {activeBowlingSquadPlayers.map((p, idx) => {
+                            const existingIdx = currentInnings?.bowlers.findIndex(b => cleanPlayerName(b.name).toLowerCase() === cleanPlayerName(p.name).toLowerCase()) ?? -1;
+                            const isPrevBowler = existingIdx !== -1 && existingIdx === currentInnings?.currentBowlerIndex;
+                            const val = existingIdx !== -1 ? `idx:${existingIdx}` : `name:${p.name}`;
+                            return (
+                              <option key={`squad-${idx}`} value={val} disabled={isPrevBowler}>
+                                👤 {p.displayName || p.name} {isPrevBowler ? '(consecutive limit)' : existingIdx !== -1 ? '(already bowled)' : '(new)'}
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                    </select>
 
-                    {/* Quick select buttons from squad */}
-                    <div className="space-y-1.5 text-left">
-                      <span className="block text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">
-                        Quick 1-Tap Bowler Select
-                      </span>
-                      <div className="flex flex-wrap gap-1 leading-none max-h-24 overflow-y-auto custom-scrollbar">
-                        {/* 1. Existing Bowlers (except previous over bowler) */}
-                        {currentInnings?.bowlers.map((b, idx) => {
-                          const isPrevBowler = idx === currentInnings.currentBowlerIndex;
-                          if (isPrevBowler) return null;
-                          return (
-                            <button
-                              key={`quick-b-${idx}`}
-                              onClick={() => handleSelectNewBowlerForOver(idx)}
-                              className="px-2 py-1.5 bg-slate-800 hover:bg-emerald-600 active:scale-95 text-slate-200 hover:text-white rounded text-[8.5px] font-extrabold uppercase cursor-pointer border-none transition-all"
-                            >
-                              🥎 {b.name}
-                            </button>
-                          );
-                        })}
-                        {/* 2. Squad Bowlers not yet bowled */}
-                        {activeBowlingSquadPlayers
-                          .filter(p => !currentInnings?.bowlers.some(b => cleanPlayerName(b.name).toLowerCase() === cleanPlayerName(p.name).toLowerCase()))
-                          .map((p, idx) => (
-                            <button
-                              key={`quick-sq-${idx}`}
-                              onClick={() => handleAddNewBowlerAndProgress(p.name)}
-                              className="px-2 py-1.5 bg-slate-900 border border-emerald-500/20 hover:bg-emerald-600 hover:border-emerald-500 active:scale-95 text-emerald-300 hover:text-white rounded text-[8.5px] font-extrabold uppercase cursor-pointer transition-all"
-                            >
-                              + {p.name}
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-
-                    <div className="relative flex py-1 items-center">
-                      <div className="flex-grow border-t border-slate-800"></div>
-                      <span className="flex-shrink mx-2 text-[8px] text-slate-500 uppercase tracking-widest font-black">or custom bowler</span>
-                      <div className="flex-grow border-t border-slate-800"></div>
-                    </div>
-
-                    {/* Fast add custom new Bowler inline */}
                     <div className="flex gap-1 text-left">
                       <input
                         type="text"
-                        placeholder="Type unlisted bowler name..."
+                        placeholder="Or type new bowler name..."
                         id="overlay-new-bowler-input"
-                        className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-white font-bold outline-none flex-1 leading-none"
+                        className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[10px] text-white font-bold outline-none flex-1 leading-none"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const val = (e.currentTarget as HTMLInputElement).value;
@@ -13650,7 +12697,7 @@ export const CricketScoreboard: React.FC = () => {
                             input.value = '';
                           }
                         }}
-                        className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 rounded-lg px-2.5 text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all leading-none flex items-center"
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-2.5 text-[9px] font-black uppercase tracking-wider cursor-pointer border-none"
                       >
                         Add
                       </button>
@@ -13659,169 +12706,521 @@ export const CricketScoreboard: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-1 sm:space-y-1.5 flex-1 flex flex-col justify-between">
-                
-                {/* RUN CHANNELS (0,1,2,3,4,6) */}
-                <div className="space-y-0.5">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[7.5px] font-black text-amber-400 uppercase tracking-widest block leading-none font-sans">
-                      BALL OUTCOME RUN CHANNELS
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        disabled={isScoringDisabled}
-                        onClick={() => {
-                          setExtraRunsBallType('bye');
-                          setShowExtraRunsModal(true);
-                        }}
-                        className="px-2 py-0.5 bg-fuchsia-800 hover:bg-fuchsia-700 text-white text-[8px] font-black rounded uppercase cursor-pointer border border-fuchsia-400 shadow-xs active:scale-95 transition-all"
-                        title="Byes - Runs scored without bat hitting ball"
-                      >
-                        Byes (B)
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isScoringDisabled}
-                        onClick={() => {
-                          setExtraRunsBallType('legbye');
-                          setShowExtraRunsModal(true);
-                        }}
-                        className="px-2 py-0.5 bg-indigo-700 hover:bg-indigo-600 text-white text-[8px] font-black rounded uppercase cursor-pointer border border-indigo-400 shadow-xs active:scale-95 transition-all"
-                        title="Leg Byes - Runs scored off batter's body/pads"
-                      >
-                        Leg Byes (LB)
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-6 gap-1 font-black">
-                    {[0, 1, 2, 3, 4, 6].map((rCount) => {
-                      let buttonStyle = 'bg-slate-800 text-white hover:bg-slate-750 active:scale-95';
-                      if (rCount === 4) buttonStyle = 'bg-emerald-600/30 text-emerald-400 border border-emerald-500/40 font-black';
-                      if (rCount === 6) buttonStyle = 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/40 font-black';
-                      if (rCount === 0) buttonStyle = 'bg-slate-850 text-slate-500 hover:bg-slate-800';
-
-                      return (
-                        <button
-                          key={rCount}
-                          id={rCount === 6 ? 'btn-six' : rCount === 4 ? 'btn-four' : undefined}
-                          disabled={isScoringDisabled}
-                          onClick={() => {
-                            if (rCount === 6) {
-                              setActiveAnimation('six');
-                              handleScoreEvent({ type: 'runs', val: 6 });
-                            } else if (rCount === 4) {
-                              setActiveAnimation('four');
-                              handleScoreEvent({ type: 'runs', val: 4 });
-                            } else if (rCount === 0) {
-                              handleScoreEvent({ type: 'dot' });
-                            } else {
-                              handleScoreEvent({ type: 'runs', val: rCount });
-                            }
-                          }}
-                          className={`h-8 sm:h-8.5 w-full flex flex-col items-center justify-center rounded-xl font-mono transition-transform border-none font-black text-xs cursor-pointer ${buttonStyle}`}
-                        >
-                          <span className="leading-none text-sm sm:text-base font-black">{rCount}</span>
-                          <span className="text-[6px] font-sans font-black uppercase opacity-70 mt-0.5">
-                            {rCount === 4 ? 'FOUR' : rCount === 6 ? 'SIX' : rCount === 0 ? 'DOT' : 'RUN'}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* EXTRAS & BYES CHOOSE: Wide, No Ball, Byes, Leg Byes (Always visible in 4 columns on all screens) */}
-                <div className="space-y-0.5">
-                  <div className="grid grid-cols-4 gap-1 sm:gap-1.5 font-bold">
-                    <button
-                      disabled={isScoringDisabled}
-                      id="btn-cockpit-wide"
-                      onClick={() => {
-                        setExtraRunsBallType('wide');
-                        setShowExtraRunsModal(true);
-                      }}
-                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-purple-950/90 border border-purple-600/60 hover:bg-purple-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow-xs px-1"
-                      title="Wide Ball (+1 extra run, re-bowls)"
-                    >
-                      <span className="leading-none font-black text-purple-200 text-[10px] sm:text-xs">+1 WIDE</span>
-                      <span className="text-[6.5px] text-purple-300 font-semibold mt-0.5 truncate max-w-full">Re-bowls</span>
-                    </button>
-                    <button
-                      disabled={isScoringDisabled}
-                      id="btn-cockpit-noball"
-                      onClick={() => {
-                        setExtraRunsBallType('noball');
-                        setShowExtraRunsModal(true);
-                      }}
-                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-amber-950/90 border border-amber-600/60 hover:bg-amber-900 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow-xs px-1"
-                      title="No Ball (+1 extra run, Free Hit)"
-                    >
-                      <span className="leading-none font-black text-amber-200 text-[10px] sm:text-xs">+1 NO BALL</span>
-                      <span className="text-[6.5px] text-amber-300 font-semibold mt-0.5 truncate max-w-full">Free hit</span>
-                    </button>
-                    <button
-                      disabled={isScoringDisabled}
-                      id="btn-cockpit-byes"
-                      onClick={() => {
-                        setExtraRunsBallType('bye');
-                        setShowExtraRunsModal(true);
-                      }}
-                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-fuchsia-800 hover:bg-fuchsia-700 border-2 border-fuchsia-400 text-white rounded-xl font-black cursor-pointer transition-all active:scale-95 text-xs shadow-md px-1"
-                      title="Byes (B) - Runs scored without bat hitting ball"
-                    >
-                      <span className="leading-none font-black text-white text-[10px] sm:text-xs">BYES (B)</span>
-                      <span className="text-[6.5px] text-fuchsia-100 font-semibold mt-0.5 truncate max-w-full">Select runs</span>
-                    </button>
-                    <button
-                      disabled={isScoringDisabled}
-                      id="btn-cockpit-legbyes"
-                      onClick={() => {
-                        setExtraRunsBallType('legbye');
-                        setShowExtraRunsModal(true);
-                      }}
-                      className="h-8 sm:h-9 flex flex-col items-center justify-center bg-indigo-700 hover:bg-indigo-600 border-2 border-indigo-300 text-white rounded-xl font-black cursor-pointer transition-all active:scale-95 text-xs shadow-md px-1"
-                      title="Leg Byes (LB) - Runs scored off batter's body/pads"
-                    >
-                      <span className="leading-none font-black text-white text-[10px] sm:text-xs">LEG BYES (LB)</span>
-                      <span className="text-[6.5px] text-indigo-100 font-semibold mt-0.5 truncate max-w-full">Off pads</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* WICKET & UNDO DUAL CONTROLS - High visibility & tactile touch targets for mobile scorers */}
-                <div className="grid grid-cols-12 gap-1 sm:gap-1.5">
-                  <button
-                    disabled={isScoringDisabled}
-                    id="btn-quick-wicket"
-                    onClick={() => openWicketModal('striker')}
-                    className="col-span-8 sm:col-span-8 h-8 sm:h-9 flex items-center justify-center gap-1.5 bg-rose-600 hover:bg-rose-500 border border-rose-400/50 rounded-xl font-black cursor-pointer text-white transition-all active:scale-95 text-xs shadow-md"
-                    title="Dismiss Batsman (Bowled, Caught, Run Out, LBW, Stumped, etc.)"
-                  >
-                    <AlertCircle size={13} className="animate-pulse text-white shrink-0" />
-                    <span className="font-black tracking-wider uppercase leading-none text-[11px] sm:text-xs">🔴 WICKET / OUT</span>
-                  </button>
-
+              {/* Header bar inside compact pad */}
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest leading-none font-sans">
+                  BALL OUTCOME RUN CHANNELS
+                </span>
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    disabled={isScoringDisabled || undoStack.length === 0}
-                    id="btn-quick-undo-pad"
-                    onClick={handleUndoAction}
-                    className={`col-span-4 sm:col-span-4 h-8 sm:h-9 flex items-center justify-center gap-1 rounded-xl font-black cursor-pointer transition-all active:scale-95 text-xs shadow-md border ${
-                      undoStack.length === 0
-                        ? 'bg-slate-800/80 text-slate-500 border-slate-700/60 cursor-not-allowed opacity-60'
-                        : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 border-amber-300 font-black shadow-amber-500/25 ring-2 ring-amber-400/40'
+                    disabled={isScoringDisabled}
+                    onClick={() => setMatch(prev => ({ ...prev, freeHitNext: !prev.freeHitNext }))}
+                    className={`px-2 py-0.5 text-[7.5px] font-black rounded uppercase cursor-pointer border shadow-xs active:scale-95 transition-all ${
+                      match.freeHitNext
+                        ? 'bg-amber-500 text-slate-950 border-amber-300 animate-pulse'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
                     }`}
-                    title="Instant Undo Last Ball / Scoring Action"
                   >
-                    <Undo size={14} className="stroke-[2.5] shrink-0" />
-                    <span className="font-black tracking-wider uppercase leading-none text-[11px] sm:text-xs">UNDO</span>
-                    <span className={`text-[10px] font-mono px-1 rounded font-black ${undoStack.length === 0 ? 'text-slate-500' : 'bg-slate-950 text-amber-300'}`}>
-                      ({undoStack.length})
-                    </span>
+                    {match.freeHitNext ? '⚡ Free Hit: ON' : '⚡ Free Hit'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Row 1: Primary Run Channels (0, 1, 1 d, 2, 3, FOUR, SIX) - Sleek Compact Buttons */}
+              <div className="grid grid-cols-7 gap-1.5">
+                {([
+                  { val: 0, label: '0', sub: 'DOT', cls: 'bg-blue-600 hover:bg-blue-500 text-white border-blue-400/50' },
+                  { val: 1, label: '1', sub: 'RUN', cls: 'bg-blue-600 hover:bg-blue-500 text-white border-blue-400/50' },
+                  { val: '1D', label: '1 d', sub: 'DECL', cls: 'bg-blue-600 hover:bg-blue-500 text-white border-blue-400/50' },
+                  { val: 2, label: '2', sub: 'RUNS', cls: 'bg-blue-600 hover:bg-blue-500 text-white border-blue-400/50' },
+                  { val: 3, label: '3', sub: 'RUNS', cls: 'bg-blue-600 hover:bg-blue-500 text-white border-blue-400/50' },
+                  { val: 4, label: 'FOUR', sub: '4 RUNS', cls: 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-sm' },
+                  { val: 6, label: 'SIX', sub: '6 RUNS', cls: 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-400 shadow-sm' }
+                ] as const).map((item) => (
+                  <button
+                    key={item.val}
+                    id={item.val === 6 ? 'btn-six' : item.val === 4 ? 'btn-four' : undefined}
+                    disabled={isScoringDisabled}
+                    onClick={() => {
+                      if (item.val === '1D') {
+                        handleScoreEvent({ type: 'runs', val: 1, isDeclaredOne: true });
+                      } else if (item.val === 6) {
+                        setActiveAnimation('six');
+                        handleScoreEvent({ type: 'runs', val: 6 });
+                      } else if (item.val === 4) {
+                        setActiveAnimation('four');
+                        handleScoreEvent({ type: 'runs', val: 4 });
+                      } else if (item.val === 0) {
+                        handleScoreEvent({ type: 'dot' });
+                      } else {
+                        handleScoreEvent({ type: 'runs', val: item.val });
+                      }
+                    }}
+                    className={`h-8.5 flex items-center justify-center rounded-lg border font-black text-[11px] uppercase tracking-wide cursor-pointer transition-all active:scale-95 shadow-xs ${item.cls}`}
+                    title={item.val === '1D' ? '1 Declared Run (No strike rotation)' : `${item.label} (${item.sub})`}
+                  >
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Row 2: Overthrow Runs (4, 5, 6), LB, BYE, Undo */}
+              <div className="grid grid-cols-7 gap-1.5">
+                {([4, 5, 6] as const).map((runVal) => (
+                  <button
+                    key={`run-ov-${runVal}`}
+                    type="button"
+                    disabled={isScoringDisabled}
+                    onClick={() => handleScoreEvent({ type: 'runs', val: runVal })}
+                    className="h-8 flex items-center justify-center rounded-lg bg-blue-600/85 hover:bg-blue-500 border border-blue-400/40 text-white font-black text-[11px] font-mono cursor-pointer transition-all active:scale-95"
+                    title={`Score ${runVal} Runs (Ran / Overthrows)`}
+                  >
+                    {runVal}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  disabled={isScoringDisabled}
+                  id="btn-cockpit-legbyes"
+                  onClick={() => {
+                    setExtraRunsBallType('legbye');
+                    setShowExtraRunsModal(true);
+                  }}
+                  className="h-8 flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 border border-slate-500/50 text-white font-black text-[10px] uppercase cursor-pointer transition-all active:scale-95"
+                  title="Leg Byes (LB)"
+                >
+                  LB
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isScoringDisabled}
+                  id="btn-cockpit-byes"
+                  onClick={() => {
+                    setExtraRunsBallType('bye');
+                    setShowExtraRunsModal(true);
+                  }}
+                  className="h-8 flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 border border-slate-500/50 text-white font-black text-[10px] uppercase cursor-pointer transition-all active:scale-95"
+                  title="Byes (BYE)"
+                >
+                  BYE
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isScoringDisabled || undoStack.length === 0}
+                  id="btn-quick-undo-pad"
+                  onClick={handleUndoAction}
+                  className={`col-span-2 h-8 flex items-center justify-center gap-1 rounded-lg font-black text-[10px] uppercase cursor-pointer transition-all active:scale-95 border ${
+                    undoStack.length === 0
+                      ? 'bg-slate-800/80 text-slate-500 border-slate-700/60 cursor-not-allowed opacity-60'
+                      : 'bg-amber-400 hover:bg-amber-300 text-slate-950 border-amber-300 shadow-xs'
+                  }`}
+                  title="Undo Last Ball / Action"
+                >
+                  <Undo size={12} className="stroke-[2.5] shrink-0" />
+                  <span>UNDO ({undoStack.length})</span>
+                </button>
+              </div>
+
+              {/* Row 3: Wide, No Ball, Penalty, OUT (Wicket) */}
+              <div className="grid grid-cols-4 gap-1.5">
+                <button
+                  type="button"
+                  disabled={isScoringDisabled}
+                  id="btn-cockpit-wide"
+                  onClick={() => {
+                    setExtraRunsBallType('wide');
+                    setShowExtraRunsModal(true);
+                  }}
+                  className="h-8.5 flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 border border-slate-500/50 text-white font-black text-[10.5px] uppercase cursor-pointer transition-all active:scale-95"
+                  title="Wide Ball (+1 extra run, re-bowls)"
+                >
+                  Wide
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isScoringDisabled}
+                  id="btn-cockpit-noball"
+                  onClick={() => {
+                    setExtraRunsBallType('noball');
+                    setShowExtraRunsModal(true);
+                  }}
+                  className="h-8.5 flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 border border-slate-500/50 text-white font-black text-[10.5px] uppercase cursor-pointer transition-all active:scale-95"
+                  title="No Ball (+1 extra run, Free Hit)"
+                >
+                  No Ball
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isScoringDisabled}
+                  id="btn-cockpit-penalty"
+                  onClick={() => {
+                    setExtraRunsBallType('penalty');
+                    setShowExtraRunsModal(true);
+                  }}
+                  className="h-8.5 flex items-center justify-center rounded-lg bg-slate-700 hover:bg-slate-600 border border-slate-500/50 text-white font-black text-[10.5px] uppercase cursor-pointer transition-all active:scale-95"
+                  title="Penalty Runs (+5 or Custom)"
+                >
+                  Penalty
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isScoringDisabled}
+                  id="btn-quick-wicket"
+                  onClick={() => openWicketModal('striker')}
+                  className="h-8.5 flex items-center justify-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-500 border border-rose-400 text-white font-black text-[11px] uppercase tracking-wider cursor-pointer transition-all active:scale-95 shadow-sm"
+                  title="Dismiss Batsman (OUT / Wicket)"
+                >
+                  <span>OUT</span>
+                </button>
+              </div>
+            </div>
+
+            {/* LOWER CONSOLE: Custom Broadcast Message / Commentator + Team Squad Settings (Single-Screen Fit like Reference App) */}
+            <div className="flex-1 min-h-[225px] shrink-0 flex flex-col gap-1.5">
+              {/* A. Commentator & Custom Broadcast Message Quick Bar */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-1.5 shrink-0 grid grid-cols-2 gap-1.5 shadow-sm">
+                {/* Commentator Box */}
+                <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-1">
+                  <span className="text-[7.5px] font-black uppercase text-slate-400 shrink-0">🎙️ Comm:</span>
+                  <input
+                    type="text"
+                    id="desktop-quick-commentator-input"
+                    defaultValue={match.commentatorName || ''}
+                    placeholder="Commentator name..."
+                    className="bg-transparent text-white text-[9px] font-bold outline-none flex-1 min-w-0"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = (e.currentTarget as HTMLInputElement).value.trim();
+                        syncMatch(prev => ({
+                          ...prev,
+                          commentatorName: val,
+                          overlayConfig: {
+                            ...(prev.overlayConfig || {}),
+                            activeGraphic: 'lower_third',
+                            lowerThirdMode: 'intro',
+                            customBannerText: val ? `🎙️ Commentator: ${val}` : ''
+                          } as any
+                        }));
+                        showNotification(val ? `Showing Commentator: ${val} on TV` : 'Updated Commentator', 'success');
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = document.getElementById('desktop-quick-commentator-input') as HTMLInputElement;
+                      const val = input?.value?.trim() || match.commentatorName || '';
+                      const isShowing = match.overlayConfig?.activeGraphic === 'lower_third';
+                      syncMatch(prev => ({
+                        ...prev,
+                        commentatorName: val,
+                        overlayConfig: {
+                          ...(prev.overlayConfig || {}),
+                          activeGraphic: isShowing ? 'none' : 'lower_third',
+                          lowerThirdMode: 'intro',
+                          customBannerText: val ? `🎙️ Commentator: ${val}` : ''
+                        } as any
+                      }));
+                      showNotification(isShowing ? 'Commentator Lower Third Hidden' : `Showing Commentator ${val || ''} on TV`, 'info');
+                    }}
+                    className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[7.5px] uppercase cursor-pointer border-none shrink-0"
+                  >
+                    Show
                   </button>
                 </div>
 
+                {/* Custom Broadcast Message Box */}
+                <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-1">
+                  <span className="text-[7.5px] font-black uppercase text-slate-400 shrink-0">💬 Msg:</span>
+                  <input
+                    type="text"
+                    id="desktop-quick-custom-msg-input"
+                    defaultValue={match.overlayConfig?.customBannerText || ''}
+                    placeholder="Custom TV message..."
+                    className="bg-transparent text-white text-[9px] font-bold outline-none flex-1 min-w-0"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = (e.currentTarget as HTMLInputElement).value.trim();
+                        syncMatch(prev => ({
+                          ...prev,
+                          overlayConfig: {
+                            ...(prev.overlayConfig || {}),
+                            customBanner: val ? 'custom' : 'none',
+                            customBannerText: val,
+                            tickerMessage: val || prev.overlayConfig?.tickerMessage || 'LIVE BROADCAST'
+                          } as any
+                        }));
+                        showNotification(val ? `Custom Message Live on TV: "${val}"` : 'Custom message cleared', 'success');
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = document.getElementById('desktop-quick-custom-msg-input') as HTMLInputElement;
+                      const val = input?.value?.trim() || '';
+                      const isShowing = match.overlayConfig?.customBanner === 'custom' && Boolean(match.overlayConfig?.customBannerText);
+                      syncMatch(prev => ({
+                        ...prev,
+                        overlayConfig: {
+                          ...(prev.overlayConfig || {}),
+                          customBanner: isShowing || !val ? 'none' : 'custom',
+                          customBannerText: isShowing ? '' : val,
+                          tickerMessage: val || prev.overlayConfig?.tickerMessage || 'LIVE BROADCAST'
+                        } as any
+                      }));
+                      showNotification(isShowing ? 'Custom TV Message Hidden' : `Custom Message Live on TV!`, 'info');
+                    }}
+                    className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[7.5px] uppercase cursor-pointer border-none shrink-0"
+                  >
+                    Show
+                  </button>
+                </div>
+              </div>
+
+              {/* B. Team Squad Settings (Side-by-Side Quick Squad Manager for Team A & Team B) */}
+              <div className="flex-1 min-h-[180px] bg-slate-900 border border-slate-800 rounded-xl p-2 flex flex-col gap-1.5 shadow-md">
+                <div className="flex items-center justify-between shrink-0 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSquadSettingsModal(true)}
+                    className="text-[8.5px] font-black uppercase tracking-widest text-slate-200 hover:text-emerald-400 bg-transparent border-none cursor-pointer flex items-center gap-1 p-0 transition-colors"
+                    title="Click to open Team Squad Settings Pop-up"
+                  >
+                    <span>👥 Team Squad Settings</span>
+                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowSquadSettingsModal(true)}
+                      className="px-2 py-0.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[7.5px] uppercase tracking-wider cursor-pointer border border-indigo-400/50 shadow-xs flex items-center gap-1 transition-all active:scale-95"
+                      title="Open Full Team Squad List Pop-up"
+                    >
+                      <span>📋 Squad List Pop-up ({activeBattingSquadPlayers.length + activeBowlingSquadPlayers.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTeamModal(true)}
+                      className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-emerald-300 font-black text-[7.5px] uppercase tracking-wider cursor-pointer border border-emerald-500/30 transition-all active:scale-95"
+                      title="Open Saved Teams & Captain Squad Links"
+                    >
+                      <span>📂 Saved Teams</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 min-h-[140px] grid grid-cols-2 gap-2">
+                  {/* Batting Team Squad Box */}
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-lg p-1.5 flex flex-col gap-1 min-h-[135px]">
+                    <div className="flex items-center justify-between shrink-0">
+                      <span className="text-[8.5px] font-black text-emerald-400 uppercase truncate">
+                        🏏 {currentInnings.battingTeam || match.teamA || 'Team 1'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSquadSettingsModal(true)}
+                        className="text-[7.5px] font-mono font-bold text-emerald-300 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded px-1.5 py-0.2 cursor-pointer shrink-0 transition-colors"
+                        title="Open Squad List Pop-up"
+                      >
+                        ({activeBattingSquadPlayers.length} in squad ↗)
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="text"
+                        id="quick-squad-bat-input"
+                        placeholder="Enter player name"
+                        className="bg-slate-900 border border-slate-750 rounded px-1.5 py-1 text-[8.5px] text-white font-bold outline-none flex-1 min-w-0"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = (e.currentTarget as HTMLInputElement).value.trim();
+                            if (!val) return;
+                            handleQuickAddSquadPlayers(val, 'batting');
+                            (e.currentTarget as HTMLInputElement).value = '';
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const input = document.getElementById('quick-squad-bat-input') as HTMLInputElement;
+                          const val = input?.value?.trim();
+                          if (!val) {
+                            setShowSquadSettingsModal(true);
+                            return;
+                          }
+                          handleQuickAddSquadPlayers(val, 'batting');
+                          input.value = '';
+                        }}
+                        className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-black text-[7.5px] uppercase cursor-pointer border-none shrink-0"
+                      >
+                        Add Player
+                      </button>
+                    </div>
+
+                    <div className="flex-1 min-h-[95px] max-h-[155px] overflow-y-auto custom-scrollbar space-y-1 pr-0.5">
+                      {activeBattingSquadPlayers.length === 0 ? (
+                        <div className="text-center py-3 text-[8px] text-slate-500 italic">
+                          No players added yet. Type name above or click Squad List Pop-up.
+                        </div>
+                      ) : (
+                        activeBattingSquadPlayers.map((p, idx) => {
+                          const isSt = currentInnings.batsmen[currentInnings.strikerIndex]?.name?.toLowerCase().trim() === p.name.toLowerCase().trim();
+                          const isNst = currentInnings.batsmen[currentInnings.nonStrikerIndex]?.name?.toLowerCase().trim() === p.name.toLowerCase().trim();
+                          return (
+                            <div
+                              key={`bat-sq-${idx}`}
+                              className={`flex items-center justify-between px-2 py-1 rounded border text-[8.5px] ${
+                                isSt
+                                  ? 'bg-emerald-950/70 border-emerald-500/40'
+                                  : isNst
+                                  ? 'bg-slate-900 border-slate-700'
+                                  : 'bg-indigo-950/70 border-indigo-500/20'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 truncate min-w-0">
+                                <span className="font-mono font-bold text-slate-400 shrink-0">{idx + 1}.</span>
+                                <span className="font-bold text-white truncate">{p.displayName || p.name}</span>
+                                {isSt && <span className="text-[6.5px] font-black uppercase px-1 rounded bg-emerald-500/20 text-emerald-300 shrink-0">★ Striker</span>}
+                                {isNst && <span className="text-[6.5px] font-black uppercase px-1 rounded bg-slate-700 text-slate-300 shrink-0">Non-Str</span>}
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectOrSwapBatsman(p.name, 'striker')}
+                                  className="px-1.5 py-0.5 rounded bg-rose-600/80 hover:bg-rose-500 text-white text-[7px] font-black uppercase cursor-pointer border-none shrink-0"
+                                  title={`Set ${p.name} as Striker`}
+                                >
+                                  Bat
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectOrSwapBatsman(p.name, 'non-striker')}
+                                  className="px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[6.5px] font-black uppercase cursor-pointer border-none shrink-0"
+                                  title={`Set ${p.name} as Non-Striker`}
+                                >
+                                  2nd
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickRemoveSquadPlayer(p.name, 'batting')}
+                                  className="px-1 py-0.5 rounded bg-slate-900/80 hover:bg-rose-900 text-slate-400 hover:text-rose-200 text-[7px] font-bold cursor-pointer border-none shrink-0"
+                                  title="Remove from squad"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bowling Team Squad Box */}
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-lg p-1.5 flex flex-col gap-1 min-h-[135px]">
+                    <div className="flex items-center justify-between shrink-0">
+                      <span className="text-[8.5px] font-black text-amber-400 uppercase truncate">
+                        🥎 {currentInnings.bowlingTeam || match.teamB || 'Team 2'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowSquadSettingsModal(true)}
+                        className="text-[7.5px] font-mono font-bold text-amber-300 hover:text-white bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded px-1.5 py-0.2 cursor-pointer shrink-0 transition-colors"
+                        title="Open Squad List Pop-up"
+                      >
+                        ({activeBowlingSquadPlayers.length} in squad ↗)
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="text"
+                        id="quick-squad-bowl-input"
+                        placeholder="Enter player name"
+                        className="bg-slate-900 border border-slate-750 rounded px-1.5 py-1 text-[8.5px] text-white font-bold outline-none flex-1 min-w-0"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = (e.currentTarget as HTMLInputElement).value.trim();
+                            if (!val) return;
+                            handleQuickAddSquadPlayers(val, 'bowling');
+                            (e.currentTarget as HTMLInputElement).value = '';
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const input = document.getElementById('quick-squad-bowl-input') as HTMLInputElement;
+                          const val = input?.value?.trim();
+                          if (!val) {
+                            setShowSquadSettingsModal(true);
+                            return;
+                          }
+                          handleQuickAddSquadPlayers(val, 'bowling');
+                          input.value = '';
+                        }}
+                        className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-black text-[7.5px] uppercase cursor-pointer border-none shrink-0"
+                      >
+                        Add Player
+                      </button>
+                    </div>
+
+                    <div className="flex-1 min-h-[95px] max-h-[155px] overflow-y-auto custom-scrollbar space-y-1 pr-0.5">
+                      {activeBowlingSquadPlayers.length === 0 ? (
+                        <div className="text-center py-3 text-[8px] text-slate-500 italic">
+                          No players added yet. Type name above or click Squad List Pop-up.
+                        </div>
+                      ) : (
+                        activeBowlingSquadPlayers.map((p, idx) => {
+                          const isCurrentBw = currentInnings.bowlers[currentInnings.currentBowlerIndex]?.name?.toLowerCase().trim() === p.name.toLowerCase().trim();
+                          return (
+                            <div
+                              key={`bowl-sq-${idx}`}
+                              className={`flex items-center justify-between px-2 py-1 rounded border text-[8.5px] ${
+                                isCurrentBw
+                                  ? 'bg-amber-950/60 border-amber-500/40'
+                                  : 'bg-indigo-950/70 border-indigo-500/20'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 truncate min-w-0">
+                                <span className="font-mono font-bold text-slate-400 shrink-0">{idx + 1}.</span>
+                                <span className="font-bold text-white truncate">{p.displayName || p.name}</span>
+                                {isCurrentBw && <span className="text-[6.5px] font-black uppercase px-1 rounded bg-amber-500/20 text-amber-300 shrink-0">🥎 Active</span>}
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectOrAddNewBowler(p.name)}
+                                  className="px-1.5 py-0.5 rounded bg-amber-500/80 hover:bg-amber-400 text-slate-950 text-[7px] font-black uppercase cursor-pointer border-none shrink-0"
+                                  title={`Set ${p.name} as Active Bowler`}
+                                >
+                                  Bowl
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickRemoveSquadPlayer(p.name, 'bowling')}
+                                  className="px-1 py-0.5 rounded bg-slate-900/80 hover:bg-rose-900 text-slate-400 hover:text-rose-200 text-[7px] font-bold cursor-pointer border-none shrink-0"
+                                  title="Remove from squad"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             {/* End of Desktop View Container */}
@@ -13829,125 +13228,69 @@ export const CricketScoreboard: React.FC = () => {
           </div>
 
           {/* COLUMN 3: Batting/Bowling Scores scorecard registries & Quick additions */}
-          <div className={`flex flex-col gap-2 min-h-0 overflow-hidden ${
+          <div className={`flex-1 flex-col gap-1.5 min-h-0 h-full overflow-hidden ${
             activeMobileTab === 'stats' ? 'flex' : 'hidden lg:flex'
           } lg:col-span-4`}>
             
-            {/* Innings Overview Scorebox Card */}
-            <div className="p-2 sm:p-2.5 bg-slate-900 border border-slate-800 rounded-xl shrink-0 space-y-1.5 shadow-md">
-              <div className="flex justify-between items-center">
-                <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-450 border border-emerald-500/20 rounded text-[8px] font-black uppercase tracking-widest">
-                  Innings {match.currentInningsNum} Active
-                </span>
-                {match.targetRuns && (
-                  <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded text-[8px] font-black uppercase tracking-widest animate-pulse">
-                    Target: {match.targetRuns}
-                  </span>
-                )}
-              </div>
-
-              <div>
-                <h3 className="text-[10px] text-slate-450 font-black uppercase tracking-widest truncate">
-                  {currentInnings.battingTeam} is Batting
-                </h3>
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-2xl font-black font-mono leading-none text-white flex items-center">
-                    <motion.span
-                      key={`runs-sidebar-${currentInnings.runs}`}
-                      initial={{ scale: 0.7, opacity: 0.5 }}
-                      animate={{ scale: [1.3, 1], opacity: 1 }}
-                      transition={{ type: "spring", stiffness: 350, damping: 15 }}
-                      className="inline-block"
-                    >
-                      {currentInnings.runs}
-                    </motion.span>
-                    <span className="mx-1.5">-</span>
-                    <motion.span
-                      key={`wickets-sidebar-${currentInnings.wickets}`}
-                      initial={{ scale: 0.7, opacity: 0.5 }}
-                      animate={{ scale: [1.3, 1], opacity: 1 }}
-                      transition={{ type: "spring", stiffness: 350, damping: 15 }}
-                      className="inline-block text-rose-500"
-                    >
-                      {currentInnings.wickets}
-                    </motion.span>
-                  </span>
-                  <span className="text-xs text-slate-400 font-bold font-mono">
-                    ({formatOvers(currentInnings.ballsBowled)} ov)
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-slate-800/80 grid grid-cols-3 gap-1.5 text-center">
-                <div>
-                  <span className="text-[7px] uppercase font-bold text-slate-500 block">CRR</span>
-                  <span className="font-mono text-xs font-black text-amber-300 block">
-                    <motion.span
-                      key={`crr-sidebar-${calculateRunRate(currentInnings.runs, currentInnings.ballsBowled)}`}
-                      initial={{ scale: 0.7 }}
-                      animate={{ scale: [1.2, 1] }}
-                      transition={{ duration: 0.2 }}
-                      className="inline-block"
-                    >
-                      {calculateRunRate(currentInnings.runs, currentInnings.ballsBowled)}
-                    </motion.span>
-                  </span>
-                </div>
-                {match.currentInningsNum === 2 && match.targetRuns && (
-                  <div>
-                    <span className="text-[7px] uppercase font-bold text-slate-500 block">RRR</span>
-                    <span className="font-mono text-xs font-black text-amber-300 block">
-                      <motion.span
-                        key={`rrr-sidebar-${(() => {
-                          const ballsLeft = (match.oversLimit * 6) - currentInnings.ballsBowled;
-                          const runsToGet = match.targetRuns - currentInnings.runs;
-                          if (ballsLeft <= 0) return '0.00';
-                          return ((runsToGet / Math.max(1, ballsLeft)) * 6).toFixed(2);
-                        })()}`}
-                        initial={{ scale: 0.7 }}
-                        animate={{ scale: [1.2, 1] }}
-                        transition={{ duration: 0.2 }}
-                        className="inline-block"
-                      >
-                        {(() => {
-                          const ballsLeft = (match.oversLimit * 6) - currentInnings.ballsBowled;
-                          const runsToGet = match.targetRuns - currentInnings.runs;
-                          if (ballsLeft <= 0) return '0.00';
-                          return ((runsToGet / Math.max(1, ballsLeft)) * 6).toFixed(2);
-                        })()}
-                      </motion.span>
+            {/* Compact Innings Overview Scorebox Card */}
+            <div className="p-2 bg-slate-900 border border-slate-800 rounded-xl shrink-0 space-y-1 shadow-md">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.2 bg-emerald-500/10 text-emerald-450 border border-emerald-500/20 rounded text-[7.5px] font-black uppercase tracking-wider shrink-0">
+                      Inn {match.currentInningsNum}
+                    </span>
+                    <h3 className="text-[10px] text-slate-300 font-black uppercase tracking-wider truncate">
+                      {currentInnings.battingTeam}
+                    </h3>
+                  </div>
+                  <div className="flex items-baseline gap-1.5 mt-0.5">
+                    <span className="text-xl font-black font-mono leading-none text-white flex items-center">
+                      <span>{currentInnings.runs}</span>
+                      <span className="mx-1 text-slate-500">-</span>
+                      <span className="text-rose-500">{currentInnings.wickets}</span>
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-bold font-mono">
+                      ({formatOvers(currentInnings.ballsBowled)}/{match.oversLimit} ov)
                     </span>
                   </div>
-                )}
-                <div>
-                  <span className="text-[7px] uppercase font-bold text-slate-500 block">Balls Max</span>
-                  <span className="font-mono text-xs font-black text-slate-300">
-                    {match.oversLimit * 6}
-                  </span>
                 </div>
-              </div>
 
-              {match.currentInningsNum === 2 && match.targetRuns && (
-                <div className="bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl text-center text-[10px] font-bold text-amber-300 space-y-1">
-                  <div className="text-[7.5px] font-black uppercase tracking-wider text-amber-400 flex items-center justify-center gap-1">
-                    ⚡ Run Chase Equation
+                <div className="flex items-center gap-2 shrink-0 text-right font-mono">
+                  <div className="bg-slate-950 px-2 py-1 rounded-lg border border-slate-800/80 text-center">
+                    <span className="text-[6.5px] uppercase font-bold text-slate-500 block leading-none">CRR</span>
+                    <span className="text-[11px] font-black text-amber-300 leading-tight block">
+                      {calculateRunRate(currentInnings.runs, currentInnings.ballsBowled)}
+                    </span>
                   </div>
-                  {match.targetRuns - currentInnings.runs > 0 ? (
-                    <div>Need <strong className="font-black text-xs text-white font-mono">{match.targetRuns - currentInnings.runs}</strong> runs to win off <strong className="font-black text-xs text-white font-mono">{Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}</strong> balls</div>
+                  {match.currentInningsNum === 2 && match.targetRuns ? (
+                    <div className="bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/30 text-center">
+                      <span className="text-[6.5px] uppercase font-black text-amber-400 block leading-none">Target {match.targetRuns}</span>
+                      <span className="text-[10px] font-black text-white leading-tight block">
+                        {match.targetRuns - currentInnings.runs > 0
+                          ? `Need ${match.targetRuns - currentInnings.runs} (${Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b)`
+                          : 'Won!'}
+                      </span>
+                    </div>
                   ) : (
-                    <span className="text-emerald-400 font-black uppercase tracking-wide animate-pulse">Target Achieved!</span>
+                    <div className="bg-slate-950 px-2 py-1 rounded-lg border border-slate-800/80 text-center">
+                      <span className="text-[6.5px] uppercase font-bold text-slate-500 block leading-none">Balls</span>
+                      <span className="text-[11px] font-black text-slate-300 leading-tight block">
+                        {currentInnings.ballsBowled}/{match.oversLimit * 6}
+                      </span>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Tabbed Scorecard box */}
-            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2.5 flex flex-col min-h-0 overflow-hidden shadow-lg font-sans">
-              <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-850">
-                <div className="flex bg-slate-950 p-0.5 rounded-lg flex-wrap gap-0.5">
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-2 flex flex-col min-h-0 overflow-hidden shadow-lg font-sans">
+              <div className="flex items-center justify-between mb-1 pb-1 border-b border-slate-850 gap-1">
+                <div className="flex bg-slate-950 p-0.5 rounded-lg gap-0.5">
                   <button
                     onClick={() => setActiveScorecardTab('bat')}
-                    className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-md text-[8px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
                       activeScorecardTab === 'bat' ? 'bg-emerald-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
@@ -13955,7 +13298,7 @@ export const CricketScoreboard: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setActiveScorecardTab('bowl')}
-                    className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-md text-[8px] font-black uppercase tracking-wider transition-all border-none cursor-pointer ${
                       activeScorecardTab === 'bowl' ? 'bg-emerald-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
@@ -13963,7 +13306,7 @@ export const CricketScoreboard: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setActiveScorecardTab('fow')}
-                    className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
+                    className={`px-2.5 py-1 rounded-md text-[8px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
                       activeScorecardTab === 'fow' ? 'bg-rose-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
@@ -13971,28 +13314,16 @@ export const CricketScoreboard: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setActiveScorecardTab('comm')}
-                    className={`px-3 py-1 rounded-md text-[8.5px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
+                    className={`px-2.5 py-1 rounded-md text-[8px] font-black uppercase tracking-wider transition-all border-none cursor-pointer flex items-center gap-1 ${
                       activeScorecardTab === 'comm' ? 'bg-indigo-600 text-white font-black' : 'text-slate-400 bg-transparent'
                     }`}
                   >
-                    Commentary ({currentInnings.commentaryList?.length || 0})
+                    Comm ({currentInnings.commentaryList?.length || 0})
                   </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-widest">
-                    {activeScorecardTab === 'bat' ? 'BATSMAN REGISTRY' : activeScorecardTab === 'bowl' ? 'BOWLER FIGURES' : activeScorecardTab === 'comm' ? 'AI COMMENTARY' : 'FALL OF WICKETS'}
-                  </span>
-                  {(activeScorecardTab === 'fow' || activeScorecardTab === 'bat') && (
-                    <button
-                      onClick={() => openWicketModal('striker')}
-                      disabled={isScoringDisabled}
-                      className="px-2 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8px] font-black uppercase tracking-wider border-none cursor-pointer transition-all flex items-center gap-1 shadow active:scale-95"
-                    >
-                      <PlusCircle size={10} />
-                      Add Wicket
-                    </button>
-                  )}
-                </div>
+                <span className="text-[7.5px] font-black text-slate-500 uppercase tracking-widest truncate hidden xl:inline">
+                  {activeScorecardTab === 'bat' ? 'BATTERS' : activeScorecardTab === 'bowl' ? 'BOWLERS' : activeScorecardTab === 'comm' ? 'FEED' : 'WICKETS'}
+                </span>
               </div>
 
               {/* Scrollable grid container inside 100vh bounds */}
@@ -14000,10 +13331,11 @@ export const CricketScoreboard: React.FC = () => {
                 {activeScorecardTab === 'bat' ? (
                   <table className="w-full text-left text-slate-400 font-sans">
                     <thead>
-                      <tr className="border-b border-slate-850 text-[8px] font-black uppercase tracking-widest text-slate-500 text-center">
+                      <tr className="border-b border-slate-850 text-[7.5px] font-black uppercase tracking-widest text-slate-500 text-center">
                         <td className="py-1 text-left">Batsman</td>
-                        <td className="py-1">Runs</td>
-                        <td className="py-1">Balls</td>
+                        <td className="py-1">R</td>
+                        <td className="py-1">B</td>
+                        <td className="py-1">4s/6s</td>
                         <td className="py-1">SR</td>
                       </tr>
                     </thead>
@@ -14014,54 +13346,35 @@ export const CricketScoreboard: React.FC = () => {
                         return (
                           <tr 
                             key={idx} 
-                            className={`border-b border-slate-850 text-center ${
-                              isStriker ? 'text-emerald-450 bg-emerald-500/5' : isNonStriker ? 'text-slate-205 font-medium' : 'text-slate-400 opacity-60'
+                            className={`border-b border-slate-850/80 text-center ${
+                              isStriker ? 'text-emerald-450 bg-emerald-500/5' : isNonStriker ? 'text-slate-205 font-medium' : 'text-slate-400 opacity-65'
                             }`}
                           >
-                            <td className="py-2 text-left font-semibold truncate max-w-[120px]">
-                              <div className="flex items-center gap-1.5 justify-between pr-1">
-                                <span className="truncate">{b.name} {isStriker ? '★' : ''}</span>
-                                {!isSpectator && !b.isOut && (isStriker || isNonStriker) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => openWicketModal(isStriker ? 'striker' : 'non-striker')}
-                                    className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white text-[7.5px] font-black uppercase rounded border-none cursor-pointer transition-all shrink-0 active:scale-95"
-                                    title={`Dismiss ${b.name} (Wicket)`}
-                                  >
-                                    Out
-                                  </button>
-                                )}
-                              </div>
-                              <p className="text-[7px] text-slate-500 truncate lowercase italic mt-0.5 leading-none">{b.howOut || 'not out'}</p>
+                            <td className="py-1.5 text-left font-semibold truncate max-w-[125px]">
+                              <span className="truncate block text-[11px] leading-tight">{b.name} {isStriker ? '★' : ''}</span>
+                              <span className="text-[7px] text-slate-500 truncate lowercase italic block leading-none mt-0.5">{b.howOut || 'not out'}</span>
                             </td>
-                            <td className="py-2 font-mono font-black text-white">{b.runs}</td>
-                            <td className="py-2 font-mono">{b.balls}</td>
-                            <td className="py-2 font-mono text-[8.5px]">
-                              {b.balls === 0 ? '-' : ((b.runs / b.balls) * 100).toFixed(0)}%
+                            <td className="py-1.5 font-mono font-black text-white text-[11px]">{b.runs}</td>
+                            <td className="py-1.5 font-mono text-[10px]">{b.balls}</td>
+                            <td className="py-1.5 font-mono text-[9px] text-slate-400">{b.fours}/{b.sixes}</td>
+                            <td className="py-1.5 font-mono text-[8.5px]">
+                              {b.balls === 0 ? '-' : ((b.runs / b.balls) * 100).toFixed(0)}
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="bg-slate-900/50 text-[10px] text-slate-300 font-bold border-t border-slate-800 text-center">
-                        <td className="py-2 text-left font-black tracking-wide uppercase px-1">Extras</td>
-                        <td colSpan={3} className="py-2 text-right pr-2 text-slate-400 font-mono">
-                          Total Ext: <strong className="text-amber-400">{currentInnings.extras.wides + currentInnings.extras.noBalls + currentInnings.extras.byes + currentInnings.extras.legByes}</strong> (Wd {currentInnings.extras.wides}, Nb {currentInnings.extras.noBalls}, B {currentInnings.extras.byes}, Lb {currentInnings.extras.legByes})
+                      <tr className="bg-slate-900/50 text-[9px] text-slate-300 font-bold border-t border-slate-800 text-center">
+                        <td className="py-1.5 text-left font-black tracking-wide uppercase px-1">Extras</td>
+                        <td colSpan={4} className="py-1.5 text-right pr-2 text-slate-400 font-mono">
+                          <strong className="text-amber-400">{currentInnings.extras.wides + currentInnings.extras.noBalls + currentInnings.extras.byes + currentInnings.extras.legByes + (currentInnings.extras.penalty || 0)}</strong> (Wd {currentInnings.extras.wides}, Nb {currentInnings.extras.noBalls}, B {currentInnings.extras.byes}, Lb {currentInnings.extras.legByes}{currentInnings.extras.penalty > 0 ? `, Pen ${currentInnings.extras.penalty}` : ''})
                         </td>
                       </tr>
-                      {currentInnings.extras.penalty > 0 && (
-                        <tr className="bg-slate-900/50 text-[10px] text-slate-350 border-t border-slate-900/50 text-center">
-                          <td className="py-1 text-left font-bold uppercase px-1">Penalties</td>
-                          <td colSpan={3} className="py-1 text-right pr-2 text-rose-400 font-mono">
-                            +{currentInnings.extras.penalty} Penalty Runs
-                          </td>
-                        </tr>
-                      )}
-                      <tr className="bg-slate-900/80 text-[11px] text-emerald-400 font-extrabold border-t border-slate-800 text-center">
-                        <td className="py-2 text-left px-1 uppercase tracking-wider font-extrabold text-emerald-400">GRAND TOTAL</td>
-                        <td colSpan={3} className="py-2 text-right pr-2 font-mono text-xs text-white">
-                          <span className="text-white font-black text-[13px]">{currentInnings.runs}</span>/{currentInnings.wickets} in {formatOvers(currentInnings.ballsBowled)} Overs
+                      <tr className="bg-slate-900/80 text-[10px] text-emerald-400 font-extrabold border-t border-slate-800 text-center">
+                        <td className="py-1.5 text-left px-1 uppercase tracking-wider font-extrabold text-emerald-400">TOTAL</td>
+                        <td colSpan={4} className="py-1.5 text-right pr-2 font-mono text-[11px] text-white">
+                          <span className="text-white font-black text-xs">{currentInnings.runs}</span>/{currentInnings.wickets} ({formatOvers(currentInnings.ballsBowled)} ov)
                         </td>
                       </tr>
                     </tfoot>
@@ -14069,11 +13382,12 @@ export const CricketScoreboard: React.FC = () => {
                 ) : activeScorecardTab === 'bowl' ? (
                   <table className="w-full text-left text-slate-400 font-sans">
                     <thead>
-                      <tr className="border-b border-slate-850 text-[8px] font-black uppercase tracking-widest text-slate-500 text-center">
+                      <tr className="border-b border-slate-850 text-[7.5px] font-black uppercase tracking-widest text-slate-500 text-center">
                         <td className="py-1 text-left">Bowler</td>
                         <td className="py-1">Overs</td>
                         <td className="py-1">Runs</td>
                         <td className="py-1">Wkts</td>
+                        <td className="py-1">Econ</td>
                       </tr>
                     </thead>
                     <tbody>
@@ -14082,24 +13396,27 @@ export const CricketScoreboard: React.FC = () => {
                         return (
                           <tr 
                             key={idx} 
-                            className={`border-b border-slate-850 text-center ${
+                            className={`border-b border-slate-850/80 text-center ${
                               isCurrent ? 'bg-amber-500/5 text-amber-300 font-bold' : 'text-slate-400'
                             }`}
                           >
-                            <td className="py-2 text-left font-semibold truncate max-w-[90px] flex items-center">
-                              {bw.name} {isCurrent ? '★' : ''}
+                            <td className="py-1.5 text-left font-semibold truncate max-w-[110px] flex items-center">
+                              <span className="truncate text-[11px]">{bw.name} {isCurrent ? '★' : ''}</span>
                               {!isSpectator && !isCurrent && (
                                 <button
                                   onClick={() => handleChangeActiveBowler(idx)}
-                                  className="ml-1.5 px-1 py-0.5 bg-slate-800 text-[8px] hover:text-white rounded border-none cursor-pointer leading-none uppercase font-black"
+                                  className="ml-1.5 px-1.5 py-0.5 bg-slate-800 text-[7.5px] hover:text-white rounded border-none cursor-pointer leading-none uppercase font-black shrink-0"
                                 >
-                                  spell
+                                  Bowl
                                 </button>
                               )}
                             </td>
-                            <td className="py-2 font-mono">{formatOvers(bw.ballsBowled)}</td>
-                            <td className="py-2 font-mono text-white">{bw.runsConceded}</td>
-                            <td className="py-2 font-mono font-black text-rose-500">{bw.wickets}</td>
+                            <td className="py-1.5 font-mono text-[10px]">{formatOvers(bw.ballsBowled)}</td>
+                            <td className="py-1.5 font-mono text-white text-[11px]">{bw.runsConceded}</td>
+                            <td className="py-1.5 font-mono font-black text-rose-500 text-[11px]">{bw.wickets}</td>
+                            <td className="py-1.5 font-mono text-[9px] text-slate-400">
+                              {bw.ballsBowled === 0 ? '0.0' : ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(1)}
+                            </td>
                           </tr>
                         );
                       })}
@@ -14107,66 +13424,48 @@ export const CricketScoreboard: React.FC = () => {
                   </table>
                 ) : (
                   /* Fall of Wickets Card View */
-                  <div className="space-y-2 font-sans">
+                  <div className="space-y-1.5 font-sans">
                     <div className="flex items-center justify-between px-1 pb-1 border-b border-slate-800">
-                      <span className="text-[9px] font-black uppercase text-slate-400">Chronological Dismissals</span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const nextWktNo = (currentInnings.fallOfWickets?.length || 0) + 1;
-                            setManualFoWData({
-                              wicketNo: nextWktNo,
-                              score: currentInnings.runs,
-                              batsmanName: currentInnings.batsmen[currentInnings.strikerIndex]?.name || '',
-                              oversList: formatOvers(currentInnings.ballsBowled)
-                            });
-                            setShowManualFoWModal(true);
-                          }}
-                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[8px] font-bold uppercase cursor-pointer border-none"
-                        >
-                          Manual +
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openWicketModal('striker')}
-                          disabled={isScoringDisabled}
-                          className="px-2.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[8px] font-black uppercase tracking-wider cursor-pointer border-none flex items-center gap-1 shadow"
-                        >
-                          <PlusCircle size={10} />
-                          + Add Wicket
-                        </button>
-                      </div>
+                      <span className="text-[8.5px] font-black uppercase text-slate-400">Chronological Dismissals</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextWktNo = (currentInnings.fallOfWickets?.length || 0) + 1;
+                          setManualFoWData({
+                            wicketNo: nextWktNo,
+                            score: currentInnings.runs,
+                            batsmanName: currentInnings.batsmen[currentInnings.strikerIndex]?.name || '',
+                            oversList: formatOvers(currentInnings.ballsBowled)
+                          });
+                          setShowManualFoWModal(true);
+                        }}
+                        className="px-2 py-0.5 bg-rose-600/25 hover:bg-rose-600 text-rose-300 hover:text-white rounded text-[8px] font-black uppercase tracking-wider cursor-pointer border border-rose-500/30 flex items-center gap-1"
+                      >
+                        <PlusCircle size={10} />
+                        + Log FoW Entry
+                      </button>
                     </div>
 
                     {(!currentInnings.fallOfWickets || currentInnings.fallOfWickets.length === 0) ? (
                       <div className="py-6 text-center space-y-2">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                        <p className="text-[9.5px] font-black uppercase tracking-widest text-slate-500">
                           No wickets fallen yet in this innings
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => openWicketModal('striker')}
-                          disabled={isScoringDisabled}
-                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider cursor-pointer border-none shadow transition-all inline-flex items-center gap-1"
-                        >
-                          <PlusCircle size={11} /> Record First Wicket
-                        </button>
                       </div>
                     ) : (
-                      <div className="space-y-1.5">
+                      <div className="space-y-1">
                         {currentInnings.fallOfWickets.map((fw, idx) => (
                           <div
                             key={idx}
-                            className="p-2 bg-slate-950/70 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs"
+                            className="p-1.5 bg-slate-950/70 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs"
                           >
                             <div className="flex items-center gap-2">
-                              <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 rounded-md font-mono font-black text-[9px]">
+                              <span className="px-1.5 py-0.5 bg-rose-500/20 text-rose-400 rounded-md font-mono font-black text-[8.5px]">
                                 Wkt {fw.wicketNo}
                               </span>
                               <div>
-                                <p className="font-bold text-white text-[11px] leading-tight">{fw.batsmanName}</p>
-                                <p className="text-[9px] font-mono text-slate-400">
+                                <p className="font-bold text-white text-[10.5px] leading-tight">{fw.batsmanName}</p>
+                                <p className="text-[8.5px] font-mono text-slate-400">
                                   at <strong className="text-amber-300">{fw.score}</strong> runs • Over {fw.oversList}
                                 </p>
                               </div>
@@ -14200,15 +13499,6 @@ export const CricketScoreboard: React.FC = () => {
                             </div>
                           </div>
                         ))}
-                        <button
-                          type="button"
-                          onClick={() => openWicketModal('striker')}
-                          disabled={isScoringDisabled}
-                          className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 border border-dashed border-rose-500/40 rounded-xl text-rose-400 hover:text-rose-300 text-[9px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-                        >
-                          <PlusCircle size={12} />
-                          + Add Wicket Dismissal
-                        </button>
                       </div>
                     )}
                   </div>
@@ -14264,10 +13554,28 @@ export const CricketScoreboard: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Contextual Tone Shifter Banner */}
+                    {/* Contextual Tone Shifter Banner, Tactical Matchup Memory & Key Moments Timeline */}
                     {commentaryDeskSubTab === 'feed' && (() => {
                       const matchTone = getMatchContextualTone(match, currentInnings);
-                      return <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />;
+                      return (
+                        <div className="space-y-1.5">
+                          <ContextualToneShifterBadge toneInfo={matchTone} language={userCommentaryLang} />
+                          <TacticalMatchupMemoryBanner
+                            innings={currentInnings}
+                            match={match}
+                            language={userCommentaryLang}
+                            compact={true}
+                          />
+                          <KeyMomentsTimelineBar
+                            commentaryList={combinedCommentaryList}
+                            language={userCommentaryLang}
+                            domIdPrefix="cockpit-comm"
+                            activeMomentId={highlightedCommentaryId}
+                            onSelectMoment={setHighlightedCommentaryId}
+                            compact={true}
+                          />
+                        </div>
+                      );
                     })()}
 
                     {/* Prize Details & Sponsor Owners in AI Commentary Desk (Text details only - no podium) */}
@@ -14286,7 +13594,7 @@ export const CricketScoreboard: React.FC = () => {
 
                       if (commentaryDeskSubTab === 'podium') {
                         return (
-                          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin max-h-[300px]">
+                          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin min-h-0">
                             {/* Header Summary */}
                             <div className="p-2.5 rounded-xl bg-slate-900 border border-amber-500/30 flex items-center justify-between">
                               <div className="flex items-center gap-1.5">
@@ -14478,26 +13786,15 @@ export const CricketScoreboard: React.FC = () => {
                         );
                       }
 
-                      return (
-                        <div 
-                          onClick={() => setCommentaryDeskSubTab('podium')}
-                          className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/15 to-purple-500/15 border border-amber-500/30 flex items-center justify-between text-[8px] font-semibold text-amber-300 cursor-pointer hover:border-amber-400 transition-all mb-1"
-                        >
-                          <span className="flex items-center gap-1 font-bold">
-                            <span>🏆</span>
-                            <span>Tournament Prize Details & Sponsors ({prizesList.length})</span>
-                          </span>
-                          <span className="font-bold underline text-amber-400">View Prize Details →</span>
-                        </div>
-                      );
+                      return null;
                     })()}
 
                     {commentaryDeskSubTab === 'feed' && (
-                    <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin max-h-[300px]">
-                      {(!currentInnings.commentaryList || currentInnings.commentaryList.length === 0) ? (
-                        <p className="text-center text-xs text-slate-500 py-8 italic">No commentary yet for this innings.</p>
+                    <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin min-h-0">
+                      {combinedCommentaryList.length === 0 ? (
+                        <p className="text-center text-xs text-slate-500 py-8 italic">No commentary yet for this match.</p>
                       ) : (
-                        currentInnings.commentaryList.map((comm) => {
+                        combinedCommentaryList.map((comm) => {
                           const isWkt = comm.type === 'wicket';
                           const isBnd = comm.type === 'boundary';
                           const isExt = comm.type === 'extra';
@@ -14505,10 +13802,42 @@ export const CricketScoreboard: React.FC = () => {
                           const isAnnouncement = !!comm.announcementType;
                           const displayText = getCommentaryText(comm, userCommentaryLang);
 
+                          if (isEndOfOverCommentary(comm)) {
+                            const overSummary = resolveOverMiniSummary(
+                              comm,
+                              combinedCommentaryList,
+                              match,
+                              (comm as any)._inningsNum === 2 ? match.innings2 : match.innings1
+                            );
+                            return (
+                              <div
+                                key={comm.id}
+                                id={`cockpit-comm-${comm.id}`}
+                                className={`rounded-2xl transition-all ${
+                                  highlightedCommentaryId === comm.id
+                                    ? 'ring-2 ring-amber-400 shadow-lg shadow-amber-500/20'
+                                    : ''
+                                }`}
+                              >
+                                <EndOfOverSummaryCard
+                                  summary={overSummary}
+                                  displayText={displayText}
+                                  language={userCommentaryLang}
+                                  compact={true}
+                                />
+                              </div>
+                            );
+                          }
+
                           return (
                             <div
                               key={comm.id}
+                              id={`cockpit-comm-${comm.id}`}
                               className={`p-2 rounded-xl text-[10.5px] border transition-all ${
+                                highlightedCommentaryId === comm.id
+                                  ? 'ring-2 ring-amber-400 shadow-lg shadow-amber-500/20 '
+                                  : ''
+                              }${
                                 comm.specialEvent === 'hundred' ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 shadow-amber-500/5' :
                                 comm.specialEvent === 'fifty' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-emerald-500/5' :
                                 comm.specialEvent === 'hat_trick' ? 'bg-rose-500/15 border-rose-500/40 text-rose-200 shadow-rose-500/5' :
@@ -14521,10 +13850,19 @@ export const CricketScoreboard: React.FC = () => {
                               }`}
                             >
                               <div className="flex items-center justify-between mb-1 gap-1">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-mono text-[8.5px] font-bold text-slate-400">
                                     Over {comm.overBall}
                                   </span>
+                                  {(comm as any)._inningsNum && (
+                                    <span className={`text-[7px] font-black uppercase px-1.5 py-0.2 rounded ${
+                                      (comm as any)._inningsNum === 2
+                                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                    }`}>
+                                      {(comm as any)._inningsNum === 2 ? '2nd Inn' : '1st Inn'}{(comm as any)._battingTeam ? ` • ${(comm as any)._battingTeam}` : ''}
+                                    </span>
+                                  )}
                                   {comm.specialEvent && (
                                     <span className={`text-[7px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-md ${
                                       comm.specialEvent === 'hundred' ? 'bg-amber-400 text-black' :
@@ -14551,6 +13889,17 @@ export const CricketScoreboard: React.FC = () => {
                                 )}
                               </div>
                               <p className="leading-snug font-sans">{displayText}</p>
+                              {!comm.announcementType && !comm.specialEvent && (
+                                <DeliveryTacticalChip
+                                  tactical={resolveDeliveryTacticalContext(
+                                    comm,
+                                    combinedCommentaryList,
+                                    match,
+                                    (comm as any)._inningsNum === 2 ? match.innings2 : match.innings1
+                                  )}
+                                  language={userCommentaryLang}
+                                />
+                              )}
                             </div>
                           );
                         })
@@ -14559,6 +13908,50 @@ export const CricketScoreboard: React.FC = () => {
                     )}
                   </div>
                 )}
+              </div>
+
+              {/* Pinned Bottom Summary & Quick Scorecard Footer (Eliminates Bottom Blank Space in Column 3) */}
+              <div className="mt-2 pt-2 border-t border-slate-800/90 shrink-0 space-y-1.5">
+                <div className="grid grid-cols-3 gap-1.5 text-center bg-slate-950/90 border border-slate-800/80 rounded-xl p-1.5">
+                  <div>
+                    <span className="text-[7px] font-black uppercase text-slate-500 block">Boundaries</span>
+                    <span className="text-[10px] font-mono font-black text-emerald-400">
+                      {currentInnings.batsmen.reduce((s, b) => s + (b.fours || 0), 0)}x4 • {currentInnings.batsmen.reduce((s, b) => s + (b.sixes || 0), 0)}x6
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[7px] font-black uppercase text-slate-500 block">Extras</span>
+                    <span className="text-[10px] font-mono font-black text-amber-400">
+                      {currentInnings.extras.wides + currentInnings.extras.noBalls + currentInnings.extras.byes + currentInnings.extras.legByes + (currentInnings.extras.penalty || 0)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[7px] font-black uppercase text-slate-500 block">Partnership</span>
+                    <span className="text-[10px] font-mono font-black text-cyan-300">
+                      {(() => {
+                        const lastFow = currentInnings.fallOfWickets?.[currentInnings.fallOfWickets.length - 1];
+                        const partRuns = lastFow ? Math.max(0, currentInnings.runs - lastFow.score) : currentInnings.runs;
+                        return `${partRuns} runs`;
+                      })()}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowFullScorecardModal(true)}
+                    className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-slate-700 cursor-pointer transition-all"
+                  >
+                    📋 Full Scorecard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowShareModal(true)}
+                    className="py-1.5 px-2 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white rounded-lg text-[8.5px] font-black uppercase tracking-wider border border-emerald-500/30 cursor-pointer transition-all"
+                  >
+                    📤 Share Match
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -14700,9 +14093,9 @@ export const CricketScoreboard: React.FC = () => {
           </button>
         </div>
 
-        {/* FLOATING INSTANT UNDO BUTTON FOR GROUND SCORERS (DESKTOP & TABLETS) */}
+        {/* FLOATING INSTANT UNDO BUTTON FOR TABLETS (Hidden on Laptop/Desktop since Ball Pad & Top Bar already have Undo) */}
         {currentInnings && match.status === 'live' && undoStack.length > 0 && (
-          <div className="hidden sm:block fixed bottom-6 right-6 z-40 select-none animate-fadeIn">
+          <div className="hidden sm:block lg:hidden fixed bottom-14 right-4 z-40 select-none animate-fadeIn">
             <button
               type="button"
               onClick={handleUndoAction}
@@ -14762,17 +14155,17 @@ export const CricketScoreboard: React.FC = () => {
 
         {/* Fall of Wicket Modal Card */}
         {fallOfWicketModal && (
-          <div className="fixed inset-0 bg-slate-950/90 z-[250] flex items-center justify-center p-4 select-none">
-            <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500 rounded-[2.5rem] p-6 max-w-md w-full space-y-6 shadow-2xl relative animate-scaleIn text-white text-center">
+          <div className="fixed inset-0 bg-slate-950/90 z-[250] flex items-center justify-center p-3 sm:p-4 select-none">
+            <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-emerald-500 rounded-3xl p-5 max-w-md w-full max-h-[90vh] overflow-y-auto custom-scrollbar space-y-4 shadow-2xl relative animate-scaleIn text-white text-center">
               <div>
-                <span className="px-3 py-1 bg-emerald-500/15 text-emerald-400 rounded-full font-black text-[9px] uppercase tracking-[0.2em] block w-fit mx-auto animate-pulse mb-3">
+                <span className="px-3 py-0.5 bg-emerald-500/15 text-emerald-400 rounded-full font-black text-[9px] uppercase tracking-[0.2em] block w-fit mx-auto animate-pulse mb-2">
                   FALL OF WICKET 🏏
                 </span>
-                <h4 className="text-2xl font-black uppercase text-white tracking-tight">OUT! Dismissal Confirmed</h4>
-                <p className="text-xs text-slate-400 mt-1 font-medium">Recorded successfully in the scoreboard database</p>
+                <h4 className="text-xl font-black uppercase text-white tracking-tight">OUT! Dismissal Confirmed</h4>
+                <p className="text-[11px] text-slate-400 mt-0.5 font-medium">Recorded successfully in the scoreboard database</p>
               </div>
 
-              <div className="bg-slate-900/60 p-5 rounded-2xl border border-white/5 text-left space-y-3 font-sans">
+              <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/5 text-left space-y-2.5 font-sans">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <span className="text-xs text-slate-400 font-medium">Batsman Out</span>
                   <strong className="text-sm text-rose-400 font-extrabold">{fallOfWicketModal.batsmanName}</strong>
@@ -14786,7 +14179,7 @@ export const CricketScoreboard: React.FC = () => {
                   <span className="text-xs text-white font-semibold">{fallOfWicketModal.bowlerName}</span>
                 </div>
                 {fallOfWicketModal.incomingBatsmanName && (
-                  <div className="flex justify-between items-center pt-1">
+                  <div className="flex justify-between items-center pt-0.5">
                     <span className="text-xs text-slate-400 font-medium">Incoming Batsman</span>
                     <strong className="text-sm text-emerald-400 font-extrabold">{fallOfWicketModal.incomingBatsmanName}</strong>
                   </div>
@@ -14802,7 +14195,7 @@ export const CricketScoreboard: React.FC = () => {
                       openWicketModal('striker');
                     }, 50);
                   }}
-                  className="flex-1 py-3.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2 active:scale-95"
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-widest rounded-xl cursor-pointer transition-all border-none shadow-lg shadow-rose-900/30 flex items-center justify-center gap-2 active:scale-95"
                 >
                   <AlertCircle size={14} />
                   + Add Next Wicket
@@ -14810,7 +14203,7 @@ export const CricketScoreboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setFallOfWicketModal(null)}
-                  className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-widest rounded-2xl cursor-pointer transition-all border-none shadow-md shadow-emerald-950/40 active:scale-95"
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-widest rounded-xl cursor-pointer transition-all border-none shadow-md shadow-emerald-950/40 active:scale-95"
                 >
                   Continue Scoring
                 </button>
@@ -14822,7 +14215,7 @@ export const CricketScoreboard: React.FC = () => {
         {/* Manual Fall of Wickets entry & adjustment modal */}
         {showManualFoWModal && currentInnings && (
           <div className="fixed inset-0 z-[260] flex items-center justify-center p-4 bg-slate-950/80 select-none">
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl text-white">
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-md w-full max-h-[90vh] overflow-y-auto custom-scrollbar space-y-4 shadow-2xl text-white">
               <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                 <div>
                   <h3 className="text-base font-black uppercase text-white flex items-center gap-2">
@@ -14891,14 +14284,14 @@ export const CricketScoreboard: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowManualFoWModal(false)}
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold uppercase border-none cursor-pointer"
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold uppercase border-none cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveManualFoW}
-                  className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase border-none cursor-pointer shadow-lg shadow-rose-900/30"
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase border-none cursor-pointer shadow-lg shadow-rose-900/30"
                 >
                   Save Wicket Entry
                 </button>
@@ -14907,42 +14300,59 @@ export const CricketScoreboard: React.FC = () => {
           </div>
         )}
 
-        {/* The original wicket selection modal if needed */}
+        {/* Wicket / Dismissal Selection Modal (Compact Single-Screen Laptop Fit with Pinned Header & Footer) */}
         <AnimatePresence>
           {showWicketModal && (
-            <div className="fixed inset-0 z-[180] flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-[180] flex items-center justify-center p-2 sm:p-4">
               <motion.div
                 initial={{ opacity: 0 }}
-                animate={{ opacity: 0.6 }}
+                animate={{ opacity: 0.7 }}
                 exit={{ opacity: 0 }}
                 onClick={() => setShowWicketModal(false)}
-                className="absolute inset-0 bg-slate-950"
+                className="absolute inset-0 bg-slate-950/90 backdrop-blur-xs"
               />
               <motion.div
                 id="wicket-dismissal-modal"
-                initial={{ scale: 0.9, opacity: 0 }}
+                initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-slate-900 rounded-3xl border border-slate-800 max-w-sm w-full p-5 shadow-2xl relative z-20 text-white space-y-3 font-sans"
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-slate-900 rounded-2xl border border-slate-700/80 max-w-xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative z-20 text-white font-sans"
               >
-                <div className="text-center">
-                  <span className="px-2.5 py-0.5 bg-rose-500/10 text-rose-450 rounded-full font-black text-[8px] uppercase tracking-widest">
-                    Match Event Trigger - Dismissal
-                  </span>
-                  <h3 className="text-base font-black uppercase tracking-tight text-white mt-1">
-                    Dismissal Analysis Board
-                  </h3>
+                {/* Pinned Compact Modal Header */}
+                <div className="px-4 py-2.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-rose-500/20 border border-rose-500/40 text-rose-400 rounded-md font-black text-[8px] uppercase tracking-widest">
+                      🔴 WICKET
+                    </span>
+                    <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-white">
+                      Dismissal Analysis Board
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWicketModal(false)}
+                    className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center border-none cursor-pointer text-xs font-bold"
+                    title="Close"
+                  >
+                    ✕
+                  </button>
                 </div>
 
-                <div className="space-y-3 text-[10.5px] font-bold font-sans">
+                {/* Scrollable & Compact Modal Body */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-2.5 space-y-2.5 text-[10.5px] font-bold font-sans">
+                  {/* 1. Which Batsman Got Out? */}
                   <div>
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none font-sans">Which Batsman got out?</span>
+                    <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none font-sans">
+                      Which Batsman got out?
+                    </span>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
                         onClick={() => setOutBatsmanWho('striker')}
-                        className={`py-2 rounded-lg text-[9.5px] font-black uppercase tracking-widest cursor-pointer border-none transition-all ${
-                          outBatsmanWho === 'striker' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400 font-bold'
+                        className={`py-1.5 px-2 rounded-lg text-[9.5px] font-black uppercase tracking-wider cursor-pointer border transition-all truncate ${
+                          outBatsmanWho === 'striker'
+                            ? 'bg-rose-600 text-white border-rose-400 shadow-sm'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 font-bold hover:text-slate-200'
                         }`}
                       >
                         Striker ({currentInnings.batsmen[currentInnings.strikerIndex]?.name || 'N/A'})
@@ -14950,8 +14360,10 @@ export const CricketScoreboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setOutBatsmanWho('non-striker')}
-                        className={`py-2 rounded-lg text-[9.5px] font-black uppercase tracking-widest cursor-pointer border-none transition-all ${
-                          outBatsmanWho === 'non-striker' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400 font-bold'
+                        className={`py-1.5 px-2 rounded-lg text-[9.5px] font-black uppercase tracking-wider cursor-pointer border transition-all truncate ${
+                          outBatsmanWho === 'non-striker'
+                            ? 'bg-rose-600 text-white border-rose-400 shadow-sm'
+                            : 'bg-slate-800 text-slate-400 border-slate-700 font-bold hover:text-slate-200'
                         }`}
                       >
                         Non-Striker ({currentInnings.batsmen[currentInnings.nonStrikerIndex]?.name || 'N/A'})
@@ -14959,8 +14371,11 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* 2. Dismissal Type */}
                   <div>
-                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none">Dismissal Type</span>
+                    <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none">
+                      Dismissal Type
+                    </span>
                     <div className="grid grid-cols-3 sm:grid-cols-6 gap-1">
                       {(['Bowled', 'Caught', 'Run Out', 'Stumped', 'LBW', 'Retired Hurt'] as const).map((mode) => (
                         <button
@@ -14979,8 +14394,10 @@ export const CricketScoreboard: React.FC = () => {
                               setWicketHowOutDetails(mode);
                             }
                           }}
-                          className={`py-1.5 rounded text-[8.5px] font-black uppercase tracking-widest transition-all cursor-pointer border-none ${
-                            wicketType === mode ? (mode === 'Retired Hurt' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white') : 'bg-slate-800 text-slate-400'
+                          className={`py-1.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                            wicketType === mode
+                              ? (mode === 'Retired Hurt' ? 'bg-amber-600 text-white border-amber-400' : 'bg-emerald-600 text-white border-emerald-400')
+                              : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
                           }`}
                         >
                           {mode === 'Retired Hurt' ? '🩹 Retired' : mode}
@@ -14989,11 +14406,11 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Who took the catch / Fielder selector */}
+                  {/* 3. Who took the catch / Fielder selector */}
                   {(wicketType === 'Caught' || wicketType === 'Run Out' || wicketType === 'Stumped') && (
-                    <div className="p-3 bg-slate-950/90 border border-emerald-500/40 rounded-xl space-y-2">
+                    <div className="p-2 bg-slate-950/90 border border-emerald-500/40 rounded-xl space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <label className="text-[8px] font-black text-emerald-400 uppercase tracking-widest block leading-none">
+                        <label className="text-[7.5px] font-black text-emerald-400 uppercase tracking-widest block leading-none">
                           {wicketType === 'Caught' ? 'Who took the catch? (Catcher Name)' : 'Fielder Name (Run Out / Stumping)'}
                         </label>
                         {wicketType === 'Caught' && (
@@ -15004,7 +14421,7 @@ export const CricketScoreboard: React.FC = () => {
                               setWicketFielderName(bName);
                               setWicketHowOutDetails(`c & b ${bName}`);
                             }}
-                            className="text-[8px] font-black uppercase text-amber-400 hover:text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded cursor-pointer transition-all"
+                            className="text-[7.5px] font-black uppercase text-amber-400 hover:text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded cursor-pointer transition-all"
                           >
                             🎯 Caught & Bowled (c & b)
                           </button>
@@ -15026,7 +14443,7 @@ export const CricketScoreboard: React.FC = () => {
                           }
                         }}
                         placeholder={wicketType === 'Caught' ? "Player name who took the catch" : "Fielder or keeper name"}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-xs font-bold outline-none text-white focus:border-emerald-500 placeholder:text-slate-500"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-white focus:border-emerald-500 placeholder:text-slate-500"
                       />
                       {(() => {
                         if (!currentInnings) return null;
@@ -15034,8 +14451,8 @@ export const CricketScoreboard: React.FC = () => {
                         const bowlingRoster = bowlingTeam === match.teamA ? selectedTeamARoster : selectedTeamBRoster;
                         if (!bowlingRoster || bowlingRoster.length === 0) return null;
                         return (
-                          <div className="flex flex-wrap gap-1 mt-1 items-center">
-                            <span className="text-[7.5px] text-slate-400 font-extrabold uppercase py-0.5 select-none font-sans">Quick Select Fielder:</span>
+                          <div className="flex flex-wrap gap-1 items-center">
+                            <span className="text-[7px] text-slate-400 font-extrabold uppercase py-0.5 select-none font-sans">Quick Fielder:</span>
                             {bowlingRoster.slice(0, 11).map((player, idx) => (
                               <button
                                 key={`dismissal-fielder-chip-${player}-${idx}`}
@@ -15047,7 +14464,7 @@ export const CricketScoreboard: React.FC = () => {
                                     setWicketHowOutDetails(player.toLowerCase() === bName.toLowerCase() ? `c & b ${bName}` : `c ${player} b ${bName}`);
                                   }
                                 }}
-                                className={`px-2 py-0.5 rounded text-[8px] uppercase font-black tracking-widest border transition-all cursor-pointer ${
+                                className={`px-1.5 py-0.5 rounded text-[7.5px] uppercase font-black tracking-wider border transition-all cursor-pointer ${
                                   wicketFielderName.toLowerCase() === player.toLowerCase()
                                     ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black'
                                     : 'bg-slate-800 hover:bg-emerald-500/20 text-slate-300 border-slate-700'
@@ -15062,109 +14479,123 @@ export const CricketScoreboard: React.FC = () => {
                     </div>
                   )}
 
-                  <div>
-                    <label className="text-[8px] font-black text-slate-450 uppercase tracking-widest block mb-1 leading-none">Details</label>
-                    <input
-                      type="text"
-                      value={wicketHowOutDetails}
-                      onChange={(e) => setWicketHowOutDetails(e.target.value)}
-                      placeholder="Caught at deep cover"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-white focus:border-rose-500"
-                    />
-                  </div>
+                  {/* 4. Details & Additional Notes (Side-by-Side 2-Column Layout) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none">
+                        Details
+                      </label>
+                      <input
+                        type="text"
+                        value={wicketHowOutDetails}
+                        onChange={(e) => setWicketHowOutDetails(e.target.value)}
+                        placeholder="Caught at deep cover"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none text-white focus:border-rose-500"
+                      />
+                    </div>
 
-                  <div>
-                    <label className="text-[8px] font-black text-slate-450 uppercase tracking-widest block mb-1 leading-none font-sans">Additional Notes</label>
-                    <input
-                      type="text"
-                      value={wicketAdditionalDetails}
-                      onChange={(e) => {
-                        setWicketAdditionalDetails(e.target.value);
-                        if (e.target.value.trim() && wicketValidationErr) {
-                          setWicketValidationErr('');
-                        }
-                      }}
-                      placeholder="e.g. LBW on middle stump"
-                      className="additional-notes w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-white focus:border-rose-500"
-                    />
-                    {wicketValidationErr && (
-                      <p className="text-[9px] text-rose-500 font-extrabold mt-1 uppercase tracking-wide">
-                        {wicketValidationErr}
-                      </p>
-                    )}
+                    <div>
+                      <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none font-sans">
+                        Additional Notes
+                      </label>
+                      <input
+                        type="text"
+                        value={wicketAdditionalDetails}
+                        onChange={(e) => {
+                          setWicketAdditionalDetails(e.target.value);
+                          if (e.target.value.trim() && wicketValidationErr) {
+                            setWicketValidationErr('');
+                          }
+                        }}
+                        placeholder="e.g. LBW on middle stump"
+                        className="additional-notes w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none text-white focus:border-rose-500"
+                      />
+                    </div>
                   </div>
+                  {wicketValidationErr && (
+                    <p className="text-[9px] text-rose-500 font-extrabold uppercase tracking-wide">
+                      {wicketValidationErr}
+                    </p>
+                  )}
 
-                  <div className="space-y-1.5">
+                  {/* 5. Bowler Name (Dropdown & Custom Input Side-by-Side) */}
+                  <div className="space-y-1">
                     <div className="flex justify-between items-center">
-                      <label className="text-[8px] font-black text-slate-450 uppercase tracking-widest block leading-none">
+                      <label className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest block leading-none">
                         Bowler Name ({currentInnings?.bowlingTeam || 'Bowling Team'})
                       </label>
                       {activeBowlingSquadPlayers.length > 0 && (
-                        <span className="text-[7px] font-mono text-emerald-400 bg-emerald-500/10 px-1 py-0.5 rounded font-black">
+                        <span className="text-[7px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded font-black">
                           {activeBowlingSquadPlayers.length} in Squad
                         </span>
                       )}
                     </div>
 
-                    {/* Bowler Dropdown from Bowling Squad */}
-                    <select
-                      value={wicketBowlerName}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val !== '__custom__') {
-                          setWicketBowlerName(val);
-                        }
-                      }}
-                      className="w-full bg-slate-950 border border-slate-700 hover:border-emerald-400 rounded-lg p-2 text-xs font-bold outline-none text-white cursor-pointer"
-                    >
-                      {wicketBowlerName && (
-                        <option value={wicketBowlerName}>🥎 Current: {wicketBowlerName}</option>
-                      )}
-                      {currentInnings && currentInnings.bowlers.length > 0 && (
-                        <optgroup label="Active Bowlers">
-                          {currentInnings.bowlers.map((b, idx) => (
-                            <option key={`wkt-b-${idx}`} value={b.name}>
-                              🥎 {b.name} ({formatOvers(b.ballsBowled)} ov, {b.wickets}w)
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {activeBowlingSquadPlayers.length > 0 && (
-                        <optgroup label={`${currentInnings?.bowlingTeam || 'Bowling Team'} Squad`}>
-                          {activeBowlingSquadPlayers.map((p, idx) => (
-                            <option key={`wkt-sq-${idx}`} value={p.name}>
-                              👤 {p.displayName || p.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      <option value="__custom__">✏️ Custom / Other Name...</option>
-                    </select>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={wicketBowlerName}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val !== '__custom__') {
+                            setWicketBowlerName(val);
+                          }
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 hover:border-emerald-400 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-white cursor-pointer"
+                      >
+                        {wicketBowlerName && (
+                          <option value={wicketBowlerName}>🥎 Current: {wicketBowlerName}</option>
+                        )}
+                        {currentInnings && currentInnings.bowlers.length > 0 && (
+                          <optgroup label="Active Bowlers">
+                            {currentInnings.bowlers.map((b, idx) => (
+                              <option key={`wkt-b-${idx}`} value={b.name}>
+                                🥎 {b.name} ({formatOvers(b.ballsBowled)} ov, {b.wickets}w)
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {activeBowlingSquadPlayers.length > 0 && (
+                          <optgroup label={`${currentInnings?.bowlingTeam || 'Bowling Team'} Squad`}>
+                            {activeBowlingSquadPlayers.map((p, idx) => (
+                              <option key={`wkt-sq-${idx}`} value={p.name}>
+                                👤 {p.displayName || p.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <option value="__custom__">✏️ Custom / Other Name...</option>
+                      </select>
 
-                    <input
-                      type="text"
-                      value={wicketBowlerName}
-                      onChange={(e) => setWicketBowlerName(e.target.value)}
-                      placeholder="Or type bowler name..."
-                      className="w-full bg-slate-955 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-white focus:border-rose-500"
-                    />
+                      <input
+                        type="text"
+                        value={wicketBowlerName}
+                        onChange={(e) => setWicketBowlerName(e.target.value)}
+                        placeholder="Or type bowler name..."
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none text-white focus:border-rose-500"
+                      />
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="text-[8.5px] font-black text-emerald-400 uppercase tracking-widest leading-none flex items-center gap-1">
-                          <span>🏏</span>
-                          <span>Incoming Batsman (Captain Squad Dropdown)</span>
-                        </label>
+                  {/* 6. Incoming Batsman (Squad Dropdown + Custom Input Side-by-Side + 1-Tap Chips) */}
+                  <div className="p-2.5 bg-slate-950/70 border border-emerald-500/30 rounded-xl space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[8px] font-black text-emerald-400 uppercase tracking-widest leading-none flex items-center gap-1">
+                        <span>🏏</span>
+                        <span>Incoming Batsman (Squad Dropdown or Custom)</span>
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        {newBatsmanName && (
+                          <span className="text-[7px] text-emerald-400 font-mono font-bold">Ready ✓</span>
+                        )}
                         {unbattedSquadPlayers.length > 0 && (
-                          <span className="text-[7.5px] font-mono text-emerald-300 bg-emerald-500/15 px-1.5 py-0.5 rounded font-black">
+                          <span className="text-[7px] font-mono text-emerald-300 bg-emerald-500/15 px-1.5 py-0.2 rounded font-black">
                             {unbattedSquadPlayers.length} unbatted ready
                           </span>
                         )}
                       </div>
+                    </div>
 
-                      {/* Dropdown Menu to select batsman name with no manual entry required */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <select
                         value={newBatsmanName}
                         onChange={(e) => {
@@ -15175,11 +14606,11 @@ export const CricketScoreboard: React.FC = () => {
                             setNewBatsmanName(val);
                           }
                         }}
-                        className="w-full bg-slate-950 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-xl p-2.5 text-xs font-bold outline-none text-white cursor-pointer shadow-sm transition-all"
+                        className="w-full bg-slate-900 border border-emerald-500/40 hover:border-emerald-400 focus:border-emerald-400 rounded-lg px-2 py-1.5 text-xs font-bold outline-none text-white cursor-pointer shadow-xs transition-all"
                       >
                         <option value="" className="bg-slate-900 text-slate-400">
                           {unbattedSquadPlayers.length > 0
-                            ? `-- Select Batsman from Squad (${unbattedSquadPlayers.length} Available) --`
+                            ? `-- Select Squad Batsman (${unbattedSquadPlayers.length}) --`
                             : `-- Select Incoming Batsman --`}
                         </option>
                         {unbattedSquadPlayers.map((player, idx) => (
@@ -15188,16 +14619,24 @@ export const CricketScoreboard: React.FC = () => {
                           </option>
                         ))}
                         <option value="__custom__" className="bg-slate-900 text-amber-300 font-bold">
-                          ✏️ Enter Custom / Unlisted Name...
+                          ✏️ Enter Custom Name...
                         </option>
                       </select>
+
+                      <input
+                        type="text"
+                        value={newBatsmanName}
+                        onChange={(e) => setNewBatsmanName(e.target.value)}
+                        placeholder={`Or type name (Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1})`}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none text-slate-200 focus:border-emerald-500"
+                      />
                     </div>
 
                     {/* Quick 1-tap buttons for fast touch selection */}
                     {unbattedSquadPlayers.length > 0 && (
-                      <div className="flex flex-wrap gap-1 items-center">
-                        <span className="text-[7.5px] text-slate-500 font-extrabold uppercase py-0.5 select-none font-sans">Quick 1-Tap:</span>
-                        {unbattedSquadPlayers.slice(0, 6).map((player, idx) => {
+                      <div className="flex flex-wrap gap-1 items-center pt-0.5">
+                        <span className="text-[7px] text-slate-400 font-extrabold uppercase py-0.5 select-none font-sans">Quick 1-Tap:</span>
+                        {unbattedSquadPlayers.slice(0, 8).map((player, idx) => {
                           const stats = playerStatsMap[player.name.toLowerCase().trim()];
                           const matchesPlayed = stats ? stats.matches : 0;
                           const avgScore = stats && stats.matches > 0 ? stats.avg : 0;
@@ -15207,9 +14646,9 @@ export const CricketScoreboard: React.FC = () => {
                               key={`${player.name}-${idx}`}
                               type="button"
                               onClick={() => setNewBatsmanName(player.name)}
-                              className={`px-2 py-0.5 rounded text-[8px] uppercase font-black tracking-wider border-none cursor-pointer transition-all active:scale-95 ${
+                              className={`px-1.5 py-0.5 rounded text-[7.5px] uppercase font-black tracking-wider border-none cursor-pointer transition-all active:scale-95 ${
                                 isSelected
-                                  ? 'bg-emerald-500 text-slate-950 font-black shadow-sm'
+                                  ? 'bg-emerald-500 text-slate-950 font-black shadow-xs'
                                   : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
                               }`}
                               title={`${player.name} - Matches: ${matchesPlayed}, Avg: ${matchesPlayed > 0 ? avgScore : 'N/A'}`}
@@ -15220,41 +14659,25 @@ export const CricketScoreboard: React.FC = () => {
                         })}
                       </div>
                     )}
-
-                    {/* Name Confirmation & Manual Edit Field */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="text-[7.5px] font-bold text-slate-400 uppercase tracking-wider leading-none">
-                          Selected Batsman Name (Or Type Custom)
-                        </label>
-                        {newBatsmanName && (
-                          <span className="text-[7px] text-emerald-400 font-mono">Ready ✓</span>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={newBatsmanName}
-                        onChange={(e) => setNewBatsmanName(e.target.value)}
-                        placeholder={`Default: Batsman ${(currentInnings?.batsmen?.length || 0) + 1}`}
-                        className="w-full bg-slate-950/80 border border-slate-800 rounded-lg p-2 text-xs font-bold outline-none text-slate-200 focus:border-slate-600"
-                      />
-                    </div>
                   </div>
+                </div>
 
-                  <div className="pt-1 flex gap-2">
-                    <button
-                      onClick={() => setShowWicketModal(false)}
-                      className="flex-1 py-2 bg-slate-800 text-slate-400 rounded-lg text-xs uppercase tracking-widest border-none cursor-pointer font-bold"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleWicketScore}
-                      className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-black uppercase tracking-widest cursor-pointer border-none"
-                    >
-                      Confirm
-                    </button>
-                  </div>
+                {/* Pinned Modal Footer (Always Visible on Laptop & Mobile) */}
+                <div className="px-4 py-2.5 bg-slate-950/95 border-t border-slate-800 flex gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowWicketModal(false)}
+                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs uppercase tracking-widest border border-slate-700 cursor-pointer font-black transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleWicketScore}
+                    className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-widest cursor-pointer border border-rose-400 shadow-lg shadow-rose-900/40 transition-all"
+                  >
+                    Confirm Wicket 🔴
+                  </button>
                 </div>
               </motion.div>
             </div>
@@ -15263,7 +14686,7 @@ export const CricketScoreboard: React.FC = () => {
 
         <AnimatePresence>
           {showExtraRunsModal && currentInnings && extraRunsBallType && (
-            <div className="fixed inset-0 z-[180] flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-[180] flex items-center justify-center p-3 sm:p-4">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 0.6 }}
@@ -15275,36 +14698,109 @@ export const CricketScoreboard: React.FC = () => {
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-slate-900 rounded-3xl border border-slate-800 max-w-sm w-full p-5 shadow-2xl relative z-20 text-white space-y-3 font-sans"
+                className="bg-slate-900 rounded-3xl border border-slate-800 max-w-sm w-full max-h-[90vh] overflow-y-auto custom-scrollbar p-5 shadow-2xl relative z-20 text-white space-y-3 font-sans"
               >
                 <div className="text-center">
                   <span className={`px-2.5 py-0.5 rounded-full font-black text-[8px] uppercase tracking-widest ${
                     extraRunsBallType === 'wide' ? 'bg-purple-500/10 text-purple-300' :
                     extraRunsBallType === 'noball' ? 'bg-amber-500/10 text-amber-300' :
                     extraRunsBallType === 'bye' ? 'bg-purple-500/10 text-purple-300' :
+                    extraRunsBallType === 'penalty' ? 'bg-rose-500/10 text-rose-300' :
                     'bg-indigo-500/10 text-indigo-300'
                   }`}>
                     Match Event Trigger - {
                       extraRunsBallType === 'wide' ? 'Wide' :
                       extraRunsBallType === 'noball' ? 'No Ball' :
                       extraRunsBallType === 'bye' ? 'Byes (B)' :
+                      extraRunsBallType === 'penalty' ? 'Penalty Runs (⚖️)' :
                       'Leg Byes (LB)'
                     }
                   </span>
                   <h3 className="text-base font-black uppercase tracking-tight text-white mt-1">
                     {extraRunsBallType === 'bye' ? 'Runs Off Byes' :
                      extraRunsBallType === 'legbye' ? 'Runs Off Leg Byes' :
+                     extraRunsBallType === 'penalty' ? 'Award Penalty Runs' :
                      `Runs Off ${extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}`}
                   </h3>
                   <p className="text-[9px] text-slate-400 mt-0.5 leading-tight font-bold">
-                    {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye')
-                      ? 'Legal ball counts. Runs added to team extras (bypasses batsman statistics).'
-                      : 'Select additional runs completed by batsmen off this ball.'}
+                    {extraRunsBallType === 'penalty'
+                      ? `Awarded directly to ${currentInnings.battingTeam}'s score & extras (does not count as a ball bowled).`
+                      : (extraRunsBallType === 'bye' || extraRunsBallType === 'legbye')
+                        ? 'Legal ball counts. Runs added to team extras (bypasses batsman statistics).'
+                        : 'Select additional runs completed by batsmen off this ball.'}
                   </p>
                 </div>
 
                 <div className="space-y-3 font-bold text-xs">
-                  {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye') ? (
+                  {extraRunsBallType === 'penalty' ? (
+                    <div className="space-y-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleAddPenaltyRuns(5, penaltyReason);
+                          setPenaltyReason('');
+                          setShowExtraRunsModal(false);
+                        }}
+                        className="w-full py-3 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border border-rose-400/50 shadow-lg transition-all flex flex-col items-center justify-center active:scale-95"
+                      >
+                        <span>⚖️ +5 Penalty Runs (Standard ICC)</span>
+                        <span className="text-[8px] font-semibold text-rose-100 mt-0.5">(+5 Runs to {currentInnings.battingTeam} & Penalty Extras)</span>
+                      </button>
+
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[1, 2, 3, 4, 6, 10].map((pRuns) => (
+                          <button
+                            key={pRuns}
+                            type="button"
+                            onClick={() => {
+                              handleAddPenaltyRuns(pRuns, penaltyReason);
+                              setPenaltyReason('');
+                              setShowExtraRunsModal(false);
+                            }}
+                            className="py-2 bg-slate-800 hover:bg-rose-900/60 text-slate-200 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border border-slate-700 hover:border-rose-500/50 transition-all flex flex-col items-center justify-center active:scale-95"
+                          >
+                            <span>+{pRuns} {pRuns === 1 ? 'Run' : 'Runs'}</span>
+                            <span className="text-[7px] font-medium opacity-60">Penalty</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-800 space-y-2">
+                        <input
+                          type="text"
+                          value={penaltyReason}
+                          onChange={(e) => setPenaltyReason(e.target.value)}
+                          placeholder="Optional reason (e.g. Slow Over Rate, Helmet, Unfair Play)..."
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-[10px] text-white font-semibold outline-none focus:border-rose-500/60"
+                        />
+                        <div className="flex gap-1.5">
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={customPenaltyRuns}
+                            onChange={(e) => setCustomPenaltyRuns(e.target.value)}
+                            placeholder="Custom runs"
+                            className="w-24 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-black outline-none focus:border-rose-500/60"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const parsed = parseInt(customPenaltyRuns, 10);
+                              if (parsed && parsed > 0) {
+                                handleAddPenaltyRuns(parsed, penaltyReason);
+                                setPenaltyReason('');
+                                setShowExtraRunsModal(false);
+                              }
+                            }}
+                            className="flex-1 py-1.5 bg-rose-700 hover:bg-rose-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none transition-all active:scale-95"
+                          >
+                            Add +{customPenaltyRuns || 0} Custom Penalty
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (extraRunsBallType === 'bye' || extraRunsBallType === 'legbye') ? (
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => {
@@ -16114,10 +15610,10 @@ export const CricketScoreboard: React.FC = () => {
   if (activeSection === 'tournaments') {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200 font-sans">
-        <header className="sticky top-0 z-40 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 dark:from-slate-950 dark:via-emerald-950 dark:to-slate-900 text-white shadow-lg border-b border-emerald-600/30 backdrop-blur-md">
+        <header className="sticky top-0 z-40 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 text-white shadow-lg border-b border-emerald-600/30 backdrop-blur-md">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="p-2 sm:p-2.5 bg-emerald-600/90 dark:bg-emerald-800/80 rounded-xl shadow-inner border border-emerald-400/20 shrink-0">
+              <div className="p-2 sm:p-2.5 bg-emerald-900/80 rounded-xl shadow-inner border border-emerald-400/20 shrink-0">
                 <Trophy className="text-amber-300" size={20} />
               </div>
               <div className="min-w-0">
@@ -16451,24 +15947,6 @@ export const CricketScoreboard: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <Link
-                to="/live/cricket-toss"
-                className="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-[10px] sm:text-xs uppercase tracking-wider flex items-center gap-1 cursor-pointer shadow-sm transition-all no-underline"
-                title="GullyScore: Cricket Digital Toss Simulator"
-              >
-                <span>🪙</span>
-                <span className="hidden sm:inline">Digital</span>
-                <span>Toss</span>
-              </Link>
-
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all cursor-pointer border border-white/10"
-                title="Toggle theme mode"
-              >
-                {darkMode ? <Sun size={16} className="text-amber-300" /> : <Moon size={16} />}
-              </button>
-
               {isScoreManager ? (
                 <button
                   type="button"
@@ -16699,10 +16177,10 @@ export const CricketScoreboard: React.FC = () => {
       )}
 
       {/* Unified Pro Broadcast Header Bar */}
-      <header className="sticky top-0 z-40 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 dark:from-slate-950 dark:via-emerald-950 dark:to-slate-900 text-white shadow-lg border-b border-emerald-600/30 backdrop-blur-md">
+      <header className="sticky top-0 z-40 bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 text-white shadow-lg border-b border-emerald-600/30 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="p-2 sm:p-2.5 bg-emerald-600/90 dark:bg-emerald-800/80 rounded-xl shadow-inner border border-emerald-400/20 shrink-0">
+            <div className="p-2 sm:p-2.5 bg-emerald-900/80 rounded-xl shadow-inner border border-emerald-400/20 shrink-0">
               <Trophy className="text-amber-300" size={20} />
             </div>
             <div className="min-w-0">
@@ -17355,7 +16833,7 @@ export const CricketScoreboard: React.FC = () => {
                           href="#/completed-matches"
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm no-underline border border-emerald-400/30 transition-all"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm no-underline border border-emerald-400/30 transition-all"
                           title="Open Dedicated All Completed Matches Archive Page"
                         >
                           <span>Public Page</span>
@@ -20390,7 +19868,7 @@ export const CricketScoreboard: React.FC = () => {
                 <button
                   onClick={handleStartMatch}
                   id="btn-start-gully-match"
-                  className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-black uppercase tracking-wider text-xs sm:text-sm transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 border-none cursor-pointer"
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-wider text-xs sm:text-sm transition-all active:scale-[0.98] shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 border-none cursor-pointer"
                 >
                   <Play size={16} fill="currentColor" />
                   <span>Start Gully Match</span>
@@ -21111,7 +20589,7 @@ export const CricketScoreboard: React.FC = () => {
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={handleSwapBatsmen}
+                                      onClick={handleSwapStrikers}
                                       className="text-[8px] font-black text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 cursor-pointer flex items-center gap-1 transition-all"
                                       title="Swap ends with Non-Striker"
                                     >
@@ -21238,7 +20716,7 @@ export const CricketScoreboard: React.FC = () => {
                                     </span>
                                     <button
                                       type="button"
-                                      onClick={handleSwapBatsmen}
+                                      onClick={handleSwapStrikers}
                                       className="text-[8px] font-black text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 cursor-pointer flex items-center gap-1 transition-all"
                                       title="Swap ends with Striker"
                                     >
@@ -21491,7 +20969,7 @@ export const CricketScoreboard: React.FC = () => {
                             <button
                               type="button"
                               onClick={handleConfirmInn2Openers}
-                              className="flex-1 sm:flex-none px-5 py-2.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                              className="flex-1 sm:flex-none px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer shadow-lg shadow-emerald-600/20 active:scale-95 transition-all flex items-center justify-center gap-2"
                             >
                               <span>🚀 CONFIRM OPENERS &amp; LAUNCH CHASE</span>
                             </button>
@@ -21708,18 +21186,19 @@ export const CricketScoreboard: React.FC = () => {
                   };
 
                   const lastDelivery = currentInnings?.commentaryList?.[0];
-                  const lastDeliverySixCount = (lastDelivery?.type === 'boundary' && (
+                  const isExplicitFour = lastDelivery?.ballScore === '4' || (lastDelivery as any)?.runsOffBat === 4 || (lastDelivery as any)?.runs === 4;
+                  const lastDeliverySixCount = (!isExplicitFour && lastDelivery?.type === 'boundary' && (
                     lastDelivery.ballScore === '6' || 
                     (lastDelivery as any).runsOffBat === 6 || 
+                    (lastDelivery as any).runs === 6 ||
                     lastDelivery.description?.toLowerCase().includes('six') || 
                     lastDelivery.description?.toLowerCase().includes('6 runs') || 
                     lastDelivery.description?.toLowerCase().includes('maximum') || 
                     lastDelivery.description?.toLowerCase().includes('षटकार') || 
                     lastDelivery.description?.toLowerCase().includes('छक्का') || 
-                    lastDelivery.description?.toLowerCase().includes('६') || 
-                    /\b6\b/.test(lastDelivery.description || '')
+                    lastDelivery.description?.toLowerCase().includes('६')
                   )) ? 1 : 0;
-                  const lastDeliveryFourCount = (!lastDeliverySixCount && lastDelivery?.type === 'boundary') ? 1 : 0;
+                  const lastDeliveryFourCount = (isExplicitFour || (!lastDeliverySixCount && lastDelivery?.type === 'boundary')) ? 1 : 0;
 
                   return (
                     <motion.div
@@ -21781,11 +21260,11 @@ export const CricketScoreboard: React.FC = () => {
                                 showNotification('🔥 Permanent OBS Link Copied! Add once to OBS (1920x1080); it stays active forever across all matches!', 'success');
                               });
                             }}
-                            className="px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer border-none"
+                            className="px-4 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95 cursor-pointer border-none"
                             title="Copy your permanent OBS Browser Source link. You never have to change OBS again between matches!"
                             id="btn-copy-permanent-obs-overlay"
                           >
-                            {copiedPermanentOverlayLink ? <Check size={16} className="text-slate-950" /> : <Radio size={16} className="text-slate-950 animate-pulse" />}
+                            {copiedPermanentOverlayLink ? <Check size={16} className="text-white" /> : <Radio size={16} className="text-white animate-pulse" />}
                             <span>{copiedPermanentOverlayLink ? 'Permanent OBS Link Copied!' : 'Copy Permanent OBS Link (Single Link)'}</span>
                           </button>
 
@@ -23085,6 +22564,120 @@ export const CricketScoreboard: React.FC = () => {
                 })()}
               </AnimatePresence>
 
+              {/* PRO SCOREBOARD MANAGER TOP ACTION & POWERPLAY BAR (PP1/PP2/PP3, Walkover, Abandon, Need Runs) */}
+              {!isSpectator && (
+                <div className="mb-3 bg-slate-950/70 border border-white/10 rounded-2xl p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2 shadow-md">
+                  {/* Left: PowerPlay Toggles (PP1, PP2, PP3) */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-amber-400 mr-1 flex items-center gap-1">
+                      <Zap size={11} className="text-amber-400" /> PowerPlay:
+                    </span>
+                    {(['PP1', 'PP2', 'PP3'] as const).map((pp) => {
+                      const isActivePP = activeOverlayConfig.activePowerPlay === pp;
+                      return (
+                        <button
+                          key={pp}
+                          type="button"
+                          onClick={() => {
+                            const nextPP = isActivePP ? null : pp;
+                            updateOverlayProp({ activePowerPlay: nextPP });
+                            showNotification(nextPP ? `⚡ ${pp} PowerPlay Activated on Scoreboard!` : `${pp} PowerPlay Turned Off`, 'info');
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95 border ${
+                            isActivePP
+                              ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)] animate-pulse'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                          title={`Toggle ${pp} PowerPlay badge on broadcast`}
+                        >
+                          {pp} {isActivePP ? '● ON' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Center: Need Runs / Equation Quick Broadcast Trigger */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {match.currentInningsNum === 2 && match.targetRuns && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isNeedActive = currentActiveGraphic === 'black_board_scoreboard';
+                          updateOverlayProp({ activeGraphic: isNeedActive ? 'none' : 'black_board_scoreboard' });
+                          showNotification(isNeedActive ? 'Need Runs Board Hidden' : '🎯 Need Runs Equation Live on Broadcast!', 'success');
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95 border flex items-center gap-1 ${
+                          currentActiveGraphic === 'black_board_scoreboard'
+                            ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-md'
+                            : 'bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border-emerald-500/40'
+                        }`}
+                      >
+                        <span>🎯 Need {Math.max(0, match.targetRuns - currentInnings.runs)} in {Math.max(0, (match.oversLimit * 6) - currentInnings.ballsBowled)}b</span>
+                        <span className="bg-black/30 px-1 py-0.5 rounded text-[8px]">{currentActiveGraphic === 'black_board_scoreboard' ? 'HIDE' : 'SHOW'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Right: Walkover, Abandon, Declare Innings */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pushStateToUndoStack(match);
+                        const updatedMatch: MatchState = {
+                          ...match,
+                          status: 'completed',
+                          winner: `${match.teamA} (Walkover)`,
+                          winReason: `${match.teamA} won by Walkover`
+                        };
+                        syncMatch(updatedMatch);
+                        showNotification(`Walkover awarded to ${match.teamA}! (Use Undo to revert)`, 'success');
+                      }}
+                      className="px-2.5 py-1 bg-indigo-950/90 hover:bg-indigo-800 text-indigo-200 border border-indigo-500/40 rounded-lg text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95"
+                      title={`Award Walkover win to ${match.teamA}`}
+                    >
+                      🏳️ Walkover ({match.teamA})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pushStateToUndoStack(match);
+                        const updatedMatch: MatchState = {
+                          ...match,
+                          status: 'completed',
+                          winner: `${match.teamB} (Walkover)`,
+                          winReason: `${match.teamB} won by Walkover`
+                        };
+                        syncMatch(updatedMatch);
+                        showNotification(`Walkover awarded to ${match.teamB}! (Use Undo to revert)`, 'success');
+                      }}
+                      className="px-2.5 py-1 bg-indigo-950/90 hover:bg-indigo-800 text-indigo-200 border border-indigo-500/40 rounded-lg text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95"
+                      title={`Award Walkover win to ${match.teamB}`}
+                    >
+                      🏳️ Walkover ({match.teamB})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pushStateToUndoStack(match);
+                        const updatedMatch: MatchState = {
+                          ...match,
+                          status: 'completed',
+                          winner: 'Match Abandoned',
+                          winReason: 'Match Abandoned (No Result)'
+                        };
+                        syncMatch(updatedMatch);
+                        showNotification('Match marked as Abandoned (No Result). Use Undo to revert.', 'alert');
+                      }}
+                      className="px-2.5 py-1 bg-rose-950/90 hover:bg-rose-800 text-rose-200 border border-rose-500/40 rounded-lg text-[9.5px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95"
+                      title="Mark match as Abandoned / No Result"
+                    >
+                      🌧️ Abandon
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Central Multi-column Grid in One Frame */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-stretch">
                 
@@ -23158,6 +22751,41 @@ export const CricketScoreboard: React.FC = () => {
                         </p>
                       </div>
                     )}
+
+                    {/* Innings Breakdown & Partnership Card (Balances Column 1 Height on Laptop & Mobile) */}
+                    <div className="bg-slate-900/90 border border-white/5 rounded-xl p-3 space-y-2.5">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                        <span className="text-[8.5px] font-black uppercase tracking-widest text-amber-400">
+                          📊 Innings & Over Telemetry
+                        </span>
+                        <span className="text-[9px] font-mono font-bold text-slate-400">
+                          Ball <strong className="text-white">{(currentInnings.ballsBowled % 6) || (currentInnings.ballsBowled > 0 ? 6 : 0)}</strong>/6
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-2">
+                          <span className="text-[7.5px] font-black uppercase text-slate-500 block">Boundaries</span>
+                          <strong className="text-xs font-mono font-black text-emerald-400">
+                            {currentInnings.batsmen.reduce((s, b) => s + (b.fours || 0), 0)}x4 • {currentInnings.batsmen.reduce((s, b) => s + (b.sixes || 0), 0)}x6
+                          </strong>
+                        </div>
+                        <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-2">
+                          <span className="text-[7.5px] font-black uppercase text-slate-500 block">Extras</span>
+                          <strong className="text-xs font-mono font-black text-amber-400">
+                            {currentInnings.extras.wides + currentInnings.extras.noBalls + currentInnings.extras.byes + currentInnings.extras.legByes + (currentInnings.extras.penalty || 0)}
+                          </strong>
+                        </div>
+                        <div className="bg-slate-950/80 border border-slate-800/80 rounded-lg p-2">
+                          <span className="text-[7.5px] font-black uppercase text-slate-500 block">Partnership</span>
+                          <strong className="text-xs font-mono font-black text-cyan-300">
+                            {(() => {
+                              const lastFow = currentInnings.fallOfWickets?.[currentInnings.fallOfWickets.length - 1];
+                              return `${lastFow ? Math.max(0, currentInnings.runs - lastFow.score) : currentInnings.runs} runs`;
+                            })()}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Over, Target & Last result card indicators */}
@@ -23232,8 +22860,8 @@ export const CricketScoreboard: React.FC = () => {
                         </div>
                       ) : (
                         <div className="text-[10px] text-slate-300 italic truncate font-bold leading-relaxed scroll-smooth">
-                          {currentInnings.commentaryList[0] 
-                            ? getCommentaryText(currentInnings.commentaryList[0], userCommentaryLang)
+                          {combinedCommentaryList[0] 
+                            ? getCommentaryText(combinedCommentaryList[0], userCommentaryLang)
                             : "Scorer cockpit fully calibrated. Ready for next ball delivery."}
                         </div>
                       )}
@@ -23352,6 +22980,42 @@ export const CricketScoreboard: React.FC = () => {
                                   <p className="text-[7.5px] text-slate-400 font-bold uppercase tracking-wider">
                                     {st.fours}x4s • {st.sixes}x6s
                                   </p>
+                                  {!isSpectator && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const isAct = currentActiveGraphic === 'player_profile_card';
+                                          updateOverlayProp({ activeGraphic: isAct ? 'none' : 'player_profile_card' });
+                                          showNotification(isAct ? 'Player Profile Hidden' : `📺 Showing ${st.name} Profile on Broadcast!`, 'success');
+                                        }}
+                                        className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase cursor-pointer border transition-all ${
+                                          currentActiveGraphic === 'player_profile_card'
+                                            ? 'bg-sky-500 text-slate-950 border-sky-300'
+                                            : 'bg-slate-900 hover:bg-sky-950 text-sky-300 border-sky-500/30'
+                                        }`}
+                                        title="Show Batsman Profile Card on Live Broadcast"
+                                      >
+                                        📺 Profile
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const isAct = currentActiveGraphic === 'batsman_stats' || currentActiveGraphic === 'individual_stats';
+                                          updateOverlayProp({ activeGraphic: isAct ? 'none' : 'batsman_stats' });
+                                          showNotification(isAct ? 'Batsman Individual Card Hidden' : `📊 Showing ${st.name} Individual Stats on Broadcast!`, 'success');
+                                        }}
+                                        className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase cursor-pointer border transition-all ${
+                                          currentActiveGraphic === 'batsman_stats'
+                                            ? 'bg-emerald-500 text-slate-950 border-emerald-300'
+                                            : 'bg-slate-900 hover:bg-emerald-950 text-emerald-300 border-emerald-500/30'
+                                        }`}
+                                        title="Show Individual Batsman Score Bar on Live Broadcast"
+                                      >
+                                        📊 Individual
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
@@ -23583,6 +23247,36 @@ export const CricketScoreboard: React.FC = () => {
                                   <p className="text-[7.5px] text-slate-450 mt-0.5 font-bold uppercase tracking-wider">
                                     {nst.fours}x4s • {nst.sixes}x6s
                                   </p>
+                                  {!isSpectator && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          openCareerCardByName(nst.name, currentInnings.battingTeam);
+                                        }}
+                                        className="px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase cursor-pointer border bg-slate-900 hover:bg-sky-950 text-sky-300 border-sky-500/30 transition-all"
+                                        title="View Non-Striker Career Profile"
+                                      >
+                                        👤 Career
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const isAct = currentActiveGraphic === 'individual_stats';
+                                          updateOverlayProp({ activeGraphic: isAct ? 'none' : 'individual_stats' });
+                                          showNotification(isAct ? 'Individual Stats Hidden' : `📊 Showing ${nst.name} Stats on Broadcast!`, 'success');
+                                        }}
+                                        className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase cursor-pointer border transition-all ${
+                                          currentActiveGraphic === 'individual_stats'
+                                            ? 'bg-emerald-500 text-slate-950 border-emerald-300'
+                                            : 'bg-slate-900 hover:bg-emerald-950 text-emerald-300 border-emerald-500/30'
+                                        }`}
+                                        title="Show Individual Stats on Broadcast"
+                                      >
+                                        📊 Individual
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             ) : (
@@ -23950,16 +23644,106 @@ export const CricketScoreboard: React.FC = () => {
                                     </button>
                                   ))}
                               </div>
+                              {/* Bowler Broadcast Quick Actions: Individual & Field Position */}
+                              <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-1.5 flex-wrap">
+                                <span className="text-[8px] font-black uppercase tracking-wider text-slate-400">
+                                  📺 Bowler & Field TV Controls:
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const isAct = currentActiveGraphic === 'bowler_stats';
+                                      updateOverlayProp({ activeGraphic: isAct ? 'none' : 'bowler_stats' });
+                                      showNotification(isAct ? 'Bowler Stats Hidden' : `📊 Showing ${bw.name} Spell on Broadcast!`, 'success');
+                                    }}
+                                    className={`px-2 py-1 rounded-lg text-[8.5px] font-black uppercase cursor-pointer border transition-all ${
+                                      currentActiveGraphic === 'bowler_stats'
+                                        ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-sm'
+                                        : 'bg-slate-900 hover:bg-amber-950 text-amber-300 border-amber-500/30'
+                                    }`}
+                                  >
+                                    📊 Individual
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowFieldPositionModal(true)}
+                                    className="px-2 py-1 rounded-lg text-[8.5px] font-black uppercase cursor-pointer border bg-emerald-950/90 hover:bg-emerald-800 text-emerald-300 border-emerald-500/40 transition-all flex items-center gap-1"
+                                    title="Open 11-Player Ground Field Position Manager"
+                                  >
+                                    🎯 Field Position
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           )}
                         </div>
                       </div>
                     );
                   })()}
+
+                  {/* Commentator & Officials Live Broadcast Input Bar (From Reference App) */}
+                  {!isSpectator && (
+                    <div className="pt-2 border-t border-white/5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[8.5px] font-black uppercase tracking-wider text-sky-400 flex items-center gap-1">
+                          🎙️ Live Commentator & Officials Bar
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isUmp = currentActiveGraphic === 'lower_third' && activeOverlayConfig.lowerThirdMode === 'umpires';
+                            updateOverlayProp({
+                              activeGraphic: isUmp ? 'none' : 'lower_third',
+                              lowerThirdMode: 'umpires'
+                            });
+                            showNotification(isUmp ? 'Officials Bar Hidden' : '🎙️ Showing Commentator & Officials on Broadcast!', 'success');
+                          }}
+                          className={`px-2 py-0.5 rounded text-[8px] font-black uppercase cursor-pointer border transition-all ${
+                            currentActiveGraphic === 'lower_third' && activeOverlayConfig.lowerThirdMode === 'umpires'
+                              ? 'bg-rose-600 text-white border-rose-400'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400'
+                          }`}
+                        >
+                          {currentActiveGraphic === 'lower_third' && activeOverlayConfig.lowerThirdMode === 'umpires' ? 'Hide Officials' : 'Show Officials'}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={match.commentatorName || activeOverlayConfig.commentatorName || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            syncMatch(prev => ({
+                              ...prev,
+                              commentatorName: val,
+                              overlayConfig: { ...(prev.overlayConfig || activeOverlayConfig), commentatorName: val }
+                            }));
+                          }}
+                          placeholder="Commentator Name (e.g. Rahul Patil)..."
+                          className="flex-1 min-w-0 bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-white font-bold outline-none focus:border-sky-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const commName = match.commentatorName || activeOverlayConfig.commentatorName || 'Live Commentator';
+                            updateOverlayProp({
+                              customBanner: 'drinks',
+                              customBannerText: `🎙️ COMMENTATOR: ${commName.toUpperCase()}`
+                            });
+                            showNotification(`🎙️ Showing Commentator "${commName}" on Broadcast!`, 'success');
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shadow-sm active:scale-95 shrink-0"
+                        >
+                          Show
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) - Optimized for Laptop Single Screen */}
-                <div className="lg:col-span-4 bg-slate-950/40 p-2.5 sm:p-3 rounded-xl border border-white/5 space-y-2 lg:space-y-1.5 overflow-y-auto custom-scrollbar">
+                {/* COLUMN 3: SCORING CONTROL PANEL OR SPECTATOR WATCH (lg:col-span-4) - Full-Height Balanced Card */}
+                <div className="lg:col-span-4 bg-slate-950/40 p-4 sm:p-6 rounded-2xl border border-white/5 flex flex-col justify-between overflow-y-auto custom-scrollbar">
                   {isSpectator ? (
                     <div className="h-full flex flex-col justify-between space-y-4">
                       <div className="space-y-2">
@@ -23980,7 +23764,7 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-4">
+                    <div className="flex-1 flex flex-col justify-between gap-3">
                       {isOverCompletedNeedsBowler ? (
                         <div className="bg-slate-900 border border-emerald-500/20 p-4 rounded-xl space-y-3 shadow-xl animate-fadeIn">
                           <div className="flex items-center gap-2">
@@ -24118,7 +23902,7 @@ export const CricketScoreboard: React.FC = () => {
                                   input.value = '';
                                 }
                               }}
-                              className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 rounded-lg px-3 text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all leading-none flex items-center"
+                              className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg px-3 text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all leading-none flex items-center"
                             >
                               Add
                             </button>
@@ -24190,29 +23974,53 @@ export const CricketScoreboard: React.FC = () => {
                               });
                               showNotification('Voice Command: Dismissed broadcast overlay.', 'info');
                             }}
+                            onAddPenalty={handleAddPenaltyRuns}
+                            onToggleFreeHit={() => {
+                              setMatch(prev => ({ ...prev, freeHitNext: !prev.freeHitNext }));
+                            }}
                           />
 
                           {/* Control buttons block */}
                           <div>
-                            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1 leading-none font-bold">TAP BALL RUNS</span>
-                            <div className="grid grid-cols-6 gap-1 font-black">
-                              {[0, 1, 2, 3, 4, 6].map((runs) => (
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest block leading-none font-bold">TAP BALL RUNS</span>
+                              <button
+                                type="button"
+                                disabled={isScoringDisabled}
+                                onClick={() => {
+                                  setExtraRunsBallType('penalty');
+                                  setShowExtraRunsModal(true);
+                                }}
+                                className="px-2 py-0.5 bg-rose-700 hover:bg-rose-600 text-white text-[8px] font-black rounded uppercase cursor-pointer border border-rose-400 shadow-xs active:scale-95 transition-all"
+                                title="Award Penalty Runs (+5 ICC or Custom)"
+                              >
+                                ⚖️ Penalty Runs
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 font-black">
+                              {([0, 1, '1D', 2, 3, 4, 6] as const).map((runs) => (
                                 <button
                                   key={runs}
                                   onClick={() => {
-                                    if (runs === 6) setActiveAnimation('six');
-                                    else if (runs === 4) setActiveAnimation('four');
+                                    if (runs === '1D') {
+                                      handleScoreEvent({ type: 'runs', val: 1, isDeclaredOne: true });
+                                    } else {
+                                      if (runs === 6) setActiveAnimation('six');
+                                      else if (runs === 4) setActiveAnimation('four');
 
-                                    if (runs === 0) handleScoreEvent({ type: 'dot' });
-                                    else handleScoreEvent({ type: 'runs', val: runs });
+                                      if (runs === 0) handleScoreEvent({ type: 'dot' });
+                                      else handleScoreEvent({ type: 'runs', val: runs });
+                                    }
                                   }}
                                   className={`py-2 text-xs sm:text-sm font-black rounded-xl transition-all cursor-pointer border-none transform active:scale-95 shadow ${
+                                    runs === '1D' ? 'bg-cyan-700 hover:bg-cyan-600 text-white font-black border border-cyan-400' :
                                     runs === 4 ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 font-black animate-pulse' :
-                                    runs === 6 ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black' :
+                                    runs === 6 ? 'bg-emerald-600 hover:bg-emerald-500 text-white font-black' :
                                     'bg-slate-800 hover:bg-slate-700 text-white hover:text-emerald-400'
                                   }`}
+                                  title={runs === '1D' ? '1 Declared Run (No strike rotation)' : undefined}
                                 >
-                                  {runs === 0 ? 'DOT' : runs}
+                                  {runs === 0 ? 'DOT' : runs === '1D' ? '1d' : runs}
                                 </button>
                               ))}
                             </div>
@@ -24220,8 +24028,8 @@ export const CricketScoreboard: React.FC = () => {
                         </>
                       )}
 
-                      {/* Extras and Byes quick selections (Wide, No Ball, Byes, Leg Byes - Always 4 cols for laptop screen) */}
-                      <div className="grid grid-cols-4 gap-1 sm:gap-1.5 font-bold">
+                      {/* Extras, Byes, and Penalty Runs quick selections */}
+                      <div className="grid grid-cols-5 gap-1 sm:gap-1.5 font-bold">
                         <button
                           onClick={() => handleScoreEvent({ type: 'wide', val: 0 })}
                           className="py-1.5 bg-purple-900/90 hover:bg-purple-800 border border-purple-600/60 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer flex flex-col items-center justify-center shadow-xs active:scale-95 px-1"
@@ -24263,6 +24071,47 @@ export const CricketScoreboard: React.FC = () => {
                           <span className="leading-none text-white font-black">LEG BYES</span>
                           <span className="text-[6.5px] text-indigo-100 font-semibold mt-0.5">Off pads</span>
                         </button>
+
+                        <button
+                          id="btn-main-penalty"
+                          onClick={() => {
+                            setExtraRunsBallType('penalty');
+                            setShowExtraRunsModal(true);
+                          }}
+                          className="py-1.5 bg-rose-800 hover:bg-rose-700 border-2 border-rose-400 text-white text-[10px] font-black rounded-xl uppercase transition-all cursor-pointer flex flex-col items-center justify-center shadow-md active:scale-95 px-1"
+                          title="Penalty Runs (+5 ICC or Custom)"
+                        >
+                          <span className="leading-none text-white font-black">⚖️ PENALTY</span>
+                          <span className="text-[6.5px] text-rose-100 font-semibold mt-0.5">+5 / Custom</span>
+                        </button>
+                      </div>
+
+                      {/* 1-Tap Direct Byes (B1-B4) & Leg Byes (LB1-LB4) Strip (From Reference Scoreboard Manager) */}
+                      <div className="grid grid-cols-8 gap-1">
+                        {[1, 2, 3, 4].map((bVal) => (
+                          <button
+                            key={`direct-b-${bVal}`}
+                            type="button"
+                            disabled={isScoringDisabled}
+                            onClick={() => handleScoreEvent({ type: 'bye', val: bVal })}
+                            className="py-1 bg-fuchsia-950/80 hover:bg-fuchsia-800 border border-fuchsia-500/40 text-fuchsia-200 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all active:scale-95"
+                            title={`1-Tap ${bVal} Bye${bVal > 1 ? 's' : ''}`}
+                          >
+                            B {bVal}
+                          </button>
+                        ))}
+                        {[1, 2, 3, 4].map((lbVal) => (
+                          <button
+                            key={`direct-lb-${lbVal}`}
+                            type="button"
+                            disabled={isScoringDisabled}
+                            onClick={() => handleScoreEvent({ type: 'legbye', val: lbVal })}
+                            className="py-1 bg-indigo-950/80 hover:bg-indigo-800 border border-indigo-500/40 text-indigo-200 rounded-lg text-[9px] font-black uppercase cursor-pointer transition-all active:scale-95"
+                            title={`1-Tap ${lbVal} Leg Bye${lbVal > 1 ? 's' : ''}`}
+                          >
+                            LB {lbVal}
+                          </button>
+                        ))}
                       </div>
 
                       {/* OUT / Wicket & UNDO buttons row - Accessible and high visibility */}
@@ -24309,12 +24158,478 @@ export const CricketScoreboard: React.FC = () => {
                         </button>
                       </div>
 
+                      {/* Quick Scorer & Broadcast Dock (Anchors Column 3 Flush at the Bottom on Laptop & Mobile) */}
+                      <div className="pt-3 border-t border-white/5 space-y-2 mt-auto">
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button
+                            type="button"
+                            disabled={isScoringDisabled}
+                            onClick={handleSwapStrikers}
+                            className="py-2 px-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-750 text-[9.5px] font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-1"
+                          >
+                            <ArrowLeftRight size={11} />
+                            <span>Swap Strike</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isScoringDisabled}
+                            onClick={() => setMatch(prev => ({ ...prev, freeHitNext: !prev.freeHitNext }))}
+                            className={`py-2 px-2 rounded-xl border text-[9.5px] font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-1 ${
+                              match.freeHitNext
+                                ? 'bg-amber-500 text-slate-950 border-amber-300 animate-pulse'
+                                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-750'
+                            }`}
+                          >
+                            <Zap size={11} />
+                            <span>{match.freeHitNext ? 'Free Hit ON' : 'Free Hit'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowFieldPositionModal(true)}
+                            className="py-2 px-2 rounded-xl bg-emerald-950/90 hover:bg-emerald-800 text-emerald-300 border border-emerald-500/40 text-[9.5px] font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-1"
+                          >
+                            <span>🎯 Field Radar</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'partnership' ? 'none' : 'partnership' })}
+                            className="py-1.5 px-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 text-[8.5px] font-black uppercase cursor-pointer truncate"
+                          >
+                            🤝 Partnership
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'manhattan_graph' ? 'none' : 'manhattan_graph' })}
+                            className="py-1.5 px-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-purple-300 border border-purple-500/30 text-[8.5px] font-black uppercase cursor-pointer truncate"
+                          >
+                            📊 Manhattan
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateOverlayProp({ activeGraphic: currentActiveGraphic === 'worm_graph' ? 'none' : 'worm_graph' })}
+                            className="py-1.5 px-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 text-[8.5px] font-black uppercase cursor-pointer truncate"
+                          >
+                            📈 Worm Graph
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowFullScorecardModal(true)}
+                            className="py-1.5 px-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 text-[8.5px] font-black uppercase cursor-pointer truncate"
+                          >
+                            📋 Scorecard
+                          </button>
+                        </div>
+                      </div>
+
                     </div>
                   )}
                 </div>
 
               </div>
             </div>
+
+            {/* ==================== 3.5. SCOREBOARD CONTROLLER: THEME OTHER PANELS TO SHOW & SQUAD QUICK-MANAGER ==================== */}
+            {!isSpectator && (
+              <div className="space-y-4">
+                {/* A. Theme Other Panels to Show (1-Tap Broadcast Controller from Reference App) */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                    <div>
+                      <h3 className="text-xs sm:text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
+                        <span>🎛️ Scoreboard Controller — Theme Other Panels to Show</span>
+                        {currentActiveGraphic !== 'none' && (
+                          <span className="px-2 py-0.5 bg-emerald-500 text-slate-950 rounded-full text-[9px] font-black uppercase animate-pulse">
+                            ON AIR: {currentActiveGraphic.replace(/_/g, ' ')}
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[10px] text-slate-400 font-medium mt-0.5">
+                        One-tap live broadcast graphic panels, automatic loop, boundary/logo switches & custom lower-third message
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {/* Automatic Loop Toggle */}
+                      <label className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl cursor-pointer select-none">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-400">
+                          🔄 Automatic Loop
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(isAutoTourRunning)}
+                          onChange={() => {
+                            if (isAutoTourRunning) {
+                              stopGraphicsAutoTour();
+                            } else {
+                              startGraphicsAutoTour();
+                            }
+                          }}
+                          className="accent-amber-500 w-3.5 h-3.5 cursor-pointer"
+                        />
+                      </label>
+
+                      {/* Clear All Overlays Button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateOverlayProp({
+                            activeGraphic: 'none',
+                            customBanner: 'none',
+                            customBannerText: ''
+                          });
+                          showNotification('Cleared active broadcast panel — showing clean Scoreboard', 'info');
+                        }}
+                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shadow-sm active:scale-95"
+                      >
+                        ✕ Clear Active Panel
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 1-Tap Broadcast Panels Grid (Matching Reference Screenshot Buttons) */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                    {[
+                      { id: 'score_bug_default', label: '📺 Scoreboard', graphic: 'none' },
+                      { id: 'team_vs_team', label: '🛡️ Team vs Team Logo', graphic: 'team_vs_team' },
+                      { id: 'toss_result', label: '🪙 Toss Details', graphic: 'toss_result' },
+                      { id: 'boundary_count', label: '💥 Boundary Count', graphic: 'lower_third' },
+                      { id: 'match_summary', label: '📋 Match Summary', graphic: 'match_summary' },
+                      { id: 'prematch_matchup', label: '⚔️ Match Preview', graphic: 'prematch_matchup' },
+                      { id: 'batting_summary', label: `🏏 ${currentInnings.battingTeam} Bat Summary`, graphic: 'batting_summary' },
+                      { id: 'bowling_summary', label: `🥎 ${currentInnings.bowlingTeam} Ball Summary`, graphic: 'bowling_summary' },
+                      { id: 'partnership', label: '🤝 Partnership', graphic: 'partnership' },
+                      { id: 'need_runs', label: '🎯 Target / Need Runs', graphic: 'black_board_scoreboard' },
+                      { id: 'manhattan_graph', label: '📊 Manhattan Graph', graphic: 'manhattan_graph' },
+                      { id: 'worm_graph', label: '📈 Worm Graph', graphic: 'worm_graph' },
+                      { id: 'run_rate_graph', label: '⚡ Run Rate Graph', graphic: 'run_rate_graph' },
+                      { id: 'field_positions', label: '🏟️ Field Positions', graphic: 'field_positions' },
+                      { id: 'squad_a', label: `👥 ${match.teamA} Squad (Img)`, graphic: 'squad_a' },
+                      { id: 'squad_b', label: `👥 ${match.teamB} Squad (Img)`, graphic: 'squad_b' },
+                      { id: 'team_comparison', label: '👥 Both Squads (XI)', graphic: 'team_comparison' },
+                      { id: 'grand_presentation_board', label: '🏆 Prize Presentation', graphic: 'grand_presentation_board' }
+                    ].map((panel) => {
+                      const isActive = panel.id === 'score_bug_default'
+                        ? currentActiveGraphic === 'none'
+                        : currentActiveGraphic === panel.graphic;
+                      return (
+                        <button
+                          key={panel.id}
+                          type="button"
+                          onClick={() => {
+                            if (panel.id === 'score_bug_default') {
+                              updateOverlayProp({ activeGraphic: 'none', showScoreBug: true });
+                              showNotification('Showing Main Scoreboard on Broadcast', 'success');
+                            } else {
+                              const nextG = isActive ? 'none' : panel.graphic;
+                              updateOverlayProp({ activeGraphic: nextG });
+                              showNotification(
+                                nextG === 'none'
+                                  ? `Hidden ${panel.label}`
+                                  : `${panel.label} is now LIVE ON AIR!`,
+                                'success'
+                              );
+                            }
+                          }}
+                          className={`py-2.5 px-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer transition-all active:scale-95 border text-center truncate ${
+                            isActive
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.35)]'
+                              : 'bg-slate-800/90 hover:bg-slate-750 text-slate-200 border-slate-700'
+                          }`}
+                        >
+                          {panel.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Quick Toggle Switches Row + Custom Message Box (Matching Reference Screenshot) */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 pt-3 border-t border-slate-800 items-center">
+                    {/* 4 Toggle Switches */}
+                    <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        {
+                          key: 'boundaryBlast',
+                          label: 'Show Six, Four, Wicket Graphic',
+                          checked: Boolean(activeOverlayConfig.boundaryBlast),
+                          onChange: (val: boolean) => updateOverlayProp({ boundaryBlast: val })
+                        },
+                        {
+                          key: 'showStatsPanel',
+                          label: 'Show 4s / 6s Counter & Stats Strip',
+                          checked: activeOverlayConfig.showStatsPanel !== false,
+                          onChange: (val: boolean) => updateOverlayProp({ showStatsPanel: val })
+                        },
+                        {
+                          key: 'showYoutubeChannelLogo',
+                          label: 'Show Channel / Tournament Logo',
+                          checked: activeOverlayConfig.showYoutubeChannelLogo !== false,
+                          onChange: (val: boolean) => updateOverlayProp({ showYoutubeChannelLogo: val })
+                        },
+                        {
+                          key: 'showWinProbability',
+                          label: 'Show Win Probability Meter',
+                          checked: Boolean(activeOverlayConfig.showWinProbability),
+                          onChange: (val: boolean) => updateOverlayProp({ showWinProbability: val })
+                        }
+                      ].map((sw) => (
+                        <label
+                          key={sw.key}
+                          className="flex items-center justify-between p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl cursor-pointer select-none"
+                        >
+                          <span className="text-[10px] font-bold text-slate-200">{sw.label}</span>
+                          <input
+                            type="checkbox"
+                            checked={sw.checked}
+                            onChange={(e) => sw.onChange(e.target.checked)}
+                            className="accent-emerald-500 w-4 h-4 cursor-pointer"
+                          />
+                        </label>
+                      ))}
+                    </div>
+
+                    {/* Custom Message Box + Show/Hide Button */}
+                    <div className="lg:col-span-5 bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-amber-400">
+                          💬 Custom Broadcast Message
+                        </span>
+                        {activeOverlayConfig.customBanner !== 'none' && (
+                          <button
+                            type="button"
+                            onClick={() => updateOverlayProp({ customBanner: 'none', customBannerText: '' })}
+                            className="text-[8.5px] font-black text-rose-400 hover:text-rose-300 bg-transparent border-none cursor-pointer uppercase"
+                          >
+                            ✕ Hide Message
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={activeOverlayConfig.customBannerText || ''}
+                          onChange={(e) => {
+                            const txt = e.target.value;
+                            updateOverlayProp({ customBannerText: txt, tickerMessage: txt || 'LIVE BROADCAST PRESENTATION' });
+                          }}
+                          placeholder="Enter custom message to show on scoreboard..."
+                          className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-bold outline-none focus:border-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const msg = activeOverlayConfig.customBannerText || activeOverlayConfig.tickerMessage || 'LIVE MATCH UPDATE';
+                            updateOverlayProp({
+                              customBanner: 'drinks',
+                              customBannerText: msg,
+                              showTicker: true,
+                              tickerMessage: msg
+                            });
+                            showNotification('Custom Message is now LIVE on the Scoreboard!', 'success');
+                          }}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-black uppercase tracking-wider cursor-pointer border-none shadow-md active:scale-95 shrink-0"
+                        >
+                          Show
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* B. Side-by-Side Team 1 Squad & Team 2 Squad Quick-Manager (Matching Reference Screenshot Bottom Panels) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Team A Squad Panel */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <Users size={15} className="text-emerald-400" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                          {match.teamA || 'Team 1'} Squad ({selectedTeamARoster.length})
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isAct = currentActiveGraphic === 'squad_a';
+                          updateOverlayProp({ activeGraphic: isAct ? 'none' : 'squad_a' });
+                          showNotification(isAct ? `Hidden ${match.teamA} Squad` : `👥 Showing ${match.teamA} Squad on Broadcast!`, 'success');
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer border transition-all ${
+                          currentActiveGraphic === 'squad_a'
+                            ? 'bg-emerald-500 text-slate-950 border-emerald-300'
+                            : 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-500/30'
+                        }`}
+                      >
+                        {currentActiveGraphic === 'squad_a' ? '● ON AIR' : '📺 Show Squad'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        id="quick-squad-a-input"
+                        placeholder={`+ Add player to ${match.teamA} squad...`}
+                        className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-bold outline-none focus:border-emerald-500"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = (e.currentTarget as HTMLInputElement).value.trim();
+                            if (val && !selectedTeamARoster.includes(val)) {
+                              const nextRoster = [...selectedTeamARoster, val];
+                              setSelectedTeamARoster(nextRoster);
+                              syncMatch(prev => ({ ...prev, teamASquad: nextRoster }));
+                              e.currentTarget.value = '';
+                              showNotification(`Added ${val} to ${match.teamA} Squad`, 'success');
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const inp = document.getElementById('quick-squad-a-input') as HTMLInputElement;
+                          const val = inp?.value?.trim();
+                          if (val && !selectedTeamARoster.includes(val)) {
+                            const nextRoster = [...selectedTeamARoster, val];
+                            setSelectedTeamARoster(nextRoster);
+                            syncMatch(prev => ({ ...prev, teamASquad: nextRoster }));
+                            inp.value = '';
+                            showNotification(`Added ${val} to ${match.teamA} Squad`, 'success');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shrink-0"
+                      >
+                        + Add Player
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                      {selectedTeamARoster.length === 0 ? (
+                        <p className="col-span-full text-[10px] text-slate-500 italic py-2 text-center">
+                          No squad players added yet. Type a name above to add!
+                        </p>
+                      ) : (
+                        selectedTeamARoster.map((pName, idx) => (
+                          <div
+                            key={`sq-a-${idx}`}
+                            className="flex items-center justify-between gap-1 px-2.5 py-1.5 bg-slate-950/80 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-200"
+                          >
+                            <span className="truncate">{idx + 1}. {pName}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextRoster = selectedTeamARoster.filter((_, i) => i !== idx);
+                                setSelectedTeamARoster(nextRoster);
+                                syncMatch(prev => ({ ...prev, teamASquad: nextRoster }));
+                              }}
+                              className="text-slate-500 hover:text-rose-400 bg-transparent border-none cursor-pointer text-[10px] p-0.5 shrink-0"
+                              title="Remove from squad"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Team B Squad Panel */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <Users size={15} className="text-sky-400" />
+                        <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                          {match.teamB || 'Team 2'} Squad ({selectedTeamBRoster.length})
+                        </h4>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isAct = currentActiveGraphic === 'squad_b';
+                          updateOverlayProp({ activeGraphic: isAct ? 'none' : 'squad_b' });
+                          showNotification(isAct ? `Hidden ${match.teamB} Squad` : `👥 Showing ${match.teamB} Squad on Broadcast!`, 'success');
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer border transition-all ${
+                          currentActiveGraphic === 'squad_b'
+                            ? 'bg-sky-500 text-slate-950 border-sky-300'
+                            : 'bg-slate-800 hover:bg-slate-700 text-sky-300 border-sky-500/30'
+                        }`}
+                      >
+                        {currentActiveGraphic === 'squad_b' ? '● ON AIR' : '📺 Show Squad'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        id="quick-squad-b-input"
+                        placeholder={`+ Add player to ${match.teamB} squad...`}
+                        className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-bold outline-none focus:border-sky-500"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = (e.currentTarget as HTMLInputElement).value.trim();
+                            if (val && !selectedTeamBRoster.includes(val)) {
+                              const nextRoster = [...selectedTeamBRoster, val];
+                              setSelectedTeamBRoster(nextRoster);
+                              syncMatch(prev => ({ ...prev, teamBSquad: nextRoster }));
+                              e.currentTarget.value = '';
+                              showNotification(`Added ${val} to ${match.teamB} Squad`, 'success');
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const inp = document.getElementById('quick-squad-b-input') as HTMLInputElement;
+                          const val = inp?.value?.trim();
+                          if (val && !selectedTeamBRoster.includes(val)) {
+                            const nextRoster = [...selectedTeamBRoster, val];
+                            setSelectedTeamBRoster(nextRoster);
+                            syncMatch(prev => ({ ...prev, teamBSquad: nextRoster }));
+                            inp.value = '';
+                            showNotification(`Added ${val} to ${match.teamB} Squad`, 'success');
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer border-none shrink-0"
+                      >
+                        + Add Player
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                      {selectedTeamBRoster.length === 0 ? (
+                        <p className="col-span-full text-[10px] text-slate-500 italic py-2 text-center">
+                          No squad players added yet. Type a name above to add!
+                        </p>
+                      ) : (
+                        selectedTeamBRoster.map((pName, idx) => (
+                          <div
+                            key={`sq-b-${idx}`}
+                            className="flex items-center justify-between gap-1 px-2.5 py-1.5 bg-slate-950/80 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-200"
+                          >
+                            <span className="truncate">{idx + 1}. {pName}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextRoster = selectedTeamBRoster.filter((_, i) => i !== idx);
+                                setSelectedTeamBRoster(nextRoster);
+                                syncMatch(prev => ({ ...prev, teamBSquad: nextRoster }));
+                              }}
+                              className="text-slate-500 hover:text-rose-400 bg-transparent border-none cursor-pointer text-[10px] p-0.5 shrink-0"
+                              title="Remove from squad"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ==================== 4. STATISTICS ROSTERS BATTING & BOWLING ==================== */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
@@ -24384,7 +24699,7 @@ export const CricketScoreboard: React.FC = () => {
                       <tr className="bg-slate-50/40 dark:bg-slate-800/10 text-xs font-black">
                         <td className="py-3 px-2">Total Extras</td>
                         <td colSpan={5} className="py-3 text-right pr-2 text-slate-550 font-mono text-[11px] dark:text-slate-400">
-                          Total Ext: <strong className="text-amber-500">{currentInnings.extras.wides + currentInnings.extras.noBalls + currentInnings.extras.byes + currentInnings.extras.legByes}</strong> (Wd {currentInnings.extras.wides}, Nb {currentInnings.extras.noBalls}, B {currentInnings.extras.byes}, Lb {currentInnings.extras.legByes})
+                          Total Ext: <strong className="text-amber-500">{currentInnings.extras.wides + currentInnings.extras.noBalls + currentInnings.extras.byes + currentInnings.extras.legByes + (currentInnings.extras.penalty || 0)}</strong> (Wd {currentInnings.extras.wides}, Nb {currentInnings.extras.noBalls}, B {currentInnings.extras.byes}, Lb {currentInnings.extras.legByes}{currentInnings.extras.penalty > 0 ? `, Pen ${currentInnings.extras.penalty}` : ''})
                         </td>
                       </tr>
                       {currentInnings.extras.penalty > 0 && (
@@ -24680,29 +24995,102 @@ export const CricketScoreboard: React.FC = () => {
                   extraRunsBallType === 'wide' ? 'bg-purple-500/10 text-purple-400' :
                   extraRunsBallType === 'noball' ? 'bg-amber-500/10 text-amber-500' :
                   extraRunsBallType === 'bye' ? 'bg-purple-500/10 text-purple-400' :
+                  extraRunsBallType === 'penalty' ? 'bg-rose-500/10 text-rose-500' :
                   'bg-indigo-500/10 text-indigo-400'
                 }`}>
                   Match Event Trigger - {
                     extraRunsBallType === 'wide' ? 'Wide Ball' :
                     extraRunsBallType === 'noball' ? 'No Ball' :
                     extraRunsBallType === 'bye' ? 'Byes (B)' :
+                    extraRunsBallType === 'penalty' ? 'Penalty Runs (⚖️)' :
                     'Leg Byes (LB)'
                   }
                 </span>
                 <h3 className="text-base font-black uppercase tracking-tight text-slate-800 dark:text-white mt-1.5">
                   {extraRunsBallType === 'bye' ? 'Runs Off Byes' :
                    extraRunsBallType === 'legbye' ? 'Runs Off Leg Byes' :
+                   extraRunsBallType === 'penalty' ? 'Award Penalty Runs' :
                    `Runs Off ${extraRunsBallType === 'wide' ? 'Wide' : 'No Ball'}`}
                 </h3>
                 <p className="text-[10px] text-slate-450 mt-1 dark:text-slate-400">
-                  {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye')
-                    ? 'Legal delivery counted. Runs added to team extras (bypasses batsman stats).'
-                    : 'Select extra runs run by the batsmen on this delivery.'}
+                  {extraRunsBallType === 'penalty'
+                    ? `Awarded directly to ${currentInnings.battingTeam}'s total & extras (does not count as a ball bowled).`
+                    : (extraRunsBallType === 'bye' || extraRunsBallType === 'legbye')
+                      ? 'Legal delivery counted. Runs added to team extras (bypasses batsman stats).'
+                      : 'Select extra runs run by the batsmen on this delivery.'}
                 </p>
               </div>
 
               <div className="space-y-4">
-                {(extraRunsBallType === 'bye' || extraRunsBallType === 'legbye') ? (
+                {extraRunsBallType === 'penalty' ? (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleAddPenaltyRuns(5, penaltyReason);
+                        setPenaltyReason('');
+                        setShowExtraRunsModal(false);
+                      }}
+                      className="w-full py-3.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none shadow-lg transition-all flex flex-col items-center justify-center active:scale-95"
+                    >
+                      <span>⚖️ +5 Penalty Runs (Standard ICC)</span>
+                      <span className="text-[8.5px] font-semibold text-rose-100 mt-0.5">(+5 Runs to {currentInnings.battingTeam} & Penalty Extras)</span>
+                    </button>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      {[1, 2, 3, 4, 6, 10].map((pRuns) => (
+                        <button
+                          key={pRuns}
+                          type="button"
+                          onClick={() => {
+                            handleAddPenaltyRuns(pRuns, penaltyReason);
+                            setPenaltyReason('');
+                            setShowExtraRunsModal(false);
+                          }}
+                          className="py-2.5 bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/50 text-slate-800 dark:text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border border-slate-200 dark:border-slate-700 transition-all flex flex-col items-center justify-center active:scale-95"
+                        >
+                          <span>+{pRuns} {pRuns === 1 ? 'Run' : 'Runs'}</span>
+                          <span className="text-[8px] font-medium opacity-60">Penalty</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="pt-2.5 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                      <input
+                        type="text"
+                        value={penaltyReason}
+                        onChange={(e) => setPenaltyReason(e.target.value)}
+                        placeholder="Optional reason (e.g. Slow Over Rate, Helmet, Unfair Play)..."
+                        className="w-full bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-semibold outline-none focus:border-rose-500"
+                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          value={customPenaltyRuns}
+                          onChange={(e) => setCustomPenaltyRuns(e.target.value)}
+                          placeholder="Runs"
+                          className="w-24 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-mono font-black outline-none focus:border-rose-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const parsed = parseInt(customPenaltyRuns, 10);
+                            if (parsed && parsed > 0) {
+                              handleAddPenaltyRuns(parsed, penaltyReason);
+                              setPenaltyReason('');
+                              setShowExtraRunsModal(false);
+                            }
+                          }}
+                          className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer border-none transition-all active:scale-95"
+                        >
+                          Add +{customPenaltyRuns || 0} Custom Penalty
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (extraRunsBallType === 'bye' || extraRunsBallType === 'legbye') ? (
                   <div className="grid grid-cols-2 gap-2.5">
                     <button
                       onClick={() => {
@@ -25976,10 +26364,10 @@ export const CricketScoreboard: React.FC = () => {
                             showNotification('🔥 Permanent OBS Link Copied! Add once to OBS (1920x1080 transparent).', 'success');
                           });
                         }}
-                        className="py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-lg shadow-emerald-500/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+                        className="py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-lg shadow-emerald-600/20 transition-all active:scale-95 flex items-center justify-center gap-2"
                         id="btn-copy-perm-obs-modal"
                       >
-                        {copiedPermanentOverlayLink ? <Check size={16} className="text-slate-950" /> : <Copy size={16} className="text-slate-950" />}
+                        {copiedPermanentOverlayLink ? <Check size={16} className="text-white" /> : <Copy size={16} className="text-white" />}
                         <span>{copiedPermanentOverlayLink ? 'Copied Permanent Link!' : 'Copy Permanent OBS Link'}</span>
                       </button>
 
@@ -26617,7 +27005,7 @@ export const CricketScoreboard: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleDownloadAwardCertificate('best_bowler')}
-                                className="w-full py-1 px-2 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                                className="w-full py-1 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
                               >
                                 <Award size={10} />
                                 <span>View Certificate</span>
@@ -26717,7 +27105,7 @@ export const CricketScoreboard: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleDownloadAwardCertificate('participation')}
-                                className="w-full py-1 px-2 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
+                                className="w-full py-1 px-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-lg text-[9px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer border-none shadow-xs"
                               >
                                 <Award size={10} />
                                 <span>Participant Certificate</span>
@@ -26805,7 +27193,7 @@ export const CricketScoreboard: React.FC = () => {
                   <div className="p-3 bg-gradient-to-r from-emerald-950/80 via-teal-950/70 to-slate-900 border border-emerald-500/40 rounded-2xl shadow-lg">
                     <div className="flex items-center justify-between gap-2 mb-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 flex items-center justify-center font-black shadow-md">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-md">
                           <Users size={16} />
                         </div>
                         <div className="text-left">
@@ -26835,7 +27223,7 @@ export const CricketScoreboard: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleDownloadAwardCertificate('participation', 'squad_pdf')}
-                        className="py-2 px-2.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer border-none shadow-md flex items-center justify-center gap-1.5"
+                        className="py-2 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-wider text-[10px] rounded-xl transition-all cursor-pointer border-none shadow-md flex items-center justify-center gap-1.5"
                       >
                         <Medal size={12} />
                         <span>Participant Squad PDF</span>

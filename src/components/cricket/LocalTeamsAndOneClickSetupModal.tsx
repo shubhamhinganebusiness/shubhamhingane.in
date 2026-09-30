@@ -493,7 +493,7 @@ export const LocalTeamsAndOneClickSetupModal: React.FC<LocalTeamsAndOneClickSetu
         {/* MODAL HEADER */}
         <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-emerald-500/10 via-indigo-500/5 to-transparent flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 shrink-0">
               <Zap size={24} className="fill-white" />
             </div>
             <div>
@@ -593,7 +593,7 @@ export const LocalTeamsAndOneClickSetupModal: React.FC<LocalTeamsAndOneClickSetu
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={handleAutoSetupFullTournament}
-                    className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[11px] font-black uppercase tracking-wider cursor-pointer border-none shadow-md flex items-center gap-1.5 transition-all"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[11px] font-black uppercase tracking-wider cursor-pointer border-none shadow-md flex items-center gap-1.5 transition-all"
                   >
                     <Sparkles size={13} className="animate-pulse" />
                     <span>Auto-Fill Full Tour ({tournament.teamCount} Teams)</span>
@@ -1085,7 +1085,7 @@ export const LocalTeamsAndOneClickSetupModal: React.FC<LocalTeamsAndOneClickSetu
                 <button
                   onClick={handleLaunchLiveScoreboard}
                   disabled={!liveTeamA || !liveTeamB || liveTeamA === liveTeamB}
-                  className="w-full py-4 px-6 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600 hover:from-emerald-500 hover:to-teal-400 text-white rounded-2xl font-black text-sm uppercase tracking-wider cursor-pointer border-none shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2.5 transition-all active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-4 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-sm uppercase tracking-wider cursor-pointer border-none shadow-xl shadow-emerald-600/25 flex items-center justify-center gap-2.5 transition-all active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Play size={18} className="fill-white" />
                   <span>🚀 1-Click Launch Live Scoreboard</span>

@@ -33,8 +33,9 @@ import {
   CaptainSquadSubmissionModal,
   ManualMatchupModal
 } from './OneHalfTeamManager';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, safeSetDoc, safeGetDoc, isFirestoreQuotaExhausted, syncOneHalfTournamentToRealtimeDB, subscribeToRealtimeDBOneHalfTournament } from '../../lib/firebase';
+import { deleteLocalTournament, deleteLocalMatch, DELETED_TOURNAMENTS_REGISTRY_KEY } from './cricketStorage';
 import { TournamentVenueScheduler, TeamWithRoster } from './TournamentVenueScheduler';
 import { TournamentStatsAndLeaderboards, StatsLeaderboardSubTab } from './TournamentStatsAndLeaderboards';
 import { PointsTableModule } from './PointsTableModule';
@@ -450,7 +451,8 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   });
 
   const [activeDay, setActiveDay] = useState<1 | 2 | 3 | 4 | 5>(1);
-  const [mainTab, setMainTab] = useState<'bracket' | 'teams' | 'venue-scheduler' | 'standings' | 'stats' | 'prizes'>('bracket');
+  const [mainTab, setMainTab] = useState<'bracket' | 'results' | 'teams' | 'venue-scheduler' | 'standings' | 'stats' | 'prizes'>('bracket');
+  const [resultsDayFilter, setResultsDayFilter] = useState<'all' | 1 | 2 | 3 | 4 | 5>('all');
   const [viewMode, setViewMode] = useState<'bracket' | 'schedule' | 'all_days' | 'teams'>('bracket');
   const [selectedTeamIdForPage, setSelectedTeamIdForPage] = useState<string | null>(null);
   const [showManualMatchupModal, setShowManualMatchupModal] = useState(false);
@@ -479,6 +481,17 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   const [showPrizeModal, setShowPrizeModal] = useState(false);
   const [prizeMatchDayFilter, setPrizeMatchDayFilter] = useState<'all' | 1 | 2 | 3 | 4 | 5>('all');
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [isTournamentDeletedState, setIsTournamentDeletedState] = useState<boolean>(() => {
+    try {
+      return typeof window !== 'undefined' && localStorage.getItem('cricket_one_half_tournament_deleted') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [newTourNameInput, setNewTourNameInput] = useState('City One-Half 32 Championship');
+  const [newTourGroundInput, setNewTourGroundInput] = useState('Shivaji Ground Turf Complex');
+  const [newTourOversInput, setNewTourOversInput] = useState(8);
   const [selectedCareerPlayer, setSelectedCareerPlayer] = useState<PlayerCareerStats | null>(null);
   const [isCapStripCompact, setIsCapStripCompact] = useState(false);
 
@@ -634,9 +647,11 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
         }
 
         // Automatic resilient background fetch from cloud on load (cross-laptop synchronization)
-        const targetDocId = tourIdParam || ACTIVE_CLOUD_TOUR_ID;
-        safeGetDoc('cricket_tournaments', targetDocId).then((cloudData: OneHalfTournamentState | null) => {
-          if (cloudData && Array.isArray(cloudData.matches) && Array.isArray(cloudData.teams)) {
+        if (localStorage.getItem('cricket_one_half_tournament_deleted') !== 'true') {
+          const targetDocId = tourIdParam || ACTIVE_CLOUD_TOUR_ID;
+          safeGetDoc('cricket_tournaments', targetDocId).then((cloudData: OneHalfTournamentState | null) => {
+            if (localStorage.getItem('cricket_one_half_tournament_deleted') === 'true') return;
+            if (cloudData && Array.isArray(cloudData.matches) && Array.isArray(cloudData.teams) && !(cloudData as any).isDeleted) {
             setTournament((prev) => {
               const cloudTime = cloudData.updatedAt || 0;
               const localTime = prev.updatedAt || 0;
@@ -654,7 +669,8 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
               setLastSyncedAt(cloudData.lastCloudSyncTime);
             }
           }
-        }).catch(() => {});
+          }).catch(() => {});
+        }
         // Listen for live match result updates from Live Scorer or storage events
         const handleLocalOneHalfSync = (e?: Event) => {
           try {
@@ -691,7 +707,8 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   useEffect(() => {
     // 1. Subscribe to Firebase Realtime Database
     const unsubRtdb = subscribeToRealtimeDBOneHalfTournament((rtdbData) => {
-      if (rtdbData && Array.isArray(rtdbData.matches) && Array.isArray(rtdbData.teams)) {
+      if (localStorage.getItem('cricket_one_half_tournament_deleted') === 'true') return;
+      if (rtdbData && Array.isArray(rtdbData.matches) && Array.isArray(rtdbData.teams) && !(rtdbData as any).isDeleted) {
         setTournament((prev) => {
           const cloudTime = rtdbData.updatedAt || 0;
           const localTime = prev.updatedAt || 0;
@@ -720,9 +737,10 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
     try {
       const activeRef = doc(db, 'cricket_tournaments', ACTIVE_CLOUD_TOUR_ID);
       const unsubscribe = onSnapshot(activeRef, (snap) => {
+        if (localStorage.getItem('cricket_one_half_tournament_deleted') === 'true') return;
         if (snap.exists()) {
           const cloudData = snap.data() as OneHalfTournamentState;
-          if (cloudData && Array.isArray(cloudData.matches) && Array.isArray(cloudData.teams)) {
+          if (cloudData && Array.isArray(cloudData.matches) && Array.isArray(cloudData.teams) && !(cloudData as any).isDeleted) {
             setTournament((prev) => {
               const cloudTime = cloudData.updatedAt || 0;
               const localTime = prev.updatedAt || 0;
@@ -882,16 +900,18 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
     showToast(`Status updated to ${newStatus}`);
   };
 
-  // 1. Immediately persist to localStorage
+  // 1. Immediately persist to localStorage (only when not deleted)
   useEffect(() => {
+    if (isTournamentDeletedState) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
     } catch (_) {}
-  }, [tournament]);
+  }, [tournament, isTournamentDeletedState]);
 
   // 2. Automatic Debounced Background Cloud Sync (Cross-Device & Online Hosting)
   const isInitialMount = useRef(true);
   useEffect(() => {
+    if (isTournamentDeletedState) return;
     const currentHash = getTournamentContentHash(tournament);
     if (isInitialMount.current) {
       isInitialMount.current = false;
@@ -942,7 +962,7 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
     return () => clearTimeout(timer);
   }, [tournament]);
 
-  // Propagate winners when a match concludes
+  // Propagate winners when a match concludes (works reliably whether component is mounted or unmounted)
   const updateMatchResult = (
     matchId: string,
     winnerName: string,
@@ -953,105 +973,342 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
     winReason?: string,
     manOfTheMatch?: string
   ) => {
-    setTournament(prev => {
-      const updatedMatches = [...prev.matches];
-      const matchIndex = updatedMatches.findIndex(m => m.id === matchId);
-      if (matchIndex === -1) return prev;
-
-      const m = { ...updatedMatches[matchIndex] };
-      m.winner = winnerName;
-      m.status = 'completed';
-      if (scoreA !== undefined) m.scoreA = scoreA;
-      if (scoreB !== undefined) m.scoreB = scoreB;
-      if (oversA !== undefined && oversA.trim() !== '') m.oversA = oversA;
-      if (oversB !== undefined && oversB.trim() !== '') m.oversB = oversB;
-      if (winReason !== undefined && winReason.trim() !== '') m.winReason = winReason;
-      if (manOfTheMatch !== undefined && manOfTheMatch.trim() !== '') m.manOfTheMatch = manOfTheMatch;
-      updatedMatches[matchIndex] = m;
-
-      // Auto-propagate based on match rules:
-      // Day 1 to 4 auto-propagate
-      if (m.day >= 1 && m.day <= 4 && m.group) {
-        const grp = m.group;
-        // If Round 1
-        if (m.round === 'round1') {
-          const sf1Idx = updatedMatches.findIndex(x => x.id === `day_${grp}_r2_m1`);
-          const sf2Idx = updatedMatches.findIndex(x => x.id === `day_${grp}_r2_m2`);
-
-          if (m.id === `day_${grp}_r1_m1` && sf1Idx !== -1) {
-            updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamA: winnerName };
-          } else if (m.id === `day_${grp}_r1_m2` && sf1Idx !== -1) {
-            updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamB: winnerName };
-          } else if (m.id === `day_${grp}_r1_m3` && sf2Idx !== -1) {
-            updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamA: winnerName };
-          } else if (m.id === `day_${grp}_r1_m4` && sf2Idx !== -1) {
-            updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamB: winnerName };
-          }
-        } 
-        // If Round 2 (Semi-Final)
-        else if (m.round === 'round2') {
-          const grpFinalIdx = updatedMatches.findIndex(x => x.id === `day_${grp}_final`);
-          if (grpFinalIdx !== -1) {
-            if (m.id === `day_${grp}_r2_m1`) {
-              updatedMatches[grpFinalIdx] = { ...updatedMatches[grpFinalIdx], teamA: winnerName };
-            } else if (m.id === `day_${grp}_r2_m2`) {
-              updatedMatches[grpFinalIdx] = { ...updatedMatches[grpFinalIdx], teamB: winnerName };
-            }
-          }
+    let baseTournament: OneHalfTournamentState = tournament;
+    try {
+      const savedRaw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('one_half_tournament_v1');
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw);
+        if (parsed && Array.isArray(parsed.matches) && Array.isArray(parsed.teams)) {
+          baseTournament = parsed;
         }
-        // If Group Final -> Propagate Group Winner to Day 5 Semi-Final!
-        else if (m.round === 'group_final') {
-          const sf1Idx = updatedMatches.findIndex(x => x.id === 'day_5_sf1');
-          const sf2Idx = updatedMatches.findIndex(x => x.id === 'day_5_sf2');
+      }
+    } catch (_) {}
 
-          if (grp === 1 && sf1Idx !== -1) {
-            updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamA: winnerName };
-          } else if (grp === 2 && sf1Idx !== -1) {
-            updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamB: winnerName };
-          } else if (grp === 3 && sf2Idx !== -1) {
-            updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamA: winnerName };
-          } else if (grp === 4 && sf2Idx !== -1) {
-            updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamB: winnerName };
+    const updatedMatches = [...baseTournament.matches];
+    const matchIndex = updatedMatches.findIndex(m => m.id === matchId);
+    if (matchIndex === -1) return;
+
+    const m = { ...updatedMatches[matchIndex] };
+    m.winner = winnerName;
+    m.status = 'completed';
+    const ovLim = baseTournament.overs || 8;
+    const matchSeed = (m.matchNumber || 1) * 7 + (m.day || 1) * 13;
+    const isTeamAWinner = winnerName === m.teamA;
+    const defaultWinRuns = 78 + (matchSeed % 28);
+    const defaultLoseRuns = Math.max(48, defaultWinRuns - (6 + (matchSeed % 18)));
+    const defaultWinWkts = 2 + (matchSeed % 4);
+    const defaultLoseWkts = 5 + (matchSeed % 4);
+
+    if (scoreA !== undefined && scoreA.trim() !== '' && scoreA.trim() !== '0/0' && scoreA.trim() !== '0') {
+      m.scoreA = scoreA.trim();
+    } else if (!m.scoreA || m.scoreA === '0/0' || m.scoreA === '0') {
+      m.scoreA = isTeamAWinner
+        ? `${defaultWinRuns}/${defaultWinWkts}`
+        : `${defaultLoseRuns}/${defaultLoseWkts}`;
+    }
+
+    if (scoreB !== undefined && scoreB.trim() !== '' && scoreB.trim() !== '0/0' && scoreB.trim() !== '0') {
+      m.scoreB = scoreB.trim();
+    } else if (!m.scoreB || m.scoreB === '0/0' || m.scoreB === '0') {
+      m.scoreB = isTeamAWinner
+        ? `${defaultLoseRuns}/${defaultLoseWkts}`
+        : `${defaultWinRuns}/${defaultWinWkts}`;
+    }
+
+    if (oversA !== undefined && oversA.trim() !== '') m.oversA = oversA;
+    else if (!m.oversA) m.oversA = `${ovLim}.0`;
+
+    if (oversB !== undefined && oversB.trim() !== '') m.oversB = oversB;
+    else if (!m.oversB) m.oversB = `${ovLim}.0`;
+
+    if (winReason !== undefined && winReason.trim() !== '') m.winReason = winReason;
+    else if (!m.winReason && winnerName && winnerName !== 'Tie') {
+      const rA = parseInt(String(m.scoreA).split('/')[0], 10) || 0;
+      const rB = parseInt(String(m.scoreB).split('/')[0], 10) || 0;
+      m.winReason = rA !== rB
+        ? `${winnerName} won by ${Math.abs(rA - rB)} runs`
+        : `${winnerName} won the match`;
+    }
+
+    const teamAObjForPotm = baseTournament.teams.find(t => t.name === m.teamA);
+    const teamBObjForPotm = baseTournament.teams.find(t => t.name === m.teamB);
+    const winnerTeamObj = isTeamAWinner ? teamAObjForPotm : teamBObjForPotm;
+    if (manOfTheMatch !== undefined && manOfTheMatch.trim() !== '') {
+      m.manOfTheMatch = manOfTheMatch.trim();
+    } else if (!m.manOfTheMatch) {
+      m.manOfTheMatch =
+        winnerTeamObj?.squad?.[0]?.name ||
+        winnerTeamObj?.captain ||
+        `${winnerName} Captain`;
+    }
+    updatedMatches[matchIndex] = m;
+
+    // Auto-propagate based on match rules:
+    // Day 1 to 4 auto-propagate
+    if (m.day >= 1 && m.day <= 4 && m.group) {
+      const grp = m.group;
+      // If Round 1
+      if (m.round === 'round1') {
+        const sf1Idx = updatedMatches.findIndex(x => x.id === `day_${grp}_r2_m1`);
+        const sf2Idx = updatedMatches.findIndex(x => x.id === `day_${grp}_r2_m2`);
+
+        if (m.id === `day_${grp}_r1_m1` && sf1Idx !== -1) {
+          updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamA: winnerName };
+        } else if (m.id === `day_${grp}_r1_m2` && sf1Idx !== -1) {
+          updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamB: winnerName };
+        } else if (m.id === `day_${grp}_r1_m3` && sf2Idx !== -1) {
+          updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamA: winnerName };
+        } else if (m.id === `day_${grp}_r1_m4` && sf2Idx !== -1) {
+          updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamB: winnerName };
+        }
+      }
+      // If Round 2 (Semi-Final)
+      else if (m.round === 'round2') {
+        const grpFinalIdx = updatedMatches.findIndex(x => x.id === `day_${grp}_final`);
+        if (grpFinalIdx !== -1) {
+          if (m.id === `day_${grp}_r2_m1`) {
+            updatedMatches[grpFinalIdx] = { ...updatedMatches[grpFinalIdx], teamA: winnerName };
+          } else if (m.id === `day_${grp}_r2_m2`) {
+            updatedMatches[grpFinalIdx] = { ...updatedMatches[grpFinalIdx], teamB: winnerName };
           }
         }
       }
+      // If Group Final -> Propagate Group Winner to Day 5 Semi-Final!
+      else if (m.round === 'group_final') {
+        const sf1Idx = updatedMatches.findIndex(x => x.id === 'day_5_sf1');
+        const sf2Idx = updatedMatches.findIndex(x => x.id === 'day_5_sf2');
 
-      // Day 5 Semi-Finals propagation:
-      if (m.day === 5 && m.round === 'semi_final') {
-        const grandFinalIdx = updatedMatches.findIndex(x => x.id === 'day_5_grand_final');
-        const thirdFourthIdx = updatedMatches.findIndex(x => x.id === 'day_5_3rd_4th');
-        const loserName = winnerName === m.teamA ? m.teamB : m.teamA;
-
-        if (m.id === 'day_5_sf1') {
-          if (grandFinalIdx !== -1) {
-            updatedMatches[grandFinalIdx] = { ...updatedMatches[grandFinalIdx], teamA: winnerName };
-          }
-          if (thirdFourthIdx !== -1) {
-            updatedMatches[thirdFourthIdx] = { ...updatedMatches[thirdFourthIdx], teamA: loserName };
-          }
-        } else if (m.id === 'day_5_sf2') {
-          if (grandFinalIdx !== -1) {
-            updatedMatches[grandFinalIdx] = { ...updatedMatches[grandFinalIdx], teamB: winnerName };
-          }
-          if (thirdFourthIdx !== -1) {
-            updatedMatches[thirdFourthIdx] = { ...updatedMatches[thirdFourthIdx], teamB: loserName };
-          }
+        if (grp === 1 && sf1Idx !== -1) {
+          updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamA: winnerName };
+        } else if (grp === 2 && sf1Idx !== -1) {
+          updatedMatches[sf1Idx] = { ...updatedMatches[sf1Idx], teamB: winnerName };
+        } else if (grp === 3 && sf2Idx !== -1) {
+          updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamA: winnerName };
+        } else if (grp === 4 && sf2Idx !== -1) {
+          updatedMatches[sf2Idx] = { ...updatedMatches[sf2Idx], teamB: winnerName };
         }
       }
+    }
 
-      const nextState: OneHalfTournamentState = {
-        ...prev,
-        matches: updatedMatches,
+    // Day 5 Semi-Finals propagation:
+    if (m.day === 5 && m.round === 'semi_final') {
+      const grandFinalIdx = updatedMatches.findIndex(x => x.id === 'day_5_grand_final');
+      const thirdFourthIdx = updatedMatches.findIndex(x => x.id === 'day_5_3rd_4th');
+      const loserName = winnerName === m.teamA ? m.teamB : m.teamA;
+
+      if (m.id === 'day_5_sf1') {
+        if (grandFinalIdx !== -1) {
+          updatedMatches[grandFinalIdx] = { ...updatedMatches[grandFinalIdx], teamA: winnerName };
+        }
+        if (thirdFourthIdx !== -1) {
+          updatedMatches[thirdFourthIdx] = { ...updatedMatches[thirdFourthIdx], teamA: loserName };
+        }
+      } else if (m.id === 'day_5_sf2') {
+        if (grandFinalIdx !== -1) {
+          updatedMatches[grandFinalIdx] = { ...updatedMatches[grandFinalIdx], teamB: winnerName };
+        }
+        if (thirdFourthIdx !== -1) {
+          updatedMatches[thirdFourthIdx] = { ...updatedMatches[thirdFourthIdx], teamB: loserName };
+        }
+      }
+    }
+
+    const nextState: OneHalfTournamentState = {
+      ...baseTournament,
+      matches: updatedMatches,
+      updatedAt: Date.now()
+    };
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      localStorage.setItem('one_half_tournament_v1', JSON.stringify(nextState));
+
+      // Also persist synthesized completed match into cricket_matches_local_registry so it shows in all Result & Leaderboard sections immediately
+      const regRaw = localStorage.getItem('cricket_matches_local_registry');
+      const regList = regRaw ? JSON.parse(regRaw) : [];
+      const synthId = `tour_${nextState.id || 'one_half'}_${m.id}`;
+      const parseSc = (sc?: string) => {
+        if (!sc) return { runs: 0, wickets: 0 };
+        const pts = String(sc).split(/[\/\-]/);
+        return { runs: parseInt(pts[0], 10) || 0, wickets: parseInt(pts[1], 10) || 0 };
+      };
+      const parseOv = (ov?: string) => {
+        if (!ov) return 0;
+        const pts = String(ov).split('.');
+        return (parseInt(pts[0], 10) || 0) * 6 + (parseInt(pts[1], 10) || 0);
+      };
+      const scA = parseSc(m.scoreA);
+      const scB = parseSc(m.scoreB);
+      const teamAObj = nextState.teams.find(t => t.name === m.teamA);
+      const teamBObj = nextState.teams.find(t => t.name === m.teamB);
+      const squadA =
+        teamAObj?.squad && teamAObj.squad.length > 0
+          ? teamAObj.squad
+          : generateDefault15Squad(m.teamA, teamAObj?.captain || `${m.teamA.split(' ')[0]} Skipper`);
+      const squadB =
+        teamBObj?.squad && teamBObj.squad.length > 0
+          ? teamBObj.squad
+          : generateDefault15Squad(m.teamB, teamBObj?.captain || `${m.teamB.split(' ')[0]} Skipper`);
+
+      const buildSynthesizedInnings = (
+        battingTeamName: string,
+        bowlingTeamName: string,
+        battingSquad: OneHalfPlayer[],
+        bowlingSquad: OneHalfPlayer[],
+        totalRuns: number,
+        totalWickets: number,
+        ballsBowled: number
+      ) => {
+        const numBatters = Math.min(battingSquad.length, Math.max(4, totalWickets + 2));
+        const shareWeights = [0.36, 0.26, 0.18, 0.10, 0.05, 0.03, 0.02];
+        let remainingRuns = totalRuns;
+        let remainingBalls = Math.max(numBatters, ballsBowled);
+        const potmLower = (m.manOfTheMatch || '').trim().toLowerCase();
+
+        const batsmen = battingSquad.slice(0, numBatters).map((p, idx) => {
+          const isLast = idx === numBatters - 1;
+          const isPotm = potmLower !== '' && p.name.trim().toLowerCase() === potmLower;
+          const weight = isPotm ? 0.44 : (shareWeights[idx] || 0.03);
+          const r = isLast
+            ? Math.max(0, remainingRuns)
+            : Math.min(remainingRuns, Math.max(idx < 2 ? 6 : 2, Math.round(totalRuns * weight)));
+          remainingRuns = Math.max(0, remainingRuns - r);
+
+          const b = isLast
+            ? Math.max(1, remainingBalls)
+            : Math.max(2, Math.min(remainingBalls - (numBatters - 1 - idx), Math.round(r * 0.68) + 1));
+          remainingBalls = Math.max(1, remainingBalls - b);
+
+          const sixes = Math.floor(r / 15);
+          const fours = Math.floor((r - sixes * 6) / 7);
+          const isOut = idx < totalWickets;
+          const bowlerName = bowlingSquad[(idx + 2) % bowlingSquad.length]?.name || 'Bowler';
+          const fielderName = bowlingSquad[(idx + 1) % bowlingSquad.length]?.name || 'Fielder';
+
+          return {
+            name: p.name,
+            runs: r,
+            balls: b,
+            fours,
+            sixes,
+            isOut,
+            dismissal: isOut ? `c ${fielderName} b ${bowlerName}` : 'not out'
+          };
+        });
+
+        const bowlerCandidates = bowlingSquad.filter(p => p.role === 'Bowler' || p.role === 'All-Rounder');
+        const activeBowlers = (bowlerCandidates.length >= 4 ? bowlerCandidates : bowlingSquad.slice(2, 7)).slice(0, 4);
+        let wktsLeft = totalWickets;
+        let runsLeft = totalRuns;
+        const oversPerBowler = Math.max(1, Math.floor((ballsBowled / 6) / Math.max(1, activeBowlers.length)));
+
+        const bowlers = activeBowlers.map((bw, idx) => {
+          const isLast = idx === activeBowlers.length - 1;
+          const isPotm = potmLower !== '' && bw.name.trim().toLowerCase() === potmLower;
+          const w = isLast
+            ? wktsLeft
+            : Math.min(wktsLeft, isPotm ? Math.ceil(totalWickets * 0.5) : (idx === 0 ? Math.ceil(totalWickets * 0.4) : Math.floor(totalWickets * 0.25)));
+          wktsLeft = Math.max(0, wktsLeft - w);
+
+          const rc = isLast
+            ? Math.max(4, runsLeft)
+            : Math.max(6, Math.round(totalRuns / activeBowlers.length));
+          runsLeft = Math.max(0, runsLeft - rc);
+
+          return {
+            name: bw.name,
+            overs: oversPerBowler,
+            ballsBowled: oversPerBowler * 6,
+            maidens: 0,
+            runsConceded: rc,
+            wickets: w,
+            dotBalls: Math.round(oversPerBowler * 6 * 0.4)
+          };
+        });
+
+        return {
+          battingTeam: battingTeamName,
+          bowlingTeam: bowlingTeamName,
+          runs: totalRuns,
+          wickets: totalWickets,
+          ballsBowled,
+          extras: { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 },
+          batsmen,
+          bowlers,
+          strikerIndex: 0,
+          nonStrikerIndex: 1,
+          currentBowlerIndex: 0,
+          fallOfWickets: [],
+          commentaryList: []
+        };
+      };
+
+      const existingIdx = regList.findIndex(
+        (x: any) =>
+          x.id === synthId ||
+          x.tournamentMatchId === m.id ||
+          (x.tournamentId === nextState.id && x.tournamentMatchId === m.id)
+      );
+      const prevMatchObj = existingIdx >= 0 ? regList[existingIdx] : null;
+      const ballsA = parseOv(m.oversA || `${ovLim}.0`) || ovLim * 6;
+      const ballsB = parseOv(m.oversB || `${ovLim}.0`) || ovLim * 6;
+
+      const synthMatch: any = {
+        ...(prevMatchObj || {}),
+        id: prevMatchObj?.id || synthId,
+        teamA: m.teamA,
+        teamB: m.teamB,
+        teamALogo: teamAObj?.logo || prevMatchObj?.teamALogo || undefined,
+        teamBLogo: teamBObj?.logo || prevMatchObj?.teamBLogo || undefined,
+        oversLimit: ovLim,
+        tossWinner: prevMatchObj?.tossWinner || m.teamA,
+        tossChoice: prevMatchObj?.tossChoice || 'bat',
+        currentInningsNum: 2,
+        status: 'completed',
+        winner: m.winner,
+        winReason: m.winReason || `${m.winner} won the match`,
+        manOfTheMatch: m.manOfTheMatch || prevMatchObj?.manOfTheMatch || '',
+        date: m.date || new Date().toISOString().split('T')[0],
+        freeHitNext: false,
+        tournamentId: nextState.id,
+        tournamentMatchId: m.id,
+        tournamentName: nextState.name,
+        tournamentLogo: nextState.tournamentLogo || undefined,
+        groundName: m.pitchVenue || nextState.groundName,
+        venue: m.pitchVenue || nextState.groundName,
+        innings1: prevMatchObj?.innings1?.runs !== undefined && prevMatchObj?.innings1?.batsmen?.length > 0 && prevMatchObj.innings1.batsmen.some((b: any) => (b.runs || 0) > 0)
+          ? prevMatchObj.innings1
+          : buildSynthesizedInnings(m.teamA, m.teamB, squadA, squadB, scA.runs, scA.wickets, ballsA),
+        innings2: prevMatchObj?.innings2?.runs !== undefined && prevMatchObj?.innings2?.batsmen?.length > 0 && prevMatchObj.innings2.batsmen.some((b: any) => (b.runs || 0) > 0)
+          ? prevMatchObj.innings2
+          : buildSynthesizedInnings(m.teamB, m.teamA, squadB, squadA, scB.runs, scB.wickets, ballsB),
+        isTournamentMatch: true,
         updatedAt: Date.now()
       };
 
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-        window.dispatchEvent(new CustomEvent('one_half_tournament_updated', { detail: nextState }));
-      } catch (_) {}
+      if (existingIdx >= 0) {
+        regList[existingIdx] = synthMatch;
+      } else {
+        regList.unshift(synthMatch);
+      }
+      localStorage.setItem('cricket_matches_local_registry', JSON.stringify(regList));
 
-      return nextState;
-    });
+      window.dispatchEvent(new CustomEvent('one_half_tournament_updated', { detail: nextState }));
+      window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (_) {}
+
+    try {
+      const activeRef = doc(db, 'cricket_tournaments', ACTIVE_CLOUD_TOUR_ID);
+      safeSetDoc(activeRef, nextState, { merge: true }).catch(() => {});
+      if (nextState.id && nextState.id !== ACTIVE_CLOUD_TOUR_ID) {
+        const customRef = doc(db, 'cricket_tournaments', nextState.id);
+        safeSetDoc(customRef, nextState, { merge: true }).catch(() => {});
+      }
+      syncOneHalfTournamentToRealtimeDB(nextState).catch(() => {});
+    } catch (_) {}
+
+    setTournament(nextState);
   };
 
   // Launch live scoring in quick scorer
@@ -1144,10 +1401,119 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   };
 
   const handleConfirmReset = () => {
+    try {
+      localStorage.removeItem('cricket_one_half_tournament_deleted');
+    } catch (_) {}
+    setIsTournamentDeletedState(false);
     const fresh = createInitialOneHalfTournament(tournament.name);
     setTournament(fresh);
     setShowResetConfirmModal(false);
     showToast('🔄 Tournament reset to initial 32-team schedule.');
+  };
+
+  // Permanently delete One-Half Tournament
+  const handleDeleteTournament = () => {
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDeleteTournament = async () => {
+    const deletedTourId = tournament.id;
+    const deletedTourName = tournament.name;
+    try {
+      localStorage.setItem('cricket_one_half_tournament_deleted', 'true');
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem('one_half_tournament_v1');
+
+      if (deletedTourId) {
+        deleteLocalTournament(deletedTourId);
+      }
+      deleteLocalTournament(ACTIVE_CLOUD_TOUR_ID);
+      deleteLocalTournament('one-half-32-series');
+
+      // Purge any synthesized or linked One-Half matches from local match registry
+      const regRaw = localStorage.getItem('cricket_matches_local_registry');
+      if (regRaw) {
+        const regList = JSON.parse(regRaw);
+        if (Array.isArray(regList)) {
+          const toDeleteIds: string[] = [];
+          const remaining = regList.filter((m: any) => {
+            if (!m) return false;
+            const isOneHalfMatch =
+              m.tournamentId === deletedTourId ||
+              m.tournamentId === ACTIVE_CLOUD_TOUR_ID ||
+              m.tournamentId === 'one-half-32-series' ||
+              String(m.id || '').startsWith(`tour_${deletedTourId}_`) ||
+              String(m.id || '').startsWith('tour_one_half');
+            if (isOneHalfMatch && m.id) {
+              toDeleteIds.push(m.id);
+              return false;
+            }
+            return true;
+          });
+          localStorage.setItem('cricket_matches_local_registry', JSON.stringify(remaining));
+          toDeleteIds.forEach(id => deleteLocalMatch(id));
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('one_half_tournament_updated'));
+      window.dispatchEvent(new CustomEvent('gully_tournaments_updated', { detail: { deletedTournamentId: deletedTourId } }));
+      window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.warn('Error deleting local One-Half tournament data:', e);
+    }
+
+    setIsTournamentDeletedState(true);
+    setShowDeleteConfirmModal(false);
+    setShowSettingsModal(false);
+    showToast(`🗑️ Deleted "${deletedTourName}" tournament.`);
+
+    // Also delete from Firestore in background
+    try {
+      if (!isFirestoreQuotaExhausted()) {
+        await deleteDoc(doc(db, 'cricket_tournaments', ACTIVE_CLOUD_TOUR_ID)).catch(() => {});
+        if (deletedTourId && deletedTourId !== ACTIVE_CLOUD_TOUR_ID) {
+          await deleteDoc(doc(db, 'cricket_tournaments', deletedTourId)).catch(() => {});
+        }
+      }
+    } catch (_) {}
+  };
+
+  const handleCreateNewOneHalfTournament = () => {
+    const title = newTourNameInput.trim() || 'City One-Half 32 Championship';
+    const ground = newTourGroundInput.trim() || 'Shivaji Ground Turf Complex';
+    const overs = Math.max(1, Number(newTourOversInput) || 8);
+
+    try {
+      localStorage.removeItem('cricket_one_half_tournament_deleted');
+      sessionStorage.removeItem(`deleted_tour_${ACTIVE_CLOUD_TOUR_ID}`);
+      sessionStorage.removeItem('deleted_tour_one-half-32-series');
+      const rawDel = localStorage.getItem(DELETED_TOURNAMENTS_REGISTRY_KEY);
+      if (rawDel) {
+        const delMap = JSON.parse(rawDel);
+        if (delMap && typeof delMap === 'object') {
+          delete delMap[ACTIVE_CLOUD_TOUR_ID];
+          delete delMap['one-half-32-series'];
+          localStorage.setItem(DELETED_TOURNAMENTS_REGISTRY_KEY, JSON.stringify(delMap));
+        }
+      }
+    } catch (_) {}
+
+    const fresh = createInitialOneHalfTournament(title);
+    fresh.groundName = ground;
+    fresh.overs = overs;
+    fresh.updatedAt = Date.now();
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
+      localStorage.setItem('one_half_tournament_v1', JSON.stringify(fresh));
+      window.dispatchEvent(new CustomEvent('one_half_tournament_updated', { detail: fresh }));
+      window.dispatchEvent(new CustomEvent('gully_tournaments_updated'));
+    } catch (_) {}
+
+    setTournament(fresh);
+    setIsTournamentDeletedState(false);
+    showToast(`🏆 Created new One-Half Tournament: ${title}!`);
   };
 
   // Open Award Certificates Modal
@@ -1346,24 +1712,32 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
   }, [mappedVenueTeams, statsGroupFilter]);
 
   const mappedStatsMatches = useMemo(() => {
-    return tournament.matches.map(m => ({
-      id: m.id,
-      teamAId: m.teamA,
-      teamBId: m.teamB,
-      teamAName: m.teamA,
-      teamBName: m.teamB,
-      date: m.date || '',
-      status: (m.status === 'completed' ? 'completed' : m.status === 'live' ? 'live' : 'scheduled') as any,
-      scoreA: m.scoreA || '',
-      scoreB: m.scoreB || '',
-      oversA: m.oversA || `${tournament.overs}`,
-      oversB: m.oversB || `${tournament.overs}`,
-      winnerId: m.winner ? (m.winner === m.teamA ? m.teamA : m.teamB) : null,
-      winner: m.winner || null,
-      winReason: m.winReason || (m.winner ? `${m.winner} won` : ''),
-      manOfTheMatch: m.manOfTheMatch || '',
-      stage: m.label
-    }));
+    return tournament.matches.map(m => {
+      const isCompletedMatch =
+        m.status === 'completed' ||
+        (Boolean(m.winner) &&
+          !m.winner.startsWith('Winner') &&
+          !m.winner.startsWith('Loser') &&
+          !m.winner.startsWith('Day '));
+      return {
+        id: m.id,
+        teamAId: m.teamA,
+        teamBId: m.teamB,
+        teamAName: m.teamA,
+        teamBName: m.teamB,
+        date: m.date || '',
+        status: (isCompletedMatch ? 'completed' : m.status === 'live' ? 'live' : 'scheduled') as any,
+        scoreA: m.scoreA || '',
+        scoreB: m.scoreB || '',
+        oversA: m.oversA || `${tournament.overs}`,
+        oversB: m.oversB || `${tournament.overs}`,
+        winnerId: m.winner ? (m.winner === m.teamA ? m.teamA : m.teamB) : null,
+        winner: m.winner || null,
+        winReason: m.winReason || (m.winner ? `${m.winner} won` : ''),
+        manOfTheMatch: m.manOfTheMatch || '',
+        stage: m.label
+      };
+    });
   }, [tournament.matches, tournament.overs]);
 
   // Standings data computation
@@ -1522,12 +1896,16 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
               (x.teamA === m.teamA && x.teamB === m.teamB)
           );
 
-          if (lm) {
-            const isTeamA = lm.teamA === team.name || m.teamA === team.name;
-            const batInnings = isTeamA ? lm.innings1 : lm.innings2;
-            const bowlInnings = isTeamA ? lm.innings2 : lm.innings1;
+          const isTeamAInLm = lm ? (lm.innings1?.battingTeam ? lm.innings1.battingTeam === team.name : lm.teamA === team.name) : false;
+          const batInnings = lm ? (isTeamAInLm ? lm.innings1 : lm.innings2) : null;
+          const bowlInnings = lm ? (isTeamAInLm ? lm.innings2 : lm.innings1) : null;
+          const batList = batInnings?.batsmen || batInnings?.batsmanList || batInnings?.batters;
+          const bowlList = bowlInnings?.bowlers || bowlInnings?.bowlerList;
+          const hasPopulatedScorecard =
+            (Array.isArray(batList) && batList.some((b: any) => (Number(b.runs) || Number(b.score) || 0) > 0)) ||
+            (Array.isArray(bowlList) && bowlList.some((bw: any) => (Number(bw.wickets) || Number(bw.runsConceded) || Number(bw.runs) || 0) > 0));
 
-            const batList = batInnings?.batsmen || batInnings?.batsmanList || batInnings?.batters;
+          if (lm && hasPopulatedScorecard) {
             if (Array.isArray(batList) && batList.length > 0) {
               const b = batList.find((bat: any) => {
                 const bName = (bat.name || bat.batsmanName || bat.playerName || bat.player || '')
@@ -1546,7 +1924,6 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
               }
             }
 
-            const bowlList = bowlInnings?.bowlers || bowlInnings?.bowlerList;
             if (Array.isArray(bowlList) && bowlList.length > 0) {
               const bw = bowlList.find((bowl: any) => {
                 const bwName = (bowl.name || bowl.bowlerName || bowl.playerName || bowl.player || '')
@@ -1570,11 +1947,18 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             }
           } else {
             const isTeamA = m.teamA === team.name;
-            const myScore = parseMatchScore(isTeamA ? m.scoreA : m.scoreB);
-            const oppScore = parseMatchScore(isTeamA ? m.scoreB : m.scoreA);
+            const rawMyScore = parseMatchScore(isTeamA ? m.scoreA : m.scoreB);
+            const rawOppScore = parseMatchScore(isTeamA ? m.scoreB : m.scoreA);
+            const iWon = m.winner === team.name;
+            const myScore = rawMyScore.runs > 0
+              ? rawMyScore
+              : { runs: iWon ? 84 : 70, wickets: iWon ? 3 : 6 };
+            const oppScore = rawOppScore.runs > 0
+              ? rawOppScore
+              : { runs: iWon ? 70 : 84, wickets: iWon ? 6 : 3 };
 
             if (myScore.runs > 0) {
-              if ( isPotm ) {
+              if (isPotm) {
                 pInnings += 1;
                 const r = Math.max(18, Math.round(myScore.runs * 0.48));
                 pRuns += r;
@@ -1828,11 +2212,83 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
         )}
       </AnimatePresence>
 
+      {isTournamentDeletedState ? (
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 p-6 sm:p-10 text-white shadow-2xl border border-rose-500/30 max-w-2xl mx-auto my-8">
+          <div className="flex flex-col items-center text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-lg">
+              <Trash2 size={28} />
+            </div>
+            <div className="space-y-1.5">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-black uppercase tracking-widest">
+                One-Half Tournament Deleted
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-white">
+                No Active One-Half 32-Team Tournament
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
+                The previous One-Half Tournament and its match records have been permanently deleted. You can launch a brand-new 5-Day 32-Team Championship below whenever you are ready.
+              </p>
+            </div>
+
+            <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-4 text-left space-y-3 mt-2">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-amber-400 block mb-1">
+                  New Tournament Name
+                </label>
+                <input
+                  type="text"
+                  value={newTourNameInput}
+                  onChange={(e) => setNewTourNameInput(e.target.value)}
+                  placeholder="e.g. City One-Half 32 Championship"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Ground / Turf Venue
+                  </label>
+                  <input
+                    type="text"
+                    value={newTourGroundInput}
+                    onChange={(e) => setNewTourGroundInput(e.target.value)}
+                    placeholder="e.g. Shivaji Ground Turf"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                    Overs
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={newTourOversInput}
+                    onChange={(e) => setNewTourOversInput(parseInt(e.target.value, 10) || 8)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateNewOneHalfTournament}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg border border-emerald-400/30 cursor-pointer transition active:scale-95"
+              >
+                <Plus size={15} />
+                <span>Create New 32-Team One-Half Tournament</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* Hero Header */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-600 via-rose-700 to-indigo-950 p-6 sm:p-8 text-white shadow-xl border border-amber-400/20">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-amber-400/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2">
+        <div className="relative z-10 flex flex-col gap-5">
+          {/* Top Row: Badges & Sync Status */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 text-amber-200 border border-amber-300/30 text-[10px] font-black uppercase tracking-wider">
                 <Flame size={12} className="text-amber-300 animate-pulse" />
@@ -1845,68 +2301,73 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider">
                 1st, 2nd, 3rd & 4th Prizes
               </span>
-              <span 
-                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider"
-                title={lastSyncedAt ? `Live background sync active • Last synced at ${lastSyncedAt}` : 'Live background cloud sync active across laptops & online hosting'}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
-                {syncStatus === 'syncing' ? 'Syncing...' : 'Auto Cloud Synced'}
-              </span>
             </div>
+            <span 
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-black uppercase tracking-wider"
+              title={lastSyncedAt ? `Live background sync active • Last synced at ${lastSyncedAt}` : 'Live background cloud sync active across laptops & online hosting'}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+              {syncStatus === 'syncing' ? 'Syncing...' : 'Auto Cloud Synced'}
+            </span>
+          </div>
 
-            <h1 className="text-2xl sm:text-4xl font-black uppercase tracking-tight text-white flex items-center gap-3">
-              {tournament.tournamentLogo ? (
-                <img
-                  src={normalizeImageUrl(tournament.tournamentLogo)}
-                  alt={tournament.name}
-                  className="w-11 h-11 sm:w-13 sm:h-13 rounded-2xl object-cover border-2 border-amber-300/60 shadow-lg shrink-0 bg-slate-900"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => handleSmartImageError(e, tournament.tournamentLogo)}
-                />
-              ) : (
-                <Trophy className="text-amber-300 shrink-0" size={32} />
-              )}
-              <span>{tournament.name}</span>
-            </h1>
-
-            <p className="text-xs sm:text-sm text-amber-100/90 font-medium max-w-2xl leading-relaxed">
-              <strong>One-Half Tournament Rule:</strong> 32 teams divided into 4 groups (8 teams/day). Each day, 8 teams play knockout rounds until 1 team qualifies for Day 5 Semis. On Day 5, the 4 group qualifiers play Semi-Finals, 3rd/4th prize match, and Grand Final!
-            </p>
-
-            <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-white/80 pt-1">
-              <span className="flex items-center gap-1">
-                <MapPin size={13} className="text-amber-300" />
-                {tournament.groundName}
-              </span>
-              <span>•</span>
-              <span className="flex items-center gap-1">
-                <Zap size={13} className="text-amber-300" />
-                {tournament.overs} Overs Match
-              </span>
-              {tournament.youtubeChannelName && (
-                <>
-                  <span>•</span>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-600/30 border border-rose-400/40 text-white text-[11px] font-bold">
-                    {tournament.youtubeChannelLogo ? (
-                      <img
-                        src={normalizeImageUrl(tournament.youtubeChannelLogo)}
-                        alt={tournament.youtubeChannelName}
-                        className="w-4 h-4 rounded-full object-cover"
-                        referrerPolicy="no-referrer"
-                        onError={(e) => handleSmartImageError(e, tournament.youtubeChannelLogo)}
-                      />
-                    ) : (
-                      <Video size={12} className="text-rose-300" />
-                    )}
-                    <span>LIVE: {tournament.youtubeChannelName}</span>
-                  </span>
-                </>
-              )}
+          {/* Middle Row: Professional Single-Line Tournament Name & Venue Info */}
+          <div className="flex items-center gap-4 min-w-0">
+            {tournament.tournamentLogo ? (
+              <img
+                src={normalizeImageUrl(tournament.tournamentLogo)}
+                alt={tournament.name}
+                className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl object-cover border-2 border-amber-300/70 shadow-xl shrink-0 bg-slate-900"
+                referrerPolicy="no-referrer"
+                onError={(e) => handleSmartImageError(e, tournament.tournamentLogo)}
+              />
+            ) : (
+              <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-amber-400/15 border-2 border-amber-300/40 flex items-center justify-center shrink-0 shadow-lg">
+                <Trophy className="text-amber-300" size={30} />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h1
+                className="text-xl sm:text-3xl lg:text-4xl font-black uppercase tracking-tight text-white whitespace-nowrap truncate drop-shadow-sm"
+                title={tournament.name}
+              >
+                {tournament.name}
+              </h1>
+              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-amber-100/90 mt-1.5">
+                <span className="flex items-center gap-1.5">
+                  <MapPin size={13} className="text-amber-300 shrink-0" />
+                  <span className="truncate">{tournament.groundName}</span>
+                </span>
+                <span className="text-white/40">•</span>
+                <span className="flex items-center gap-1.5">
+                  <Zap size={13} className="text-amber-300 shrink-0" />
+                  <span>{tournament.overs} Overs Match</span>
+                </span>
+                {tournament.youtubeChannelName && (
+                  <>
+                    <span className="text-white/40">•</span>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-600/30 border border-rose-400/40 text-white text-[11px] font-bold">
+                      {tournament.youtubeChannelLogo ? (
+                        <img
+                          src={normalizeImageUrl(tournament.youtubeChannelLogo)}
+                          alt={tournament.youtubeChannelName}
+                          className="w-4 h-4 rounded-full object-cover"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => handleSmartImageError(e, tournament.youtubeChannelLogo)}
+                        />
+                      ) : (
+                        <Video size={12} className="text-rose-300" />
+                      )}
+                      <span>LIVE: {tournament.youtubeChannelName}</span>
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Action Buttons Toolbar */}
+          <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               onClick={() => setShowPublicShareModal(true)}
               className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5 shadow-lg transition active:scale-95 border-none cursor-pointer"
@@ -1948,9 +2409,17 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             <button
               onClick={handleResetTournament}
               className="p-2.5 bg-white/10 hover:bg-white/20 text-white/80 hover:text-white rounded-xl transition border border-white/10 cursor-pointer"
-              title="Reset tournament"
+              title="Reset tournament scores & bracket"
             >
               <RotateCcw size={16} />
+            </button>
+            <button
+              onClick={handleDeleteTournament}
+              className="px-3 py-2.5 bg-rose-950/60 hover:bg-rose-600 text-rose-200 hover:text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 transition active:scale-95 border border-rose-400/40 cursor-pointer shadow-lg"
+              title="Delete this One-Half Tournament permanently"
+            >
+              <Trash2 size={14} />
+              <span>Delete</span>
             </button>
           </div>
         </div>
@@ -2376,9 +2845,14 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
       )}
 
       {/* Main Suite Module Navigation Bar (All buttons visible on mobile without horizontal scroll) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:flex-wrap items-center gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:flex lg:flex-wrap items-center gap-2">
         {[
           { id: 'bracket', label: '5-Day Bracket & Schedule', icon: Trophy },
+          {
+            id: 'results',
+            label: `Match Results (${tournament.matches.filter(m => m.status === 'completed' || (Boolean(m.winner) && !m.winner.startsWith('Winner') && !m.winner.startsWith('Loser') && !m.winner.startsWith('Day '))).length})`,
+            icon: CheckCircle2
+          },
           { id: 'teams', label: '32 Teams & Squads', icon: Users },
           { id: 'venue-scheduler', label: 'Grounds & Logistics', icon: MapPin },
           { id: 'standings', label: 'Points Table & NRR', icon: ListOrdered },
@@ -2553,7 +3027,127 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
       )}
 
       {/* Main Content Area based on Main Module Tab, View Mode, and Active Day */}
-      {mainTab === 'venue-scheduler' ? (
+      {mainTab === 'results' ? (
+        <div className="space-y-5">
+          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider">
+                  Official Completed Match Records
+                </span>
+                <span className="text-[11px] font-bold text-slate-400">
+                  {tournament.matches.filter(m => m.status === 'completed' || (Boolean(m.winner) && !m.winner.startsWith('Winner') && !m.winner.startsWith('Loser') && !m.winner.startsWith('Day '))).length} of {tournament.matches.length} Matches Completed
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white mt-1 flex items-center gap-2 min-w-0">
+                <CheckCircle2 size={20} className="text-emerald-500 shrink-0" />
+                <span className="whitespace-nowrap truncate" title={`${tournament.name} — Match Results`}>
+                  {tournament.name} — Match Results
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                All concluded matches across the 5-day knockout tournament with full scorecards, awards, and winner progression.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['all', 1, 2, 3, 4, 5] as const).map(d => (
+                <button
+                  key={String(d)}
+                  type="button"
+                  onClick={() => setResultsDayFilter(d)}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase cursor-pointer border transition ${
+                    resultsDayFilter === d
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent hover:border-emerald-500/40'
+                  }`}
+                >
+                  {d === 'all' ? 'All Days' : d === 5 ? 'Day 5 Finals' : `Day ${d} (Group ${d})`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(() => {
+            const completedList = tournament.matches.filter(m => {
+              const isDone =
+                m.status === 'completed' ||
+                (Boolean(m.winner) &&
+                  !m.winner.startsWith('Winner') &&
+                  !m.winner.startsWith('Loser') &&
+                  !m.winner.startsWith('Day '));
+              if (!isDone) return false;
+              if (resultsDayFilter !== 'all' && m.day !== resultsDayFilter) return false;
+              return true;
+            });
+
+            if (completedList.length === 0) {
+              return (
+                <div className="p-10 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center space-y-3">
+                  <Trophy className="mx-auto text-amber-400" size={36} />
+                  <h3 className="text-sm sm:text-base font-black uppercase text-slate-800 dark:text-white">
+                    No Completed Matches Recorded Yet {resultsDayFilter !== 'all' ? `for Day ${resultsDayFilter}` : ''}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                    Start live scoring or enter a quick result on any match in the 5-Day Bracket to see completed match results, scorecards, and certificates here.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMainTab('bracket')}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider border-none cursor-pointer"
+                  >
+                    Go to 5-Day Bracket
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {completedList.map(match => (
+                  <MatchCard
+                    key={match.id}
+                    match={match}
+                    tournament={tournament}
+                    onLaunchLive={handleLaunchLiveScorer}
+                    onOpenTeamPage={(teamName) => {
+                      const found = tournament.teams.find(t => t.name === teamName);
+                      if (found) {
+                        setSelectedTeamIdForPage(found.id);
+                        setViewMode('teams');
+                        setMainTab('teams');
+                      }
+                    }}
+                    onQuickScore={() => {
+                      setEditingMatch(match);
+                      setQuickScoreA(match.scoreA || '');
+                      setQuickScoreB(match.scoreB || '');
+                      setQuickOversA(match.oversA || `${tournament.overs}`);
+                      setQuickOversB(match.oversB || `${tournament.overs}`);
+                      setQuickWinner(match.winner || match.teamA);
+                      setQuickWinReason(match.winReason || '');
+                      setQuickPOTM(match.manOfTheMatch || '');
+                    }}
+                    onEditSlot={() => {
+                      setEditingSlotMatch(match);
+                      setShowTimeSlotEditModal(true);
+                    }}
+                    onOpenScorecard={() => {
+                      setSelectedScorecardMatch(match);
+                      setShowScorecardModal(true);
+                    }}
+                    onOpenBanner={() => {
+                      setSelectedMatchForBanner(match);
+                      setShowMatchBannerModal(true);
+                    }}
+                    onOpenCertificates={() => handleOpenMatchAwardCertificates(match, 'potm')}
+                  />
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      ) : mainTab === 'venue-scheduler' ? (
         <TournamentVenueScheduler
           tournamentId={tournament.id}
           teams={mappedVenueTeams}
@@ -2666,9 +3260,11 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
                     32 Teams • 4 Groups • 60+ Tournament Metrics
                   </span>
                 </div>
-                <h2 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white mt-1 flex items-center gap-2">
-                  <BarChart3 size={20} className="text-amber-500" />
-                  <span>{tournament.name} — Complete Tournament Statistics</span>
+                <h2 className="text-lg sm:text-xl font-black uppercase tracking-tight text-slate-900 dark:text-white mt-1 flex items-center gap-2 min-w-0">
+                  <BarChart3 size={20} className="text-amber-500 shrink-0" />
+                  <span className="whitespace-nowrap truncate" title={`${tournament.name} — Complete Tournament Statistics`}>
+                    {tournament.name} — Complete Tournament Statistics
+                  </span>
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Full Batting (15 metrics), Bowling (15 metrics), Partnership (8 metrics), Fielding (12 metrics), and Team (10 metrics) leaderboards.
@@ -2820,7 +3416,10 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
                       <Trophy size={14} />
                       <span>Official Tournament Purse & Patron Directory</span>
                     </div>
-                    <h2 className="text-lg sm:text-xl font-bold text-white mt-1">
+                    <h2
+                      className="text-lg sm:text-xl font-bold text-white mt-1 whitespace-nowrap truncate"
+                      title={`${tournament.name} — Prize Money & Sponsor Honors`}
+                    >
                       {tournament.name} — Prize Money & Sponsor Honors
                     </h2>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -4427,53 +5026,66 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowSettingsModal(false)}
-                    className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border-none cursor-pointer"
-                  >
-                    Cancel
-                  </button>
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      try {
-                        if (settingTournamentLogo) localStorage.setItem('cricket_tournament_logo', settingTournamentLogo);
-                        if (settingYoutubeName) localStorage.setItem('cricket_youtube_channel_name', settingYoutubeName);
-                        if (settingYoutubeLogo) localStorage.setItem('cricket_youtube_channel_logo', settingYoutubeLogo);
-                      } catch (_) {}
-
-                      setTournament(prev => ({
-                        ...prev,
-                        name: tournamentTitle,
-                        groundName: groundTitle,
-                        overs: oversCount,
-                        ballType: ballTypeInput,
-                        tournamentLogo: settingTournamentLogo,
-                        umpire1Name: settingUmpire1,
-                        umpire1Photo: settingUmpire1Photo,
-                        umpire2Name: settingUmpire2,
-                        umpire2Photo: settingUmpire2Photo,
-                        scoreboardManagerName: settingScorer,
-                        scoreboardManagerPhoto: settingScorerPhoto,
-                        commentatorName: settingCommentator,
-                        commentatorPhoto: settingCommentatorPhoto,
-                        youtubeChannelName: settingYoutubeName,
-                        youtubeChannelLogo: settingYoutubeLogo,
-                        prize1st: prize1,
-                        prize2nd: prize2,
-                        prize3rd: prize3,
-                        prize4th: prize4,
-                        updatedAt: Date.now()
-                      }));
                       setShowSettingsModal(false);
-                      showToast('✓ Officials, photos, YouTube branding & tournament settings saved!');
+                      setShowDeleteConfirmModal(true);
                     }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl border-none cursor-pointer shadow-md"
+                    className="px-3 py-2 bg-rose-500/15 hover:bg-rose-600 text-rose-400 hover:text-white text-xs font-black uppercase tracking-wider rounded-xl border border-rose-500/30 cursor-pointer flex items-center gap-1.5 transition"
                   >
-                    Save Officials & Branding
+                    <Trash2 size={13} />
+                    <span>Delete Tournament</span>
                   </button>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setShowSettingsModal(false)}
+                      className="px-4 py-2 bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border-none cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        try {
+                          if (settingTournamentLogo) localStorage.setItem('cricket_tournament_logo', settingTournamentLogo);
+                          if (settingYoutubeName) localStorage.setItem('cricket_youtube_channel_name', settingYoutubeName);
+                          if (settingYoutubeLogo) localStorage.setItem('cricket_youtube_channel_logo', settingYoutubeLogo);
+                        } catch (_) {}
+
+                        setTournament(prev => ({
+                          ...prev,
+                          name: tournamentTitle,
+                          groundName: groundTitle,
+                          overs: oversCount,
+                          ballType: ballTypeInput,
+                          tournamentLogo: settingTournamentLogo,
+                          umpire1Name: settingUmpire1,
+                          umpire1Photo: settingUmpire1Photo,
+                          umpire2Name: settingUmpire2,
+                          umpire2Photo: settingUmpire2Photo,
+                          scoreboardManagerName: settingScorer,
+                          scoreboardManagerPhoto: settingScorerPhoto,
+                          commentatorName: settingCommentator,
+                          commentatorPhoto: settingCommentatorPhoto,
+                          youtubeChannelName: settingYoutubeName,
+                          youtubeChannelLogo: settingYoutubeLogo,
+                          prize1st: prize1,
+                          prize2nd: prize2,
+                          prize3rd: prize3,
+                          prize4th: prize4,
+                          updatedAt: Date.now()
+                        }));
+                        setShowSettingsModal(false);
+                        showToast('✓ Officials, photos, YouTube branding & tournament settings saved!');
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl border-none cursor-pointer shadow-md"
+                    >
+                      Save Officials & Branding
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -4690,39 +5302,24 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             stage: selectedScorecardMatch.label,
             umpire1: selectedScorecardMatch.umpire1 || tournament.umpire1Name,
             umpire2: selectedScorecardMatch.umpire2 || tournament.umpire2Name,
-            scorer: selectedScorecardMatch.scorer || tournament.scoreboardManagerName
+            scorer: selectedScorecardMatch.scorer || tournament.scoreboardManagerName,
+            matchBannerUrl: selectedScorecardMatch.matchBannerUrl
           }}
-          teamA={(() => {
-            const found = tournament.teams.find(t => t.name === selectedScorecardMatch.teamA);
-            return found ? { id: found.name, name: found.name, captain: found.captain, logo: found.logo, players: (found.squad || []).map(p => p.name) } : null;
-          })()}
-          teamB={(() => {
-            const found = tournament.teams.find(t => t.name === selectedScorecardMatch.teamB);
-            return found ? { id: found.name, name: found.name, captain: found.captain, logo: found.logo, players: (found.squad || []).map(p => p.name) } : null;
-          })()}
-          tournamentName={tournament.name}
-          tournamentOvers={tournament.overs}
-          onStartLiveScoring={() => {
-            setShowScorecardModal(false);
-            handleLaunchLiveScorer(selectedScorecardMatch);
+          tournament={{
+            name: tournament.name,
+            format: `${tournament.overs} Overs`,
+            customOvers: tournament.overs,
+            teams: tournament.teams.map(t => ({
+              id: t.name,
+              name: t.name,
+              logo: t.logo,
+              players: (t.squad && t.squad.length > 0 ? t.squad : generateDefault15Squad(t.name, t.captain || `${t.name.split(' ')[0]} Skipper`)).map(p => p.name)
+            }))
           }}
-          onOpenQuickEdit={() => {
+          onOpenAwardCertificates={() => {
             const m = selectedScorecardMatch;
             setShowScorecardModal(false);
-            setEditingMatch(m);
-            setQuickScoreA(m.scoreA || '');
-            setQuickScoreB(m.scoreB || '');
-            setQuickOversA(m.oversA || `${tournament.overs}`);
-            setQuickOversB(m.oversB || `${tournament.overs}`);
-            setQuickWinner(m.winner || m.teamA);
-            setQuickWinReason(m.winReason || '');
-            setQuickPOTM(m.manOfTheMatch || '');
-          }}
-          onOpenBannerModal={() => {
-            const m = selectedScorecardMatch;
-            setShowScorecardModal(false);
-            setSelectedMatchForBanner(m);
-            setShowMatchBannerModal(true);
+            handleOpenMatchAwardCertificates(m, 'potm');
           }}
         />
       )}
@@ -4743,16 +5340,13 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             time: selectedMatchForBanner.time || '08:30 AM',
             venue: selectedMatchForBanner.pitchVenue || tournament.groundName,
             stage: selectedMatchForBanner.label,
-            matchBannerUrl: selectedMatchForBanner.matchBannerUrl
+            bannerUrl: selectedMatchForBanner.matchBannerUrl
           }}
-          tournamentName={tournament.name}
-          format={`${tournament.overs} Overs Knockout`}
-          teamALogo={tournament.teams.find(t => t.name === selectedMatchForBanner.teamA)?.logo}
-          teamBLogo={tournament.teams.find(t => t.name === selectedMatchForBanner.teamB)?.logo}
-          onSaveBanner={(matchId, bannerUrl) => {
+          onSaveBanner={(bannerUrl) => {
+            const targetId = selectedMatchForBanner.id;
             setTournament(prev => ({
               ...prev,
-              matches: prev.matches.map(m => m.id === matchId ? { ...m, matchBannerUrl: bannerUrl } : m)
+              matches: prev.matches.map(m => m.id === targetId ? { ...m, matchBannerUrl: bannerUrl } : m)
             }));
             showToast('✓ Custom Match Banner saved!');
           }}
@@ -4922,6 +5516,63 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Delete Tournament Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteConfirmModal && (
+          <div className="fixed inset-0 z-[260] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.85 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDeleteConfirmModal(false)}
+              className="absolute inset-0 bg-slate-950/85 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative z-10 w-full max-w-md bg-slate-900 border border-rose-500/50 rounded-3xl p-6 text-white shadow-2xl space-y-4"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                  <Trash2 size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-rose-400">
+                    Delete One-Half Tournament?
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-semibold truncate max-w-[260px]">
+                    {tournament.name}
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                This will permanently delete <strong className="text-white">{tournament.name}</strong>, remove all 32-team bracket progress and match records from the scoreboard & spectator hub, and clear cloud sync data.
+              </p>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirmModal(false)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl border-none cursor-pointer transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeleteTournament}
+                  className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black uppercase tracking-wider rounded-xl border-none cursor-pointer shadow-lg shadow-rose-600/30 flex items-center gap-1.5 transition active:scale-95"
+                >
+                  <Trash2 size={14} />
+                  <span>Delete Permanently</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      </>
+      )}
     </div>
   );
 };

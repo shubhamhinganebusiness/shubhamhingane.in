@@ -574,7 +574,7 @@ export const TeamDedicatedPageView: React.FC<TeamDedicatedPageViewProps> = ({
             <button
               type="button"
               onClick={() => onStartLiveMatchWithSquad(team)}
-              className="w-full py-3 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-black uppercase tracking-wider text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition active:scale-95 border-none cursor-pointer"
+              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-wider text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition active:scale-95 border-none cursor-pointer"
             >
               <Zap size={16} className="text-amber-300" />
               <span>1-Click Live Scoreboard Setup</span>

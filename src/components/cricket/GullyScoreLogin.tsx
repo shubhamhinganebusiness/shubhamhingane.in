@@ -368,7 +368,7 @@ export const GullyScoreLogin: React.FC = () => {
       {/* Top Bar */}
       <header className="relative z-10 border-b border-slate-850 bg-slate-900/60 backdrop-blur-md px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center shadow-lg shadow-emerald-600/20">
+          <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-600/20">
             <Trophy size={20} className="text-amber-300" />
           </div>
           <div>
@@ -610,7 +610,7 @@ export const GullyScoreLogin: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/20 transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+                className="w-full py-3.5 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-600/20 transition-all cursor-pointer border-none flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
               >
                 {loading ? (
                   <>

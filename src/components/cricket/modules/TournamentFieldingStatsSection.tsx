@@ -466,7 +466,7 @@ export const TournamentFieldingStatsSection: React.FC<TournamentFieldingStatsSec
         {/* ACTIVE METRIC BANNER & DESCRIPTION */}
         <div className="bg-gradient-to-r from-emerald-900/10 via-teal-900/5 to-transparent dark:from-emerald-950/40 dark:via-teal-950/20 rounded-2xl p-4 border border-emerald-500/15 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-rose-500/20 shrink-0">
               {renderIcon(activeConfig.iconName, 'w-6 h-6')}
             </div>
             <div>
@@ -573,7 +573,7 @@ export const TournamentFieldingStatsSection: React.FC<TournamentFieldingStatsSec
               onClick={() => onOpenPlayerCard && onOpenPlayerCard(topThree[0].rawPlayerStats || topThree[0])}
               className="bg-gradient-to-b from-emerald-500/10 via-white to-white dark:from-emerald-950/40 dark:via-slate-900 dark:to-slate-900 border-2 border-emerald-500/50 rounded-[2.2rem] p-6 shadow-xl relative overflow-hidden flex flex-col justify-between cursor-pointer hover:border-emerald-500 transition-all group md:-translate-y-2 ring-4 ring-emerald-500/10"
             >
-              <div className="absolute top-0 right-0 bg-gradient-to-l from-emerald-600 to-teal-600 text-white text-[10px] font-black uppercase tracking-wider px-3.5 py-1 rounded-bl-xl shadow-md flex items-center gap-1">
+              <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[10px] font-black uppercase tracking-wider px-3.5 py-1 rounded-bl-xl shadow-md flex items-center gap-1">
                 <Crown size={12} className="text-amber-300" />
                 Tournament Leader
               </div>
@@ -589,7 +589,7 @@ export const TournamentFieldingStatsSection: React.FC<TournamentFieldingStatsSec
 
               <div className="my-4 text-center space-y-1">
                 <div className="relative w-16 h-16 mx-auto">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-600 text-white flex items-center justify-center font-black text-xl shadow-lg shadow-emerald-500/30 group-hover:scale-105 transition-transform">
+                  <div className="w-16 h-16 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-xl shadow-lg shadow-rose-500/30 group-hover:scale-105 transition-transform">
                     {topThree[0].playerName.charAt(0)}
                   </div>
                   <div className="absolute -top-2 -right-1 bg-amber-400 text-slate-950 p-1 rounded-full shadow-md">

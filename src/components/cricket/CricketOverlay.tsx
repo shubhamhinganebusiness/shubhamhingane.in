@@ -1216,11 +1216,11 @@ export const CricketOverlay: React.FC = () => {
   }, []);
 
   // Timer-based auto-close feature for wicket dismissal popup:
-  // Dynamically counts down from 2 to 0 seconds (2.0s timing) and auto-dismisses when finished
+  // Dynamically counts down from 1 to 0 seconds (1.0s timing) and auto-dismisses when finished
   useEffect(() => {
     const isWicketOpen = Boolean((wicketPopup?.visible && !localWicketDismissed) || (activeConfig.manualWicketTrigger && !localWicketDismissed));
     if (isWicketOpen) {
-      setWicketSecondsRemaining(2);
+      setWicketSecondsRemaining(1);
       const timer = setInterval(() => {
         setWicketSecondsRemaining(prev => {
           if (prev <= 1) {
@@ -1302,7 +1302,7 @@ export const CricketOverlay: React.FC = () => {
 
       if (diff === 4) {
         setLastBdryFlash('4');
-        setTimeout(() => setLastBdryFlash(null), 2000);
+        setTimeout(() => setLastBdryFlash(null), 1000);
         if (activeConfig.showBoundaryCounter !== false) {
           setBoundaryCounterPopup({
             visible: true,
@@ -1327,7 +1327,7 @@ export const CricketOverlay: React.FC = () => {
         }
       } else if (diff === 6) {
         setLastBdryFlash('6');
-        setTimeout(() => setLastBdryFlash(null), 2000);
+        setTimeout(() => setLastBdryFlash(null), 1000);
         if (activeConfig.showBoundaryCounter !== false) {
           setBoundaryCounterPopup({
             visible: true,
@@ -1353,14 +1353,14 @@ export const CricketOverlay: React.FC = () => {
       }
     }
 
-    // Detect Wickets Fall popups & auto-trigger dismissal animations (2.0s duration)
+    // Detect Wickets Fall popups & auto-trigger dismissal animations (1.0s duration)
     if (previousWickets > 0 && currentInnings.wickets > previousWickets) {
       setLocalWicketDismissed(false);
-      setWicketSecondsRemaining(2);
+      setWicketSecondsRemaining(1);
       setWicketTriggerAlert(true);
       setTimeout(() => {
         setWicketTriggerAlert(false);
-      }, 2000); // exactly 2.0s duration
+      }, 1000); // exactly 1.0s duration
 
       const latestWicketNum = currentInnings.wickets;
       const fowList = currentInnings.fallOfWickets || [];
@@ -1456,12 +1456,17 @@ export const CricketOverlay: React.FC = () => {
           c.type === 'info' || 
           c.specialEvent === 'retire_hurt' ||
           c.announcementType === 'new_batsman' ||
-          c.announcementType === 'new_bowler'
+          c.announcementType === 'new_bowler' ||
+          c.id?.startsWith('comm-bat-upd-') ||
+          c.id?.startsWith('comm-bowl-upd-') ||
+          c.id?.startsWith('comm-over-finish-')
         ) return false;
         const desc = (c.description || '').toLowerCase();
         if (
           desc.includes('retired hurt') ||
-          desc.includes('new batsman on crease') ||
+          desc.includes('new batsman') ||
+          desc.includes('come on crease') ||
+          desc.includes('will bowl the') ||
           desc.includes('bowler into the attack') ||
           desc.includes('started') ||
           desc.includes('toss')
@@ -1536,9 +1541,19 @@ export const CricketOverlay: React.FC = () => {
           const directScore = String((c as any).ballScore || '').trim();
           const runsOffBat = Number((c as any).runsOffBat);
           const runs = Number((c as any).runs);
-          const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
-            desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
-            desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+          const isExplicit4 = directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
+          const isExplicit6 = directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6;
+          let is6 = false;
+          if (isExplicit4) {
+            is6 = false;
+          } else if (isExplicit6) {
+            is6 = true;
+          } else if (
+            desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+            desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+          ) {
+            is6 = true;
+          }
           runsSum += is6 ? 6 : 4;
           bLabels.push(is6 ? '6' : '4');
         } else {
@@ -1698,9 +1713,19 @@ export const CricketOverlay: React.FC = () => {
         const directScore = String((c as any).ballScore || '').trim();
         const runsOffBat = Number((c as any).runsOffBat);
         const runs = Number((c as any).runs);
-        const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
-          desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
-          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+        const isExplicit4 = directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
+        const isExplicit6 = directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6;
+        let is6 = false;
+        if (isExplicit4) {
+          is6 = false;
+        } else if (isExplicit6) {
+          is6 = true;
+        } else if (
+          desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+        ) {
+          is6 = true;
+        }
         ppRuns += is6 ? 6 : 4;
       } else {
         const matchDigits = desc.match(/\d+/);
@@ -1721,9 +1746,19 @@ export const CricketOverlay: React.FC = () => {
         const directScore = String((c as any).ballScore || '').trim();
         const runsOffBat = Number((c as any).runsOffBat);
         const runs = Number((c as any).runs);
-        const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
-          desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
-          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+        const isExplicit4 = directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
+        const isExplicit6 = directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6;
+        let is6 = false;
+        if (isExplicit4) {
+          is6 = false;
+        } else if (isExplicit6) {
+          is6 = true;
+        } else if (
+          desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+        ) {
+          is6 = true;
+        }
         deathRuns += is6 ? 6 : 4;
       } else {
         const matchDigits = desc.match(/\d+/);
@@ -1747,9 +1782,19 @@ export const CricketOverlay: React.FC = () => {
         const directScore = String((c as any).ballScore || '').trim();
         const runsOffBat = Number((c as any).runsOffBat);
         const runs = Number((c as any).runs);
-        const is6 = directScore === '6' || runsOffBat === 6 || runs === 6 ||
-          desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
-          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc);
+        const isExplicit4 = directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
+        const isExplicit6 = directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6;
+        let is6 = false;
+        if (isExplicit4) {
+          is6 = false;
+        } else if (isExplicit6) {
+          is6 = true;
+        } else if (
+          desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+        ) {
+          is6 = true;
+        }
         last5Runs += is6 ? 6 : 4;
       } else {
         const matchDigits = desc.match(/\d+/);
@@ -1943,7 +1988,10 @@ export const CricketOverlay: React.FC = () => {
       (b as any).type === 'info' || 
       (b as any).specialEvent === 'retire_hurt' ||
       (b as any).announcementType === 'new_batsman' ||
-      (b as any).announcementType === 'new_bowler'
+      (b as any).announcementType === 'new_bowler' ||
+      b.id?.startsWith('comm-bat-upd-') ||
+      b.id?.startsWith('comm-bowl-upd-') ||
+      b.id?.startsWith('comm-over-finish-')
     ) {
       return { label: '', style: 'hidden' };
     }
@@ -1951,7 +1999,9 @@ export const CricketOverlay: React.FC = () => {
     const desc = (b.description || '').toLowerCase();
     if (
       desc.includes('retired hurt') ||
-      desc.includes('new batsman on crease') ||
+      desc.includes('new batsman') ||
+      desc.includes('come on crease') ||
+      desc.includes('will bowl the') ||
       desc.includes('bowler into the attack') ||
       desc.includes('started') ||
       desc.includes('toss')
@@ -1959,7 +2009,7 @@ export const CricketOverlay: React.FC = () => {
       return { label: '', style: 'hidden' };
     }
 
-    let label = '•';
+    let label = '0';
     let style = '';
 
     if (b.type === 'wicket') {
@@ -1969,12 +2019,19 @@ export const CricketOverlay: React.FC = () => {
       const directScore = String((b as any).ballScore || '').trim();
       const runsOffBat = Number((b as any).runsOffBat);
       const runs = Number((b as any).runs);
-      const isSix =
-        directScore === '6' || directScore === '6s' || directScore.toUpperCase() === 'SIX' ||
-        runsOffBat === 6 || runs === 6 ||
-        desc.includes('six') || desc.includes('6 runs') || desc.includes(' 6 ') || desc.includes('maximum') ||
-        desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') ||
-        /\b6\b/.test(desc);
+      const isExplicitFour = directScore === '4' || directScore === '4s' || directScore.toUpperCase() === 'FOUR' || runsOffBat === 4 || runs === 4;
+      const isExplicitSix = directScore === '6' || directScore === '6s' || directScore.toUpperCase() === 'SIX' || runsOffBat === 6 || runs === 6;
+      let isSix = false;
+      if (isExplicitFour) {
+        isSix = false;
+      } else if (isExplicitSix) {
+        isSix = true;
+      } else if (
+        desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+        desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+      ) {
+        isSix = true;
+      }
       if (isSix) {
         label = '6';
         style = 'bg-gradient-to-r from-amber-500 to-yellow-400 border-amber-500 font-extrabold text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-bounce-custom';
@@ -2096,20 +2153,20 @@ export const CricketOverlay: React.FC = () => {
 
       if (resolvedRuns === null) {
         if (
-          desc.includes('six') || desc.includes(' 6 ') || desc.includes('6 runs') || desc.includes('maximum') ||
-          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\b/.test(desc)
-        ) {
-          resolvedRuns = 6;
-        } else if (
-          desc.includes('four') || desc.includes(' 4 ') || desc.includes('4 runs') || desc.includes('boundary') ||
-          desc.includes('चौकार') || desc.includes('चौका') || desc.includes('४') || /\b4\b/.test(desc)
+          desc.includes('four') || desc.includes(' 4 ') || desc.includes('4 runs') || desc.includes('4 run') || desc.includes('boundary') ||
+          desc.includes('चौकार') || desc.includes('चौका') || desc.includes('४') || /\b4\s*runs?\b/i.test(desc)
         ) {
           resolvedRuns = 4;
+        } else if (
+          desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+          desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+        ) {
+          resolvedRuns = 6;
         } else if (desc.includes('three') || desc.includes('triple') || desc.includes('3 runs') || desc.includes('3 run') || desc.includes('for three') || desc.includes('runs 3')) {
           resolvedRuns = 3;
         } else if (desc.includes('two') || desc.includes('couple') || desc.includes('double') || desc.includes('2 runs') || desc.includes('2 run') || desc.includes('for two') || desc.includes('runs 2')) {
           resolvedRuns = 2;
-        } else if (desc.includes('single') || desc.includes('one run') || desc.includes('1 run') || desc.includes('for a single') || desc.includes('runs 1') || desc.includes('rotates strike')) {
+        } else if (desc.includes('single') || desc.includes('one run') || desc.includes('1 run') || desc.includes('for a single') || desc.includes('runs 1') || desc.includes('rotates strike') || desc.includes('comfortable run') || desc.includes('runs immediately')) {
           resolvedRuns = 1;
         } else {
           const numMatch = desc.match(/\b([0-6])\b/) || desc.match(/\d+/);
@@ -2122,8 +2179,8 @@ export const CricketOverlay: React.FC = () => {
       }
 
       if (resolvedRuns === 0) {
-        label = '•';
-        style = 'bg-slate-850 border-slate-800 text-slate-500';
+        label = '0';
+        style = 'bg-slate-800 border-slate-700 text-slate-200 font-bold';
       } else if (resolvedRuns === 4) {
         label = '4';
         style = 'bg-sky-500 border-sky-500 font-bold text-white shadow-[0_0_10px_rgba(14,165,233,0.5)]';
@@ -3007,19 +3064,17 @@ export const CricketOverlay: React.FC = () => {
                   const directScore = String((b as any).ballScore || '').trim();
                   const runsOffBat = Number((b as any).runsOffBat);
                   const runs = Number((b as any).runs);
-                  const isSix =
-                    d.label === '6' || directScore === '6' || runsOffBat === 6 || runs === 6 ||
-                    (b.type === 'boundary' && (directScore === '6' || runsOffBat === 6 || /six|6 runs|maximum|षटकार|छक्का|६|\b6\b/i.test(b.description || '')));
-                  const isFour =
-                    !isSix && (d.label === '4' || directScore === '4' || runsOffBat === 4 || runs === 4 ||
-                    (b.type === 'boundary' && !isSix));
+                  const isExplicitFour = d.label === '4' || directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
+                  const isExplicitSix = !isExplicitFour && (d.label === '6' || directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6);
+                  const isSix = isExplicitSix || (!isExplicitFour && b.type === 'boundary' && (directScore === '6' || runsOffBat === 6 || /six|6 runs|maximum|षटकार|छक्का|६|\b6\s*runs?\b/i.test(b.description || '')));
+                  const isFour = isExplicitFour || (!isSix && (d.label === '4' || directScore === '4' || runsOffBat === 4 || runs === 4 || b.type === 'boundary'));
 
                   if (b.type === 'wicket' || d.label === 'W' || /^W$/i.test(d.label)) {
                     type = 'wicket';
-                  } else if (isSix) {
-                    type = 'six';
                   } else if (isFour) {
                     type = 'four';
+                  } else if (isSix) {
+                    type = 'six';
                   } else if (
                     b.type === 'extra' ||
                     /wd|nb|lb|b|ex/i.test(d.label) ||
@@ -3029,7 +3084,7 @@ export const CricketOverlay: React.FC = () => {
                   } else if (['1', '2', '3', '5'].includes(d.label) || parseInt(d.label, 10) > 0) {
                     type = 'run';
                   }
-                  return { label: isSix ? '6' : isFour ? '4' : d.label, type };
+                  return { label: isFour ? '4' : isSix ? '6' : d.label, type };
                 })}
                 bowlingTeamName={(currentInnings?.battingTeam || '') === (match?.teamA || '') ? (match?.teamB || 'TEAM B') : (match?.teamA || 'TEAM A')}
                 bowlingTeamSubtext="BOWLING"

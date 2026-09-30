@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
 export type CommentaryLanguage = 'mr' | 'hi' | 'en';
 
@@ -381,6 +381,7 @@ export function generateLocalizedCricketCommentary(
     runsOffBat?: number;
     winProbability?: any;
     isCrucialTime?: boolean;
+    tacticalContext?: TacticalMatchupContext;
   }
 ): string {
   const bat = striker?.trim() || 'फलंदाज';
@@ -388,7 +389,10 @@ export function generateLocalizedCricketCommentary(
   const targetLang = lang === 'mr' ? 'mr' : lang === 'hi' ? 'hi' : 'en';
 
   const appendWinProb = (text: string): string => {
-    // Win probability removed from AI live commentary per user directive
+    const suffix = options?.tacticalContext?.tacticalNarrativeSuffix?.[targetLang];
+    if (suffix && !text.includes(suffix.trim())) {
+      return `${text}${suffix}`;
+    }
     return text;
   };
 
@@ -827,7 +831,7 @@ export const CommentaryLanguageSelector: React.FC<CommentaryLanguageSelectorProp
               onClick={() => handleSelect(l.id)}
               className={`px-2 py-1 rounded-lg text-[9.5px] font-extrabold tracking-wide transition-all border-none cursor-pointer flex items-center gap-1 ${
                 isActive
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm scale-102'
+                  ? 'bg-emerald-600 text-white shadow-sm scale-102'
                   : 'text-slate-400 hover:text-slate-200 bg-transparent hover:bg-slate-800/50'
               }`}
             >
@@ -1265,43 +1269,234 @@ export function getOrdinalWordMr(n: number): string {
   return ordinals[n] || `${n} वे`;
 }
 
+export interface OverMiniSummaryData {
+  overNo: number;
+  runsInOver: number;
+  wicketsInOver: number;
+  ballsInOver: string[];
+  battingTeam: string;
+  bowlingTeam?: string;
+  totalRuns: number;
+  totalWickets: number;
+  crr: string;
+  rrr?: string;
+  targetRuns?: number;
+  runsNeeded?: number;
+  ballsRemaining?: number;
+  strikerName?: string;
+  strikerRuns?: number;
+  strikerBalls?: number;
+  nonStrikerName?: string;
+  nonStrikerRuns?: number;
+  nonStrikerBalls?: number;
+  bowlerName?: string;
+  bowlerOvers?: string;
+  bowlerMaidens?: number;
+  bowlerRuns?: number;
+  bowlerWickets?: number;
+  nextBowlerName?: string;
+  inningsNum?: number;
+}
+
 /**
- * Creates an over finish and bowling change announcement
+ * Helper to compute over summary metrics from an innings state at the end of `completedOverNo` (1-indexed)
+ */
+export function buildOverMiniSummaryFromInnings(
+  completedOverNo: number,
+  innings: any,
+  match?: any,
+  nextBowlerName?: string
+): OverMiniSummaryData | undefined {
+  if (!innings) return undefined;
+  const overN = Math.max(1, completedOverNo);
+  const overIdx = overN - 1; // 0-indexed over prefix, e.g., Over 1 has deliveries 0.1..0.6 or 1.0
+
+  // Extract deliveries belonging to this completed over from commentaryList
+  const rawComm = Array.isArray(innings.commentaryList) ? innings.commentaryList : [];
+  const overDeliveries = rawComm.filter((c: any) => {
+    if (!c || !c.overBall || c.overBall === '0.0') return false;
+    if (
+      c.id?.startsWith('comm-over-finish-') ||
+      c.id?.startsWith('comm-bat-') ||
+      c.id?.startsWith('comm-bowl-') ||
+      c.id?.startsWith('comm-sponsor-') ||
+      c.id?.startsWith('comm-over-sponsor-') ||
+      c.id?.startsWith('comm-inn-') ||
+      c.id?.startsWith('comm-match-') ||
+      c.id?.startsWith('comm-squad-') ||
+      c.id?.startsWith('milestone-') ||
+      c.announcementType
+    ) {
+      return false;
+    }
+    const parts = String(c.overBall).split('.');
+    if (parts.length !== 2) return false;
+    const oNum = parseInt(parts[0], 10);
+    const bNum = parseInt(parts[1], 10);
+    if (isNaN(oNum) || isNaN(bNum)) return false;
+    // Standard cricket notation: 0.1..0.5 and 1.0 belong to Over 1 (overIdx = 0)
+    if (bNum === 0) {
+      return oNum === overN;
+    }
+    return oNum === overIdx;
+  });
+
+  // Reverse to chronological order (ball 1 to ball 6)
+  const chronological = [...overDeliveries].reverse();
+  const ballsInOver: string[] = [];
+  let runsInOver = 0;
+  let wicketsInOver = 0;
+
+  for (const d of chronological) {
+    const isExplicitFour = d.ballScore === '4' || d.ballScore === '4s' || d.runsOffBat === 4 || (d as any).runs === 4;
+    const isExplicitSix = !isExplicitFour && (d.ballScore === '6' || d.ballScore === '6s' || d.runsOffBat === 6 || (d as any).runs === 6);
+    const label = isExplicitFour ? '4' : isExplicitSix ? '6' : (d.ballScore || (
+      d.type === 'wicket' ? 'W' :
+      d.extraType === 'wide' ? (d.runsOffBat ? `WD+${d.runsOffBat}` : 'WD') :
+      d.extraType === 'noball' ? (d.runsOffBat ? `NB+${d.runsOffBat}` : 'NB') :
+      d.extraType === 'legbye' ? `${d.runsOffBat || 1}lb` :
+      d.extraType === 'bye' ? `${d.runsOffBat || 1}b` :
+      d.runsOffBat !== undefined ? String(d.runsOffBat) :
+      d.type === 'boundary' ? (((d.description || '').toLowerCase().includes('six') || (d.description || '').toLowerCase().includes('6 run') || (d.description || '').toLowerCase().includes('maximum') || (d.description || '').toLowerCase().includes('षटकार') || (d.description || '').toLowerCase().includes('छक्का') || (d.description || '').toLowerCase().includes('६')) ? '6' : '4') :
+      '0'
+    ));
+    ballsInOver.push(String(label));
+
+    if (d.type === 'wicket' && d.specialEvent !== 'retire_hurt') {
+      wicketsInOver += 1;
+    }
+    if (d.extraType === 'wide' || d.extraType === 'noball') {
+      runsInOver += 1 + (Number(d.runsOffBat) || 0);
+    } else if (d.extraType === 'bye' || d.extraType === 'legbye') {
+      runsInOver += Number(d.runsOffBat) || 1;
+    } else if (d.runsOffBat !== undefined) {
+      runsInOver += Number(d.runsOffBat) || 0;
+    } else if (label === '6') {
+      runsInOver += 6;
+    } else if (label === '4') {
+      runsInOver += 4;
+    } else if (!isNaN(Number(label))) {
+      runsInOver += Number(label);
+    }
+  }
+
+  // Fallback to history delta if commentaryList didn't have granular ball tags
+  if (ballsInOver.length === 0 && Array.isArray(innings.history) && innings.history.length > 1) {
+    const endSnap = innings.history.find((h: any) => Math.round((h.over || 0) * 6) === overN * 6) || innings.history[innings.history.length - 1];
+    const startSnap = innings.history.find((h: any) => Math.round((h.over || 0) * 6) === (overN - 1) * 6);
+    if (endSnap && startSnap) {
+      runsInOver = Math.max(0, (endSnap.cumulativeRuns || 0) - (startSnap.cumulativeRuns || 0));
+      wicketsInOver = Math.max(0, (endSnap.cumulativeWickets || 0) - (startSnap.cumulativeWickets || 0));
+    }
+  }
+
+  const totalRuns = Number(innings.runs) || 0;
+  const totalWickets = Number(innings.wickets) || 0;
+  const ballsBowled = Number(innings.ballsBowled) || (overN * 6);
+  const crr = ballsBowled > 0 ? ((totalRuns / ballsBowled) * 6).toFixed(2) : '0.00';
+
+  const striker = innings.batsmen?.[innings.strikerIndex ?? 0];
+  const nonStriker = innings.batsmen?.[innings.nonStrikerIndex ?? 1];
+  const bowler = innings.bowlers?.[innings.currentBowlerIndex ?? 0];
+
+  const bBalls = Number(bowler?.ballsBowled) || 0;
+  const bowlerOvers = `${Math.floor(bBalls / 6)}.${bBalls % 6}`;
+
+  let rrr: string | undefined = undefined;
+  let runsNeeded: number | undefined = undefined;
+  let ballsRemaining: number | undefined = undefined;
+  const targetRuns = match?.targetRuns ? Number(match.targetRuns) : undefined;
+  const oversLimit = Number(match?.oversLimit) || 10;
+
+  if ((match?.currentInningsNum === 2 || innings._inningsNum === 2) && targetRuns) {
+    runsNeeded = Math.max(0, targetRuns - totalRuns);
+    ballsRemaining = Math.max(0, oversLimit * 6 - ballsBowled);
+    rrr = ballsRemaining > 0 ? ((runsNeeded / ballsRemaining) * 6).toFixed(2) : '0.00';
+  }
+
+  return {
+    overNo: overN,
+    runsInOver,
+    wicketsInOver,
+    ballsInOver,
+    battingTeam: innings.battingTeam || match?.teamA || 'Batting Team',
+    bowlingTeam: innings.bowlingTeam || match?.teamB || 'Bowling Team',
+    totalRuns,
+    totalWickets,
+    crr,
+    rrr,
+    targetRuns,
+    runsNeeded,
+    ballsRemaining,
+    strikerName: striker?.name,
+    strikerRuns: striker?.runs ?? 0,
+    strikerBalls: striker?.balls ?? 0,
+    nonStrikerName: nonStriker?.name,
+    nonStrikerRuns: nonStriker?.runs ?? 0,
+    nonStrikerBalls: nonStriker?.balls ?? 0,
+    bowlerName: bowler?.name,
+    bowlerOvers,
+    bowlerMaidens: bowler?.maidens ?? 0,
+    bowlerRuns: bowler?.runsConceded ?? 0,
+    bowlerWickets: bowler?.wickets ?? 0,
+    nextBowlerName: nextBowlerName?.trim() || undefined,
+    inningsNum: match?.currentInningsNum || 1
+  };
+}
+
+/**
+ * Creates an over finish and bowling change announcement with rich End-of-Over Mini Summary Card metadata
  * Example: "First over finished and Umesh will bowl second over."
  */
 export function createOverFinishedAndBowlerChangeAnnouncement(
   completedOverNo: number,
   nextBowlerName: string,
-  overBallStr?: string
+  overBallStr?: string,
+  innings?: any,
+  match?: any
 ): CommentaryWithTranslations {
   const bwl = nextBowlerName?.trim() || 'Bowler';
   const overN = Math.max(1, completedOverNo);
   const nextN = overN + 1;
 
-  // English: "First over finished and Umesh will bowl second over."
+  const overSummary = innings
+    ? buildOverMiniSummaryFromInnings(overN, innings, match, bwl)
+    : undefined;
+
   const ordEnCurr = getOrdinalWordEn(overN);
   const ordEnNext = getOrdinalWordEn(nextN);
   const capitalizedOrdEnCurr = ordEnCurr.charAt(0).toUpperCase() + ordEnCurr.slice(1);
-  const en = `${capitalizedOrdEnCurr} over finished and ${bwl} will bowl ${ordEnNext} over.`;
 
-  // Hindi: "पहला ओवर समाप्त हुआ और Umesh दूसरा ओवर फेंकेंगे."
   const ordHiCurr = getOrdinalWordHi(overN);
   const ordHiNext = getOrdinalWordHi(nextN);
-  const hi = `${ordHiCurr} ओवर समाप्त हुआ और ${bwl} ${ordHiNext} ओवर फेंकेंगे.`;
 
-  // Marathi: "पहिले षटक संपले आणि Umesh दुसरे षटक टाकणार आहे."
   const ordMrCurr = getOrdinalWordMr(overN);
   const ordMrNext = getOrdinalWordMr(nextN);
-  const mr = `${ordMrCurr} षटक संपले आणि ${bwl} ${ordMrNext} षटक टाकणार आहे.`;
+
+  let en = `${capitalizedOrdEnCurr} over finished and ${bwl} will bowl ${ordEnNext} over.`;
+  let hi = `${ordHiCurr} ओवर समाप्त हुआ और ${bwl} ${ordHiNext} ओवर फेंकेंगे.`;
+  let mr = `${ordMrCurr} षटक संपले आणि ${bwl} ${ordMrNext} षटक टाकणार आहे.`;
+
+  if (overSummary) {
+    const { runsInOver, wicketsInOver, battingTeam, totalRuns, totalWickets, crr } = overSummary;
+    const wktEn = wicketsInOver > 0 ? `, ${wicketsInOver} wkt${wicketsInOver > 1 ? 's' : ''}` : '';
+    const wktHi = wicketsInOver > 0 ? `, ${wicketsInOver} विकेट` : '';
+    const wktMr = wicketsInOver > 0 ? `, ${wicketsInOver} बाद` : '';
+
+    en = `📊 END OF OVER ${overN} (${runsInOver} runs${wktEn}): ${battingTeam} ${totalRuns}/${totalWickets} (CRR: ${crr}). ${capitalizedOrdEnCurr} over finished and ${bwl} will bowl ${ordEnNext} over.`;
+    hi = `📊 ओवर ${overN} समाप्त (${runsInOver} रन${wktHi}): ${battingTeam} ${totalRuns}/${totalWickets} (रन रेट: ${crr}). ${ordHiCurr} ओवर समाप्त हुआ और ${bwl} ${ordHiNext} ओवर फेंकेंगे.`;
+    mr = `📊 षटक ${overN} संपले (${runsInOver} धावा${wktMr}): ${battingTeam} ${totalRuns}/${totalWickets} (धावगती: ${crr}). ${ordMrCurr} षटक संपले आणि ${bwl} ${ordMrNext} षटक टाकणार आहे.`;
+  }
 
   return {
     id: `comm-over-finish-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     overBall: overBallStr || `${overN}.0`,
     description: en,
     type: 'milestone',
-    announcementType: 'new_bowler',
+    announcementType: 'over_summary',
     playerName: bwl,
     soundWave: true,
+    overSummary,
     translations: { en, hi, mr }
   };
 }
@@ -2034,3 +2229,1689 @@ export function ContextualToneShifterBadge({
     </div>
   );
 }
+
+/**
+ * Checks if a commentary item represents an End-of-Over announcement / summary card
+ */
+export function isEndOfOverCommentary(comm: any): boolean {
+  if (!comm) return false;
+  if (comm.announcementType === 'over_summary' || comm.overSummary) return true;
+  const idStr = String(comm.id || '');
+  if (idStr.startsWith('comm-over-finish-')) return true;
+  const desc = String(comm.description || '').toLowerCase();
+  if (desc.includes('over finished and') || desc.includes('end of over ')) return true;
+  return false;
+}
+
+/**
+ * Resolves OverMiniSummaryData for an over-finish commentary item, computing it dynamically
+ * from the match/innings commentary list if `comm.overSummary` was not pre-stored.
+ */
+export function resolveOverMiniSummary(
+  comm: any,
+  allCommentary: any[],
+  match?: any,
+  fallbackInnings?: any
+): OverMiniSummaryData {
+  if (comm?.overSummary) {
+    return comm.overSummary as OverMiniSummaryData;
+  }
+
+  const innNum = comm?._inningsNum || match?.currentInningsNum || 1;
+  const targetInn = (innNum === 2 ? match?.innings2 : match?.innings1) || fallbackInnings || {};
+
+  // Parse over number from comm.overBall (e.g. "1.0" -> Over 1, "2.0" -> Over 2, "0.6" -> Over 1)
+  let overNo = 1;
+  const obStr = String(comm?.overBall || '1.0');
+  const parts = obStr.split('.');
+  if (parts.length === 2) {
+    const o = parseInt(parts[0], 10);
+    const b = parseInt(parts[1], 10);
+    if (!isNaN(o)) {
+      overNo = b === 0 ? Math.max(1, o) : o + 1;
+    }
+  }
+
+  const overIdx = overNo - 1;
+  const sourceList = Array.isArray(targetInn.commentaryList) && targetInn.commentaryList.length > 0
+    ? targetInn.commentaryList
+    : (allCommentary || []).filter((c: any) => !c._inningsNum || c._inningsNum === innNum);
+
+  const overDeliveries = sourceList.filter((c: any) => {
+    if (!c || !c.overBall || c.overBall === '0.0') return false;
+    if (
+      isEndOfOverCommentary(c) ||
+      c.id?.startsWith('comm-bat-') ||
+      c.id?.startsWith('comm-bowl-') ||
+      c.id?.startsWith('comm-sponsor-') ||
+      c.id?.startsWith('comm-over-sponsor-') ||
+      c.id?.startsWith('comm-inn-') ||
+      c.id?.startsWith('comm-match-') ||
+      c.id?.startsWith('comm-squad-') ||
+      c.id?.startsWith('milestone-') ||
+      c.announcementType
+    ) {
+      return false;
+    }
+    const p = String(c.overBall).split('.');
+    if (p.length !== 2) return false;
+    const oNum = parseInt(p[0], 10);
+    const bNum = parseInt(p[1], 10);
+    if (isNaN(oNum) || isNaN(bNum)) return false;
+    if (bNum === 0) return oNum === overNo;
+    return oNum === overIdx;
+  });
+
+  const chronological = [...overDeliveries].reverse();
+  const ballsInOver: string[] = [];
+  let runsInOver = 0;
+  let wicketsInOver = 0;
+
+  for (const d of chronological) {
+    const isExplicitFour = d.ballScore === '4' || d.ballScore === '4s' || d.runsOffBat === 4 || (d as any).runs === 4;
+    const isExplicitSix = !isExplicitFour && (d.ballScore === '6' || d.ballScore === '6s' || d.runsOffBat === 6 || (d as any).runs === 6);
+    const label = isExplicitFour ? '4' : isExplicitSix ? '6' : (d.ballScore || (
+      d.type === 'wicket' ? 'W' :
+      d.extraType === 'wide' ? (d.runsOffBat ? `WD+${d.runsOffBat}` : 'WD') :
+      d.extraType === 'noball' ? (d.runsOffBat ? `NB+${d.runsOffBat}` : 'NB') :
+      d.extraType === 'legbye' ? `${d.runsOffBat || 1}lb` :
+      d.extraType === 'bye' ? `${d.runsOffBat || 1}b` :
+      d.runsOffBat !== undefined ? String(d.runsOffBat) :
+      d.type === 'boundary' ? (((d.description || '').toLowerCase().includes('six') || (d.description || '').toLowerCase().includes('6 run') || (d.description || '').toLowerCase().includes('maximum') || (d.description || '').toLowerCase().includes('षटकार') || (d.description || '').toLowerCase().includes('छक्का') || (d.description || '').toLowerCase().includes('६')) ? '6' : '4') :
+      '0'
+    ));
+    ballsInOver.push(String(label));
+
+    if (d.type === 'wicket' && d.specialEvent !== 'retire_hurt') {
+      wicketsInOver += 1;
+    }
+    if (d.extraType === 'wide' || d.extraType === 'noball') {
+      runsInOver += 1 + (Number(d.runsOffBat) || 0);
+    } else if (d.extraType === 'bye' || d.extraType === 'legbye') {
+      runsInOver += Number(d.runsOffBat) || 1;
+    } else if (d.runsOffBat !== undefined) {
+      runsInOver += Number(d.runsOffBat) || 0;
+    } else if (label === '6') {
+      runsInOver += 6;
+    } else if (label === '4') {
+      runsInOver += 4;
+    } else if (!isNaN(Number(label))) {
+      runsInOver += Number(label);
+    }
+  }
+
+  // Try to find cumulative score at the end of this over from targetInn.history
+  let totalRuns = Number(targetInn.runs) || 0;
+  let totalWickets = Number(targetInn.wickets) || 0;
+  if (Array.isArray(targetInn.history) && targetInn.history.length > 0) {
+    const snap = targetInn.history.find((h: any) => Math.round((h.over || 0) * 6) === overNo * 6);
+    if (snap) {
+      totalRuns = Number(snap.cumulativeRuns) || totalRuns;
+      totalWickets = Number(snap.cumulativeWickets) || totalWickets;
+    }
+  }
+
+  const crr = overNo > 0 ? (totalRuns / overNo).toFixed(2) : '0.00';
+  const striker = targetInn.batsmen?.[targetInn.strikerIndex ?? 0] || targetInn.batsmen?.[0];
+  const nonStriker = targetInn.batsmen?.[targetInn.nonStrikerIndex ?? 1] || targetInn.batsmen?.[1];
+  const bowler = targetInn.bowlers?.[targetInn.currentBowlerIndex ?? 0] || targetInn.bowlers?.[0];
+  const bBalls = Number(bowler?.ballsBowled) || 0;
+
+  return {
+    overNo,
+    runsInOver,
+    wicketsInOver,
+    ballsInOver,
+    battingTeam: comm?._battingTeam || targetInn.battingTeam || match?.teamA || 'Batting Side',
+    bowlingTeam: targetInn.bowlingTeam || match?.teamB || 'Bowling Side',
+    totalRuns,
+    totalWickets,
+    crr,
+    strikerName: striker?.name,
+    strikerRuns: striker?.runs ?? 0,
+    strikerBalls: striker?.balls ?? 0,
+    nonStrikerName: nonStriker?.name,
+    nonStrikerRuns: nonStriker?.runs ?? 0,
+    nonStrikerBalls: nonStriker?.balls ?? 0,
+    bowlerName: bowler?.name,
+    bowlerOvers: `${Math.floor(bBalls / 6)}.${bBalls % 6}`,
+    bowlerMaidens: bowler?.maidens ?? 0,
+    bowlerRuns: bowler?.runsConceded ?? 0,
+    bowlerWickets: bowler?.wickets ?? 0,
+    nextBowlerName: comm?.playerName || undefined,
+    inningsNum: innNum
+  };
+}
+
+/**
+ * Ensures every completed over in an innings's commentary list (newest-first) has an
+ * End-of-Over Mini Summary Card entry positioned at the top of that over's deliveries.
+ */
+export function injectMissingOverSummaries(
+  commList: any[],
+  innings: any,
+  match?: any,
+  inningsNum: number = 1
+): any[] {
+  if (!Array.isArray(commList) || commList.length === 0 || !innings) {
+    return commList || [];
+  }
+
+  const completedOversCount = Math.floor((Number(innings.ballsBowled) || 0) / 6);
+  if (completedOversCount <= 0) {
+    return commList;
+  }
+
+  const existingSummaryOvers = new Set<number>();
+  for (const c of commList) {
+    if (isEndOfOverCommentary(c)) {
+      if (c.overSummary?.overNo) {
+        existingSummaryOvers.add(Number(c.overSummary.overNo));
+      } else {
+        const parts = String(c.overBall || '').split('.');
+        if (parts.length === 2) {
+          const o = parseInt(parts[0], 10);
+          const b = parseInt(parts[1], 10);
+          if (!isNaN(o)) {
+            existingSummaryOvers.add(b === 0 ? Math.max(1, o) : o + 1);
+          }
+        }
+      }
+    }
+  }
+
+  const isActualDelivery = (c: any): number | null => {
+    if (!c || !c.overBall || c.overBall === '0.0') return null;
+    if (
+      isEndOfOverCommentary(c) ||
+      c.id?.startsWith('comm-bat-') ||
+      c.id?.startsWith('comm-bowl-') ||
+      c.id?.startsWith('comm-sponsor-') ||
+      c.id?.startsWith('comm-over-sponsor-') ||
+      c.id?.startsWith('comm-inn-') ||
+      c.id?.startsWith('comm-match-') ||
+      c.id?.startsWith('comm-squad-') ||
+      c.id?.startsWith('milestone-') ||
+      c.announcementType
+    ) {
+      return null;
+    }
+    const p = String(c.overBall).split('.');
+    if (p.length !== 2) return null;
+    const o = parseInt(p[0], 10);
+    const b = parseInt(p[1], 10);
+    if (isNaN(o) || isNaN(b) || (o === 0 && b === 0)) return null;
+    return b === 0 ? o : o + 1;
+  };
+
+  const result: any[] = [];
+  for (const item of commList) {
+    const overNo = isActualDelivery(item);
+    if (
+      overNo !== null &&
+      overNo >= 1 &&
+      overNo <= completedOversCount &&
+      !existingSummaryOvers.has(overNo)
+    ) {
+      existingSummaryOvers.add(overNo);
+      const syntheticSummaryComm = createOverFinishedAndBowlerChangeAnnouncement(
+        overNo,
+        '',
+        `${overNo}.0`,
+        { ...innings, _inningsNum: inningsNum },
+        match
+      );
+      result.push({
+        ...syntheticSummaryComm,
+        id: `comm-over-finish-auto-inn${inningsNum}-ov${overNo}`,
+        _inningsNum: inningsNum,
+        _battingTeam: innings.battingTeam || (inningsNum === 2 ? match?.teamB : match?.teamA)
+      });
+    }
+    result.push(item);
+  }
+
+  return result;
+}
+
+/**
+ * Broadcast-grade End-of-Over Mini Summary Card for Live Commentary Feeds (Cricbuzz / IPL style)
+ */
+export function EndOfOverSummaryCard({
+  summary,
+  displayText,
+  language = 'en',
+  compact = false
+}: {
+  summary: OverMiniSummaryData;
+  displayText: string;
+  language?: CommentaryLanguage;
+  compact?: boolean;
+}) {
+  const isMaiden = summary.runsInOver === 0 && summary.ballsInOver.length >= 6;
+
+  const overTitle =
+    language === 'mr'
+      ? `षटक ${summary.overNo} समाप्त`
+      : language === 'hi'
+        ? `ओवर ${summary.overNo} समाप्त`
+        : `END OF OVER ${summary.overNo}`;
+
+  const runsLabel =
+    language === 'mr'
+      ? `${summary.runsInOver} धावा`
+      : language === 'hi'
+        ? `${summary.runsInOver} रन`
+        : `${summary.runsInOver} Run${summary.runsInOver === 1 ? '' : 's'}`;
+
+  const wktsLabel =
+    summary.wicketsInOver > 0
+      ? language === 'mr'
+        ? ` • ${summary.wicketsInOver} बाद`
+        : language === 'hi'
+          ? ` • ${summary.wicketsInOver} विकेट`
+          : ` • ${summary.wicketsInOver} Wkt${summary.wicketsInOver > 1 ? 's' : ''}`
+      : '';
+
+  const getBallPillClass = (b: string) => {
+    const up = b.toUpperCase();
+    if (up.includes('W') && !up.includes('WD')) {
+      return 'bg-rose-500 text-white border-rose-400 shadow-xs shadow-rose-500/30';
+    }
+    if (up.includes('6')) {
+      return 'bg-emerald-500 text-slate-950 border-emerald-300 shadow-xs shadow-emerald-500/30';
+    }
+    if (up.includes('4')) {
+      return 'bg-amber-400 text-slate-950 border-amber-300 shadow-xs shadow-amber-400/30';
+    }
+    if (up.includes('WD') || up.includes('NB') || up.includes('LB') || up.includes('B')) {
+      return 'bg-sky-500/25 text-sky-300 border-sky-400/40';
+    }
+    if (up === '0' || up === '•') {
+      return 'bg-slate-800/90 text-slate-400 border-slate-700';
+    }
+    return 'bg-slate-800 text-white border-slate-600';
+  };
+
+  return (
+    <div
+      className={`rounded-2xl bg-gradient-to-br from-indigo-950/90 via-slate-900/95 to-slate-950 border-2 border-indigo-500/40 text-white shadow-md overflow-hidden transition-all ${
+        compact ? 'p-2.5 space-y-2' : 'p-3.5 sm:p-4 space-y-3'
+      }`}
+    >
+      {/* Top Header Strip: END OF OVER N + Over Runs/Wickets + Innings Badge */}
+      <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-indigo-500/25">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="bg-indigo-500 text-white font-black text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1">
+            📊 {overTitle}
+          </span>
+          <span
+            className={`text-[9px] font-mono font-black px-2 py-0.5 rounded-md border ${
+              isMaiden
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse'
+                : summary.runsInOver >= 12
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-slate-800/90 text-slate-200 border-slate-700'
+            }`}
+          >
+            {isMaiden ? '🌟 MAIDEN OVER' : `${runsLabel}${wktsLabel}`}
+          </span>
+          {summary.inningsNum && (
+            <span
+              className={`text-[7.5px] font-black uppercase px-1.5 py-0.5 rounded ${
+                summary.inningsNum === 2
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+              }`}
+            >
+              {summary.inningsNum === 2 ? '2nd Inn' : '1st Inn'}
+            </span>
+          )}
+        </div>
+
+        {/* Team Score & CRR at End of Over */}
+        <div className="flex items-center gap-2 text-right">
+          <span className="text-[10px] font-black text-slate-300 truncate max-w-[110px]">
+            {summary.battingTeam}
+          </span>
+          <span className="font-mono font-black text-xs sm:text-sm text-amber-400 bg-slate-950/90 px-2 py-0.5 rounded-lg border border-amber-500/30">
+            {summary.totalRuns}/{summary.totalWickets}
+          </span>
+          <span className="text-[8.5px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+            CRR {summary.crr}
+          </span>
+        </div>
+      </div>
+
+      {/* Ball-by-Ball Sequence Pills for this Over */}
+      {summary.ballsInOver && summary.ballsInOver.length > 0 && (
+        <div className="flex items-center justify-between gap-2 bg-slate-950/70 px-2.5 py-1.5 rounded-xl border border-slate-800/90">
+          <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 shrink-0">
+            {language === 'mr' ? 'या षटकातील चेंडू:' : language === 'hi' ? 'इस ओवर की गेंदें:' : 'This Over:'}
+          </span>
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            {summary.ballsInOver.map((ball, bIdx) => (
+              <span
+                key={bIdx}
+                className={`min-w-[20px] h-5 px-1 rounded-md font-mono text-[9px] font-black flex items-center justify-center border ${getBallPillClass(ball)}`}
+              >
+                {ball}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Crease Batters & Bowler Mini Stats Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[9.5px] font-sans">
+        {/* Batters on Crease */}
+        <div className="bg-slate-950/65 border border-slate-800/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-[7.5px] font-black uppercase text-emerald-400 block tracking-wider">
+              🏏 {language === 'mr' ? 'नाबाद फलंदाज' : language === 'hi' ? 'क्रीज पर बल्लेबाज' : 'At The Crease'}
+            </span>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5 font-bold text-slate-200">
+              {summary.strikerName ? (
+                <span className="truncate">
+                  {summary.strikerName}*{' '}
+                  <strong className="font-mono text-white">
+                    {summary.strikerRuns}({summary.strikerBalls})
+                  </strong>
+                </span>
+              ) : (
+                <span className="text-slate-400">-</span>
+              )}
+              {summary.nonStrikerName && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="truncate text-slate-300">
+                    {summary.nonStrikerName}{' '}
+                    <strong className="font-mono text-slate-200">
+                      {summary.nonStrikerRuns}({summary.nonStrikerBalls})
+                    </strong>
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Bowler Figures & Next Bowler */}
+        <div className="bg-slate-950/65 border border-slate-800/80 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[7.5px] font-black uppercase text-cyan-400 tracking-wider">
+                🎯 {language === 'mr' ? 'गोलंदाज' : language === 'hi' ? 'गेंदबाज' : 'Bowler'}
+              </span>
+              {summary.nextBowlerName && (
+                <span className="text-[7.5px] font-bold text-amber-300 truncate">
+                  {language === 'mr'
+                    ? `पुढील: ${summary.nextBowlerName}`
+                    : language === 'hi'
+                      ? `अगला: ${summary.nextBowlerName}`
+                      : `Next: ${summary.nextBowlerName}`}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-0.5">
+              <span className="font-bold text-slate-200 truncate">
+                {summary.bowlerName || 'Bowler'}
+              </span>
+              <span className="font-mono font-black text-cyan-300 text-[9px] shrink-0">
+                {summary.bowlerOvers || '1.0'}-{summary.bowlerMaidens ?? 0}-{summary.bowlerRuns ?? summary.runsInOver}-{summary.bowlerWickets ?? summary.wicketsInOver}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Chase Equation Strip if 2nd Innings */}
+      {summary.runsNeeded !== undefined && summary.runsNeeded > 0 && summary.ballsRemaining !== undefined && (
+        <div className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-center justify-between text-[9px] font-bold text-amber-300">
+          <span>
+            🎯 Need <strong className="text-white font-mono">{summary.runsNeeded}</strong> runs in{' '}
+            <strong className="text-white font-mono">{summary.ballsRemaining}</strong> balls
+          </span>
+          {summary.rrr && (
+            <span className="font-mono font-black text-amber-400">RRR: {summary.rrr}</span>
+          )}
+        </div>
+      )}
+
+      {/* Localized Commentary Text */}
+      <p className="text-[10.5px] text-slate-200 leading-relaxed font-semibold font-sans pt-0.5">
+        {displayText}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Step 3: Smarter Tactical & Matchup Context (Memory Across Balls)
+ */
+export interface TacticalMatchupContext {
+  strikerName: string;
+  bowlerName: string;
+  nonStrikerName?: string;
+  // Head-to-head in this innings
+  h2hRuns: number;
+  h2hBalls: number;
+  h2hDots: number;
+  h2hFours: number;
+  h2hSixes: number;
+  h2hWickets: number;
+  h2hStrikeRate: string;
+  // Cross-ball streaks & momentum
+  consecutiveDots: number;
+  previousDotStreakBroken: number;
+  consecutiveBoundaries: number;
+  recentBoundarySequence: string[];
+  runsInCurrentOver: number;
+  ballsInCurrentOver: number;
+  isHatTrickBall: boolean;
+  // Partnership & Milestone proximity
+  partnershipRuns: number;
+  partnershipBalls: number;
+  strikerRuns: number;
+  strikerBalls: number;
+  approachingMilestone?: 'fifty' | 'hundred';
+  runsToMilestone?: number;
+  // Match phase
+  phase: 'powerplay' | 'middle' | 'death';
+  phaseLabel: { en: string; hi: string; mr: string };
+  primaryInsightTag?: {
+    icon: string;
+    tone: 'pressure' | 'dominance' | 'breakthrough' | 'milestone' | 'partnership' | 'matchup';
+    en: string;
+    hi: string;
+    mr: string;
+  };
+  matchupBadgeText: {
+    en: string;
+    hi: string;
+    mr: string;
+  };
+  tacticalNarrativeSuffix?: {
+    en: string;
+    hi: string;
+    mr: string;
+  };
+  promptSummary: string;
+}
+
+/**
+ * Extracts structured delivery outcome from a commentary item
+ */
+function parseDeliveryFromCommentaryItem(c: any): {
+  isActualBall: boolean;
+  isLegalBall: boolean;
+  runs: number;
+  runsOffBat: number;
+  isDot: boolean;
+  isBoundary: boolean;
+  isFour: boolean;
+  isSix: boolean;
+  isWicket: boolean;
+  batterName?: string;
+  bowlerName?: string;
+  label: string;
+} {
+  if (!c || !c.overBall || c.overBall === '0.0') {
+    return { isActualBall: false, isLegalBall: false, runs: 0, runsOffBat: 0, isDot: false, isBoundary: false, isFour: false, isSix: false, isWicket: false, label: '' };
+  }
+  if (
+    isEndOfOverCommentary(c) ||
+    c.id?.startsWith('comm-bat-') ||
+    c.id?.startsWith('comm-bowl-') ||
+    c.id?.startsWith('comm-sponsor-') ||
+    c.id?.startsWith('comm-over-sponsor-') ||
+    c.id?.startsWith('comm-inn-') ||
+    c.id?.startsWith('comm-match-') ||
+    c.id?.startsWith('comm-squad-') ||
+    c.id?.startsWith('milestone-') ||
+    c.announcementType
+  ) {
+    return { isActualBall: false, isLegalBall: false, runs: 0, runsOffBat: 0, isDot: false, isBoundary: false, isFour: false, isSix: false, isWicket: false, label: '' };
+  }
+
+  const desc = String(c.description || '');
+  let batterName = c.batterName || c.tacticalContext?.strikerName;
+  let bowlerName = c.bowlerName || c.tacticalContext?.bowlerName;
+
+  if (!batterName || !bowlerName) {
+    const toMatch = desc.match(/^([^:]+?)\s+to\s+([^:]+?):/i);
+    if (toMatch) {
+      bowlerName = bowlerName || toMatch[1].trim();
+      batterName = batterName || toMatch[2].trim();
+    } else {
+      const outMatch = desc.match(/OUT!\s*([^(]+?)\s+has to walk back/i);
+      if (outMatch) {
+        batterName = batterName || outMatch[1].trim();
+      }
+      const bwlMatch = desc.match(/Bowler:\s*([^)]+)\)/i) || desc.match(/\bb\s+([A-Za-z0-9_ ]+?)\s*\(/i);
+      if (bwlMatch) {
+        bowlerName = bowlerName || bwlMatch[1].trim();
+      }
+    }
+  }
+
+  const isWide = c.extraType === 'wide';
+  const isNoBall = c.extraType === 'noball' || Boolean(c.isNoBall);
+  const isLegalBall = !isWide && !isNoBall;
+  const isWicket = c.type === 'wicket' && c.specialEvent !== 'retire_hurt';
+
+  const label = String(
+    c.ballScore ||
+      (isWicket
+        ? 'W'
+        : isWide
+          ? c.runsOffBat ? `WD+${c.runsOffBat}` : 'WD'
+          : isNoBall
+            ? c.runsOffBat ? `NB+${c.runsOffBat}` : 'NB'
+            : c.runsOffBat !== undefined
+              ? String(c.runsOffBat)
+              : c.type === 'boundary'
+                ? desc.toLowerCase().includes('six') || desc.includes(' 6 ')
+                  ? '6'
+                  : '4'
+                : '0')
+  );
+
+  let runsOffBat = Number(c.runsOffBat);
+  if (isNaN(runsOffBat)) {
+    if (label === '6') runsOffBat = 6;
+    else if (label === '4') runsOffBat = 4;
+    else if (!isNaN(Number(label))) runsOffBat = Number(label);
+    else runsOffBat = 0;
+  }
+
+  const totalRuns = isWide || isNoBall ? 1 + runsOffBat : runsOffBat;
+  const isSix = runsOffBat === 6 || label === '6';
+  const isFour = (runsOffBat === 4 || label === '4') && !isSix;
+  const isBoundary = isFour || isSix || c.type === 'boundary';
+  const isDot = isLegalBall && totalRuns === 0 && !isWicket;
+
+  return {
+    isActualBall: true,
+    isLegalBall,
+    runs: totalRuns,
+    runsOffBat,
+    isDot,
+    isBoundary,
+    isFour,
+    isSix,
+    isWicket,
+    batterName,
+    bowlerName,
+    label
+  };
+}
+
+/**
+ * Builds rich cross-ball Tactical & Matchup Context (Memory Across Balls)
+ * from the active innings state and delivery history.
+ */
+export function buildTacticalMatchupContext(
+  innings: any,
+  match?: any,
+  currentDeliveryOverride?: {
+    strikerName?: string;
+    bowlerName?: string;
+    nonStrikerName?: string;
+    eventType?: 'dot' | 'runs' | 'boundary' | 'wicket' | 'extra';
+    runsOffBat?: number;
+    extraType?: string;
+    isWicket?: boolean;
+    alreadyInCommentaryList?: boolean;
+  }
+): TacticalMatchupContext {
+  const strikerObj = innings?.batsmen?.[innings?.strikerIndex ?? 0] || innings?.batsmen?.[0];
+  const nonStrikerObj = innings?.batsmen?.[innings?.nonStrikerIndex ?? 1] || innings?.batsmen?.[1];
+  const bowlerObj = innings?.bowlers?.[innings?.currentBowlerIndex ?? 0] || innings?.bowlers?.[0];
+
+  const strikerName = (currentDeliveryOverride?.strikerName || strikerObj?.name || 'Striker').trim();
+  const bowlerName = (currentDeliveryOverride?.bowlerName || bowlerObj?.name || 'Bowler').trim();
+  const nonStrikerName = (currentDeliveryOverride?.nonStrikerName || nonStrikerObj?.name || '').trim() || undefined;
+
+  const rawList = Array.isArray(innings?.commentaryList) ? innings.commentaryList : [];
+  // Extract chronological deliveries (oldest to newest)
+  const parsedChronological = rawList
+    .map(c => parseDeliveryFromCommentaryItem(c))
+    .filter(d => d.isActualBall)
+    .reverse();
+
+  // If the current ball is being scored right now and hasn't been prepended to commentaryList yet, append it
+  if (currentDeliveryOverride && !currentDeliveryOverride.alreadyInCommentaryList && currentDeliveryOverride.eventType) {
+    const isWide = currentDeliveryOverride.extraType === 'wide';
+    const isNoBall = currentDeliveryOverride.extraType === 'noball';
+    const isLegalBall = !isWide && !isNoBall;
+    const isWicket = Boolean(currentDeliveryOverride.isWicket || currentDeliveryOverride.eventType === 'wicket');
+    const rBat = Number(currentDeliveryOverride.runsOffBat) || 0;
+    const totalR = isWide || isNoBall ? 1 + rBat : rBat;
+    const isSix = rBat === 6;
+    const isFour = rBat === 4;
+    const isBoundary = isFour || isSix || currentDeliveryOverride.eventType === 'boundary';
+    const isDot = isLegalBall && totalR === 0 && !isWicket;
+
+    parsedChronological.push({
+      isActualBall: true,
+      isLegalBall,
+      runs: totalR,
+      runsOffBat: rBat,
+      isDot,
+      isBoundary,
+      isFour,
+      isSix,
+      isWicket,
+      batterName: strikerName,
+      bowlerName: bowlerName,
+      label: isWicket ? 'W' : isSix ? '6' : isFour ? '4' : String(totalR)
+    });
+  }
+
+  // Compute Head-to-Head (Striker vs Bowler) in this innings
+  let h2hRuns = 0;
+  let h2hBalls = 0;
+  let h2hDots = 0;
+  let h2hFours = 0;
+  let h2hSixes = 0;
+  let h2hWickets = 0;
+
+  const norm = (s?: string) => (s || '').toLowerCase().trim();
+  const targetBat = norm(strikerName);
+  const targetBowl = norm(bowlerName);
+
+  for (const d of parsedChronological) {
+    const dBat = norm(d.batterName);
+    const dBowl = norm(d.bowlerName);
+    const batMatches = !dBat || dBat === targetBat || dBat.includes(targetBat) || targetBat.includes(dBat);
+    const bowlMatches = !dBowl || dBowl === targetBowl || dBowl.includes(targetBowl) || targetBowl.includes(dBowl);
+
+    if (batMatches && bowlMatches && d.batterName && d.bowlerName) {
+      h2hRuns += d.runsOffBat;
+      if (d.isLegalBall) h2hBalls += 1;
+      if (d.isDot) h2hDots += 1;
+      if (d.isFour) h2hFours += 1;
+      if (d.isSix) h2hSixes += 1;
+      if (d.isWicket) h2hWickets += 1;
+    }
+  }
+
+  // Ensure at least current delivery is reflected in H2H if batter/bowler has faced a ball
+  if (h2hBalls === 0 && (strikerObj?.balls || 0) > 0 && (bowlerObj?.ballsBowled || 0) > 0) {
+    h2hBalls = Math.min(Number(strikerObj.balls) || 1, Number(bowlerObj.ballsBowled) || 1);
+    h2hRuns = Math.min(Number(strikerObj.runs) || 0, Number(bowlerObj.runsConceded) || 0);
+  }
+
+  const h2hStrikeRate = h2hBalls > 0 ? ((h2hRuns / h2hBalls) * 100).toFixed(1) : '0.0';
+
+  // Compute consecutive dots & consecutive boundaries at the tail of parsedChronological
+  let consecutiveDots = 0;
+  for (let i = parsedChronological.length - 1; i >= 0; i--) {
+    if (parsedChronological[i].isDot) {
+      consecutiveDots++;
+    } else {
+      break;
+    }
+  }
+
+  // Check if the current delivery just broke a dot-ball streak of >= 2 dots!
+  let previousDotStreakBroken = 0;
+  if (parsedChronological.length >= 3) {
+    const latest = parsedChronological[parsedChronological.length - 1];
+    if (latest.isBoundary || latest.isWicket || latest.runsOffBat >= 2) {
+      for (let i = parsedChronological.length - 2; i >= 0; i--) {
+        if (parsedChronological[i].isDot) {
+          previousDotStreakBroken++;
+        } else {
+          break;
+        }
+      }
+    }
+  }
+
+  let consecutiveBoundaries = 0;
+  const recentBoundarySequence: string[] = [];
+  for (let i = parsedChronological.length - 1; i >= 0; i--) {
+    if (parsedChronological[i].isBoundary) {
+      consecutiveBoundaries++;
+      recentBoundarySequence.unshift(parsedChronological[i].isSix ? '6' : '4');
+    } else {
+      break;
+    }
+  }
+
+  // Check if bowler is on a Hat-Trick ball (last 2 deliveries by this bowler were wickets)
+  const bowlerDeliveries = parsedChronological.filter(
+    d => !d.bowlerName || norm(d.bowlerName) === targetBowl
+  );
+  const isHatTrickBall =
+    bowlerDeliveries.length >= 2 &&
+    bowlerDeliveries[bowlerDeliveries.length - 1].isWicket &&
+    bowlerDeliveries[bowlerDeliveries.length - 2].isWicket;
+
+  // Current over tempo
+  const totalBallsBowled = Number(innings?.ballsBowled) || 0;
+  const ballsInCurrentOver = totalBallsBowled % 6 === 0 && totalBallsBowled > 0 ? 6 : totalBallsBowled % 6;
+  const recentOverSlice = parsedChronological.slice(-Math.max(1, ballsInCurrentOver));
+  const runsInCurrentOver = recentOverSlice.reduce((sum, d) => sum + d.runs, 0);
+
+  // Partnership since last fall of wicket
+  const fowList = Array.isArray(innings?.fallOfWickets) ? innings.fallOfWickets : [];
+  const lastFow = fowList.length > 0 ? fowList[fowList.length - 1] : null;
+  const partnershipRuns = lastFow
+    ? Math.max(0, (Number(innings?.runs) || 0) - (Number(lastFow.score) || 0))
+    : Number(innings?.runs) || 0;
+
+  let partnershipBalls = totalBallsBowled;
+  if (lastFow?.oversList) {
+    const p = String(lastFow.oversList).split('.');
+    if (p.length === 2) {
+      const fowBalls = (parseInt(p[0], 10) || 0) * 6 + (parseInt(p[1], 10) || 0);
+      partnershipBalls = Math.max(0, totalBallsBowled - fowBalls);
+    }
+  }
+
+  // Striker milestone proximity (44..49 or 90..99)
+  const strikerRuns = Number(strikerObj?.runs) || 0;
+  const strikerBalls = Number(strikerObj?.balls) || 0;
+  let approachingMilestone: 'fifty' | 'hundred' | undefined = undefined;
+  let runsToMilestone: number | undefined = undefined;
+  if (strikerRuns >= 44 && strikerRuns < 50) {
+    approachingMilestone = 'fifty';
+    runsToMilestone = 50 - strikerRuns;
+  } else if (strikerRuns >= 90 && strikerRuns < 100) {
+    approachingMilestone = 'hundred';
+    runsToMilestone = 100 - strikerRuns;
+  }
+
+  // Match phase detection
+  const oversLimit = Math.max(1, Number(match?.oversLimit) || 10);
+  const currentOverFloat = totalBallsBowled / 6;
+  const progressRatio = currentOverFloat / oversLimit;
+  let phase: 'powerplay' | 'middle' | 'death' = 'middle';
+  let phaseLabel = {
+    en: 'Middle Overs Consolidation',
+    hi: 'मिडिल ओवर्स रणनीति',
+    mr: 'मधल्या षटकांची रणनीती'
+  };
+  if (progressRatio <= 0.3 || currentOverFloat <= 2) {
+    phase = 'powerplay';
+    phaseLabel = {
+      en: 'Powerplay Attacking Phase',
+      hi: 'पावरप्ले आक्रामक चरण',
+      mr: 'पॉवरप्ले आक्रमक टप्पा'
+    };
+  } else if (progressRatio >= 0.75 || oversLimit - currentOverFloat <= 2) {
+    phase = 'death';
+    phaseLabel = {
+      en: 'Death Overs Slog Phase',
+      hi: 'डेथ ओवर्स स्लॉग चरण',
+      mr: 'डेथ ओव्हर्स स्लॉग टप्पा'
+    };
+  }
+
+  const matchupBadgeText = {
+    en: `⚔️ ${strikerName} vs ${bowlerName}: ${h2hRuns} runs (${h2hBalls}b${h2hDots > 0 ? `, ${h2hDots} dots` : ''})`,
+    hi: `⚔️ ${strikerName} बनाम ${bowlerName}: ${h2hRuns} रन (${h2hBalls} गेंद${h2hDots > 0 ? `, ${h2hDots} डॉट` : ''})`,
+    mr: `⚔️ ${strikerName} वि. ${bowlerName}: ${h2hRuns} धावा (${h2hBalls} चेंडू${h2hDots > 0 ? `, ${h2hDots} डॉट` : ''})`
+  };
+
+  let primaryInsightTag: TacticalMatchupContext['primaryInsightTag'] = undefined;
+  let tacticalNarrativeSuffix: TacticalMatchupContext['tacticalNarrativeSuffix'] = undefined;
+
+  const latestBall = parsedChronological[parsedChronological.length - 1];
+
+  // Priority 1: Consecutive Boundaries (2+ in a row)
+  if (consecutiveBoundaries >= 2) {
+    const seqStr = recentBoundarySequence.join(' • ');
+    primaryInsightTag = {
+      icon: '🔥',
+      tone: 'dominance',
+      en: `${consecutiveBoundaries} BOUNDARIES IN A ROW (${seqStr})`,
+      hi: `लगातार ${consecutiveBoundaries} बाउंड्री (${seqStr})`,
+      mr: `सलग ${consecutiveBoundaries} बाउंड्री (${seqStr})`
+    };
+    tacticalNarrativeSuffix = {
+      en: ` 🔥 Tactical Momentum: Back-to-back boundaries (${seqStr})! ${strikerName} now has ${h2hRuns} runs off ${h2hBalls} balls against ${bowlerName}, forcing the captain to rethink the field!`,
+      hi: ` 🔥 टैक्टिकल मोमेंटम: लगातार ${consecutiveBoundaries} बाउंड्री (${seqStr})! ${strikerName} ने ${bowlerName} के खिलाफ ${h2hBalls} गेंदों में ${h2hRuns} रन जड़ दिए हैं!`,
+      mr: ` 🔥 टॅक्टिकल मोमेंटम: सलग ${consecutiveBoundaries} बाउंड्री (${seqStr})! ${strikerName} ने ${bowlerName} विरुद्ध ${h2hBalls} चेंडूत ${h2hRuns} धावा कुटल्या आहेत!`
+    };
+  }
+  // Priority 2: Dot-ball streak broken by a boundary (2+ dots followed by 4 or 6)
+  else if (previousDotStreakBroken >= 2 && latestBall?.isBoundary) {
+    primaryInsightTag = {
+      icon: '💥',
+      tone: 'dominance',
+      en: `SHACKLES BROKEN AFTER ${previousDotStreakBroken} DOTS!`,
+      hi: `${previousDotStreakBroken} डॉट गेंदों का दबाव तोड़ा!`,
+      mr: `${previousDotStreakBroken} डॉट चेंडूंचा दबाव झुगारला!`
+    };
+    tacticalNarrativeSuffix = {
+      en: ` 💥 Pressure Release: After ${previousDotStreakBroken} consecutive dot balls built the pressure, ${strikerName} breaks the shackles in style!`,
+      hi: ` 💥 दबाव तोड़ा: लगातार ${previousDotStreakBroken} डॉट गेंदों के दबाव के बाद ${strikerName} ने शानदार प्रहार कर बेड़ियां तोड़ीं!`,
+      mr: ` 💥 दबाव झुगारला: सलग ${previousDotStreakBroken} डॉट चेंडूंच्या दबावानंतर ${strikerName} ने जोरदार फटका मारत कोंडी फोडली!`
+    };
+  }
+  // Priority 3: Dot-ball pressure induces a wicket (2+ dots followed by W)
+  else if (previousDotStreakBroken >= 2 && latestBall?.isWicket) {
+    primaryInsightTag = {
+      icon: '🎯',
+      tone: 'breakthrough',
+      en: `${previousDotStreakBroken} DOTS INDUCED THE WICKET!`,
+      hi: `${previousDotStreakBroken} डॉट गेंदों के दबाव से मिला विकेट!`,
+      mr: `${previousDotStreakBroken} डॉट चेंडूंच्या दबावातून मिळाली विकेट!`
+    };
+    tacticalNarrativeSuffix = {
+      en: ` 🧠 Tactical Setup: ${previousDotStreakBroken} dot balls in a row built suffocating pressure and forced the false shot!`,
+      hi: ` 🧠 टैक्टिकल सेटअप: लगातार ${previousDotStreakBroken} डॉट गेंदों के दबाव ने बल्लेबाज को गलत शॉट खेलने पर मजबूर कर दिया!`,
+      mr: ` 🧠 टॅक्टिकल सेटअप: सलग ${previousDotStreakBroken} डॉट चेंडूंच्या दबावामुळेच फलंदाजाला चुकीचा फटका मारावा लागला!`
+    };
+  }
+  // Priority 4: Consecutive Dot-Ball Pressure (2+ dots in a row)
+  else if (consecutiveDots >= 2) {
+    primaryInsightTag = {
+      icon: '🔒',
+      tone: 'pressure',
+      en: `${consecutiveDots} DOTS IN A ROW • PRESSURE MOUNTING`,
+      hi: `लगातार ${consecutiveDots} डॉट गेंदें • दबाव बढ़ा`,
+      mr: `सलग ${consecutiveDots} डॉट चेंडू • दबाव वाढला`
+    };
+    tacticalNarrativeSuffix = {
+      en: ` 🧠 Tactical Pressure: ${consecutiveDots} dot balls in a row now from ${bowlerName}! Pressure mounting on ${strikerName} (${h2hRuns} off ${h2hBalls}b in this matchup) to manufacture a release shot.`,
+      hi: ` 🧠 टैक्टिकल दबाव: ${bowlerName} की लगातार ${consecutiveDots} डॉट गेंदें! ${strikerName} (आमने-सामने: ${h2hBalls} गेंद, ${h2hRuns} रन) पर अब बड़ा शॉट खेलने का भारी दबाव!`,
+      mr: ` 🧠 टॅक्टिकल दबाव: ${bowlerName} चे सलग ${consecutiveDots} निर्धाव चेंडू! ${strikerName} (आमने-सामने: ${h2hBalls} चेंडूत ${h2hRuns} धावा) वर आता मोठा फटका मारण्याचा दबाव वाढतोय!`
+    };
+  }
+  // Priority 5: Hat-Trick Ball Alert
+  else if (isHatTrickBall) {
+    primaryInsightTag = {
+      icon: '⚡',
+      tone: 'breakthrough',
+      en: `HAT-TRICK BALL FOR ${bowlerName.toUpperCase()}!`,
+      hi: `${bowlerName} हैट्रिक बॉल पर!`,
+      mr: `${bowlerName} हॅटट्रिक बॉलवर!`
+    };
+    tacticalNarrativeSuffix = {
+      en: ` ⚡ Tactical Alert: Two wickets in two balls for ${bowlerName} — everyone crowds around the bat for the Hat-Trick delivery!`,
+      hi: ` ⚡ टैक्टिकल अलर्ट: ${bowlerName} ने २ गेंदों में २ विकेट लिए हैं — हैट्रिक बॉल के लिए सभी फील्डर घेरा बनाकर तैयार!`,
+      mr: ` ⚡ टॅक्टिकल अलर्ट: ${bowlerName} ने सलग २ चेंडूत २ बळी घेतलेत — हॅटट्रिक चेंडूसाठी सर्व क्षेत्ररक्षकांचा वेढा!`
+    };
+  }
+  // Priority 6: Milestone Proximity (44..49 or 90..99)
+  else if (approachingMilestone && runsToMilestone !== undefined) {
+    const targetNum = approachingMilestone === 'hundred' ? 100 : 50;
+    primaryInsightTag = {
+      icon: '🎯',
+      tone: 'milestone',
+      en: `${strikerName} ON ${strikerRuns}* (${runsToMilestone} TO ${targetNum})`,
+      hi: `${strikerName} ${strikerRuns}* पर (${targetNum} से ${runsToMilestone} दूर)`,
+      mr: `${strikerName} ${strikerRuns}* वर (${targetNum} पासून ${runsToMilestone} दूर)`
+    };
+    tacticalNarrativeSuffix = {
+      en: ` 🎯 Milestone Watch: ${strikerName} moves to ${strikerRuns}* (${strikerBalls}b) — just ${runsToMilestone} run${runsToMilestone === 1 ? '' : 's'} away from a well-deserved ${targetNum}!`,
+      hi: ` 🎯 माइलस्टोन नजर: ${strikerName} ${strikerRuns}* (${strikerBalls} गेंद) पर पहुंचे — अपने ${targetNum === 100 ? 'शतक' : 'अर्धशतक'} से मात्र ${runsToMilestone} रन दूर!`,
+      mr: ` 🎯 माईलस्टोन नजर: ${strikerName} ${strikerRuns}* (${strikerBalls} चेंडू) वर पोहोचले — ${targetNum === 100 ? 'शतकापासून' : 'अर्धशतकापासून'} अवघ्या ${runsToMilestone} धावा दूर!`
+    };
+  }
+  // Priority 7: Strong Partnership (30+ runs)
+  else if (partnershipRuns >= 30 && partnershipBalls > 0) {
+    primaryInsightTag = {
+      icon: '🤝',
+      tone: 'partnership',
+      en: `PARTNERSHIP: ${partnershipRuns} RUNS (${partnershipBalls}B)`,
+      hi: `साझेदारी: ${partnershipRuns} रन (${partnershipBalls} गेंद)`,
+      mr: `भागीदारी: ${partnershipRuns} धावा (${partnershipBalls} चेंडू)`
+    };
+  }
+  // Priority 8: Established Head-to-Head Matchup (3+ balls faced against this bowler)
+  else if (h2hBalls >= 3) {
+    primaryInsightTag = {
+      icon: '⚔️',
+      tone: 'matchup',
+      en: `MATCHUP: ${h2hRuns} RUNS OFF ${h2hBalls} BALLS (SR ${h2hStrikeRate})`,
+      hi: `आमने-सामने: ${h2hBalls} गेंदों में ${h2hRuns} रन (SR ${h2hStrikeRate})`,
+      mr: `आमने-सामने: ${h2hBalls} चेंडूत ${h2hRuns} धावा (SR ${h2hStrikeRate})`
+    };
+  }
+
+  const promptSummary = [
+    `Match Phase: ${phaseLabel.en}`,
+    `Head-to-Head Matchup (${strikerName} vs ${bowlerName}): ${h2hRuns} runs off ${h2hBalls} balls (${h2hDots} dots, ${h2hFours}x4, ${h2hSixes}x6, SR ${h2hStrikeRate})`,
+    consecutiveDots >= 2 ? `TACTICAL STREAK: ${consecutiveDots} consecutive dot balls in a row! Highlight the mounting dot-ball pressure on ${strikerName}.` : '',
+    previousDotStreakBroken >= 2 ? `TACTICAL STREAK BROKEN: Preceded by ${previousDotStreakBroken} consecutive dot balls before this delivery!` : '',
+    consecutiveBoundaries >= 2 ? `MOMENTUM STREAK: ${consecutiveBoundaries} consecutive boundaries in a row (${recentBoundarySequence.join(', ')})! Highlight the boundary carnage and field-placement pressure on ${bowlerName}.` : '',
+    isHatTrickBall ? `HAT-TRICK ALERT: ${bowlerName} is on a Hat-Trick ball!` : '',
+    approachingMilestone ? `MILESTONE NERVES: ${strikerName} is on ${strikerRuns}* off ${strikerBalls} balls, just ${runsToMilestone} runs away from ${approachingMilestone === 'hundred' ? '100' : '50'}!` : '',
+    partnershipRuns >= 25 ? `Active Partnership: ${partnershipRuns} runs off ${partnershipBalls} balls.` : '',
+    `Current Over Tempo: ${runsInCurrentOver} runs in ${ballsInCurrentOver} balls this over.`
+  ]
+    .filter(Boolean)
+    .join(' | ');
+
+  return {
+    strikerName,
+    bowlerName,
+    nonStrikerName,
+    h2hRuns,
+    h2hBalls,
+    h2hDots,
+    h2hFours,
+    h2hSixes,
+    h2hWickets,
+    h2hStrikeRate,
+    consecutiveDots,
+    previousDotStreakBroken,
+    consecutiveBoundaries,
+    recentBoundarySequence,
+    runsInCurrentOver,
+    ballsInCurrentOver,
+    isHatTrickBall,
+    partnershipRuns,
+    partnershipBalls,
+    strikerRuns,
+    strikerBalls,
+    approachingMilestone,
+    runsToMilestone,
+    phase,
+    phaseLabel,
+    primaryInsightTag,
+    matchupBadgeText,
+    tacticalNarrativeSuffix,
+    promptSummary
+  };
+}
+
+/**
+ * Resolves TacticalMatchupContext for any delivery item in a commentary feed,
+ * computing it from the slice of deliveries up to that ball if not pre-stored.
+ */
+export function resolveDeliveryTacticalContext(
+  comm: any,
+  allCommentary: any[],
+  match?: any,
+  fallbackInnings?: any
+): TacticalMatchupContext | null {
+  if (!comm) return null;
+  if (comm.tacticalContext) {
+    return comm.tacticalContext as TacticalMatchupContext;
+  }
+
+  const parsed = parseDeliveryFromCommentaryItem(comm);
+  if (!parsed.isActualBall) return null;
+
+  const innNum = comm._inningsNum || match?.currentInningsNum || 1;
+  const targetInn = (innNum === 2 ? match?.innings2 : match?.innings1) || fallbackInnings || {};
+  const sourceList = Array.isArray(targetInn.commentaryList) && targetInn.commentaryList.length > 0
+    ? targetInn.commentaryList
+    : (allCommentary || []).filter((c: any) => !c._inningsNum || c._inningsNum === innNum);
+
+  const idx = sourceList.findIndex((c: any) => c.id === comm.id || (c.overBall === comm.overBall && c.description === comm.description));
+  const sliceUpToBall = idx >= 0 ? sourceList.slice(idx) : [comm];
+
+  return buildTacticalMatchupContext(
+    {
+      ...targetInn,
+      commentaryList: sliceUpToBall
+    },
+    match,
+    {
+      strikerName: parsed.batterName,
+      bowlerName: parsed.bowlerName,
+      alreadyInCommentaryList: true
+    }
+  );
+}
+
+/**
+ * Compact inline Tactical & Matchup Memory chip rendered inside a delivery commentary card
+ */
+export function DeliveryTacticalChip({
+  tactical,
+  language = 'en'
+}: {
+  tactical?: TacticalMatchupContext | null;
+  language?: CommentaryLanguage;
+}) {
+  if (!tactical) return null;
+  const tag = tactical.primaryInsightTag;
+  const showH2H = tactical.h2hBalls >= 2 && tactical.strikerName !== 'Striker' && tactical.bowlerName !== 'Bowler';
+
+  if (!tag && !showH2H) return null;
+
+  const getToneStyle = (tone?: string) => {
+    switch (tone) {
+      case 'dominance':
+        return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+      case 'pressure':
+        return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+      case 'breakthrough':
+        return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+      case 'milestone':
+        return 'bg-purple-500/20 text-purple-300 border-purple-500/40';
+      case 'partnership':
+        return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      default:
+        return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/35';
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap mt-1.5 pt-1 border-t border-white/10 font-sans">
+      {tag && (
+        <span
+          className={`inline-flex items-center gap-1 text-[7.5px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md border ${getToneStyle(tag.tone)}`}
+        >
+          <span>{tag.icon}</span>
+          <span>{tag[language] || tag.en}</span>
+        </span>
+      )}
+      {showH2H && (
+        <span className="inline-flex items-center gap-1 text-[7.5px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-900/90 text-slate-300 border border-slate-700/80">
+          {tactical.matchupBadgeText[language] || tactical.matchupBadgeText.en}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Live Tactical & Matchup Memory Banner for the AI Commentary Desk header
+ */
+export function TacticalMatchupMemoryBanner({
+  innings,
+  match,
+  language = 'en',
+  compact = false
+}: {
+  innings: any;
+  match?: any;
+  language?: CommentaryLanguage;
+  compact?: boolean;
+}) {
+  if (!innings || (Number(innings.ballsBowled) || 0) === 0) return null;
+
+  const ctx = buildTacticalMatchupContext(innings, match, { alreadyInCommentaryList: true });
+  const phaseTitle = ctx.phaseLabel[language] || ctx.phaseLabel.en;
+  const h2hText = ctx.matchupBadgeText[language] || ctx.matchupBadgeText.en;
+  const insight = ctx.primaryInsightTag;
+
+  if (compact) {
+    return (
+      <div className="px-2.5 py-1.5 rounded-xl bg-slate-950/90 border border-indigo-500/30 flex items-center justify-between gap-2 flex-wrap text-[8.5px]">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-black uppercase tracking-wider shrink-0">
+            🧠 {language === 'mr' ? 'टॅक्टिकल मेमरी' : language === 'hi' ? 'टैक्टिकल मेमोरी' : 'Tactical Memory'}
+          </span>
+          <span className="font-mono font-bold text-slate-200 truncate">{h2hText}</span>
+        </div>
+        {insight && (
+          <span className="font-black text-[8px] text-amber-300 bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
+            {insight.icon} {insight[language] || insight.en}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-950/70 via-slate-900/90 to-slate-950 border border-indigo-500/30 shadow-xs space-y-1.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-500 text-white shadow-xs">
+            🧠 {language === 'mr' ? 'स्मार्ट मॅचअप आणि टॅक्टिकल मेमरी' : language === 'hi' ? 'स्मार्ट मैचअप व टैक्टिकल मेमोरी' : 'TACTICAL & MATCHUP MEMORY'}
+          </span>
+          <span className="text-[7.5px] font-bold text-indigo-300 bg-indigo-500/15 px-1.5 py-0.5 rounded border border-indigo-500/25">
+            {phaseTitle}
+          </span>
+        </div>
+        <span className="text-[8px] font-mono font-bold text-emerald-400">
+          🤝 {language === 'mr' ? 'भागीदारी' : language === 'hi' ? 'साझेदारी' : 'Stand'}: {ctx.partnershipRuns}({ctx.partnershipBalls})
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 flex-wrap text-[9px]">
+        <span className="font-mono font-bold text-slate-200 bg-slate-950/80 px-2 py-0.5 rounded-lg border border-slate-800">
+          {h2hText} • SR {ctx.h2hStrikeRate}
+        </span>
+        {insight ? (
+          <span className="font-black text-[8px] uppercase tracking-wider px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/35">
+            {insight.icon} {insight[language] || insight.en}
+          </span>
+        ) : (
+          <span className="font-mono text-[8px] text-slate-400">
+            {language === 'mr'
+              ? `या षटकात: ${ctx.runsInCurrentOver} धावा (${ctx.ballsInCurrentOver} चेंडू)`
+              : language === 'hi'
+                ? `इस ओवर में: ${ctx.runsInCurrentOver} रन (${ctx.ballsInCurrentOver} गेंद)`
+                : `This Over: ${ctx.runsInCurrentOver} runs (${ctx.ballsInCurrentOver}b)`}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Step 5: ⚡ "Key Moments / Highlights" Quick-Jump Timeline
+ */
+export type KeyMomentCategory = 'wicket' | 'six' | 'four' | 'milestone' | 'turning_point';
+
+export interface KeyMomentItem {
+  id: string;
+  overBall: string;
+  category: KeyMomentCategory;
+  badgeLabel: string;
+  icon: string;
+  shortTitle: string;
+  playerName?: string;
+  inningsNum: number;
+  battingTeam?: string;
+  description: string;
+  commRef: any;
+}
+
+/**
+ * Extracts chronological or reverse-chronological Key Moments (Wickets, 6s, 4s, Milestones, Turning Points)
+ * from a commentary feed list for the Quick-Jump Highlights Timeline.
+ */
+export function extractKeyMomentsFromCommentary(
+  commentaryList: any[],
+  language: CommentaryLanguage = 'en'
+): KeyMomentItem[] {
+  if (!Array.isArray(commentaryList) || commentaryList.length === 0) return [];
+
+  const moments: KeyMomentItem[] = [];
+  const seenIds = new Set<string>();
+
+  for (const comm of commentaryList) {
+    if (!comm || !comm.id || seenIds.has(comm.id)) continue;
+
+    // Skip routine squad/batsman/bowler announcements
+    if (
+      comm.announcementType === 'squad_announcement' ||
+      comm.announcementType === 'new_batsman' ||
+      comm.announcementType === 'new_bowler' ||
+      comm.id.startsWith('comm-bat-') ||
+      comm.id.startsWith('comm-bowl-') ||
+      comm.id.startsWith('comm-squad-')
+    ) {
+      continue;
+    }
+
+    const innNum = Number(comm._inningsNum) || 1;
+    const battingTeam = comm._battingTeam || undefined;
+    const desc = String(comm.description || '');
+    const localizedDesc = getCommentaryText(comm, language);
+    const overBall = String(comm.overBall || '0.0');
+
+    // 1. Check Special Milestones (100, 50, Hat-Trick)
+    if (comm.specialEvent === 'hundred' || (comm.type === 'milestone' && /century|100\s+for|शतक/i.test(desc))) {
+      seenIds.add(comm.id);
+      const pName = comm.batterName || comm.playerName || desc.match(/for\s+([A-Za-z0-9_ ]+?)[!!]/i)?.[1]?.trim();
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'milestone',
+        badgeLabel: '100',
+        icon: '👑',
+        shortTitle: pName ? `100 • ${pName.split(' ')[0]}` : `Century (${overBall})`,
+        playerName: pName,
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+      continue;
+    }
+
+    if (comm.specialEvent === 'fifty' || (comm.type === 'milestone' && /fifty|half-century|50\s+runs|अर्धशतक/i.test(desc))) {
+      seenIds.add(comm.id);
+      const pName = comm.batterName || comm.playerName || desc.match(/for\s+([A-Za-z0-9_ ]+?)[!!]/i)?.[1]?.trim();
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'milestone',
+        badgeLabel: '50',
+        icon: '🌟',
+        shortTitle: pName ? `50 • ${pName.split(' ')[0]}` : `Fifty (${overBall})`,
+        playerName: pName,
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+      continue;
+    }
+
+    if (comm.specialEvent === 'hat_trick' || /hat-trick|हैट्रिक|हॅटट्रिक/i.test(desc)) {
+      seenIds.add(comm.id);
+      const pName = comm.bowlerName || comm.playerName;
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'milestone',
+        badgeLabel: 'H-T',
+        icon: '🔥',
+        shortTitle: pName ? `Hat-Trick • ${pName.split(' ')[0]}` : `Hat-Trick (${overBall})`,
+        playerName: pName,
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+      continue;
+    }
+
+    // 2. Check End-of-Over Summary Cards for Maiden Overs or Huge Overs (15+ runs)
+    if (isEndOfOverCommentary(comm) && comm.overSummary) {
+      const ov = comm.overSummary as OverMiniSummaryData;
+      if (ov.runsInOver === 0 && ov.ballsInOver && ov.ballsInOver.length >= 6) {
+        seenIds.add(comm.id);
+        moments.push({
+          id: comm.id,
+          overBall: `Ov ${ov.overNo}`,
+          category: 'turning_point',
+          badgeLabel: 'MDN',
+          icon: '🛡️',
+          shortTitle: `Maiden Ov ${ov.overNo}`,
+          playerName: ov.bowlerName,
+          inningsNum: innNum,
+          battingTeam,
+          description: localizedDesc,
+          commRef: comm
+        });
+      } else if (ov.runsInOver >= 15) {
+        seenIds.add(comm.id);
+        moments.push({
+          id: comm.id,
+          overBall: `Ov ${ov.overNo}`,
+          category: 'turning_point',
+          badgeLabel: `${ov.runsInOver}R`,
+          icon: '💥',
+          shortTitle: `Big Ov ${ov.overNo} (${ov.runsInOver}r)`,
+          playerName: ov.strikerName,
+          inningsNum: innNum,
+          battingTeam,
+          description: localizedDesc,
+          commRef: comm
+        });
+      }
+      continue;
+    }
+
+    // 3. Check Match Result / Innings Summary Milestones
+    if (
+      comm.id.startsWith('comm-match-win-') ||
+      comm.id.startsWith('comm-inn-summary-') ||
+      /match result|player of the match|innings summary/i.test(desc)
+    ) {
+      seenIds.add(comm.id);
+      const isWin = comm.id.startsWith('comm-match-win-') || /won by|विजय|जीत/i.test(desc);
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'turning_point',
+        badgeLabel: isWin ? 'WIN' : 'INN',
+        icon: isWin ? '🏆' : '📋',
+        shortTitle: isWin ? 'Match Result' : 'Innings Break',
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+      continue;
+    }
+
+    // 4. Parse delivery for Wickets, Sixes, Fours
+    const parsed = parseDeliveryFromCommentaryItem(comm);
+    if (!parsed.isActualBall) continue;
+
+    const shortBatter = parsed.batterName ? parsed.batterName.split(' ')[0] : '';
+
+    if (parsed.isWicket) {
+      seenIds.add(comm.id);
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'wicket',
+        badgeLabel: 'W',
+        icon: '🔴',
+        shortTitle: shortBatter ? `W ${overBall} • ${shortBatter}` : `Wicket ${overBall}`,
+        playerName: parsed.batterName,
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+    } else if (parsed.isSix) {
+      seenIds.add(comm.id);
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'six',
+        badgeLabel: '6',
+        icon: '🚀',
+        shortTitle: shortBatter ? `6 ${overBall} • ${shortBatter}` : `Six ${overBall}`,
+        playerName: parsed.batterName,
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+    } else if (parsed.isFour) {
+      seenIds.add(comm.id);
+      moments.push({
+        id: comm.id,
+        overBall,
+        category: 'four',
+        badgeLabel: '4',
+        icon: '⚡',
+        shortTitle: shortBatter ? `4 ${overBall} • ${shortBatter}` : `Four ${overBall}`,
+        playerName: parsed.batterName,
+        inningsNum: innNum,
+        battingTeam,
+        description: localizedDesc,
+        commRef: comm
+      });
+    }
+  }
+
+  return moments;
+}
+
+/**
+ * Interactive Horizontal Quick-Jump Timeline Bar for Key Match Moments & Highlights
+ */
+export function KeyMomentsTimelineBar({
+  commentaryList,
+  language = 'en',
+  domIdPrefix = 'comm-item',
+  activeMomentId,
+  onSelectMoment,
+  compact = false
+}: {
+  commentaryList: any[];
+  language?: CommentaryLanguage;
+  domIdPrefix?: string;
+  activeMomentId?: string | null;
+  onSelectMoment?: (commId: string | null) => void;
+  compact?: boolean;
+}) {
+  const [selectedCategory, setSelectedCategory] = useState<'all' | KeyMomentCategory>('all');
+  const [internalActiveId, setInternalActiveId] = useState<string | null>(null);
+
+  const effectiveActiveId = activeMomentId !== undefined ? activeMomentId : internalActiveId;
+
+  const allMoments = useMemo(
+    () => extractKeyMomentsFromCommentary(commentaryList, language),
+    [commentaryList, language]
+  );
+
+  const filteredMoments = useMemo(() => {
+    if (selectedCategory === 'all') return allMoments;
+    if (selectedCategory === 'milestone') {
+      return allMoments.filter(m => m.category === 'milestone' || m.category === 'turning_point');
+    }
+    return allMoments.filter(m => m.category === selectedCategory);
+  }, [allMoments, selectedCategory]);
+
+  const counts = useMemo(() => {
+    return {
+      all: allMoments.length,
+      wicket: allMoments.filter(m => m.category === 'wicket').length,
+      six: allMoments.filter(m => m.category === 'six').length,
+      four: allMoments.filter(m => m.category === 'four').length,
+      milestone: allMoments.filter(m => m.category === 'milestone' || m.category === 'turning_point').length
+    };
+  }, [allMoments]);
+
+  if (allMoments.length === 0) return null;
+
+  const triggerJumpToMoment = (momentId: string | null) => {
+    if (onSelectMoment) {
+      onSelectMoment(momentId);
+    } else {
+      setInternalActiveId(momentId);
+    }
+
+    if (momentId && typeof document !== 'undefined') {
+      setTimeout(() => {
+        const el =
+          document.getElementById(`${domIdPrefix}-${momentId}`) ||
+          document.getElementById(`comm-item-${momentId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }, 40);
+    }
+  };
+
+  const activeMomentObj = effectiveActiveId
+    ? allMoments.find(m => m.id === effectiveActiveId) || null
+    : null;
+
+  const activeIndexInFiltered = activeMomentObj
+    ? filteredMoments.findIndex(m => m.id === activeMomentObj.id)
+    : -1;
+
+  const getMomentPillClass = (m: KeyMomentItem, isSelected: boolean) => {
+    const ring = isSelected ? 'ring-2 ring-white scale-[1.03] shadow-md' : 'opacity-95 hover:opacity-100';
+    switch (m.category) {
+      case 'wicket':
+        return `${ring} bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border-rose-500/45`;
+      case 'six':
+        return `${ring} bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border-emerald-500/45`;
+      case 'four':
+        return `${ring} bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border-amber-500/45`;
+      case 'milestone':
+        return `${ring} bg-purple-500/25 hover:bg-purple-500/35 text-purple-200 border-purple-400/50`;
+      default:
+        return `${ring} bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border-sky-500/45`;
+    }
+  };
+
+  const getBadgePillClass = (cat: KeyMomentCategory) => {
+    switch (cat) {
+      case 'wicket':
+        return 'bg-rose-500 text-white';
+      case 'six':
+        return 'bg-emerald-500 text-slate-950';
+      case 'four':
+        return 'bg-amber-400 text-slate-950';
+      case 'milestone':
+        return 'bg-purple-500 text-white';
+      default:
+        return 'bg-sky-400 text-slate-950';
+    }
+  };
+
+  const headerTitle =
+    language === 'mr'
+      ? '⚡ महत्त्वाचे क्षण (Quick-Jump)'
+      : language === 'hi'
+        ? '⚡ मुख्य पल (Quick-Jump)'
+        : '⚡ KEY MOMENTS TIMELINE';
+
+  return (
+    <div
+      className={`rounded-xl bg-slate-950/95 border border-slate-800/90 shadow-xs transition-all ${
+        compact ? 'p-2 space-y-1.5' : 'p-2.5 sm:p-3 space-y-2'
+      }`}
+    >
+      {/* Top Row: Title + Quick Category Filter Pills */}
+      <div className="flex items-center justify-between gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+            {headerTitle}
+          </span>
+          <span className="text-[7.5px] font-mono font-bold px-1.5 py-0.2 rounded bg-slate-900 text-slate-400 border border-slate-800">
+            {filteredMoments.length}
+          </span>
+        </div>
+
+        {/* Category Filter Tabs */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setSelectedCategory('all')}
+            className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase tracking-wider border cursor-pointer transition-all ${
+              selectedCategory === 'all'
+                ? 'bg-amber-500 text-slate-950 border-amber-400'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+          >
+            All ({counts.all})
+          </button>
+          {counts.wicket > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('wicket')}
+              className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase tracking-wider border cursor-pointer transition-all ${
+                selectedCategory === 'wicket'
+                  ? 'bg-rose-500 text-white border-rose-400'
+                  : 'bg-rose-500/10 text-rose-300 border-rose-500/25 hover:bg-rose-500/20'
+              }`}
+            >
+              🔴 W ({counts.wicket})
+            </button>
+          )}
+          {counts.six > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('six')}
+              className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase tracking-wider border cursor-pointer transition-all ${
+                selectedCategory === 'six'
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/25 hover:bg-emerald-500/20'
+              }`}
+            >
+              🚀 6s ({counts.six})
+            </button>
+          )}
+          {counts.four > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('four')}
+              className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase tracking-wider border cursor-pointer transition-all ${
+                selectedCategory === 'four'
+                  ? 'bg-amber-400 text-slate-950 border-amber-300'
+                  : 'bg-amber-500/10 text-amber-300 border-amber-500/25 hover:bg-amber-500/20'
+              }`}
+            >
+              ⚡ 4s ({counts.four})
+            </button>
+          )}
+          {counts.milestone > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedCategory('milestone')}
+              className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase tracking-wider border cursor-pointer transition-all ${
+                selectedCategory === 'milestone'
+                  ? 'bg-purple-500 text-white border-purple-400'
+                  : 'bg-purple-500/10 text-purple-300 border-purple-500/25 hover:bg-purple-500/20'
+              }`}
+            >
+              🌟 ★ ({counts.milestone})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Horizontal Scrollable Quick-Jump Moment Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 scrollbar-thin">
+        {filteredMoments.map(moment => {
+          const isSelected = effectiveActiveId === moment.id;
+          return (
+            <button
+              key={moment.id}
+              type="button"
+              onClick={() => triggerJumpToMoment(isSelected ? null : moment.id)}
+              title={`${moment.shortTitle}: ${moment.description}`}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[8.5px] font-bold cursor-pointer transition-all ${getMomentPillClass(
+                moment,
+                isSelected
+              )}`}
+            >
+              <span
+                className={`px-1 py-0.2 rounded text-[7.5px] font-mono font-black ${getBadgePillClass(
+                  moment.category
+                )}`}
+              >
+                {moment.badgeLabel}
+              </span>
+              <span className="font-mono font-black text-white">{moment.overBall}</span>
+              {moment.playerName && (
+                <span className="truncate max-w-[68px] text-[8px] opacity-90">
+                  {moment.playerName.split(' ')[0]}
+                </span>
+              )}
+              {moment.inningsNum === 2 && (
+                <span className="text-[6.5px] font-mono uppercase px-1 rounded bg-indigo-500/30 text-indigo-200">
+                  2nd
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Active Moment Spotlight Preview & Prev/Next Stepper */}
+      {activeMomentObj && (
+        <div className="p-2 rounded-lg bg-slate-900/95 border border-amber-500/40 text-[9.5px] space-y-1 animate-fade-in">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[7.5px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 shrink-0">
+                📍 {activeMomentObj.icon} Over {activeMomentObj.overBall}
+              </span>
+              {activeMomentObj.playerName && (
+                <span className="font-black text-white truncate text-[9px]">
+                  {activeMomentObj.playerName}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                disabled={activeIndexInFiltered <= 0}
+                onClick={() => {
+                  if (activeIndexInFiltered > 0) {
+                    triggerJumpToMoment(filteredMoments[activeIndexInFiltered - 1].id);
+                  }
+                }}
+                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-slate-200 text-[7.5px] font-black border border-slate-700 cursor-pointer"
+              >
+                ◀ Prev
+              </button>
+              <button
+                type="button"
+                disabled={activeIndexInFiltered === -1 || activeIndexInFiltered >= filteredMoments.length - 1}
+                onClick={() => {
+                  if (activeIndexInFiltered !== -1 && activeIndexInFiltered < filteredMoments.length - 1) {
+                    triggerJumpToMoment(filteredMoments[activeIndexInFiltered + 1].id);
+                  }
+                }}
+                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-35 text-slate-200 text-[7.5px] font-black border border-slate-700 cursor-pointer"
+              >
+                Next ▶
+              </button>
+              <button
+                type="button"
+                onClick={() => triggerJumpToMoment(null)}
+                className="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[7.5px] font-black border border-rose-500/30 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <p className="text-slate-200 leading-snug font-sans font-medium">
+            {activeMomentObj.description}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+

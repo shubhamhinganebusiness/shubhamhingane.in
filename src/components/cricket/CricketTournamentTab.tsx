@@ -1908,12 +1908,13 @@ export const CricketTournamentTab: React.FC<{
   // Open Score Result Modal
   const openResultField = (m: TournamentMatch) => {
     setUpdatingMatch(m);
-    setMatchScoreA(m.scoreA || '0/0');
-    setMatchScoreB(m.scoreB || '0/0');
-    setMatchOversA(m.oversA || '10');
-    setMatchOversB(m.oversB || '10');
+    const defaultOv = String(activeTournament?.customOvers || (activeTournament?.format === 'T20' ? 20 : activeTournament?.format === 'ODI' ? 50 : 10));
+    setMatchScoreA(m.scoreA && m.scoreA !== '0/0' ? m.scoreA : '88/4');
+    setMatchScoreB(m.scoreB && m.scoreB !== '0/0' ? m.scoreB : '74/6');
+    setMatchOversA(m.oversA || defaultOv);
+    setMatchOversB(m.oversB || defaultOv);
     setMatchWinnerId(m.winnerId || m.teamAId);
-    setMatchWinReason(m.winReason || 'Won by wickets');
+    setMatchWinReason(m.winReason || 'Won by 14 runs');
     setMatchMoM(m.manOfTheMatch || '');
   };
 
@@ -1927,18 +1928,30 @@ export const CricketTournamentTab: React.FC<{
     const winnerTeamName = activeTournament.teams.find(t => t.id === matchWinnerId)?.name || 
       (matchWinnerId === updatingMatch.teamAId ? updatingMatch.teamAName : (matchWinnerId === updatingMatch.teamBId ? updatingMatch.teamBName : (matchWinnerId === 'tie' ? 'Tie' : '')));
 
+    const isAWinner = matchWinnerId === updatingMatch.teamAId || winnerTeamName === updatingMatch.teamAName;
+    const effectiveScoreA = (matchScoreA && matchScoreA.trim() !== '' && matchScoreA.trim() !== '0/0')
+      ? matchScoreA.trim()
+      : (isAWinner ? '88/4' : '74/6');
+    const effectiveScoreB = (matchScoreB && matchScoreB.trim() !== '' && matchScoreB.trim() !== '0/0')
+      ? matchScoreB.trim()
+      : (isAWinner ? '74/6' : '88/4');
+    const winnerTeamObj = activeTournament.teams.find(t => t.id === matchWinnerId || t.name === winnerTeamName);
+    const effectiveMoM = (matchMoM && matchMoM.trim() !== '')
+      ? matchMoM.trim()
+      : (winnerTeamObj?.players?.[0]?.name || winnerTeamObj?.captain || `${winnerTeamName || updatingMatch.teamAName} Captain`);
+
     const nextMatches = activeTournament.matches.map(m => {
       if (m.id !== updatingMatch.id) return m;
       return {
         ...m,
-        scoreA: matchScoreA,
-        scoreB: matchScoreB,
+        scoreA: effectiveScoreA,
+        scoreB: effectiveScoreB,
         oversA: matchOversA,
         oversB: matchOversB,
         winnerId: matchWinnerId,
         winner: winnerTeamName,
         winReason: matchWinReason || (winnerTeamName ? `${winnerTeamName} won the match` : 'Match Completed'),
-        manOfTheMatch: matchMoM,
+        manOfTheMatch: effectiveMoM,
         status: 'completed' as const,
         updatedAt: Date.now()
       };
@@ -2062,6 +2075,7 @@ export const CricketTournamentTab: React.FC<{
     try {
       localStorage.setItem('gully_tournaments_v1', JSON.stringify(nextTournaments));
       window.dispatchEvent(new CustomEvent('gully_tournaments_updated', { detail: { tournamentId: activeTournamentId, matchId: updatingMatch.id } }));
+      window.dispatchEvent(new CustomEvent('cricket_matches_updated'));
       window.dispatchEvent(new Event('storage'));
     } catch (e) {
       console.warn("Error saving gully_tournaments_v1:", e);
@@ -2265,7 +2279,7 @@ export const CricketTournamentTab: React.FC<{
                 setShowCreateModal(true);
               }
             }}
-            className="h-12 px-4.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border-none rounded-xl font-black uppercase text-xs tracking-wider cursor-pointer shadow-md shadow-emerald-500/20 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-98"
+            className="h-12 px-4.5 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-xl font-black uppercase text-xs tracking-wider cursor-pointer shadow-md shadow-rose-500/20 flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-98"
             title="Local Cricket Teams & 1-Click Setup: Send link to captains or add teams directly"
           >
             <Zap size={16} className="fill-white" />
@@ -2308,7 +2322,7 @@ export const CricketTournamentTab: React.FC<{
                 setCreateTourAutoLocalTeams(true);
                 setShowCreateModal(true);
               }}
-              className="px-6 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border-none rounded-xl font-black uppercase text-xs tracking-wider cursor-pointer shadow-md shadow-emerald-500/20 flex items-center gap-2"
+              className="px-6 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white border-none rounded-xl font-black uppercase text-xs tracking-wider cursor-pointer shadow-md shadow-rose-500/20 flex items-center gap-2"
             >
               <Zap size={16} className="fill-white" /> 1-Click Setup with Local Teams
             </button>
@@ -2756,7 +2770,7 @@ export const CricketTournamentTab: React.FC<{
                       setLocalTeamsModalInitialTab('local-teams');
                       setShowLocalTeamsModal(true);
                     }}
-                    className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl border-none font-black uppercase text-[10px] tracking-widest cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all hover:scale-[1.02] active:scale-98"
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl border-none font-black uppercase text-[10px] tracking-widest cursor-pointer flex items-center gap-1.5 shadow-md shadow-rose-500/20 transition-all hover:scale-[1.02] active:scale-98"
                     title="Send link to captains or add local teams directly for 1-click live scoreboard setup"
                   >
                     <Zap size={14} className="fill-white" />
@@ -3332,7 +3346,7 @@ export const CricketTournamentTab: React.FC<{
                               className={`px-4 py-2.5 rounded-xl border-none font-black text-xs uppercase tracking-wider cursor-pointer shadow-lg flex items-center gap-2 transition-all hover:scale-105 active:scale-95 ${
                                 isLive
                                   ? 'bg-gradient-to-r from-rose-600 via-rose-500 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white shadow-rose-500/30 ring-2 ring-rose-400/40 animate-pulse'
-                                  : 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-emerald-500/30'
+                                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-rose-900/30'
                               }`}
                               title={isLive ? "Resume scoring this active match in live scoreboard" : "Launch Live Scoreboard with automated tournament metadata, venue, officials & crew"}
                             >
@@ -4385,7 +4399,7 @@ export const CricketTournamentTab: React.FC<{
             {/* Sticky Header */}
             <div className="sticky top-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 z-20 shrink-0">
               <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/20">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-600/20">
                   <Trophy size={18} className="sm:size-5" />
                 </div>
                 <div className="min-w-0 text-left">
@@ -4819,7 +4833,7 @@ export const CricketTournamentTab: React.FC<{
                 <button
                   type="button"
                   onClick={handleCreateTournament}
-                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
                 >
                   <Sparkles size={14} />
                   <span>Create Tournament</span>
@@ -5570,7 +5584,7 @@ export const CricketTournamentTab: React.FC<{
                   saveQuickEditMatchUpdate();
                   handleTriggerLiveScore(mToScore);
                 }}
-                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-600/25 flex items-center justify-center gap-2 transition"
               >
                 <Play size={13} className="fill-white" />
                 <span>Save & Start Scoring Match</span>
@@ -6356,7 +6370,7 @@ export const CricketTournamentTab: React.FC<{
                 <button
                   type="button"
                   onClick={handleEditTournament}
-                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
+                  className="flex-1 sm:flex-initial px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider cursor-pointer border-none shadow-md shadow-emerald-500/25 flex items-center justify-center gap-2 transition"
                 >
                   <Check size={14} />
                   <span>Save Settings</span>

@@ -104,6 +104,7 @@ const hideOnRoutes = [
   '/furniture-login',
   '/live/school-erp',
   '/live/cricket-scoreboard',
+  '/cricket-scoreboard',
   '/live/cricket-details',
   '/cricket-details',
   '/live/cricket-detail',
