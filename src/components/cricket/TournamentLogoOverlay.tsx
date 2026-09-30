@@ -25,8 +25,8 @@ export const TournamentLogoOverlay: React.FC<TournamentLogoOverlayProps> = ({
   const teamB = match?.teamB || 'TEAM B';
   const tossWinner = match?.tossWinner || teamA;
   const tossChoice = (match?.tossChoice || 'bat').toLowerCase() === 'bowl' ? 'field' : 'bat';
-  const venue = match?.venue || match?.groundName || 'LIVE CRICKET STADIUM';
-  const matchNumber = match?.matchNumber || 'LIVE MATCH';
+  const venue = (match as any)?.venue || (match as any)?.groundName || 'LIVE CRICKET STADIUM';
+  const matchNumber = (match as any)?.matchNumber || 'LIVE MATCH';
   const tournamentLogo = match?.tournamentLogo;
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

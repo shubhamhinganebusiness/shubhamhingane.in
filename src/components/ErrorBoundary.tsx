@@ -1,5 +1,4 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { isInternalFirestoreAssertionError, markFirestoreAssertionFailed } from '../lib/firebase';
 
 interface Props {
   children: ReactNode;
@@ -22,13 +21,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public static getDerivedStateFromError(error: Error): State {
-    // If Firestore SDK throws an internal WatchStream / AsyncQueue assertion (ID: ca9 / ID: b815),
-    // trip the assertion circuit breaker and recover without unmounting the UI into a crash screen.
-    if (isInternalFirestoreAssertionError(error)) {
-      markFirestoreAssertionFailed();
-      return { hasError: false, error: null };
-    }
-
     // If it's a dynamic module import failure (e.g. chunk reload during dev),
     // attempt an automatic recovery reload
     if (
@@ -52,12 +44,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    if (isInternalFirestoreAssertionError(error)) {
-      markFirestoreAssertionFailed();
-      console.warn('[ErrorBoundary] Auto-recovered from Firestore internal assertion:', error.message);
-      this.setState({ hasError: false, error: null });
-      return;
-    }
     console.error('[ErrorBoundary] Uncaught application render error:', error, errorInfo);
   }
 

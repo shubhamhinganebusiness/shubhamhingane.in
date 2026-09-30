@@ -28,11 +28,7 @@ import {
   FileText,
   CheckCircle2,
   ChevronRight,
-  Plus,
-  Upload,
-  Camera,
-  Crown,
-  Edit3
+  Plus
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
@@ -42,19 +38,16 @@ import {
   generateCertificateSerial, 
   buildCertificateVerificationUrl, 
   AwardType,
-  CertificateCustomAssets,
   SquadPlayerCertificateItem,
-  extractSquadPlayersForCertificates,
-  registerIssuedCertificate
+  extractSquadPlayersForCertificates 
 } from '../../utils/certificateVerification';
 
-export type { AwardType, CertificateCustomAssets };
+export type { AwardType };
 
 export type CertificateThemeId = 'classic_ivory';
 
 export interface AwardPlayer {
   name: string;
-  team?: string;
   runs: number;
   balls?: number;
   fours?: number;
@@ -62,6 +55,9 @@ export interface AwardPlayer {
   wickets: number;
   runsConceded?: number;
   points: number;
+  team?: string;
+  photo?: string;
+  role?: string;
 }
 
 export interface MatchCertificateData {
@@ -748,68 +744,6 @@ function fallbackDrawQrGrid(ctx: CanvasRenderingContext2D, x: number, y: number,
   }
 }
 
-async function loadCanvasImageSafe(url?: string): Promise<HTMLImageElement | null> {
-  if (!url || !url.trim()) return null;
-  return new Promise((resolve) => {
-    const img = new Image();
-    if (!url.startsWith('data:')) {
-      img.crossOrigin = 'anonymous';
-    }
-    const timer = setTimeout(() => resolve(null), 1200);
-    img.onload = () => {
-      clearTimeout(timer);
-      resolve(img);
-    };
-    img.onerror = () => {
-      clearTimeout(timer);
-      resolve(null);
-    };
-    img.src = url;
-  });
-}
-
-function drawCircularImageMedallion(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  cx: number,
-  cy: number,
-  radius: number,
-  borderColor: string,
-  accentColor: string
-) {
-  ctx.save();
-  // Outer gold ring glow
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
-  ctx.lineWidth = 2.5;
-  ctx.strokeStyle = borderColor;
-  ctx.stroke();
-
-  // Clip circular image
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.clip();
-
-  // Center-crop image into square
-  const minDim = Math.min(img.width || 100, img.height || 100);
-  const sx = ((img.width || 100) - minDim) / 2;
-  const sy = ((img.height || 100) - minDim) / 2;
-  ctx.drawImage(img, sx, sy, minDim, minDim, cx - radius, cy - radius, radius * 2, radius * 2);
-  ctx.restore();
-
-  // Inner subtle ring
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = accentColor;
-  ctx.stroke();
-  ctx.restore();
-}
-
 export interface CanvasRenderOptions {
   data: MatchCertificateData;
   selectedAward: AwardType;
@@ -822,7 +756,6 @@ export interface CanvasRenderOptions {
   verificationUrl?: string;
   serialNumber?: string;
   isFinalMatch?: boolean;
-  customAssets?: CertificateCustomAssets;
   awardConfig: {
     en: string;
     mr: string;
@@ -840,8 +773,7 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
     federationName = 'Gully Cricket Federation',
     themeId = 'classic_ivory',
     awardConfig,
-    selectedAward,
-    customAssets
+    selectedAward
   } = opts;
 
   const isFinalMatch = opts.isFinalMatch ?? (data.isFinalMatch || false);
@@ -968,14 +900,7 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   ctx.fillStyle = theme.accentColor;
   ctx.fillText(coBrandingStr, width / 2, coBrandY + coBrandH / 2);
 
-  // Preload custom uploaded images in parallel if provided
-  const [teamLogoImg, playerPhotoImg, signatureImg] = await Promise.all([
-    loadCanvasImageSafe(customAssets?.teamLogoUrl),
-    loadCanvasImageSafe(customAssets?.playerPhotoUrl),
-    loadCanvasImageSafe(customAssets?.signatureImageUrl)
-  ]);
-
-  // Tournament name with flanking gold stars (and optional uploaded Team/Tournament Crest)
+  // Tournament name with flanking gold stars
   const cleanTourn = (tournamentName || 'GULLY PREMIER LEAGUE 2026').toUpperCase();
   ctx.font = '900 16px "Montserrat", "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.fillStyle = theme.accentColor;
@@ -984,10 +909,6 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   ctx.fillText(cleanTourn, width / 2, 132);
   drawStar(ctx, width / 2 - tournWidth / 2 - 24, 132, 5, 8, 3.5, theme.accentColor);
   drawStar(ctx, width / 2 + tournWidth / 2 + 24, 132, 5, 8, 3.5, theme.accentColor);
-
-  if (teamLogoImg) {
-    drawCircularImageMedallion(ctx, teamLogoImg, 155, 135, 42, theme.primaryBorder, theme.accentColor);
-  }
 
   // Title: "CERTIFICATE OF EXCELLENCE" with Formal Classical Serif Typography
   ctx.font = '900 44px "Cinzel Decorative", "Cinzel", Georgia, serif';
@@ -1021,22 +942,14 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   ctx.fillStyle = theme.mutedText;
   ctx.fillText('In recognition of distinguished sporting excellence and match prowess, this accolade is conferred upon', width / 2, 290);
 
-  // Recipient Player Name in High-Prestige Typography (with optional Player Portrait Medallion)
+  // Recipient Player Name in High-Prestige Typography
   const recipientName = (recipient.name || 'Star Performer').toUpperCase();
   ctx.font = '900 50px "Cinzel", "Montserrat", Georgia, serif';
   ctx.fillStyle = theme.headingText;
-  const nameWidth = ctx.measureText(recipientName).width;
-
-  if (playerPhotoImg) {
-    // Draw portrait medallion to the left of the recipient name or right-top honor position
-    const portraitX = Math.max(165, width / 2 - nameWidth / 2 - 68);
-    drawCircularImageMedallion(ctx, playerPhotoImg, portraitX, 348, 44, theme.primaryBorder, theme.accentColor);
-  }
-
-  ctx.textAlign = 'center';
   ctx.fillText(recipientName, width / 2, 355);
 
   // Underline flourish
+  const nameWidth = ctx.measureText(recipientName).width;
   const lineW = Math.max(380, Math.min(720, nameWidth + 90));
   const flourishGrad = ctx.createLinearGradient(width / 2 - lineW / 2, 0, width / 2 + lineW / 2, 0);
   flourishGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
@@ -1052,12 +965,6 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   let prefixText = 'adjudged for exceptional match-winning performance as ';
   if (selectedAward === 'fighter') {
     prefixText = 'adjudged for valorous fighting determination as ';
-  } else if (selectedAward === 'man_of_series' || selectedAward === 'orange_cap' || selectedAward === 'purple_cap') {
-    prefixText = 'crowned for extraordinary championship dominance as ';
-  } else if (selectedAward === 'best_fielder' || selectedAward === 'emerging_player') {
-    prefixText = 'honored for standout athletic brilliance and impact as ';
-  } else if (selectedAward === 'umpire_official') {
-    prefixText = 'conferred in official recognition of fair play and match governance as ';
   } else if (selectedAward === 'champion_squad') {
     prefixText = isFinalMatch
       ? 'conferred in high sporting honor and awarded as tournament champion trophy winner '
@@ -1108,9 +1015,7 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   const startCardsX = (width - totalCardsW) / 2;
   const cardsY = 525;
 
-  const isUmpireAward = selectedAward === 'umpire_official';
-
-  // Card 1: Runs Scored / Match Status / Official Role
+  // Card 1: Runs Scored / Match Status
   const c1X = startCardsX;
   ctx.fillStyle = theme.cardBg;
   ctx.strokeStyle = theme.cardBorder;
@@ -1119,18 +1024,12 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '900 13px system-ui, sans-serif';
-  ctx.fillText(
-    isUmpireAward ? 'OFFICIAL ROLE' : (isTeamCardRecipient ? 'MATCH STATUS' : 'RUNS SCORED'),
-    c1X + cardW / 2,
-    cardsY + 36
-  );
+  ctx.fillText(isTeamCardRecipient ? 'MATCH STATUS' : 'RUNS SCORED', c1X + cardW / 2, cardsY + 36);
 
   ctx.fillStyle = theme.isLight ? '#047857' : '#10b981';
-  ctx.font = (isTeamCardRecipient || isUmpireAward) ? '900 32px system-ui, sans-serif' : '900 48px monospace, system-ui';
+  ctx.font = isTeamCardRecipient ? '900 36px system-ui, sans-serif' : '900 48px monospace, system-ui';
   ctx.fillText(
-    isUmpireAward
-      ? 'MATCH UMPIRE'
-      : isTeamCardRecipient
+    isTeamCardRecipient
       ? (selectedAward === 'champion_squad' ? 'WINNER' : 'PARTICIPANT')
       : String(recipient.runs ?? 0),
     c1X + cardW / 2,
@@ -1139,16 +1038,14 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '600 12px monospace, system-ui';
-  const c1Sub = isUmpireAward
-    ? 'On-Field Arbiter & Referee'
-    : isTeamCardRecipient
+  const c1Sub = isTeamCardRecipient
     ? (selectedAward === 'champion_squad' ? 'Official Match Champions' : 'Honored Match Contender')
     : (recipient.balls
         ? `${recipient.balls}b (${recipient.fours || 0}x4, ${recipient.sixes || 0}x6)`
         : (recipient.runs > 0 ? `${recipient.runs} runs scored` : 'Key Squad Member'));
   ctx.fillText(c1Sub, c1X + cardW / 2, cardsY + 128);
 
-  // Card 2: Wickets Taken / Team Squad / Sanction Status
+  // Card 2: Wickets Taken / Team Squad
   const c2X = startCardsX + cardW + cardGap;
   ctx.fillStyle = theme.cardBg;
   ctx.strokeStyle = theme.cardBorder;
@@ -1156,25 +1053,19 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '900 13px system-ui, sans-serif';
-  ctx.fillText(
-    isUmpireAward ? 'GOVERNANCE' : (isTeamCardRecipient ? 'TEAM SQUAD' : 'WICKETS TAKEN'),
-    c2X + cardW / 2,
-    cardsY + 36
-  );
+  ctx.fillText(isTeamCardRecipient ? 'TEAM SQUAD' : 'WICKETS TAKEN', c2X + cardW / 2, cardsY + 36);
 
   ctx.fillStyle = theme.isLight ? '#0284c7' : '#06b6d4';
-  ctx.font = (isTeamCardRecipient || isUmpireAward) ? '900 32px system-ui, sans-serif' : '900 48px monospace, system-ui';
+  ctx.font = isTeamCardRecipient ? '900 36px system-ui, sans-serif' : '900 48px monospace, system-ui';
   ctx.fillText(
-    isUmpireAward ? '100% FAIR' : (isTeamCardRecipient ? '11 PLAYERS' : String(recipient.wickets ?? 0)),
+    isTeamCardRecipient ? '11 PLAYERS' : String(recipient.wickets ?? 0),
     c2X + cardW / 2,
     cardsY + 86
   );
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '600 12px monospace, system-ui';
-  const c2Sub = isUmpireAward
-    ? 'Sanctioned Rules Compliance'
-    : isTeamCardRecipient
+  const c2Sub = isTeamCardRecipient
     ? 'Official Certified Roster'
     : (recipient.runsConceded !== undefined && recipient.runsConceded > 0
         ? `${recipient.runsConceded} runs conceded`
@@ -1189,18 +1080,12 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '900 13px system-ui, sans-serif';
-  ctx.fillText(
-    isUmpireAward ? 'HONOR GRADE' : (isTeamCardRecipient ? 'OFFICIAL ACCLAIM' : 'MVP RATING'),
-    c3X + cardW / 2,
-    cardsY + 36
-  );
+  ctx.fillText(isTeamCardRecipient ? 'OFFICIAL ACCLAIM' : 'MVP RATING', c3X + cardW / 2, cardsY + 36);
 
   ctx.fillStyle = theme.accentColor;
-  ctx.font = (isTeamCardRecipient || isUmpireAward) ? '900 32px system-ui, sans-serif' : '900 44px monospace, system-ui';
+  ctx.font = isTeamCardRecipient ? '900 32px system-ui, sans-serif' : '900 44px monospace, system-ui';
   ctx.fillText(
-    isUmpireAward
-      ? 'DISTINCTION'
-      : isTeamCardRecipient
+    isTeamCardRecipient
       ? (selectedAward === 'champion_squad' ? (isFinalMatch ? 'GOLD TROPHY' : 'WINNER') : (isFinalMatch ? 'SILVER MEDAL' : 'PARTICIPANT'))
       : `${recipient.points ?? 0} pts`,
     c3X + cardW / 2,
@@ -1209,9 +1094,7 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
 
   ctx.fillStyle = theme.mutedText;
   ctx.font = '800 12px system-ui, sans-serif';
-  const c3Sub = isUmpireAward
-    ? 'SPIRIT OF CRICKET'
-    : isTeamCardRecipient
+  const c3Sub = isTeamCardRecipient
     ? (selectedAward === 'champion_squad' ? (isFinalMatch ? 'CHAMPIONS TROPHY' : 'MATCH WINNERS') : (isFinalMatch ? 'FINALIST RUNNER-UP' : 'PARTICIPANTS'))
     : ((selectedAward === 'champion_squad' || selectedAward === 'runner_up_squad' || selectedAward === 'participation')
         ? (isFinalMatch
@@ -1270,21 +1153,11 @@ export async function generateCertificateCanvas(opts: CanvasRenderOptions): Prom
   const sealR = 48;
   drawGoldFoilEmbossedSeal(ctx, sealCx, sealCy, sealR);
 
-  // Quadrant 4 (Right): Official Authority Calligraphic or Custom Uploaded Signature
+  // Quadrant 4 (Right): Official Authority Calligraphic Signatures
   const sigX = width - 210;
 
-  if (signatureImg) {
-    // Draw uploaded custom signature image centered above signature line
-    const maxW = 190;
-    const maxH = 54;
-    const scale = Math.min(maxW / (signatureImg.width || 190), maxH / (signatureImg.height || 54));
-    const drawW = (signatureImg.width || 190) * scale;
-    const drawH = (signatureImg.height || 54) * scale;
-    ctx.drawImage(signatureImg, sigX - drawW / 2, 852 - drawH, drawW, drawH);
-  } else {
-    // Primary Calligraphic Signature: Founder of Gully Scoreboard
-    drawCalligraphicSignature(ctx, sigX, 836, organizerName || 'Shubham Hingane', theme.accentColor);
-  }
+  // Primary Calligraphic Signature: Founder of Gully Scoreboard
+  drawCalligraphicSignature(ctx, sigX, 836, 'Shubham Hingane', theme.accentColor);
 
   ctx.strokeStyle = theme.secondaryBorder;
   ctx.lineWidth = 1.4;
@@ -1553,45 +1426,6 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
 
   const [isExporting, setIsExporting] = useState(false);
   const [downloadSuccessMessage, setDownloadSuccessMessage] = useState<string | null>(null);
-  const [customAssets, setCustomAssets] = useState<CertificateCustomAssets>({});
-  const [showCustomToolbar, setShowCustomToolbar] = useState(false);
-  const [recipientNameOverride, setRecipientNameOverride] = useState<string>('');
-  const [recipientRunsOverride, setRecipientRunsOverride] = useState<string>('');
-  const [recipientWicketsOverride, setRecipientWicketsOverride] = useState<string>('');
-
-  // Compress uploaded image to clean data URL for 300-DPI canvas & cloud registry
-  const handleAssetUpload = (key: keyof CertificateCustomAssets, file: File | undefined) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = key === 'signatureImageUrl' ? 420 : 360;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/png', 0.92);
-          setCustomAssets(prev => ({ ...prev, [key]: dataUrl }));
-        }
-      };
-      img.src = String(ev.target?.result || '');
-    };
-    reader.readAsDataURL(file);
-  };
 
   // Helper to reliably match player team to target team
   const isTeamMatch = (playerTeam: string | undefined, targetTeam: string | undefined) => {
@@ -1957,11 +1791,6 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       if (globalConfig.defaultThemeId) {
         setSelectedTheme(prev => (prev === 'classic_ivory' ? (globalConfig.defaultThemeId as CertificateThemeId) : prev));
       }
-      setCustomAssets(prev => ({
-        teamLogoUrl: prev.teamLogoUrl || globalConfig.defaultTeamLogoUrl || undefined,
-        signatureImageUrl: prev.signatureImageUrl || globalConfig.defaultSignatureImageUrl || undefined,
-        playerPhotoUrl: prev.playerPhotoUrl || globalConfig.defaultPlayerPhotoUrl || undefined
-      }));
     });
     return () => unsub();
   }, []);
@@ -2033,22 +1862,10 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   const standoutRecipient: AwardPlayer = 
     selectedAward === 'fighter' && data.fighterOfTheMatch
       ? data.fighterOfTheMatch
-      : (selectedAward === 'best_batter' || selectedAward === 'orange_cap') && data.bestBatsman
+      : selectedAward === 'best_batter' && data.bestBatsman
       ? data.bestBatsman
-      : (selectedAward === 'best_bowler' || selectedAward === 'purple_cap') && data.bestBowler
+      : selectedAward === 'best_bowler' && data.bestBowler
       ? data.bestBowler
-      : selectedAward === 'man_of_series'
-      ? (data.playerOfTheMatch || data.bestBatsman || { name: 'Series MVP Champion', runs: 185, balls: 92, fours: 18, sixes: 11, wickets: 6, points: 280 })
-      : selectedAward === 'best_fielder'
-      ? (data.fighterOfTheMatch || data.playerOfTheMatch || { name: 'Star Fielder', runs: 32, wickets: 1, points: 95 })
-      : selectedAward === 'emerging_player'
-      ? (data.bestBatsman || data.fighterOfTheMatch || data.playerOfTheMatch || { name: 'Rising Star', runs: 48, wickets: 2, points: 110 })
-      : selectedAward === 'umpire'
-      ? { name: (data as any).umpireName || 'Official Match Umpire', runs: 0, wickets: 0, points: 100 }
-      : selectedAward === 'scorer'
-      ? { name: (data as any).scorerName || 'Official Match Scorer', runs: 0, wickets: 0, points: 100 }
-      : selectedAward === 'organizer'
-      ? { name: data.organizerName || certProviderFounder, runs: 0, wickets: 0, points: 100 }
       : selectedAward === 'champion_squad'
       ? (currentWinningPlayer ? {
           name: currentWinningPlayer.name + (currentWinningPlayer.isCaptain ? ' (C)' : ''),
@@ -2076,26 +1893,20 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   const activeSquadPlayer = editableSquadList[selectedSquadPlayerIndex] || editableSquadList[0];
 
   const effectiveRecipient: AwardPlayer = useMemo(() => {
-    const base = (activeTab === 'squad_batch' && activeSquadPlayer)
-      ? {
-          name: activeSquadPlayer.name + (activeSquadPlayer.isCaptain ? ' (C)' : ''),
-          runs: activeSquadPlayer.runs || 0,
-          balls: activeSquadPlayer.balls,
-          fours: activeSquadPlayer.fours,
-          sixes: activeSquadPlayer.sixes,
-          wickets: activeSquadPlayer.wickets || 0,
-          runsConceded: activeSquadPlayer.runsConceded,
-          points: activeSquadPlayer.points || 25
-        }
-      : standoutRecipient;
-
-    return {
-      ...base,
-      name: recipientNameOverride.trim() || base.name,
-      runs: recipientRunsOverride.trim() !== '' ? (parseInt(recipientRunsOverride, 10) || 0) : base.runs,
-      wickets: recipientWicketsOverride.trim() !== '' ? (parseInt(recipientWicketsOverride, 10) || 0) : base.wickets,
-    };
-  }, [activeTab, activeSquadPlayer, standoutRecipient, recipientNameOverride, recipientRunsOverride, recipientWicketsOverride]);
+    if (activeTab === 'squad_batch' && activeSquadPlayer) {
+      return {
+        name: activeSquadPlayer.name + (activeSquadPlayer.isCaptain ? ' (C)' : ''),
+        runs: activeSquadPlayer.runs || 0,
+        balls: activeSquadPlayer.balls,
+        fours: activeSquadPlayer.fours,
+        sixes: activeSquadPlayer.sixes,
+        wickets: activeSquadPlayer.wickets || 0,
+        runsConceded: activeSquadPlayer.runsConceded,
+        points: activeSquadPlayer.points || 25
+      };
+    }
+    return standoutRecipient;
+  }, [activeTab, activeSquadPlayer, standoutRecipient]);
 
   const effectiveAward: AwardType = activeTab === 'squad_batch' ? selectedSquadAwardType : selectedAward;
 
@@ -2127,62 +1938,6 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
       badge: 'RUNNER-UP STANDOUT FIGHTER',
       icon: Zap,
       color: 'from-rose-400 via-pink-400 to-amber-400'
-    },
-    man_of_series: {
-      en: 'MAN OF THE SERIES (MVP)',
-      mr: 'मालिकावीर मानकरी (Player of the Tournament)',
-      badge: 'TOURNAMENT SUPREME MVP',
-      icon: Crown,
-      color: 'from-amber-400 via-yellow-300 to-orange-500'
-    },
-    orange_cap: {
-      en: 'ORANGE CAP WINNER',
-      mr: 'ऑरेंज कॅप मानकरी (Leading Run Scorer)',
-      badge: 'TOURNAMENT TOP RUN SCORER',
-      icon: Flame,
-      color: 'from-orange-500 via-amber-400 to-yellow-400'
-    },
-    purple_cap: {
-      en: 'PURPLE CAP WINNER',
-      mr: 'पर्पल कॅप मानकरी (Leading Wicket Taker)',
-      badge: 'TOURNAMENT TOP WICKET TAKER',
-      icon: Medal,
-      color: 'from-purple-400 via-indigo-400 to-pink-400'
-    },
-    best_fielder: {
-      en: 'BEST FIELDER OF THE TOURNAMENT',
-      mr: 'उत्कृष्ट क्षेत्ररक्षक (Best Fielder)',
-      badge: 'ELECTRIC FIELDING EXCELLENCE',
-      icon: Zap,
-      color: 'from-emerald-400 via-teal-400 to-cyan-400'
-    },
-    emerging_player: {
-      en: 'EMERGING PLAYER AWARD',
-      mr: 'उदयोन्मुख खेळाडू (Emerging Star)',
-      badge: 'RISING CHAMPION STAR',
-      icon: Sparkles,
-      color: 'from-sky-400 via-blue-400 to-indigo-400'
-    },
-    umpire: {
-      en: 'OFFICIAL MATCH UMPIRE CITATION',
-      mr: 'अधिकृत पंच गौरव प्रमाणपत्र (Match Official)',
-      badge: 'FAIR PLAY & OFFICIATING HONOR',
-      icon: ShieldCheck,
-      color: 'from-amber-400 via-yellow-400 to-emerald-400'
-    },
-    scorer: {
-      en: 'OFFICIAL DIGITAL SCORER CITATION',
-      mr: 'अधिकृत गुणलेखक गौरव प्रमाणपत्र (Official Scorer)',
-      badge: 'PRECISION BROADCAST ANALYST',
-      icon: Award,
-      color: 'from-cyan-400 via-blue-400 to-indigo-400'
-    },
-    organizer: {
-      en: 'TOURNAMENT ORGANIZER EXCELLENCE',
-      mr: 'स्पर्धा आयोजक गौरव प्रमाणपत्र (Organizer Honor)',
-      badge: 'LEADERSHIP & SPORTING SERVICE',
-      icon: Crown,
-      color: 'from-amber-400 via-yellow-400 to-amber-500'
     },
     champion_squad: {
       en: isFinalMatch ? 'TOURNAMENT CHAMPION TROPHY WINNER' : 'MATCH WINNER CERTIFICATE',
@@ -2243,40 +1998,6 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
     });
   }, [serialNumber, data, effectiveAward, effectiveRecipient, selectedTeamFilter, winnerTeamName, runnerUpTeamName, autoTournamentName]);
 
-  // Automatically register active certificate in Cloud & Local Registry so manual Certificate ID lookup works immediately
-  useEffect(() => {
-    if (!isOpen || !serialNumber || !effectiveRecipient.name) return;
-    const targetTeam = selectedTeamFilter === 'winner' ? winnerTeamName : (selectedTeamFilter === 'runner_up' ? runnerUpTeamName : data.teamA);
-    registerIssuedCertificate({
-      certId: serialNumber,
-      matchId: data.matchId || 'TOURN',
-      matchDate: data.matchDate || new Date().toISOString().slice(0, 10),
-      tournamentName: autoTournamentName,
-      teamA: data.teamA,
-      teamB: data.teamB,
-      winner: data.winner || targetTeam,
-      winReason: data.winReason,
-      venue: data.venue,
-      awardType: effectiveAward,
-      awardTitle: effectiveAwardConfig.en,
-      awardSubtitle: effectiveAwardConfig.mr,
-      badgeText: effectiveAwardConfig.badge || 'OFFICIAL AWARD',
-      playerName: effectiveRecipient.name,
-      playerTeam: targetTeam,
-      runs: effectiveRecipient.runs || 0,
-      balls: effectiveRecipient.balls,
-      fours: effectiveRecipient.fours,
-      sixes: effectiveRecipient.sixes,
-      wickets: effectiveRecipient.wickets || 0,
-      runsConceded: effectiveRecipient.runsConceded,
-      points: effectiveRecipient.points || 25,
-      verifiedAt: new Date().toISOString(),
-      playerPhotoUrl: customAssets.playerPhotoUrl,
-      teamLogoUrl: customAssets.teamLogoUrl,
-      signatureImageUrl: customAssets.signatureImageUrl
-    }).catch(() => {});
-  }, [isOpen, serialNumber, effectiveAward, effectiveRecipient.name, effectiveRecipient.runs, effectiveRecipient.wickets, customAssets.playerPhotoUrl, customAssets.teamLogoUrl, customAssets.signatureImageUrl]);
-
   // Export high-res PNG image of the currently displayed certificate
   const handleDownloadImage = async () => {
     if (isExporting) return;
@@ -2293,8 +2014,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         themeId: selectedTheme,
         verificationUrl,
         isFinalMatch,
-        awardConfig: effectiveAwardConfig,
-        customAssets
+        awardConfig: effectiveAwardConfig
       });
 
       const fileName = `GullyScore_${effectiveAward.toUpperCase()}_${effectiveRecipient.name.replace(/\s+/g, '_')}.png`;
@@ -2339,8 +2059,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         themeId: selectedTheme,
         verificationUrl,
         isFinalMatch,
-        awardConfig: effectiveAwardConfig,
-        customAssets
+        awardConfig: effectiveAwardConfig
       });
 
       const imgData = canvas.toDataURL('image/png');
@@ -2467,8 +2186,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
           verificationUrl: vUrl,
           serialNumber: serial,
           isFinalMatch,
-          awardConfig: awardTitleMap[selectedSquadAwardType],
-          customAssets
+          awardConfig: awardTitleMap[selectedSquadAwardType]
         });
 
         const dataUrl = canvas.toDataURL('image/png');
@@ -2524,14 +2242,14 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   // WhatsApp share message with certificate summary
   const handleShareWhatsApp = () => {
     const text = `🏆 *GULLY CRICKET CERTIFICATE OF EXCELLENCE* 🏆\n\n` +
-      `🌟 *Award:* ${effectiveAwardConfig.en}\n` +
-      `👤 *Recipient:* ${effectiveRecipient.name}\n` +
+      `🌟 *Award:* ${activeAwardConfig.en}\n` +
+      `👤 *Recipient:* ${currentRecipient.name}\n` +
       `🏏 *Match:* ${data.teamA} vs ${data.teamB}\n` +
       `🥇 *Winner:* ${data.winner} (${data.winReason || 'Won'})\n` +
       `📊 *Performance Highlights:*\n` +
-      `  • Runs: ${effectiveRecipient.runs} ${effectiveRecipient.balls ? `(${effectiveRecipient.balls}b, ${effectiveRecipient.fours || 0}x4, ${effectiveRecipient.sixes || 0}x6)` : ''}\n` +
-      `  • Wickets: ${effectiveRecipient.wickets} ${effectiveRecipient.runsConceded !== undefined ? `(${effectiveRecipient.runsConceded} runs)` : ''}\n` +
-      `  • MVP Rating: ${effectiveRecipient.points} pts\n` +
+      `  • Runs: ${currentRecipient.runs} ${currentRecipient.balls ? `(${currentRecipient.balls}b, ${currentRecipient.fours || 0}x4, ${currentRecipient.sixes || 0}x6)` : ''}\n` +
+      `  • Wickets: ${currentRecipient.wickets} ${currentRecipient.runsConceded !== undefined ? `(${currentRecipient.runsConceded} runs)` : ''}\n` +
+      `  • MVP Rating: ${currentRecipient.points} pts\n` +
       `📅 *Date:* ${data.matchDate}\n` +
       `✨ *Tournament:* ${autoTournamentName}\n` +
       `🛡️ *Verification Serial:* ${serialNumber}\n` +
@@ -2642,273 +2360,102 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
         {/* Sub-Header Controls */}
         {activeTab === 'individual' ? (
           /* Standout Award Category Buttons */
-          <div className="py-1 shrink-0 flex flex-col gap-1 border-b border-slate-800/80">
-            <div className="flex items-center justify-between gap-1.5">
-              <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 max-w-full overflow-x-auto">
+          <div className="py-1 shrink-0 flex items-center justify-center border-b border-slate-800/80">
+            <div className="flex items-center gap-1 sm:gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 max-w-full overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => setSelectedAward('potm')}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  selectedAward === 'potm'
+                    ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Trophy size={12} />
+                <span>Player of Match</span>
+              </button>
+
+              {data.bestBatsman && (
                 <button
                   type="button"
-                  onClick={() => setSelectedAward('potm')}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'potm'
+                  onClick={() => setSelectedAward('best_batter')}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedAward === 'best_batter'
                       ? 'bg-amber-500 text-slate-950 shadow-md font-black'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <Trophy size={12} />
-                  <span>Player of Match</span>
-                </button>
-
-                {data.bestBatsman && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedAward('best_batter')}
-                    className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                      selectedAward === 'best_batter'
-                        ? 'bg-amber-500 text-slate-950 shadow-md font-black'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Flame size={12} />
-                    <span>Best Batsman</span>
-                  </button>
-                )}
-
-                {data.bestBowler && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedAward('best_bowler')}
-                    className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                      selectedAward === 'best_bowler'
-                        ? 'bg-amber-500 text-slate-950 shadow-md font-black'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Medal size={12} />
-                    <span>Best Bowler</span>
-                  </button>
-                )}
-
-                {data.fighterOfTheMatch && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedAward('fighter')}
-                    className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                      selectedAward === 'fighter'
-                        ? 'bg-gradient-to-r from-rose-500 to-amber-500 text-white shadow-md font-black'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Zap size={12} className="text-amber-300" />
-                    <span>Fighter</span>
-                  </button>
-                )}
-
-                {/* Season & Official Tournament Awards */}
-                <button
-                  type="button"
-                  onClick={() => setSelectedAward('man_of_series')}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'man_of_series'
-                      ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 shadow-md font-black'
-                      : 'text-amber-300/80 hover:text-amber-200'
-                  }`}
-                >
-                  <Crown size={12} />
-                  <span>Man of Series</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedAward('orange_cap')}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'orange_cap'
-                      ? 'bg-orange-500 text-slate-950 shadow-md font-black'
-                      : 'text-orange-300/80 hover:text-orange-200'
-                  }`}
-                >
                   <Flame size={12} />
-                  <span>Orange Cap</span>
+                  <span>Best Batsman</span>
                 </button>
+              )}
 
+              {data.bestBowler && (
                 <button
                   type="button"
-                  onClick={() => setSelectedAward('purple_cap')}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'purple_cap'
-                      ? 'bg-purple-600 text-white shadow-md font-black'
-                      : 'text-purple-300/80 hover:text-purple-200'
+                  onClick={() => setSelectedAward('best_bowler')}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedAward === 'best_bowler'
+                      ? 'bg-amber-500 text-slate-950 shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   <Medal size={12} />
-                  <span>Purple Cap</span>
+                  <span>Best Bowler</span>
                 </button>
+              )}
 
+              {data.fighterOfTheMatch && (
                 <button
                   type="button"
-                  onClick={() => setSelectedAward('umpire')}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'umpire'
-                      ? 'bg-sky-500 text-slate-950 shadow-md font-black'
-                      : 'text-sky-300/80 hover:text-sky-200'
+                  onClick={() => setSelectedAward('fighter')}
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                    selectedAward === 'fighter'
+                      ? 'bg-gradient-to-r from-rose-500 to-amber-500 text-white shadow-md font-black'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <ShieldCheck size={12} />
-                  <span>Umpire Award</span>
+                  <Zap size={12} className="text-amber-300" />
+                  <span>Fighter of Match</span>
                 </button>
+              )}
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedAward('champion_squad');
-                    setSelectedTeamFilter('winner');
-                    setSelectedSquadAwardType('champion_squad');
-                  }}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'champion_squad'
-                      ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 shadow-md font-black'
-                      : 'text-amber-400/90 hover:text-amber-300'
-                  }`}
-                  title={isFinalMatch ? "Championship Winning Team - Champion Trophy Winner" : "Match Winning Team - Winner Certification"}
-                >
-                  <Trophy size={12} className={selectedAward === 'champion_squad' ? 'text-slate-950' : 'text-amber-400'} />
-                  <span>{isFinalMatch ? 'Champion Winner' : 'Winning Team'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedAward('participation');
-                    setSelectedTeamFilter('runner_up');
-                    setSelectedSquadAwardType('participation');
-                  }}
-                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                    selectedAward === 'participation' || selectedAward === 'runner_up_squad'
-                      ? 'bg-emerald-600 text-white shadow-md font-black'
-                      : 'text-teal-400/90 hover:text-teal-300'
-                  }`}
-                  title={isFinalMatch ? "Finalist Team - Runner-Up Finalist Certification" : "Losing Team - Participant Certification"}
-                >
-                  <Medal size={12} className={selectedAward === 'participation' || selectedAward === 'runner_up_squad' ? 'text-white' : 'text-teal-400'} />
-                  <span>{isFinalMatch ? 'Runner-Up Finalist' : 'Participant Team'}</span>
-                </button>
-              </div>
-
-              {/* Toggle Custom Photos, Logos & Signature Toolbar */}
               <button
                 type="button"
-                onClick={() => setShowCustomToolbar(prev => !prev)}
-                className={`px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider border transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
-                  showCustomToolbar || customAssets.playerPhotoUrl || customAssets.teamLogoUrl || customAssets.signatureImageUrl
-                    ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white'
+                onClick={() => {
+                  setSelectedAward('champion_squad');
+                  setSelectedTeamFilter('winner');
+                  setSelectedSquadAwardType('champion_squad');
+                }}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  selectedAward === 'champion_squad'
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 shadow-md font-black'
+                    : 'text-amber-400/90 hover:text-amber-300'
                 }`}
-                title="Upload player portrait, team logo crest, custom signature, or edit recipient name"
+                title={isFinalMatch ? "Championship Winning Team - Champion Trophy Winner" : "Match Winning Team - Winner Certification"}
               >
-                <Camera size={12} />
-                <span className="hidden sm:inline">Photos & Signature</span>
+                <Trophy size={12} className={selectedAward === 'champion_squad' ? 'text-slate-950' : 'text-amber-400'} />
+                <span>{isFinalMatch ? 'Champion Winner' : 'Winning Team'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedAward('participation');
+                  setSelectedTeamFilter('runner_up');
+                  setSelectedSquadAwardType('participation');
+                }}
+                className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer shrink-0 ${
+                  selectedAward === 'participation' || selectedAward === 'runner_up_squad'
+                    ? 'bg-emerald-600 text-white shadow-md font-black'
+                    : 'text-teal-400/90 hover:text-teal-300'
+                }`}
+                title={isFinalMatch ? "Finalist Team - Runner-Up Finalist Certification" : "Losing Team - Participant Certification"}
+              >
+                <Medal size={12} className={selectedAward === 'participation' || selectedAward === 'runner_up_squad' ? 'text-white' : 'text-teal-400'} />
+                <span>{isFinalMatch ? 'Runner-Up Finalist' : 'Participant Team'}</span>
               </button>
             </div>
-
-            {/* Custom Photo, Crest, Signature & Recipient Override Bar */}
-            {showCustomToolbar && (
-              <div className="bg-slate-950/90 border border-amber-500/30 rounded-xl p-1.5 sm:p-2 flex flex-wrap items-center justify-between gap-2 text-[10px]">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {/* Player Photo Upload */}
-                  <label className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 font-bold flex items-center gap-1 cursor-pointer transition-colors">
-                    <Upload size={11} />
-                    <span>{customAssets.playerPhotoUrl ? 'Change Player Photo' : 'Player Photo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleAssetUpload('playerPhotoUrl', e.target.files?.[0])}
-                    />
-                  </label>
-                  {customAssets.playerPhotoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setCustomAssets(prev => ({ ...prev, playerPhotoUrl: undefined }))}
-                      className="text-rose-400 hover:text-rose-300 px-1 font-bold"
-                      title="Remove player photo"
-                    >
-                      ✕
-                    </button>
-                  )}
-
-                  {/* Team Crest / Logo Upload */}
-                  <label className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-emerald-300 font-bold flex items-center gap-1 cursor-pointer transition-colors">
-                    <Upload size={11} />
-                    <span>{customAssets.teamLogoUrl ? 'Change Team Logo' : 'Team / Club Logo'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleAssetUpload('teamLogoUrl', e.target.files?.[0])}
-                    />
-                  </label>
-                  {customAssets.teamLogoUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setCustomAssets(prev => ({ ...prev, teamLogoUrl: undefined }))}
-                      className="text-rose-400 hover:text-rose-300 px-1 font-bold"
-                      title="Remove team logo"
-                    >
-                      ✕
-                    </button>
-                  )}
-
-                  {/* Authority Signature Upload */}
-                  <label className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sky-300 font-bold flex items-center gap-1 cursor-pointer transition-colors">
-                    <Upload size={11} />
-                    <span>{customAssets.signatureImageUrl ? 'Change Signature' : 'Custom Signature'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleAssetUpload('signatureImageUrl', e.target.files?.[0])}
-                    />
-                  </label>
-                  {customAssets.signatureImageUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setCustomAssets(prev => ({ ...prev, signatureImageUrl: undefined }))}
-                      className="text-rose-400 hover:text-rose-300 px-1 font-bold"
-                      title="Remove custom signature"
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                {/* Quick Recipient & Stat Overrides */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-0.5">
-                    <Edit3 size={10} className="text-amber-400" />
-                    <input
-                      type="text"
-                      value={recipientNameOverride}
-                      onChange={(e) => setRecipientNameOverride(e.target.value)}
-                      placeholder={`Name (${standoutRecipient.name})`}
-                      className="bg-transparent text-white placeholder-slate-500 focus:outline-none w-28 sm:w-36 font-bold text-[10px]"
-                    />
-                  </div>
-                  <input
-                    type="number"
-                    value={recipientRunsOverride}
-                    onChange={(e) => setRecipientRunsOverride(e.target.value)}
-                    placeholder="Runs"
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-0.5 text-white placeholder-slate-500 focus:outline-none w-14 font-mono text-[10px]"
-                  />
-                  <input
-                    type="number"
-                    value={recipientWicketsOverride}
-                    onChange={(e) => setRecipientWicketsOverride(e.target.value)}
-                    placeholder="Wkts"
-                    className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-0.5 text-white placeholder-slate-500 focus:outline-none w-14 font-mono text-[10px]"
-                  />
-                </div>
-              </div>
-            )}
 
             {/* Individual Squad Player Selection Strip for Winning Team */}
             {selectedAward === 'champion_squad' && winningSquadPlayers.length > 0 && (
@@ -3216,28 +2763,6 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
 
             {/* Certificate Header: Co-branding Bar & Tournament Title */}
             <div className="relative z-10 space-y-0.5 sm:space-y-1 shrink-0">
-              {/* Custom Team / Tournament Crest Logo (Top Left) */}
-              {customAssets.teamLogoUrl && (
-                <div className="absolute top-0 left-2 sm:left-4 w-9 h-9 sm:w-14 sm:h-14 rounded-full border-2 border-amber-500/80 bg-white p-0.5 shadow-md overflow-hidden flex items-center justify-center z-20">
-                  <img
-                    src={customAssets.teamLogoUrl}
-                    alt="Team Crest"
-                    className="w-full h-full object-contain rounded-full"
-                  />
-                </div>
-              )}
-
-              {/* Custom Player Portrait Medallion (Top Right) */}
-              {customAssets.playerPhotoUrl && (
-                <div className="absolute top-0 right-2 sm:right-4 w-10 h-10 sm:w-16 sm:h-16 rounded-full border-2 border-amber-500 bg-amber-50 p-0.5 shadow-lg overflow-hidden flex items-center justify-center z-20">
-                  <img
-                    src={customAssets.playerPhotoUrl}
-                    alt={effectiveRecipient.name}
-                    className="w-full h-full object-cover rounded-full"
-                  />
-                </div>
-              )}
-
               {/* Co-Branding Banner */}
               <div
                 className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[7px] sm:text-[8.5px] font-extrabold uppercase tracking-widest border mx-auto mb-0.5 shadow-xs"
@@ -3522,24 +3047,16 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
 
               {/* 4. Official Authority Calligraphic Signatures */}
               <div className="text-right">
-                <div className="h-5 sm:h-7 flex items-end justify-end">
-                  {customAssets.signatureImageUrl ? (
-                    <img
-                      src={customAssets.signatureImageUrl}
-                      alt="Official Signature"
-                      className="max-h-6 sm:max-h-8 w-auto object-contain ml-auto"
-                    />
-                  ) : (
-                    <span
-                      className="font-bold text-[12px] sm:text-base md:text-lg"
-                      style={{
-                        fontFamily: '"Alex Brush", "Cormorant Garamond", cursive, serif',
-                        color: activeTheme.accentColor
-                      }}
-                    >
-                      Shubham Hingane
-                    </span>
-                  )}
+                <div className="h-5 sm:h-6 flex items-end justify-end">
+                  <span
+                    className="font-bold text-[12px] sm:text-base md:text-lg"
+                    style={{
+                      fontFamily: '"Alex Brush", "Cormorant Garamond", cursive, serif',
+                      color: activeTheme.accentColor
+                    }}
+                  >
+                    Shubham Hingane
+                  </span>
                 </div>
                 <div className="w-24 sm:w-36 border-b ml-auto my-0.5" style={{ borderColor: activeTheme.secondaryBorder }} />
                 <span className="uppercase tracking-wider block text-[6.5px] sm:text-[7.5px] font-black" style={{ color: activeTheme.headingText }}>

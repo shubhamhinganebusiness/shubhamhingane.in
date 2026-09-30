@@ -269,26 +269,6 @@ export const TournamentMatchScorecardModal: React.FC<TournamentMatchScorecardMod
   const handleDownloadPDF = () => {
     try {
       const doc = new jsPDF();
-
-      const runAutoTable = (targetDoc: any, options: any) => {
-        try {
-          if (typeof autoTable === 'function') {
-            autoTable(targetDoc, options);
-          } else if (typeof (autoTable as any)?.default === 'function') {
-            (autoTable as any).default(targetDoc, options);
-          } else if (typeof (targetDoc as any)?.autoTable === 'function') {
-            (targetDoc as any).autoTable(options);
-          }
-        } catch (e) {
-          console.warn('AutoTable invocation error:', e);
-          if (typeof (targetDoc as any)?.autoTable === 'function') {
-            try {
-              (targetDoc as any).autoTable(options);
-            } catch (_) {}
-          }
-        }
-      };
-
       doc.setFontSize(16);
       doc.text(tournament.name, 14, 18);
       doc.setFontSize(11);
@@ -298,64 +278,27 @@ export const TournamentMatchScorecardModal: React.FC<TournamentMatchScorecardMod
         doc.text(`Player of the Match: ${match.manOfTheMatch}`, 14, 40);
       }
 
-      // Innings 1 Batting Table
-      doc.setFontSize(12);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`${match.teamAName} Batting: ${match.scoreA} (${match.oversA} ov)`, 14, 50);
-      runAutoTable(doc, {
-        startY: 54,
+      // Innings 1 Table
+      doc.setFontSize(13);
+      doc.text(`${match.teamAName} Batting: ${match.scoreA} (${match.oversA} ov)`, 14, 52);
+      autoTable(doc, {
+        startY: 56,
         head: [['Batter', 'Dismissal', 'R', 'B', '4s', '6s', 'SR']],
         body: innings1.batters.map(b => [b.name, b.dismissal, b.runs, b.balls, b.fours, b.sixes, b.strikeRate]),
         theme: 'striped',
-        headStyles: { fillColor: [16, 185, 129] },
-        styles: { fontSize: 8.5 }
+        headStyles: { fillColor: [16, 185, 129] }
       });
 
-      // Innings 1 Bowling Table
-      let finalY = (doc as any).lastAutoTable?.finalY || 100;
-      doc.setFontSize(10);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`${match.teamBName} Bowling Figures`, 14, finalY + 8);
-      runAutoTable(doc, {
-        startY: finalY + 12,
-        head: [['Bowler', 'O', 'M', 'R', 'W', 'Econ']],
-        body: innings1.bowlers.map(bw => [bw.name, bw.overs, bw.maidens, bw.runs, bw.wickets, bw.economy]),
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42] },
-        styles: { fontSize: 8 }
-      });
-
-      finalY = (doc as any).lastAutoTable?.finalY || (finalY + 40);
-      if (finalY > 210) {
-        doc.addPage();
-        finalY = 20;
-      }
-
-      // Innings 2 Batting Table
-      doc.setFontSize(12);
-      doc.setFont('Helvetica', 'bold');
+      // Innings 2 Table
+      const finalY = (doc as any).lastAutoTable?.finalY || 120;
+      doc.setFontSize(13);
       doc.text(`${match.teamBName} Batting: ${match.scoreB} (${match.oversB} ov)`, 14, finalY + 12);
-      runAutoTable(doc, {
+      autoTable(doc, {
         startY: finalY + 16,
         head: [['Batter', 'Dismissal', 'R', 'B', '4s', '6s', 'SR']],
         body: innings2.batters.map(b => [b.name, b.dismissal, b.runs, b.balls, b.fours, b.sixes, b.strikeRate]),
         theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229] },
-        styles: { fontSize: 8.5 }
-      });
-
-      // Innings 2 Bowling Table
-      finalY = (doc as any).lastAutoTable?.finalY || (finalY + 60);
-      doc.setFontSize(10);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`${match.teamAName} Bowling Figures`, 14, finalY + 8);
-      runAutoTable(doc, {
-        startY: finalY + 12,
-        head: [['Bowler', 'O', 'M', 'R', 'W', 'Econ']],
-        body: innings2.bowlers.map(bw => [bw.name, bw.overs, bw.maidens, bw.runs, bw.wickets, bw.economy]),
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42] },
-        styles: { fontSize: 8 }
+        headStyles: { fillColor: [79, 70, 229] }
       });
 
       doc.save(`Scorecard_${match.teamAName}_vs_${match.teamBName}.pdf`);

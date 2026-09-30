@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, safeOnSnapshot } from '../../lib/firebase';
-import { collection, query, orderBy } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { DEFAULT_PRESET_SPONSORS } from '../../utils/cricketSponsorsStorage';
 
 export interface SponsorAdSlide {
@@ -56,11 +56,11 @@ export function useSpectatorSliderImages() {
 
     try {
       const q = query(collection(db, 'spectator_slider_images'), orderBy('order', 'asc'));
-      unsub = safeOnSnapshot(
+      unsub = onSnapshot(
         q,
         (snapshot) => {
           const items: SponsorAdSlide[] = [];
-          snapshot.forEach((docSnap: any) => {
+          snapshot.forEach((docSnap) => {
             const data = docSnap.data();
             if (data.isActive !== false && data.imageUrl && typeof data.imageUrl === 'string' && data.imageUrl.trim() !== '') {
               items.push({
@@ -93,7 +93,7 @@ export function useSpectatorSliderImages() {
           setLoading(false);
         },
         (err) => {
-          console.warn('[useSpectatorSliderImages] Firestore read note:', err?.message || err);
+          console.warn('[useSpectatorSliderImages] Firestore read note:', err);
           setLoading(false);
         }
       );
@@ -112,7 +112,8 @@ export function useSpectatorSliderImages() {
       }
     };
 
-    const handleStorageUpdate = (e: StorageEvent) => {
+    window.addEventListener('spectator_slider_updated', handleCustomUpdate);
+    window.addEventListener('storage', (e) => {
       if (e.key === SPECTATOR_SLIDER_CACHE_KEY && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
@@ -121,17 +122,11 @@ export function useSpectatorSliderImages() {
           }
         } catch (_) {}
       }
-    };
-
-    window.addEventListener('spectator_slider_updated', handleCustomUpdate);
-    window.addEventListener('storage', handleStorageUpdate);
+    });
 
     return () => {
-      try {
-        unsub();
-      } catch {}
+      unsub();
       window.removeEventListener('spectator_slider_updated', handleCustomUpdate);
-      window.removeEventListener('storage', handleStorageUpdate);
     };
   }, [syncToLocalCache]);
 

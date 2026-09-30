@@ -38,6 +38,7 @@ export interface TeamWithRoster {
   regFeePaid: boolean;
   seed: number;
   group?: string; // Group A, Group B (for Group Stages + Playoffs)
+  logo?: string;
 }
 
 export interface Official {

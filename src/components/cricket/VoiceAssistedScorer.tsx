@@ -33,7 +33,7 @@ export interface VoiceScoreCommandResult {
   runs?: number;
   extraRuns?: number;
   wicketType?: 'bowled' | 'caught' | 'run_out' | 'lbw' | 'stumped' | 'hit_wicket';
-  overlayType?: 'team_vs_team' | 'squad_a' | 'squad_b' | 'squad_both' | 'field_positions' | 'batting_summary' | 'bowling_summary' | 'tournament_logo' | 'toss_result' | 'none';
+  overlayType?: 'team_vs_team' | 'squad_a' | 'squad_b' | 'squad_both' | 'field_positions' | 'batting_summary' | 'bowling_summary' | 'tournament_logo' | 'toss_result' | 'none' | 'clear';
   modalType?: 'toss' | 'dls' | 'field_positions' | 'awards' | 'sponsors' | 'prizes' | 'scorecard' | 'share' | 'dream_team' | 'playoff' | 'edit_match' | 'slider_admin';
   penaltyRuns?: number;
   playerName?: string;

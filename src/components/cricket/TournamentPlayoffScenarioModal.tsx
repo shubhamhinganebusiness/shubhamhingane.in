@@ -296,11 +296,11 @@ export const TournamentPlayoffScenarioModal: React.FC<TournamentPlayoffScenarioM
                             )}
                           </div>
                         </td>
-                        <td className="py-3 px-3 text-center font-mono text-slate-300">{team.matchesPlayed}</td>
-                        <td className="py-3 px-3 text-center font-mono font-bold text-emerald-400">{team.wins}</td>
+                        <td className="py-3 px-3 text-center font-mono text-slate-300">{(team as any).matchesPlayed ?? team.played}</td>
+                        <td className="py-3 px-3 text-center font-mono font-bold text-emerald-400">{(team as any).wins ?? team.won}</td>
                         <td className="py-3 px-3 text-center font-mono font-black text-white text-sm bg-slate-950/40">{team.points}</td>
                         <td className="py-3 px-3 text-center font-mono font-extrabold text-amber-400">
-                          {team.netRunRate > 0 ? `+${team.netRunRate.toFixed(3)}` : team.netRunRate.toFixed(3)}
+                          {((team as any).netRunRate ?? team.NRR) > 0 ? `+${((team as any).netRunRate ?? team.NRR).toFixed(3)}` : ((team as any).netRunRate ?? team.NRR).toFixed(3)}
                         </td>
                         <td className="py-3 px-4 text-center">
                           {qual.status === 'QUALIFIED' ? (
@@ -341,7 +341,7 @@ export const TournamentPlayoffScenarioModal: React.FC<TournamentPlayoffScenarioM
                     <div className="flex items-center justify-between">
                       <strong className="text-white font-black">{team.name}</strong>
                       <span className="text-[10px] font-mono font-bold text-amber-400">
-                        {team.points} Pts ({team.netRunRate > 0 ? `+${team.netRunRate.toFixed(2)}` : team.netRunRate.toFixed(2)})
+                        {team.points} Pts ({((team as any).netRunRate ?? team.NRR) > 0 ? `+${((team as any).netRunRate ?? team.NRR).toFixed(2)}` : ((team as any).netRunRate ?? team.NRR).toFixed(2)})
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 leading-relaxed">

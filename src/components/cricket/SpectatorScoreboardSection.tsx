@@ -14,7 +14,6 @@ import {
   db, 
   handleFirestoreError, 
   OperationType, 
-  safeOnSnapshot,
   subscribeToRealtimeDBMatch,
   subscribeToRealtimeDBMatchesList,
   subscribeToRealtimeDBCompletedMatch,
@@ -24,7 +23,7 @@ import {
 } from '../../lib/firebase';
 import { subscribeToLiveSummary } from '../../services/cricketDb';
 import { liveFanOutClient } from './modules/LiveFanOutClient';
-import { doc, collection } from 'firebase/firestore';
+import { doc, onSnapshot, collection } from 'firebase/firestore';
 
 // Local storage & real-time sync across scoreboard components
 import { 
@@ -99,7 +98,6 @@ import {
   subscribeToSponsors,
   DEFAULT_PRESET_SPONSORS 
 } from '../../utils/cricketSponsorsStorage';
-import { SpectatorOneHalfBracketViewer } from './SpectatorOneHalfBracketViewer';
 
 // Struct definitions matching those in CricketScoreboard.tsx
 interface Batsman {
@@ -137,40 +135,18 @@ interface Innings {
   runs: number;
   wickets: number;
   ballsBowled: number;
-  extras: {
-    wides: number;
-    noBalls: number;
-    byes: number;
-    legByes: number;
-    penalty: number;
-  };
+  overs?: number;
+  extras: any;
   batsmen: Batsman[];
   bowlers: Bowler[];
-  strikerIndex: number;
-  nonStrikerIndex: number;
-  currentBowlerIndex: number;
-  fallOfWickets: {
-    wicketNo: number;
-    score: number;
-    batsmanName: string;
-    oversList: string;
-  }[];
-  commentaryList: {
-    id: string;
-    overBall: string;
-    description: string;
-    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone' | 'announcement' | 'break' | 'info' | string;
-    soundWave?: boolean;
-    announcementType?: string;
-    specialEvent?: string;
-    translations?: {
-      en?: string;
-      hi?: string;
-      mr?: string;
-    };
-    [key: string]: any;
-  }[];
+  strikerIndex?: number;
+  nonStrikerIndex?: number;
+  currentBowlerIndex?: number;
+  fallOfWickets: any[];
+  commentaryList?: any[];
   history?: BallProgress[];
+  recentBalls?: any[];
+  [key: string]: any;
 }
 
 interface MatchState {
@@ -178,15 +154,15 @@ interface MatchState {
   teamA: string;
   teamB: string;
   oversLimit: number;
-  tossWinner: string;
-  tossChoice: 'bat' | 'bowl';
+  tossWinner?: string;
+  tossChoice?: 'bat' | 'bowl' | string;
   currentInningsNum: 1 | 2;
-  innings1: Innings | null;
-  innings2: Innings | null;
-  status: 'setup' | 'live' | 'completed' | 'draft' | 'deleted';
+  innings1: any;
+  innings2: any;
+  status: 'setup' | 'live' | 'completed' | 'draft' | 'deleted' | string;
   isDeleted?: boolean;
   date: string;
-  freeHitNext: boolean;
+  freeHitNext?: boolean;
   winner?: string;
   winReason?: string;
   targetRuns?: number;
@@ -198,6 +174,12 @@ interface MatchState {
   mainMatchState?: any;
   superOversHistory?: any[];
   updatedAt?: number;
+  version?: number;
+  squadPlayers?: any;
+  scoreA?: string;
+  scoreB?: string;
+  oversA?: string;
+  oversB?: string;
   tournamentId?: string | null;
   tournamentMatchId?: string | null;
   tournamentName?: string | null;
@@ -227,7 +209,9 @@ interface MatchState {
     wickets: number;
     runsConceded: number;
     points: number;
+    [key: string]: any;
   };
+  [key: string]: any;
 }
 
 const copyToClipboard = (text: string): Promise<void> => {
@@ -578,7 +562,7 @@ export const LiveMatchGlobalBanner = () => {
     window.addEventListener('cricket_match_deleted', handleDeletedEvent);
 
     return () => {
-      try { unsub(); } catch {}
+      unsub();
       window.removeEventListener('cricket_match_deleted', handleDeletedEvent);
     };
   }, []);
@@ -739,7 +723,7 @@ export const LiveMatchGlobalBanner = () => {
 
           {adminAds.length > 0 && (
             <button
-              onClick={() => setShowDrawer(true)}
+              onClick={() => navigate('/#spectator-hub')}
               className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold transition-all cursor-pointer"
               title="View Sponsor Advertisements & Match Banner"
             >
@@ -858,7 +842,7 @@ export const SpectatorScoreboardSection = ({
   const [showMatchSelectionHub, setShowMatchSelectionHub] = useState(false);
   const [dismissedAutoSelect, setDismissedAutoSelect] = useState(false);
   const [typedMatchId, setTypedMatchId] = useState('');
-  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'bracket' | 'standing' | 'sponsors-prizes'>('arena');
+  const [activeTab, setActiveTab] = useState<'arena' | 'scorecard' | 'overs' | 'highlights' | 'points-table' | 'standing' | 'sponsors-prizes'>('arena');
   const [sponsorsList, setSponsorsList] = useState<LocalCricketSponsor[]>(() => getLocalSponsors());
 
   useEffect(() => {
@@ -895,7 +879,7 @@ export const SpectatorScoreboardSection = ({
   const [showMatchResultModal, setShowMatchResultModal] = useState(false);
   const [showCertificateModal, setShowCertificateModal] = useState(false);
   const [certificateAwardType, setCertificateAwardType] = useState<AwardType>('potm');
-  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | null>(null);
+  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | 'squad_pdf' | null>(null);
   const [hasDismissedResultModal, setHasDismissedResultModal] = useState<string | null>(() => {
     try {
       return sessionStorage.getItem('last_dismissed_result_modal_id');
@@ -984,15 +968,7 @@ export const SpectatorScoreboardSection = ({
   const [insightsError, setInsightsError] = useState<string>( '');
 
   // Subtab navigation inside spectator screen
-  const [spectatorSearchTab, setSpectatorSearchTab] = useState<'fixtures' | 'bracket' | 'tournaments'>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search || (window.location.hash.includes('?') ? window.location.hash.split('?')[1] : ''));
-      if (params.get('view') === 'tournament_hub' || params.get('tab') === 'bracket') {
-        return 'bracket';
-      }
-    } catch (_) {}
-    return 'fixtures';
-  });
+  const [spectatorSearchTab, setSpectatorSearchTab] = useState<'fixtures' | 'tournaments'>('fixtures');
   const [tournaments, setTournaments] = useState<any[]>([]);
   const [selectedTournament, setSelectedTournament] = useState<any | null>(null);
 
@@ -1740,12 +1716,12 @@ export const SpectatorScoreboardSection = ({
     window.addEventListener('cricket_select_match', handleSelectMatchEvent);
 
     return () => {
-      try { unsub(); } catch {}
-      try { unsubFanOut(); } catch {}
-      try { unsubRtdbList(); } catch {}
-      try { unsubCompleted(); } catch {}
-      try { unsubSync(); } catch {}
-      try { unsubDeleted(); } catch {}
+      unsub();
+      unsubFanOut();
+      unsubRtdbList();
+      unsubCompleted();
+      unsubSync();
+      unsubDeleted();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('cricket_matches_updated', handleMatchesUpdated);
       window.removeEventListener('cricket_match_updated', handleMatchesUpdated);
@@ -1976,12 +1952,12 @@ export const SpectatorScoreboardSection = ({
       setTournaments(initialLocal);
     }
 
-    const unsub = safeOnSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
+    const unsub = onSnapshot(collection(db, 'cricket_tournaments'), (snap) => {
       const list: any[] = [];
       const snapSeenIds = new Set<string>();
-      snap.forEach((docSnap: any) => {
-        const data = docSnap.data();
-        const tid = data?.id || docSnap.id;
+      snap.forEach((doc) => {
+        const data = doc.data();
+        const tid = data?.id || doc.id;
         if (tid && !isTournamentDeleted(tid) && !snapSeenIds.has(tid)) {
           snapSeenIds.add(tid);
           list.push({ ...data, id: tid });
@@ -2032,7 +2008,7 @@ export const SpectatorScoreboardSection = ({
       const validTournaments = deduplicateTournaments(merged);
       setTournaments(validTournaments);
     }, (err) => {
-      console.warn("Warning subscribing to cricket_tournaments:", err?.message || err);
+      console.warn("Warning subscribing to cricket_tournaments:", err);
     });
 
     const handleTournamentsUpdate = () => {
@@ -2050,7 +2026,7 @@ export const SpectatorScoreboardSection = ({
     window.addEventListener('storage', handleTournamentsUpdate);
 
     return () => {
-      try { unsub(); } catch {}
+      unsub();
       window.removeEventListener('gully_tournaments_updated', handleTournamentsUpdate);
       window.removeEventListener('one_half_tournament_updated', handleTournamentsUpdate);
       window.removeEventListener('storage', handleTournamentsUpdate);
@@ -2296,11 +2272,11 @@ export const SpectatorScoreboardSection = ({
     });
 
     return () => {
-      try { unsub(); } catch {}
-      try { unsubSummary(); } catch {}
-      try { unsubFanOutMatch(); } catch {}
-      try { unsubRtdb(); } catch {}
-      try { unsubSync(); } catch {}
+      unsub();
+      unsubSummary();
+      unsubFanOutMatch();
+      unsubRtdb();
+      unsubSync();
     };
   }, [matchIdParam, homepageMode, localSelectedMatchId]);
 
@@ -2314,7 +2290,7 @@ export const SpectatorScoreboardSection = ({
   const liveMatches = useMemo(() => {
     // 1. Gather all genuine live matches created by score manager from allMatches
     const list = allMatches.filter(m => {
-      if (!m || m.status !== 'live' || m.isHidden || m.isBlocked || isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted' || isDemoOrAIMatch(m)) return false;
+      if (!m || m.status !== 'live' || m.isHidden || m.isBlocked || isMatchDeleted(m.id) || (m as any).isDeleted === true || isDemoOrAIMatch(m)) return false;
       return true;
     });
 
@@ -2416,7 +2392,7 @@ export const SpectatorScoreboardSection = ({
   const completedMatches = useMemo(() => allMatches.filter(m => {
     if (!m || m.status !== 'completed' || m.isHidden || m.isBlocked) return false;
     if ((m as any).hideResultCard === true) return false;
-    if ((m as any).isDeleted === true || m.status === 'deleted' || isMatchDeleted(m.id)) return false;
+    if ((m as any).isDeleted === true || isMatchDeleted(m.id)) return false;
     // Authoritative check: Once remote Firestore matches collection has synced,
     // completed records MUST exist in the remote database (unless it's a tournament match).
     const isTour = !!m.tournamentId || m.id.startsWith('tour_') || (m as any).isTournamentMatch;
@@ -2484,20 +2460,13 @@ export const SpectatorScoreboardSection = ({
   );
 
   useEffect(() => {
-    const viewParam = searchParams.get('view');
-    const tabParam = searchParams.get('tab') as string | null;
-    if (viewParam === 'tournament_hub' || tabParam === 'bracket') {
-      setSpectatorSearchTab('bracket');
-      if (!homepageMode) {
-        setActiveTab('bracket');
-      }
-    }
     if (homepageMode) return;
+    const tabParam = searchParams.get('tab') as SpectatorTargetTab | null;
     if (
       tabParam &&
-      ['arena', 'scorecard', 'overs', 'highlights', 'points-table', 'bracket', 'standing', 'sponsors-prizes'].includes(tabParam)
+      ['arena', 'scorecard', 'overs', 'highlights', 'points-table', 'standing', 'sponsors-prizes'].includes(tabParam)
     ) {
-      setActiveTab(tabParam as any);
+      setActiveTab(tabParam);
     }
     const certParam = searchParams.get('cert');
     if (certParam === 'true') {
@@ -3754,125 +3723,79 @@ export const SpectatorScoreboardSection = ({
       const bowlerText = topBowlerName !== 'N/A' ? `${topBowlerName} (${topBowlerWickets} wkts / ${topBowlerRuns} runs)` : 'None yet';
       doc.text(`Best Innings Batting: ${batterText}   |   Best Bowling Figures: ${bowlerText}`, 18, 89);
 
-      const runAutoTable = (targetDoc: any, options: any) => {
-        try {
-          if (typeof autoTable === 'function') {
-            autoTable(targetDoc, options);
-          } else if (typeof (autoTable as any)?.default === 'function') {
-            (autoTable as any).default(targetDoc, options);
-          } else if (typeof (targetDoc as any)?.autoTable === 'function') {
-            (targetDoc as any).autoTable(options);
-          }
-        } catch (e) {
-          console.warn('AutoTable invocation fallback error:', e);
-          if (typeof (targetDoc as any)?.autoTable === 'function') {
-            try {
-              (targetDoc as any).autoTable(options);
-            } catch (_) {}
-          }
-        }
-      };
-
       // Innings 1 Card
-      if (selectedMatch.innings1) {
-        doc.setTextColor(30);
-        doc.setFontSize(13);
-        doc.setFont('Helvetica', 'bold');
-        doc.text(`1st Innings: ${selectedMatch.innings1.battingTeam || selectedMatch.teamA} Scorecard`, 14, 105);
-        
-        doc.setFontSize(10);
-        doc.setFont('Helvetica', 'normal');
-        doc.text(`Total Score: ${selectedMatch.innings1.runs || 0}/${selectedMatch.innings1.wickets || 0} in ${formatOvers(selectedMatch.innings1.ballsBowled || 0)} overs`, 14, 110);
-        
-        // Innings 1 Batting table
-        const validInn1Batsmen = (selectedMatch.innings1.batsmen || []).filter((b: any) => b && b.name);
-        const inn1BatRows = validInn1Batsmen.length > 0
-          ? validInn1Batsmen.map((b: any) => {
-              const runs = Number(b.runs) || 0;
-              const balls = Number(b.balls) || 0;
-              const fours = Number(b.fours) || 0;
-              const sixes = Number(b.sixes) || 0;
-              return [
-                b.name,
-                b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-                runs.toString(),
-                balls.toString(),
-                fours.toString(),
-                sixes.toString(),
-                balls > 0 ? (((runs) / balls) * 100).toFixed(1) : '0.0'
-              ];
-            })
-          : [
-              ['Scoreboard Total (Innings 1)', 'Completed', (selectedMatch.innings1.runs || 0).toString(), (selectedMatch.innings1.ballsBowled || 0).toString(), '-', '-', '-']
-            ];
-        
-        runAutoTable(doc, {
-          startY: 114,
-          head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
-          body: inn1BatRows,
-          theme: 'striped',
-          headStyles: { fillColor: [16, 185, 129] },
-          styles: { fontSize: 8.5 }
-        });
-        
-        let lastY1 = (doc as any).lastAutoTable?.finalY || 140;
-        
-        // Extras break-out line
-        const ext1 = (typeof selectedMatch.innings1.extras === 'object' && selectedMatch.innings1.extras !== null)
-          ? selectedMatch.innings1.extras
-          : { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
-        const extTotal1 = (ext1.wides || 0) + (ext1.noBalls || 0) + (ext1.byes || 0) + (ext1.legByes || 0) + (ext1.penalty || 0);
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(8.5);
-        doc.setTextColor(60);
-        doc.text(`Extras: ${extTotal1} (wides: ${ext1.wides || 0}, no-balls: ${ext1.noBalls || 0}, byes: ${ext1.byes || 0}, legbyes: ${ext1.legByes || 0}, penalty: ${ext1.penalty || 0})`, 14, lastY1 + 6);
-        
-        // Fall of Wickets line
-        const fowItems1 = selectedMatch.innings1.fallOfWickets && selectedMatch.innings1.fallOfWickets.length > 0
-          ? selectedMatch.innings1.fallOfWickets.map((fw: any) => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
-          : 'No wickets fell';
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text(`Fall of Wickets: ${fowItems1}`, 14, lastY1 + 11);
-        
-        let bowlStartY1 = lastY1 + 16;
-        doc.setFontSize(12);
-        doc.setFont('Helvetica', 'bold');
-        doc.setTextColor(30);
-        const bowlTeam1 = selectedMatch.innings1.bowlingTeam || (selectedMatch.innings1.battingTeam === selectedMatch.teamA ? selectedMatch.teamB : selectedMatch.teamA);
-        doc.text(`${bowlTeam1} Bowling Figures`, 14, bowlStartY1);
-        
-        const validInn1Bowlers = (selectedMatch.innings1.bowlers || []).filter((bw: any) => bw && bw.name);
-        const inn1BowlRows = validInn1Bowlers.length > 0
-          ? validInn1Bowlers.map((bw: any) => {
-              const bb = Number(bw.ballsBowled) || 0;
-              const maidens = Number(bw.maidens) || 0;
-              const rc = Number(bw.runsConceded) || 0;
-              const wkts = Number(bw.wickets) || 0;
-              return [
-                bw.name,
-                formatOvers(bb),
-                maidens.toString(),
-                rc.toString(),
-                wkts.toString(),
-                bb > 0 ? (((rc) / bb) * 6).toFixed(2) : '0.00'
-              ];
-            })
-          : [
-              ['Bowling Attack Combined', formatOvers(selectedMatch.innings1.ballsBowled || 0), '0', (selectedMatch.innings1.runs || 0).toString(), (selectedMatch.innings1.wickets || 0).toString(), '-']
-            ];
-        
-        runAutoTable(doc, {
-          startY: bowlStartY1 + 4,
-          head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
-          body: inn1BowlRows,
-          theme: 'striped',
-          headStyles: { fillColor: [15, 23, 42] },
-          styles: { fontSize: 8.5 }
-        });
-      }
+      doc.setTextColor(30);
+      doc.setFontSize(13);
+      doc.setFont('Helvetica', 'bold');
+      doc.text(`1st Innings: ${selectedMatch.innings1.battingTeam} Scorecard`, 14, 105);
       
-      let nextY = ((doc as any).lastAutoTable?.finalY || 165) + 15;
+      doc.setFontSize(10);
+      doc.setFont('Helvetica', 'normal');
+      doc.text(`Total Score: ${selectedMatch.innings1.runs}/${selectedMatch.innings1.wickets} in ${formatOvers(selectedMatch.innings1.ballsBowled)} overs`, 14, 110);
+      
+      // Innings 1 Batting table
+      const inn1BatRows = (selectedMatch.innings1.batsmen || []).map((b: any) => [
+        b.name,
+        b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - bowling: ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
+        (b.runs || 0).toString(),
+        (b.balls || 0).toString(),
+        (b.fours || 0).toString(),
+        (b.sixes || 0).toString(),
+        b.balls > 0 ? (((b.runs || 0) / b.balls) * 100).toFixed(1) : '0.0'
+      ]);
+      
+      autoTable(doc, {
+        startY: 114,
+        head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
+        body: inn1BatRows,
+        theme: 'striped',
+        headStyles: { fillColor: [16, 185, 129] },
+        styles: { fontSize: 8.5 }
+      });
+      
+      let lastY1 = (doc as any).lastAutoTable.finalY;
+      
+      // Extras break-out line
+      const ext1 = selectedMatch.innings1.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
+      const extTotal1 = (ext1.wides || 0) + (ext1.noBalls || 0) + (ext1.byes || 0) + (ext1.legByes || 0) + (ext1.penalty || 0);
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(60);
+      doc.text(`Extras: ${extTotal1} (wides: ${ext1.wides || 0}, no-balls: ${ext1.noBalls || 0}, byes: ${ext1.byes || 0}, legbyes: ${ext1.legByes || 0}, penalty: ${ext1.penalty || 0})`, 14, lastY1 + 6);
+      
+      // Fall of Wickets line
+      const fowItems1 = selectedMatch.innings1.fallOfWickets && selectedMatch.innings1.fallOfWickets.length > 0
+        ? selectedMatch.innings1.fallOfWickets.map((fw: any) => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
+        : 'No wickets fell';
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(`Fall of Wickets: ${fowItems1}`, 14, lastY1 + 11);
+      
+      let bowlStartY1 = lastY1 + 16;
+      doc.setFontSize(12);
+      doc.setFont('Helvetica', 'bold');
+      doc.setTextColor(30);
+      doc.text(`${selectedMatch.innings1.battingTeam} Bowlers Performance`, 14, bowlStartY1);
+      
+      const inn1BowlRows = (selectedMatch.innings1.bowlers || []).map((bw: any) => [
+        bw.name,
+        formatOvers(bw.ballsBowled || 0),
+        (bw.maidens || 0).toString(),
+        (bw.runsConceded || 0).toString(),
+        (bw.wickets || 0).toString(),
+        bw.ballsBowled > 0 ? (((bw.runsConceded || 0) / bw.ballsBowled) * 6).toFixed(2) : '0.00'
+      ]);
+      
+      autoTable(doc, {
+        startY: bowlStartY1 + 4,
+        head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
+        body: inn1BowlRows,
+        theme: 'striped',
+        headStyles: { fillColor: [15, 23, 42] },
+        styles: { fontSize: 8.5 }
+      });
+      
+      let nextY = (doc as any).lastAutoTable.finalY + 15;
       
       // Check if we need a new page for Innings 2 Scorecard
       if (selectedMatch.innings2) {
@@ -3884,34 +3807,23 @@ export const SpectatorScoreboardSection = ({
         doc.setFontSize(13);
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(30);
-        doc.text(`2nd Innings: ${selectedMatch.innings2.battingTeam || selectedMatch.teamB} Scorecard`, 14, nextY);
+        doc.text(`2nd Innings: ${selectedMatch.innings2.battingTeam} Scorecard`, 14, nextY);
         
         doc.setFontSize(10);
         doc.setFont('Helvetica', 'normal');
-        doc.text(`Total Score: ${selectedMatch.innings2.runs || 0}/${selectedMatch.innings2.wickets || 0} in ${formatOvers(selectedMatch.innings2.ballsBowled || 0)} overs`, 14, nextY + 6);
+        doc.text(`Total Score: ${selectedMatch.innings2.runs}/${selectedMatch.innings2.wickets} in ${formatOvers(selectedMatch.innings2.ballsBowled)} overs`, 14, nextY + 6);
         
-        const validInn2Batsmen = (selectedMatch.innings2.batsmen || []).filter((b: any) => b && b.name);
-        const inn2BatRows = validInn2Batsmen.length > 0
-          ? validInn2Batsmen.map((b: any) => {
-              const runs = Number(b.runs) || 0;
-              const balls = Number(b.balls) || 0;
-              const fours = Number(b.fours) || 0;
-              const sixes = Number(b.sixes) || 0;
-              return [
-                b.name,
-                b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-                runs.toString(),
-                balls.toString(),
-                fours.toString(),
-                sixes.toString(),
-                balls > 0 ? (((runs) / balls) * 100).toFixed(1) : '0.0'
-              ];
-            })
-          : [
-              ['Scoreboard Total (Innings 2)', 'Completed', (selectedMatch.innings2.runs || 0).toString(), (selectedMatch.innings2.ballsBowled || 0).toString(), '-', '-', '-']
-            ];
+        const inn2BatRows = (selectedMatch.innings2.batsmen || []).map((b: any) => [
+          b.name,
+          b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - bowling: ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
+          (b.runs || 0).toString(),
+          (b.balls || 0).toString(),
+          (b.fours || 0).toString(),
+          (b.sixes || 0).toString(),
+          b.balls > 0 ? (((b.runs || 0) / b.balls) * 100).toFixed(1) : '0.0'
+        ]);
         
-        runAutoTable(doc, {
+        autoTable(doc, {
           startY: nextY + 11,
           head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
           body: inn2BatRows,
@@ -3920,11 +3832,9 @@ export const SpectatorScoreboardSection = ({
           styles: { fontSize: 8.5 }
         });
         
-        let lastY2 = (doc as any).lastAutoTable?.finalY || (nextY + 45);
+        let lastY2 = (doc as any).lastAutoTable.finalY;
         
-        const ext2 = (typeof selectedMatch.innings2.extras === 'object' && selectedMatch.innings2.extras !== null)
-          ? selectedMatch.innings2.extras
-          : { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
+        const ext2 = selectedMatch.innings2.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
         const extTotal2 = (ext2.wides || 0) + (ext2.noBalls || 0) + (ext2.byes || 0) + (ext2.legByes || 0) + (ext2.penalty || 0);
         doc.setFont('Helvetica', 'bold');
         doc.setFontSize(8.5);
@@ -3942,30 +3852,18 @@ export const SpectatorScoreboardSection = ({
         doc.setFontSize(12);
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(30);
-        const bowlTeam2 = selectedMatch.innings2.bowlingTeam || (selectedMatch.innings2.battingTeam === selectedMatch.teamA ? selectedMatch.teamB : selectedMatch.teamA);
-        doc.text(`${bowlTeam2} Bowling Figures`, 14, bowlStartY2);
+        doc.text(`${selectedMatch.innings2.battingTeam} Bowlers Performance`, 14, bowlStartY2);
         
-        const validInn2Bowlers = (selectedMatch.innings2.bowlers || []).filter((bw: any) => bw && bw.name);
-        const inn2BowlRows = validInn2Bowlers.length > 0
-          ? validInn2Bowlers.map((bw: any) => {
-              const bb = Number(bw.ballsBowled) || 0;
-              const maidens = Number(bw.maidens) || 0;
-              const rc = Number(bw.runsConceded) || 0;
-              const wkts = Number(bw.wickets) || 0;
-              return [
-                bw.name,
-                formatOvers(bb),
-                maidens.toString(),
-                rc.toString(),
-                wkts.toString(),
-                bb > 0 ? (((rc) / bb) * 6).toFixed(2) : '0.00'
-              ];
-            })
-          : [
-              ['Bowling Attack Combined', formatOvers(selectedMatch.innings2.ballsBowled || 0), '0', (selectedMatch.innings2.runs || 0).toString(), (selectedMatch.innings2.wickets || 0).toString(), '-']
-            ];
+        const inn2BowlRows = (selectedMatch.innings2.bowlers || []).map((bw: any) => [
+          bw.name,
+          formatOvers(bw.ballsBowled || 0),
+          (bw.maidens || 0).toString(),
+          (bw.runsConceded || 0).toString(),
+          (bw.wickets || 0).toString(),
+          bw.ballsBowled > 0 ? (((bw.runsConceded || 0) / bw.ballsBowled) * 6).toFixed(2) : '0.00'
+        ]);
         
-        runAutoTable(doc, {
+        autoTable(doc, {
           startY: bowlStartY2 + 4,
           head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
           body: inn2BowlRows,
@@ -3974,7 +3872,7 @@ export const SpectatorScoreboardSection = ({
           styles: { fontSize: 8.5 }
         });
         
-        nextY = ((doc as any).lastAutoTable?.finalY || (bowlStartY2 + 35)) + 15;
+        nextY = (doc as any).lastAutoTable.finalY + 15;
       }
       
       // Add Commentary Log Section
@@ -4160,14 +4058,14 @@ export const SpectatorScoreboardSection = ({
             )}
 
             {/* Landing Hub Sub-navigation Tabs */}
-            <div className="flex flex-wrap border border-slate-200/50 dark:border-slate-800 p-1 mb-6 gap-1.5 w-full max-w-xl bg-slate-100 dark:bg-slate-905 rounded-[1.3rem] shadow-inner">
+            <div className="flex border border-slate-200/50 dark:border-slate-800 p-1 mb-6 gap-2 w-full max-w-sm bg-slate-100 dark:bg-slate-905 rounded-[1.3rem] shadow-inner">
               <button
                 type="button"
                 onClick={() => {
                   setSpectatorSearchTab('fixtures');
                   setSelectedTournament(null);
                 }}
-                className={`flex-1 py-2.5 px-3 sm:px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2.5 px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-2 ${
                   spectatorSearchTab === 'fixtures'
                     ? 'bg-emerald-600 text-white shadow-md font-extrabold scale-[1.02]'
                     : 'text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
@@ -4177,22 +4075,8 @@ export const SpectatorScoreboardSection = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setSpectatorSearchTab('bracket');
-                  setSelectedTournament(null);
-                }}
-                className={`flex-1 py-2.5 px-3 sm:px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-1.5 ${
-                  spectatorSearchTab === 'bracket'
-                    ? 'bg-emerald-600 text-white shadow-md font-extrabold scale-[1.02]'
-                    : 'text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
-                }`}
-              >
-                🏆 Group 1 Bracket
-              </button>
-              <button
-                type="button"
                 onClick={() => setSpectatorSearchTab('tournaments')}
-                className={`flex-1 py-2.5 px-3 sm:px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2.5 px-4 rounded-xl text-[10px] uppercase tracking-widest border-none cursor-pointer font-black transition-all flex items-center justify-center gap-2 ${
                   spectatorSearchTab === 'tournaments'
                     ? 'bg-emerald-600 text-white shadow-md font-extrabold scale-[1.02]'
                     : 'text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-transparent'
@@ -4748,37 +4632,10 @@ export const SpectatorScoreboardSection = ({
                     onExportPDF={(m) => handleExportMatchPDF(m)}
                   />
                 )}
-
-                {/* Read-Only One-Half Tournament — Group 1 Knockout Bracket Section on Spectator Hub */}
-                {!isOneHalfTournamentDeleted() && (
-                  <div className="pt-4">
-                    <SpectatorOneHalfBracketViewer
-                      allMatches={allMatches}
-                      onSelectLiveMatch={(id) => selectMatch(id)}
-                      defaultDay={1}
-                    />
-                  </div>
-                )}
             </>
-            ) : spectatorSearchTab === 'bracket' ? (
-              /* ===================== GROUP 1 KNOCKOUT BRACKET (READ-ONLY SPECTATOR VIEW) ===================== */
-              <div className="space-y-8 animate-fade-in">
-                <SpectatorOneHalfBracketViewer
-                  allMatches={allMatches}
-                  onSelectLiveMatch={(id) => selectMatch(id)}
-                  defaultDay={1}
-                />
-              </div>
             ) : (
               /* ===================== TOURNAMENTS ARENA TAB VIEW ===================== */
               <div className="space-y-8 animate-fade-in">
-                {!isOneHalfTournamentDeleted() && !selectedTournament && (
-                  <SpectatorOneHalfBracketViewer
-                    allMatches={allMatches}
-                    onSelectLiveMatch={(id) => selectMatch(id)}
-                    defaultDay={1}
-                  />
-                )}
                 {!selectedTournament ? (
                   <div className="space-y-6">
                     <div className="flex items-center gap-2">
@@ -6883,8 +6740,7 @@ export const SpectatorScoreboardSection = ({
                     { id: 'scorecard', label: '📊 Full Scorecard' },
                     { id: 'overs', label: '⚾ Overs Analysis' },
                     { id: 'highlights', label: '✨ Highlights & Comm' },
-                    { id: 'bracket', label: '🏆 Group 1 Bracket' },
-                    ...(isTournamentMatch ? [{ id: 'points-table', label: '📋 Points Table' }] : []),
+                    ...(isTournamentMatch ? [{ id: 'points-table', label: '🏆 Points Table' }] : []),
                     { id: 'standing', label: isTournamentMatch ? '👥 Squads XI' : '👥 Squads & Teams' },
                     { id: 'sponsors-prizes', label: '🎁 Sponsors & Prizes' }
                   ].map((tab) => (
@@ -8938,26 +8794,6 @@ export const SpectatorScoreboardSection = ({
                       </div>
 
                     </div>
-
-                    {/* One-Half Group 1 Knockout Bracket (Read-Only Spectator View) */}
-                    {!isOneHalfTournamentDeleted() && (
-                      <SpectatorOneHalfBracketViewer
-                        allMatches={allMatches}
-                        onSelectLiveMatch={(id) => selectMatch(id)}
-                        defaultDay={1}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {/* ===================== TAB: GROUP 1 KNOCKOUT BRACKET (READ-ONLY) ===================== */}
-                {activeTab === 'bracket' && (
-                  <div className="space-y-6 animate-fade-in">
-                    <SpectatorOneHalfBracketViewer
-                      allMatches={allMatches}
-                      onSelectLiveMatch={(id) => selectMatch(id)}
-                      defaultDay={1}
-                    />
                   </div>
                 )}
 

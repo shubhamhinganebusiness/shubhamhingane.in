@@ -15,10 +15,6 @@ export interface CertificateConfigSettings {
   customHeaderTitle: string;
   customSubtitleTemplate: string;
   customFooterNote: string;
-  // Custom uploaded branding assets (Base64 data URLs or image URLs)
-  defaultTeamLogoUrl?: string;
-  defaultSignatureImageUrl?: string;
-  defaultPlayerPhotoUrl?: string;
   // Custom overrides per theme or global accent color override
   customAccentColor?: string;
   customPrimaryBorder?: string;
@@ -39,9 +35,6 @@ export const DEFAULT_CERTIFICATE_CONFIG: CertificateConfigSettings = {
   customHeaderTitle: 'CERTIFICATE OF EXCELLENCE',
   customSubtitleTemplate: 'for outstanding match-winning performance as',
   customFooterNote: 'Certified & Issued by Gully Scoreboard Team • Shubham Hingane, Founder of Gully Scoreboard',
-  defaultTeamLogoUrl: '',
-  defaultSignatureImageUrl: '',
-  defaultPlayerPhotoUrl: '',
   updatedAt: Date.now()
 };
 
