@@ -130,6 +130,11 @@ export interface MatchLiveSummary {
   status: 'setup' | 'live' | 'completed' | 'draft';
   teamA: string;
   teamB: string;
+  groundName?: string;
+  venue?: string;
+  tournamentName?: string;
+  tossWinner?: string;
+  tossChoice?: 'bat' | 'bowl';
   oversLimit: number;
   currentInningsNum: 1 | 2;
   currentScore: {
@@ -193,29 +198,94 @@ export function extractLiveSummary(match: MatchState): MatchLiveSummary | null {
   const nonStriker = currentInn?.batsmen?.[currentInn.nonStrikerIndex];
   const bowler = currentInn?.bowlers?.[currentInn.currentBowlerIndex];
 
-  // Derive last mini balls from recent commentary
+  // Derive current over mini balls from recent commentary
   const recentMini: string[] = [];
+  const maxWickets = match.isSuperOver ? ((match as any).superOverWicketLimit || 2) : 10;
+  const isAllOut = wickets >= maxWickets;
+  const isOversLimitReached = match.oversLimit > 0 && balls >= match.oversLimit * 6;
+  const isMatchCompleted = match.status === 'completed' || isAllOut || isOversLimitReached;
+  const activeOverNo = balls === 0 ? 0 : isMatchCompleted ? Math.max(0, Math.floor((balls - 1) / 6)) : Math.floor(balls / 6);
+
   if (currentInn?.commentaryList && currentInn.commentaryList.length > 0) {
-    for (let i = 0; i < Math.min(12, currentInn.commentaryList.length); i++) {
-      const comm = currentInn.commentaryList[i];
-      if (comm?.id) {
-        // Find simple label
-        if (comm.type === 'wicket') recentMini.unshift('W');
-        else if (comm.ballScore === '4' || (comm as any).runsOffBat === 4 || (comm as any).runs === 4 || comm.description?.includes('FOUR') || comm.description?.includes('four') || comm.description?.includes('boundary')) recentMini.unshift('4');
-        else if (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || comm.description?.includes('SIX') || comm.description?.includes('six') || comm.description?.includes('maximum')) recentMini.unshift('6');
-        else if (comm.description?.includes('WIDE') || comm.description?.includes('Wide')) recentMini.unshift('WD');
-        else if (comm.description?.includes('NO BALL') || comm.description?.includes('No ball')) recentMini.unshift('NB');
-        else if (comm.description?.includes('DOT') || comm.description?.includes('dot') || comm.ballScore === '0') recentMini.unshift('0');
-        else recentMini.unshift(comm.ballScore ? `${comm.ballScore}` : comm.overBall ? `${comm.overBall}` : '•');
+    for (let i = 0; i < currentInn.commentaryList.length && recentMini.length < 12; i++) {
+      const comm = currentInn.commentaryList[i] as any;
+      if (!comm || !comm.overBall) continue;
+      const hasScore = Boolean(comm.ballScore) || typeof comm.runsOffBat === 'number' || typeof comm.runs === 'number' || comm.type === 'extra';
+      if (
+        (comm.overBall === '0.0' && !hasScore) ||
+        comm.type === 'milestone' ||
+        comm.type === 'announcement' ||
+        comm.type === 'break' ||
+        comm.type === 'info' ||
+        comm.specialEvent === 'retire_hurt' ||
+        comm.announcementType ||
+        comm.id?.startsWith('comm-bat-upd-') ||
+        comm.id?.startsWith('comm-bowl-upd-') ||
+        comm.id?.startsWith('comm-over-finish-') ||
+        comm.id?.startsWith('comm-dls-') ||
+        comm.id?.startsWith('c-news-') ||
+        comm.id?.startsWith('comment-')
+      ) {
+        continue;
+      }
+
+      let commOverIdx = -1;
+      if (typeof comm.overIndex === 'number' && !isNaN(comm.overIndex)) {
+        commOverIdx = comm.overIndex;
+      } else if (typeof comm.overBall === 'string') {
+        const parts = comm.overBall.trim().split('.');
+        if (parts.length === 2) {
+          const op = parseInt(parts[0], 10);
+          if (!isNaN(op)) commOverIdx = op;
+        }
+      }
+      if (commOverIdx !== activeOverNo) continue;
+
+      const bScore = String(comm.ballScore || '').trim().toUpperCase();
+      const runsOffBat = typeof comm.runsOffBat === 'number' && !isNaN(comm.runsOffBat) ? comm.runsOffBat : null;
+      const directRuns = typeof comm.runs === 'number' && !isNaN(comm.runs) ? comm.runs : null;
+      const desc = String(comm.description || '');
+
+      if (comm.type === 'wicket' || bScore === 'W' || bScore.startsWith('W+')) {
+        recentMini.unshift('W');
+      } else if (comm.isNoBall || comm.extraType === 'noball' || /nb/i.test(bScore)) {
+        recentMini.unshift(runsOffBat && runsOffBat > 0 ? `NB+${runsOffBat}` : bScore || 'NB');
+      } else if (comm.extraType === 'wide' || /wd/i.test(bScore)) {
+        recentMini.unshift(runsOffBat && runsOffBat > 0 ? `WD+${runsOffBat}` : bScore || 'WD');
+      } else if (bScore) {
+        recentMini.unshift(bScore);
+      } else if (runsOffBat !== null) {
+        recentMini.unshift(String(runsOffBat));
+      } else if (directRuns !== null) {
+        recentMini.unshift(String(directRuns));
+      } else if (desc.includes('FOUR') || desc.includes('four') || desc.includes('boundary')) {
+        recentMini.unshift('4');
+      } else if (desc.includes('SIX') || desc.includes('six') || desc.includes('maximum')) {
+        recentMini.unshift('6');
+      } else if (desc.includes('WIDE') || desc.includes('Wide')) {
+        recentMini.unshift('WD');
+      } else if (desc.includes('NO BALL') || desc.includes('No ball')) {
+        recentMini.unshift('NB');
+      } else if (comm.type === 'dot' || desc.includes('DOT') || desc.includes('dot')) {
+        recentMini.unshift('0');
+      } else {
+        recentMini.unshift('0');
       }
     }
   }
+
+  const resolvedGround = match.groundName || match.venue || (match as any).ground || undefined;
 
   return {
     matchId: match.id,
     status: match.status === 'completed' ? 'completed' : match.status === 'live' ? 'live' : 'setup',
     teamA: match.teamA,
     teamB: match.teamB,
+    groundName: resolvedGround,
+    venue: resolvedGround,
+    tournamentName: match.tournamentName || (match as any).seriesName || undefined,
+    tossWinner: match.tossWinner,
+    tossChoice: match.tossChoice,
     oversLimit: match.oversLimit,
     currentInningsNum: match.currentInningsNum,
     currentScore: {

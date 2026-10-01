@@ -3,6 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function () {
+        function isFsAssertion(v) {
+          if (!v) return false;
+          var s = typeof v === 'string' ? v : (v.message ? v.message + ' ' + (v.stack || '') : String(v));
+          return s.indexOf('INTERNAL ASSERTION FAILED') !== -1 || s.indexOf('ID: ca9') !== -1 || s.indexOf('ID: b815') !== -1 || s.indexOf('{"ve":-1}') !== -1;
+        }
+        var origErr = console.error;
+        console.error = function () {
+          for (var i = 0; i < arguments.length; i++) {
+            if (isFsAssertion(arguments[i])) return;
+          }
+          return origErr.apply(console, arguments);
+        };
+        window.addEventListener('error', function (e) {
+          if (isFsAssertion(e && (e.message || e.error))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          if (isFsAssertion(e && e.reason)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
     
     <!-- Primary Meta Tags -->
     <title>Shubham Hingane — Expert React Firebase SaaS Developer Pune, India</title>

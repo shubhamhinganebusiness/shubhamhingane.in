@@ -200,10 +200,48 @@ export const MiniLiveScoreboardWidget: React.FC<MiniLiveScoreboardWidgetProps> =
   const ballsRemaining = Math.max(0, maxBalls - ballsBowled);
   const rrr = (ballsRemaining > 0 && runsNeeded > 0) ? ((runsNeeded / ballsRemaining) * 6).toFixed(1) : null;
 
-  // Recent balls
-  const recentBalls = (ballsBowled > 0 && currInnings?.recentBalls && Array.isArray(currInnings.recentBalls))
-    ? currInnings.recentBalls.slice(-6)
-    : [];
+  // Recent balls in current over (including any No Balls / Wides bowled before the first legal ball of the over)
+  const recentBalls = (() => {
+    const rb = Array.isArray(currInnings?.recentBalls) ? currInnings.recentBalls : [];
+    if (rb.length === 0) return [];
+    const legalInOver = ballsBowled % 6;
+    if (legalInOver === 0 && activeMatch.status !== 'completed') {
+      const trailingExtras: string[] = [];
+      for (let i = rb.length - 1; i >= 0; i--) {
+        const item = String(rb[i] || '').toUpperCase();
+        if (item.includes('NB') || item.includes('WD')) {
+          trailingExtras.unshift(rb[i]);
+        } else {
+          break;
+        }
+      }
+      return trailingExtras;
+    }
+    const targetLegal = legalInOver === 0 ? 6 : legalInOver;
+    let legalSeen = 0;
+    const result: string[] = [];
+    for (let i = rb.length - 1; i >= 0; i--) {
+      const item = String(rb[i] || '').toUpperCase();
+      const isExtra = item.includes('NB') || item.includes('WD');
+      if (!isExtra) {
+        legalSeen++;
+      }
+      result.unshift(rb[i]);
+      if (legalSeen >= targetLegal) {
+        while (i - 1 >= 0) {
+          const prevItem = String(rb[i - 1] || '').toUpperCase();
+          if (prevItem.includes('NB') || prevItem.includes('WD')) {
+            i--;
+            result.unshift(rb[i]);
+          } else {
+            break;
+          }
+        }
+        break;
+      }
+    }
+    return result;
+  })();
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end max-w-sm w-full pointer-events-none">
@@ -367,24 +405,33 @@ export const MiniLiveScoreboardWidget: React.FC<MiniLiveScoreboardWidgetProps> =
                   Over:
                 </span>
                 <div className="flex items-center gap-1 overflow-x-auto">
-                  {recentBalls.map((b, i) => (
-                    <span
-                      key={i}
-                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black font-mono ${
-                        b === 'W' 
-                          ? 'bg-rose-500 text-white animate-pulse' 
-                          : b === '6' 
-                          ? 'bg-purple-600 text-white' 
-                          : b === '4' 
-                          ? 'bg-blue-500 text-white' 
-                          : b === '0' || b === '•'
-                          ? 'bg-slate-800 text-slate-400' 
-                          : 'bg-emerald-600 text-white'
-                      }`}
-                    >
-                      {b}
-                    </span>
-                  ))}
+                  {recentBalls.map((b, i) => {
+                    const upperB = String(b || '').toUpperCase();
+                    const isNB = upperB.includes('NB');
+                    const isWD = upperB.includes('WD');
+                    return (
+                      <span
+                        key={i}
+                        className={`min-w-5 h-5 px-1 rounded-full flex items-center justify-center text-[9px] font-black font-mono shrink-0 ${
+                          b === 'W' 
+                            ? 'bg-rose-500 text-white animate-pulse' 
+                            : isNB
+                            ? 'bg-pink-600 text-white border border-pink-400'
+                            : isWD
+                            ? 'bg-blue-600 text-white border border-blue-400'
+                            : b === '6' 
+                            ? 'bg-purple-600 text-white' 
+                            : b === '4' 
+                            ? 'bg-blue-500 text-white' 
+                            : b === '0' || b === '•'
+                            ? 'bg-slate-800 text-slate-400' 
+                            : 'bg-emerald-600 text-white'
+                        }`}
+                      >
+                        {b}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -168,7 +168,7 @@ async function getFirebaseDb(): Promise<any> {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     const { initializeApp, getApps } = await import("firebase/app");
-    const { getFirestore, setLogLevel } = await import("firebase/firestore");
+    const { getFirestore, setLogLevel } = await import("firebase/firestore/lite");
     try {
       setLogLevel("silent");
     } catch (_) {}
@@ -187,7 +187,7 @@ async function fetchBlogMeta(blogId: string): Promise<any> {
   try {
     const db = await getFirebaseDb();
     if (!db) return null;
-    const { doc, getDoc } = await import("firebase/firestore");
+    const { doc, getDoc } = await import("firebase/firestore/lite");
     const docRef = doc(db, "blogs", blogId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
@@ -1006,7 +1006,7 @@ async function startServer() {
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const { doc, getDoc, collection, query, where, getDocs, limit } = await import("firebase/firestore");
+      const { doc, getDoc, collection, query, where, getDocs, limit } = await import("firebase/firestore/lite");
 
       // 1. Check direct score_managers pointer document
       let mgrData: any = null;
@@ -1145,9 +1145,48 @@ async function startServer() {
     const bowler = currentInn?.bowlers?.[currentInn?.currentBowlerIndex];
 
     const recentBalls: any[] = [];
+    const maxWickets = m.isSuperOver ? (m.superOverWicketLimit || 2) : 10;
+    const isAllOut = wickets >= maxWickets;
+    const isOversLimitReached = (m.oversLimit || 10) > 0 && balls >= (m.oversLimit || 10) * 6;
+    const isMatchCompleted = m.status === "completed" || isAllOut || isOversLimitReached;
+    const activeOverNo = balls === 0 ? 0 : isMatchCompleted ? Math.max(0, Math.floor((balls - 1) / 6)) : Math.floor(balls / 6);
+
     if (Array.isArray(currentInn?.commentaryList) && currentInn.commentaryList.length > 0) {
-      recentBalls.push(...currentInn.commentaryList.slice(0, 12));
+      for (const comm of currentInn.commentaryList) {
+        if (!comm || !comm.overBall) continue;
+        const hasScore = Boolean(comm.ballScore) || typeof comm.runsOffBat === "number" || typeof comm.runs === "number" || comm.type === "extra";
+        if (
+          (comm.overBall === "0.0" && !hasScore) ||
+          comm.type === "milestone" ||
+          comm.type === "announcement" ||
+          comm.type === "break" ||
+          comm.type === "info" ||
+          comm.specialEvent === "retire_hurt" ||
+          comm.announcementType ||
+          comm.id?.startsWith("comm-bat-upd-") ||
+          comm.id?.startsWith("comm-bowl-upd-") ||
+          comm.id?.startsWith("comm-over-finish-")
+        ) {
+          continue;
+        }
+        let commOverIdx = -1;
+        if (typeof comm.overIndex === "number" && !isNaN(comm.overIndex)) {
+          commOverIdx = comm.overIndex;
+        } else if (typeof comm.overBall === "string") {
+          const parts = comm.overBall.trim().split(".");
+          if (parts.length === 2) {
+            const op = parseInt(parts[0], 10);
+            if (!isNaN(op)) commOverIdx = op;
+          }
+        }
+        if (commOverIdx === activeOverNo) {
+          recentBalls.push(comm);
+          if (recentBalls.length >= 12) break;
+        }
+      }
     }
+
+    const resolvedGround = m.groundName || m.venue || m.ground || "";
 
     return {
       id: m.id,
@@ -1156,8 +1195,16 @@ async function startServer() {
       teamB: m.teamB || "Team B",
       teamALogo: m.teamALogo || "",
       teamBLogo: m.teamBLogo || "",
-      tournamentName: m.tournamentName || "",
-      groundName: m.groundName || "",
+      tournamentId: m.tournamentId || "",
+      tournamentName: m.tournamentName || m.seriesName || "",
+      groundName: resolvedGround,
+      venue: resolvedGround,
+      tossWinner: m.tossWinner || "",
+      tossChoice: m.tossChoice || "",
+      umpire1Name: m.umpire1Name || "",
+      umpire2Name: m.umpire2Name || "",
+      commentatorName: m.commentatorName || "",
+      scoreboardManagerName: m.scoreboardManagerName || "",
       oversLimit: m.oversLimit || 10,
       currentInningsNum: m.currentInningsNum || 1,
       targetRuns: m.targetRuns || null,
@@ -1253,7 +1300,7 @@ async function startServer() {
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const { collection, query, where, getDocs, limit, orderBy } = await import("firebase/firestore");
+      const { collection, query, where, getDocs, limit, orderBy } = await import("firebase/firestore/lite");
       
       const rawMatches: any[] = [];
       try {
@@ -1422,7 +1469,7 @@ async function startServer() {
         return res.status(503).json({ error: "Database not available" });
       }
 
-      const { doc, getDoc } = await import("firebase/firestore");
+      const { doc, getDoc } = await import("firebase/firestore/lite");
       let docSnap: any = null;
       try {
         docSnap = await getDoc(doc(db, "cricket_matches", matchId));
@@ -1586,7 +1633,7 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
   if (clone.innings1 && typeof clone.innings1 === "object") {
     clone.innings1 = { ...clone.innings1 };
     if (Array.isArray(clone.innings1.commentaryList) && clone.innings1.commentaryList.length > 75) {
-      clone.innings1.commentaryList = clone.innings1.commentaryList.slice(-75);
+      clone.innings1.commentaryList = clone.innings1.commentaryList.slice(0, 75);
     }
     if (Array.isArray(clone.innings1.history) && clone.innings1.history.length > 100) {
       clone.innings1.history = clone.innings1.history.slice(-100);
@@ -1595,7 +1642,7 @@ function pruneServerMatchPayload(payload: any, maxBytes = 800000): any {
   if (clone.innings2 && typeof clone.innings2 === "object") {
     clone.innings2 = { ...clone.innings2 };
     if (Array.isArray(clone.innings2.commentaryList) && clone.innings2.commentaryList.length > 75) {
-      clone.innings2.commentaryList = clone.innings2.commentaryList.slice(-75);
+      clone.innings2.commentaryList = clone.innings2.commentaryList.slice(0, 75);
     }
     if (Array.isArray(clone.innings2.history) && clone.innings2.history.length > 100) {
       clone.innings2.history = clone.innings2.history.slice(-100);
@@ -1807,7 +1854,7 @@ function cleanServerUndefined(obj: any): any {
         try {
           const db = await getFirebaseDb();
           if (db) {
-            const { doc, getDoc } = await import("firebase/firestore");
+            const { doc, getDoc } = await import("firebase/firestore/lite");
             const targetDocRef = doc(db, collectionName, docId);
             const snap = await getDoc(targetDocRef);
             if (snap.exists()) {
@@ -1849,7 +1896,7 @@ function cleanServerUndefined(obj: any): any {
         try {
           const db = await getFirebaseDb();
           if (db) {
-            const { collection, getDocs } = await import("firebase/firestore");
+            const { collection, getDocs } = await import("firebase/firestore/lite");
             const snap = await getDocs(collection(db, collectionName));
             snap.forEach((docSnap: any) => {
               const id = docSnap.id;

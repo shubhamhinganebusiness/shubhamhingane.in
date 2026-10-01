@@ -48,52 +48,72 @@ export const LiveMatchMetadataTicker: React.FC<MatchMetadataTickerProps> = ({
     let resolvedU2 = m.umpire2Name?.trim() || '';
     let resolvedComm = m.commentatorName?.trim() || '';
     let resolvedScorer = m.scoreboardManagerName?.trim() || '';
-    const resolvedGround = m.groundName?.trim() || m.venue?.trim() || m.ground?.trim() || '';
+    let resolvedGround = m.groundName?.trim() || m.venue?.trim() || m.ground?.trim() || '';
     const resolvedSeries = m.seriesName?.trim() || m.tournamentName?.trim() || '';
 
-    // If any official is missing, look up tournament storage cache if tournamentId exists
-    if (typeof window !== 'undefined' && m.tournamentId && (!resolvedU1 || !resolvedU2 || !resolvedComm || !resolvedScorer)) {
+    // If any official or ground is missing, look up active match / tournament storage cache
+    if (typeof window !== 'undefined' && (!resolvedGround || (m.tournamentId && (!resolvedU1 || !resolvedU2 || !resolvedComm || !resolvedScorer)))) {
       try {
-        // 1. Check one-half tournament cache
-        const rawOneHalf = localStorage.getItem('gully_one_half_tournament_v1');
-        if (rawOneHalf) {
-          const parsed = JSON.parse(rawOneHalf);
-          if (parsed && (parsed.id === m.tournamentId || m.tournamentId.includes('one_half') || m.tournamentId.includes('one-half'))) {
-            if (!resolvedU1 && parsed.umpire1Name) resolvedU1 = parsed.umpire1Name.trim();
-            if (!resolvedU2 && parsed.umpire2Name) resolvedU2 = parsed.umpire2Name.trim();
-            if (!resolvedComm && parsed.commentatorName) resolvedComm = parsed.commentatorName.trim();
-            if (!resolvedScorer && parsed.scoreboardManagerName) resolvedScorer = parsed.scoreboardManagerName.trim();
-          }
-        }
-
-        // 2. Check general tournament registry
-        const rawTours = localStorage.getItem('gully_tournaments_v1');
-        if (rawTours) {
-          const tours = JSON.parse(rawTours);
-          if (Array.isArray(tours)) {
-            const found = tours.find((t: any) => t.id === m.tournamentId);
-            if (found) {
-              if (!resolvedU1 && found.umpire1Name) resolvedU1 = found.umpire1Name.trim();
-              if (!resolvedU2 && found.umpire2Name) resolvedU2 = found.umpire2Name.trim();
-              if (!resolvedComm && found.commentatorName) resolvedComm = found.commentatorName.trim();
-              if (!resolvedScorer && found.scoreboardManagerName) resolvedScorer = found.scoreboardManagerName.trim();
+        if (!resolvedGround && m.id) {
+          const rawActive = localStorage.getItem('cricket_active_match');
+          if (rawActive) {
+            const parsedAct = JSON.parse(rawActive);
+            if (parsedAct && parsedAct.id === m.id) {
+              resolvedGround = (parsedAct.groundName || parsedAct.venue || parsedAct.ground || '').trim();
             }
           }
         }
+        if (!resolvedGround) {
+          const savedLastGround = localStorage.getItem('gully_last_ground_name');
+          if (savedLastGround && savedLastGround.trim()) {
+            resolvedGround = savedLastGround.trim();
+          }
+        }
 
-        // 3. Check saved officials array
-        const rawOff = localStorage.getItem(`gully_officials_${m.tournamentId}`);
-        if (rawOff) {
-          const parsedOff = JSON.parse(rawOff);
-          if (Array.isArray(parsedOff)) {
-            const onField = parsedOff.find((o: any) => o.role === 'On-Field Umpire');
-            const leg = parsedOff.find((o: any) => o.role === 'Leg Umpire');
-            const sc = parsedOff.find((o: any) => o.role === 'Official Scorer');
-            const cm = parsedOff.find((o: any) => o.role === 'Commentator' || o.role === 'Live Commentator');
-            if (!resolvedU1 && onField?.name) resolvedU1 = onField.name.trim();
-            if (!resolvedU2 && leg?.name) resolvedU2 = leg.name.trim();
-            if (!resolvedScorer && sc?.name) resolvedScorer = sc.name.trim();
-            if (!resolvedComm && cm?.name) resolvedComm = cm.name.trim();
+        if (m.tournamentId) {
+          // 1. Check one-half tournament cache
+          const rawOneHalf = localStorage.getItem('gully_one_half_tournament_v1');
+          if (rawOneHalf) {
+            const parsed = JSON.parse(rawOneHalf);
+            if (parsed && (parsed.id === m.tournamentId || m.tournamentId.includes('one_half') || m.tournamentId.includes('one-half'))) {
+              if (!resolvedU1 && parsed.umpire1Name) resolvedU1 = parsed.umpire1Name.trim();
+              if (!resolvedU2 && parsed.umpire2Name) resolvedU2 = parsed.umpire2Name.trim();
+              if (!resolvedComm && parsed.commentatorName) resolvedComm = parsed.commentatorName.trim();
+              if (!resolvedScorer && parsed.scoreboardManagerName) resolvedScorer = parsed.scoreboardManagerName.trim();
+              if (!resolvedGround && (parsed.groundName || parsed.venue)) resolvedGround = (parsed.groundName || parsed.venue).trim();
+            }
+          }
+
+          // 2. Check general tournament registry
+          const rawTours = localStorage.getItem('gully_tournaments_v1');
+          if (rawTours) {
+            const tours = JSON.parse(rawTours);
+            if (Array.isArray(tours)) {
+              const found = tours.find((t: any) => t.id === m.tournamentId);
+              if (found) {
+                if (!resolvedU1 && found.umpire1Name) resolvedU1 = found.umpire1Name.trim();
+                if (!resolvedU2 && found.umpire2Name) resolvedU2 = found.umpire2Name.trim();
+                if (!resolvedComm && found.commentatorName) resolvedComm = found.commentatorName.trim();
+                if (!resolvedScorer && found.scoreboardManagerName) resolvedScorer = found.scoreboardManagerName.trim();
+                if (!resolvedGround && (found.groundName || found.venue)) resolvedGround = (found.groundName || found.venue).trim();
+              }
+            }
+          }
+
+          // 3. Check saved officials array
+          const rawOff = localStorage.getItem(`gully_officials_${m.tournamentId}`);
+          if (rawOff) {
+            const parsedOff = JSON.parse(rawOff);
+            if (Array.isArray(parsedOff)) {
+              const onField = parsedOff.find((o: any) => o.role === 'On-Field Umpire');
+              const leg = parsedOff.find((o: any) => o.role === 'Leg Umpire');
+              const sc = parsedOff.find((o: any) => o.role === 'Official Scorer');
+              const cm = parsedOff.find((o: any) => o.role === 'Commentator' || o.role === 'Live Commentator');
+              if (!resolvedU1 && onField?.name) resolvedU1 = onField.name.trim();
+              if (!resolvedU2 && leg?.name) resolvedU2 = leg.name.trim();
+              if (!resolvedScorer && sc?.name) resolvedScorer = sc.name.trim();
+              if (!resolvedComm && cm?.name) resolvedComm = cm.name.trim();
+            }
           }
         }
       } catch (_) {}
@@ -108,6 +128,7 @@ export const LiveMatchMetadataTicker: React.FC<MatchMetadataTickerProps> = ({
       series: resolvedSeries
     };
   }, [
+    m.id,
     m.umpire1Name,
     m.umpire2Name,
     m.commentatorName,

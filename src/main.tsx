@@ -6,6 +6,20 @@ import { LanguageProvider } from './components/LanguageContext.tsx';
 import { ThemeProvider } from './components/ThemeContext.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
+// Handle dynamic module load failure (e.g. after dev server restart or asset invalidation)
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', (event) => {
+    console.warn('[Vite] Preload error detected, reloading page to fetch fresh modules...', event);
+    const retryKey = 'vite_preload_reload_ts';
+    const lastRetry = parseInt(sessionStorage.getItem(retryKey) || '0', 10);
+    const now = Date.now();
+    if (now - lastRetry > 3000) {
+      sessionStorage.setItem(retryKey, String(now));
+      window.location.reload();
+    }
+  });
+}
+
 // Auto-redirect direct path access or captain squad submission query params to hash route for HashRouter
 if (typeof window !== 'undefined') {
   try {

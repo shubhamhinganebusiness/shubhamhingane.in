@@ -180,7 +180,7 @@ export function pruneOversizedDataForFirestore(data: any, maxByteSize = 820000):
   if (clone.innings1 && typeof clone.innings1 === 'object') {
     clone.innings1 = { ...clone.innings1 };
     if (Array.isArray(clone.innings1.commentaryList) && clone.innings1.commentaryList.length > 75) {
-      clone.innings1.commentaryList = clone.innings1.commentaryList.slice(-75);
+      clone.innings1.commentaryList = clone.innings1.commentaryList.slice(0, 75);
     }
     if (Array.isArray(clone.innings1.history) && clone.innings1.history.length > 100) {
       clone.innings1.history = clone.innings1.history.slice(-100);
@@ -189,7 +189,7 @@ export function pruneOversizedDataForFirestore(data: any, maxByteSize = 820000):
   if (clone.innings2 && typeof clone.innings2 === 'object') {
     clone.innings2 = { ...clone.innings2 };
     if (Array.isArray(clone.innings2.commentaryList) && clone.innings2.commentaryList.length > 75) {
-      clone.innings2.commentaryList = clone.innings2.commentaryList.slice(-75);
+      clone.innings2.commentaryList = clone.innings2.commentaryList.slice(0, 75);
     }
     if (Array.isArray(clone.innings2.history) && clone.innings2.history.length > 100) {
       clone.innings2.history = clone.innings2.history.slice(-100);
@@ -341,15 +341,19 @@ export function isDemoOrAIMatch(m: any): boolean {
     return true;
   }
 
-  // Creator / manager name checks for AI / bots
-  const createdBy = String(m.createdBy || '').toLowerCase();
-  const managerName = String(m.managerName || '').toLowerCase();
-  const managerId = String(m.managerId || '').toLowerCase();
-  if (
-    createdBy.includes('bot') || createdBy.includes('ai') || createdBy.includes('system') || createdBy.includes('simulator') ||
-    managerName.includes('bot') || managerName.includes('ai') ||
-    managerId.includes('bot') || managerId.includes('ai')
-  ) {
+  // Creator / manager name checks for AI / bots (avoid matching 'ai' inside '@gmail.com' or Indian names like Sai/Jai/Mumbai)
+  const createdBy = String(m.createdBy || '').toLowerCase().trim();
+  const managerName = String(m.managerName || '').toLowerCase().trim();
+  const managerId = String(m.managerId || '').toLowerCase().trim();
+  const isBotIdentity = (val: string) =>
+    val === 'bot' ||
+    val === 'ai' ||
+    val === 'ai_bot' ||
+    val === 'ai-bot' ||
+    val === 'system_bot' ||
+    val === 'simulator' ||
+    /\b(ai[\s_-]*bot|demo[\s_-]*bot|auto[\s_-]*simulator)\b/i.test(val);
+  if (isBotIdentity(createdBy) || isBotIdentity(managerName) || isBotIdentity(managerId)) {
     return true;
   }
 
@@ -357,7 +361,7 @@ export function isDemoOrAIMatch(m: any): boolean {
   const teamA = String(m.teamA || '').toLowerCase().trim();
   const teamB = String(m.teamB || '').toLowerCase().trim();
   if (!teamA || !teamB) return true;
-  if (teamA.includes('demo') || teamB.includes('demo')) return true;
+  if (teamA === 'demo team a' || teamB === 'demo team b') return true;
   if (teamA.includes('adelaide strikers') || teamB.includes('adelaide strikers')) return true;
   if (teamA === 'mumbai champions' && teamB === 'pune super warriors') return true;
   if (
@@ -366,14 +370,15 @@ export function isDemoOrAIMatch(m: any): boolean {
   ) {
     return true;
   }
-  if (teamA.includes('bot') || teamB.includes('bot')) return true;
-  if (teamA.includes('ai team') || teamB.includes('ai team') || teamA.includes('ai bot') || teamB.includes('ai bot')) return true;
+  if (/\b(ai[\s_-]*team|ai[\s_-]*bot|demo[\s_-]*team)\b/i.test(teamA) || /\b(ai[\s_-]*team|ai[\s_-]*bot|demo[\s_-]*team)\b/i.test(teamB)) {
+    return true;
+  }
 
   // Tournament / series name check
-  const tournamentName = String(m.tournamentName || '').toLowerCase();
-  const seriesName = String(m.seriesName || '').toLowerCase();
-  if (tournamentName.includes('bot') || tournamentName.includes('ai match') || tournamentName.includes('ai tournament') || tournamentName.includes('demo')) return true;
-  if (seriesName.includes('bot') || seriesName.includes('ai series') || seriesName.includes('demo')) return true;
+  const tournamentName = String(m.tournamentName || '').toLowerCase().trim();
+  const seriesName = String(m.seriesName || '').toLowerCase().trim();
+  if (/\b(ai[\s_-]*match|ai[\s_-]*tournament|demo[\s_-]*tournament)\b/i.test(tournamentName)) return true;
+  if (/\b(ai[\s_-]*series|demo[\s_-]*series)\b/i.test(seriesName)) return true;
 
   return false;
 }

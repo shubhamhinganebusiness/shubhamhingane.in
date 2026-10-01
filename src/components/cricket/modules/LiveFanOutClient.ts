@@ -75,12 +75,23 @@ class LiveFanOutClient {
    */
   public publishMatch(match: any): void {
     if (!match || !match.id) return;
+    const resolvedGround = match.groundName || match.venue || match.ground || '';
     const summary = {
       id: match.id,
       teamA: match.teamA,
       teamB: match.teamB,
       teamALogo: match.teamALogo,
       teamBLogo: match.teamBLogo,
+      tournamentId: match.tournamentId,
+      tournamentName: match.tournamentName || match.seriesName || '',
+      groundName: resolvedGround,
+      venue: resolvedGround,
+      tossWinner: match.tossWinner || '',
+      tossChoice: match.tossChoice || '',
+      umpire1Name: match.umpire1Name || '',
+      umpire2Name: match.umpire2Name || '',
+      commentatorName: match.commentatorName || '',
+      scoreboardManagerName: match.scoreboardManagerName || '',
       status: match.status,
       currentInningsNum: match.currentInningsNum,
       oversLimit: match.oversLimit,

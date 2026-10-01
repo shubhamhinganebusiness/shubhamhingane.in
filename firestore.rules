@@ -18,7 +18,7 @@ service cloud.firestore {
 
     function isSuperAdmin() {
       return isSignedIn() && (
-        request.auth.token.email.lower() in ['jamkhednewsnetwork@gmail.com', 'shubhamhingane7719@gmail.com', 'shubhamingane7719@gmail.com', '771999595@admin.com', '7719959593@admin.com', 'shubhamhinganebusiness@gmail.com', 'streetsportsoffical@gmail.com'] ||
+        request.auth.token.email.lower() in ['ahilyanagarnewsnetwork@gmail.com', 'jamkhednewsnetwork@gmail.com', 'shubhamhingane7719@gmail.com', 'shubhamingane7719@gmail.com', '771999595@admin.com', '7719959593@admin.com', 'shubhamhinganebusiness@gmail.com', 'streetsportsoffical@gmail.com'] ||
         (userExists(request.auth.uid) && getUserData(request.auth.uid).role == 'super_admin')
       );
     }
@@ -63,8 +63,12 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
-    // CMS & Global Data
+    // Connection Test & CMS Global Data
     // -------------------------------------------------------------------------
+    match /_internal_/{id} {
+      allow get, list: if true;
+    }
+
     match /site/{id} {
       allow get, list: if true;
       allow write: if isSuperAdmin();
@@ -78,6 +82,13 @@ service cloud.firestore {
     match /education/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
     match /testimonials/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
     match /clients/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /cms_blogs/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /cms_courses/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /cms_clients/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /cms_portfolio/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /cms_testimonials/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+    match /cms_features/{id} { allow get, list: if true; allow write: if isSuperAdmin(); }
+
     match /site_stats/{id} {
       allow get, list: if true;
       allow create, update: if isValidSiteStats(request.resource.data) || isSuperAdmin();
@@ -87,6 +98,16 @@ service cloud.firestore {
     match /messages/{id} {
       allow create: if true;
       allow get, list, delete: if isSuperAdmin();
+    }
+
+    match /course_enrollments/{id} {
+      allow create: if true;
+      allow get, list, update, delete: if isSuperAdmin();
+    }
+
+    match /demo_bookings/{id} {
+      allow create: if true;
+      allow get, list, update, delete: if isSuperAdmin();
     }
 
     // -------------------------------------------------------------------------

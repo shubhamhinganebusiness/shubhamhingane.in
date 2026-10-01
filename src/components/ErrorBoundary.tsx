@@ -21,8 +21,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public static getDerivedStateFromError(error: Error): State {
-    // If it's a dynamic module import failure (e.g. chunk reload during dev),
-    // attempt an automatic recovery reload
     if (
       typeof window !== 'undefined' &&
       error?.message &&
@@ -34,9 +32,11 @@ export class ErrorBoundary extends Component<Props, State> {
         const storageKey = 'last_dynamic_import_retry_ts';
         const lastRetry = parseInt(sessionStorage.getItem(storageKey) || '0', 10);
         const now = Date.now();
-        if (now - lastRetry > 8000) {
+        if (now - lastRetry > 2000) {
           sessionStorage.setItem(storageKey, String(now));
-          window.location.reload();
+          setTimeout(() => {
+            window.location.reload();
+          }, 400);
         }
       } catch (_) {}
     }
@@ -52,17 +52,28 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback;
       }
+      const isChunkError =
+        this.state.error?.message?.includes('dynamically imported module') ||
+        this.state.error?.message?.includes('Failed to fetch') ||
+        this.state.error?.message?.includes('Importing a module script failed');
+
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-zinc-900 text-slate-800 dark:text-zinc-100 font-sans">
           <div className="max-w-md w-full p-6 bg-white dark:bg-zinc-800 rounded-2xl shadow-xl border border-slate-200 dark:border-zinc-700 text-center">
-            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-400 font-black text-xl">
-              !
+            <div className={`w-12 h-12 mx-auto mb-4 rounded-full flex items-center justify-center font-black text-xl ${
+              isChunkError ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 animate-pulse' : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+            }`}>
+              {isChunkError ? '⚡' : '!'}
             </div>
-            <h2 className="text-xl font-bold mb-2">Display Error Detected</h2>
+            <h2 className="text-xl font-bold mb-2">
+              {isChunkError ? 'Refreshing Live Module...' : 'Display Error Detected'}
+            </h2>
             <p className="text-sm text-slate-500 dark:text-zinc-400 mb-4">
-              A temporary component render issue occurred. You can safely reload the view.
+              {isChunkError
+                ? 'Connecting to the latest application updates. Retrying automatically...'
+                : 'A temporary component render issue occurred. You can safely reload the view.'}
             </p>
-            <pre className="text-xs text-left bg-slate-100 dark:bg-zinc-900 p-3 rounded-lg overflow-x-auto text-red-600 dark:text-red-400 mb-4 max-h-36">
+            <pre className="text-xs text-left bg-slate-100 dark:bg-zinc-900 p-3 rounded-lg overflow-x-auto text-red-600 dark:text-red-400 mb-4 max-h-36 font-mono">
               {this.state.error?.message || 'Component failed to mount.'}
             </pre>
             <button
@@ -70,9 +81,9 @@ export class ErrorBoundary extends Component<Props, State> {
                 this.setState({ hasError: false, error: null });
                 window.location.reload();
               }}
-              className="w-full py-2.5 px-4 bg-[#ff014f] hover:bg-[#d90042] text-white text-sm font-bold rounded-xl transition shadow-md cursor-pointer"
+              className="w-full py-2.5 px-4 bg-[#ff014f] hover:bg-[#d90042] text-white text-sm font-bold rounded-xl transition shadow-md cursor-pointer flex items-center justify-center gap-2"
             >
-              Reload Page
+              <span>{isChunkError ? 'Reconnect Now' : 'Reload Page'}</span>
             </button>
           </div>
         </div>

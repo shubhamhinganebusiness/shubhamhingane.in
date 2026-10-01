@@ -211,9 +211,9 @@ export const ActiveLiveMatchBannerSlider: React.FC<ActiveLiveMatchBannerSliderPr
               <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1">
                 <Trophy size={11} /> {m.tournamentName || 'Live Cricket Series'}
               </span>
-              {m.groundName && (
-                <span className="text-[10px] text-slate-400 font-medium hidden md:inline">
-                  • 📍 {m.groundName}
+              {(m.groundName || m.venue) && (
+                <span className="text-[10px] text-emerald-300 font-semibold inline-flex items-center gap-1">
+                  • 📍 {m.groundName || m.venue}
                 </span>
               )}
             </div>

@@ -189,7 +189,7 @@ export const generateDefault15Squad = (teamName: string, captainName?: string): 
       : `${firstNames[i % firstNames.length]} ${genericSurnames[(i + teamName.length) % genericSurnames.length]}`;
 
     return {
-      id: `p_${Date.now()}_${i + 1}`,
+      id: `p_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${i + 1}`,
       name,
       role: roles[i],
       jerseyNumber: i + 1,
@@ -368,7 +368,7 @@ export const TeamDedicatedPageView: React.FC<TeamDedicatedPageViewProps> = ({
       else if (i === 2) role = 'Wicket-Keeper';
 
       return {
-        id: `p_${Date.now()}_${i}`,
+        id: `p_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${i}`,
         name: pName,
         role,
         jerseyNumber: i + 1,
@@ -823,7 +823,7 @@ export const TeamDedicatedPageView: React.FC<TeamDedicatedPageViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {playing11.map((player, idx) => (
               <div
-                key={player.id || idx}
+                key={`p11-${player.id || player.name || 'player'}-${idx}`}
                 className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 hover:border-slate-300 dark:hover:border-slate-700 transition"
               >
                 <div className="flex items-center gap-2.5 truncate">
@@ -920,7 +920,7 @@ export const TeamDedicatedPageView: React.FC<TeamDedicatedPageViewProps> = ({
               const actualIdx = 11 + bIdx;
               return (
                 <div
-                  key={player.id || actualIdx}
+                  key={`bench-${player.id || player.name || 'player'}-${actualIdx}`}
                   className="p-3 rounded-2xl bg-slate-50/60 dark:bg-slate-950/60 border border-dashed border-slate-300 dark:border-slate-800 flex items-center justify-between gap-3"
                 >
                   <div className="flex items-center gap-2.5 truncate">
@@ -1234,7 +1234,7 @@ export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalPr
     if (team.squad && team.squad.length > 0) {
       return team.squad.map((p, idx) => ({
         ...p,
-        id: p.id || `p_${team.id}_${idx}_${Date.now()}`,
+        id: p.id || `p_${team.id}_${idx}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         jerseyNumber: p.jerseyNumber || `${idx + 1}`,
         mobileNumber: p.mobileNumber || p.phone || (p.isCaptain ? team.captainPhone : ''),
         photo: p.photo || ''
@@ -1364,7 +1364,7 @@ export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalPr
     }
     const newIdx = players.length + 1;
     const newPlayer: OneHalfPlayer = {
-      id: `p_${team.id}_${Date.now()}_${newIdx}`,
+      id: `p_${team.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${newIdx}`,
       name: '',
       role: 'All-Rounder',
       jerseyNumber: newIdx,
@@ -1490,7 +1490,7 @@ export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalPr
       }
 
       parsed.push({
-        id: `p_${team.id}_${Date.now()}_${i}`,
+        id: `p_${team.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${i}`,
         name: cleanName,
         role: isWK ? 'Wicket-Keeper' : roles[i] || 'All-Rounder',
         jerseyNumber: i + 1,
@@ -1907,7 +1907,7 @@ export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalPr
 
               return (
                 <div
-                  key={player.id || idx}
+                  key={`roster-${player.id || player.name || 'player'}-${idx}`}
                   className={`p-3.5 rounded-2xl border transition-all flex flex-col gap-3 ${
                     isCap
                       ? 'bg-gradient-to-r from-amber-950/30 via-slate-900/95 to-slate-900 border-amber-500/40 shadow-md ring-1 ring-amber-500/20'
@@ -2206,7 +2206,7 @@ export const BulkPasteSquadModal: React.FC<BulkPasteSquadModalProps> = ({
       }
 
       parsed.push({
-        id: `p_${Date.now()}_${i + 1}`,
+        id: `p_${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${i + 1}`,
         name: cleanName,
         role: isWK ? 'Wicket-Keeper' : roles[i],
         jerseyNumber: i + 1,

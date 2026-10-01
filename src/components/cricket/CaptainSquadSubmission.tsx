@@ -1101,7 +1101,7 @@ export const CaptainSquadSubmission: React.FC = () => {
               const isCap = player.isCaptain;
 
               return (
-                <React.Fragment key={player.id || idx}>
+                <React.Fragment key={`squad-${player.id || player.name || 'player'}-${idx}`}>
                   {idx === 0 && (
                     <div className="flex items-center gap-2 pt-1 pb-1">
                       <span className="px-3 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-black text-[10px] uppercase tracking-wider flex items-center gap-1.5">

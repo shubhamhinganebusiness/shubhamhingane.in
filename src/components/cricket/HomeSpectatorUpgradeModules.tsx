@@ -343,30 +343,34 @@ export const LiveMatchCardBroadcastIntel: React.FC<{
     match?.innings2?.ballsBowled
   ]);
 
-  // Extract latest delivery commentary line
-  const latestCommentary = useMemo(() => {
+  // Extract recent delivery commentary lines for scrollable feed
+  const recentCommentaries = useMemo(() => {
     const currentInnings =
       match?.currentInningsNum === 2 && match?.innings2 ? match.innings2 : match?.innings1;
     const commList = Array.isArray(currentInnings?.commentaryList)
       ? currentInnings.commentaryList
       : [];
-    const latestBall = commList.find(
-      (c: any) =>
-        c &&
-        c.overBall &&
-        c.overBall !== '0.0' &&
-        c.type !== 'announcement' &&
-        (c.description || c.translations)
-    );
-    if (!latestBall) return null;
-    const text = getCommentaryText(latestBall, language) || latestBall.description || '';
-    const cleaned = text.replace(/\s+/g, ' ').trim();
-    return {
-      overBall: latestBall.overBall,
-      type: latestBall.type,
-      runs: latestBall.runs,
-      text: cleaned.length > 92 ? `${cleaned.substring(0, 92)}...` : cleaned
-    };
+    return commList
+      .filter(
+        (c: any) =>
+          c &&
+          c.overBall &&
+          c.overBall !== '0.0' &&
+          c.type !== 'announcement' &&
+          (c.description || c.translations)
+      )
+      .map((c: any, idx: number) => {
+        const text = getCommentaryText(c, language) || c.description || '';
+        const cleaned = text.replace(/\s+/g, ' ').trim();
+        return {
+          id: c.id || `${c.overBall}-${idx}`,
+          overBall: c.overBall,
+          type: c.type,
+          runs: c.runs ?? c.runsOffBat,
+          ballScore: c.ballScore,
+          text: cleaned
+        };
+      });
   }, [match?.currentInningsNum, match?.innings1?.commentaryList, match?.innings2?.commentaryList, language]);
 
   const probA = winProb?.probA ?? 50;
@@ -415,25 +419,50 @@ export const LiveMatchCardBroadcastIntel: React.FC<{
         )}
       </div>
 
-      {/* Latest Ball Commentary Snippet */}
-      {latestCommentary && (
-        <div className="px-2.5 py-2 rounded-xl bg-slate-900/70 border border-white/[0.04] flex items-start gap-2 text-left">
-          <span
-            className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-black uppercase shrink-0 mt-0.5 ${
-              latestCommentary.type === 'wicket'
-                ? 'bg-rose-500 text-white'
-                : latestCommentary.runs === 6
-                ? 'bg-amber-400 text-slate-950'
-                : latestCommentary.runs === 4
-                ? 'bg-emerald-500 text-white'
-                : 'bg-slate-800 text-slate-300'
-            }`}
-          >
-            {latestCommentary.overBall}
-          </span>
-          <p className="text-[10px] text-slate-300 font-medium leading-snug line-clamp-2">
-            {latestCommentary.text}
-          </p>
+      {/* Scrollable Past & Latest Ball Commentary Feed */}
+      {recentCommentaries.length > 0 && (
+        <div
+          className="p-2.5 rounded-xl bg-slate-900/80 border border-white/[0.06] space-y-1.5 text-left"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between text-[8px] font-mono font-black uppercase tracking-wider text-slate-400 pb-1 border-b border-white/[0.05]">
+            <span className="text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Ball-by-Ball Commentary ({recentCommentaries.length})
+            </span>
+            {recentCommentaries.length > 1 && (
+              <span className="text-slate-500">Scroll ↕</span>
+            )}
+          </div>
+          <div className="max-h-28 overflow-y-auto custom-scrollbar scrollbar-thin space-y-1.5 pr-1">
+            {recentCommentaries.map((item, idx) => (
+              <div
+                key={item.id}
+                className={`p-1.5 rounded-lg flex items-start gap-2 ${
+                  idx === 0
+                    ? 'bg-slate-950/90 border border-emerald-500/25'
+                    : 'bg-slate-950/40 border border-white/[0.03]'
+                }`}
+              >
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-black uppercase shrink-0 mt-0.5 ${
+                    item.type === 'wicket' || item.ballScore === 'W'
+                      ? 'bg-rose-500 text-white'
+                      : item.runs === 6 || item.ballScore === '6'
+                      ? 'bg-amber-400 text-slate-950'
+                      : item.runs === 4 || item.ballScore === '4'
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-slate-800 text-slate-300'
+                  }`}
+                >
+                  {item.overBall}
+                </span>
+                <p className="text-[10px] text-slate-300 font-medium leading-snug">
+                  {item.text}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

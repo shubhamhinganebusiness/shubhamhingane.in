@@ -1309,9 +1309,16 @@ export const CricketScoreboard: React.FC = () => {
     if (isDemoOrAIMatch(m) || isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted') {
       return false;
     }
-    // Reject matches created by bot / ai / system
-    const createdBy = String(m.createdBy || '').toLowerCase();
-    if (createdBy.includes('bot') || createdBy.includes('ai') || createdBy.includes('system') || createdBy.includes('simulator')) {
+    // Reject matches created by explicit bot / simulator accounts (do not match 'ai' inside '@gmail.com')
+    const createdBy = String(m.createdBy || '').toLowerCase().trim();
+    if (
+      createdBy === 'bot' ||
+      createdBy === 'ai' ||
+      createdBy === 'ai_bot' ||
+      createdBy === 'ai-bot' ||
+      createdBy === 'system_bot' ||
+      createdBy === 'simulator'
+    ) {
       return false;
     }
     // If signed in as official scorekeeper / manager, verify ownership
@@ -1643,7 +1650,19 @@ export const CricketScoreboard: React.FC = () => {
   const [tossWinner, setTossWinner] = useState('Team A');
   const [tossChoice, setTossChoice] = useState<'bat' | 'bowl'>('bat');
   const [seriesName, setSeriesName] = useState('Bilateral Series');
-  const [groundName, setGroundName] = useState('Gully Ground');
+  const [groundName, setGroundName] = useState(() => {
+    try {
+      const actStr = localStorage.getItem('cricket_active_match');
+      if (actStr) {
+        const parsed = JSON.parse(actStr);
+        const g = (parsed?.groundName || parsed?.venue || '').trim();
+        if (g) return g;
+      }
+      const saved = localStorage.getItem('gully_last_ground_name');
+      if (saved && saved.trim()) return saved.trim();
+    } catch (_) {}
+    return 'Gully Ground';
+  });
   const [tournamentName, setTournamentName] = useState('Bilateral Cup');
   const [tournamentLogo, setTournamentLogo] = useState(() => {
     try {
@@ -2346,8 +2365,13 @@ export const CricketScoreboard: React.FC = () => {
       setTournamentName(editModalTournamentName);
     }
     if (editModalGroundName !== undefined) {
-      updated.groundName = editModalGroundName;
-      setGroundName(editModalGroundName);
+      const trimmedGround = editModalGroundName.trim() || 'Gully Ground';
+      updated.groundName = trimmedGround;
+      updated.venue = trimmedGround;
+      setGroundName(trimmedGround);
+      try {
+        localStorage.setItem('gully_last_ground_name', trimmedGround);
+      } catch (_) {}
     }
     if (editModalUmpire1Name !== undefined) {
       updated.umpire1Name = editModalUmpire1Name;
@@ -2894,9 +2918,12 @@ export const CricketScoreboard: React.FC = () => {
         const data = docSnap.data();
         const m = { ...data, id: data.id || docSnap.id } as MatchState;
         
-        // Permanently filter out matches that were deleted or are AI bot / demo matches
-        if (isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted' || isDemoOrAIMatch(m)) {
+        // Permanently filter out matches that were explicitly deleted or are AI bot / demo matches
+        if ((m as any).isDeleted === true || m.status === 'deleted') {
           markMatchDeleted(m.id);
+          return;
+        }
+        if (isMatchDeleted(m.id) || isDemoOrAIMatch(m)) {
           return;
         }
 
@@ -3300,6 +3327,11 @@ export const CricketScoreboard: React.FC = () => {
     const unsub = subscribeToCricketMatchDoc(activeMatchId, (docSnap) => {
       if (!docSnap || !docSnap.exists || !docSnap.exists()) return;
       if (isMatchDeleted(activeMatchId)) {
+        // Never close an active live match currently being scored on this device
+        if (!isSpectator && latestStateToSaveRef.current?.id === activeMatchId && latestStateToSaveRef.current?.status === 'live') {
+          unmarkMatchDeleted(activeMatchId);
+          return;
+        }
         setMatch({
           id: '',
           teamA: '',
@@ -3358,6 +3390,10 @@ export const CricketScoreboard: React.FC = () => {
 
             // If this device is the Scoreboard Manager / Scorer, local state is the authoritative source
             if (!isSpectator) {
+              // 0. If local match is live and remote snapshot is still setup or missing innings1, never revert to setup
+              if (prevLocal.status === 'live' && (remoteMatch.status === 'setup' || !remoteMatch.innings1)) {
+                return prevLocal;
+              }
               // 1. If local match is completed, never revert to live/uncompleted
               if (prevLocal.status === 'completed' && remoteMatch.status !== 'completed') {
                 return prevLocal;
@@ -3383,29 +3419,11 @@ export const CricketScoreboard: React.FC = () => {
             }
             return prevLocal;
           }
+          if (!isSpectator && prevLocal && prevLocal.status === 'live' && (remoteMatch.status === 'setup' || !remoteMatch.innings1)) {
+            return prevLocal;
+          }
           return remoteMatch;
         });
-      } else {
-        // Document does not exist in Firestore snapshot, match was deleted
-        markMatchDeleted(activeMatchId);
-        deleteLocalMatch(activeMatchId);
-        setMatch({
-          id: '',
-          teamA: '',
-          teamB: '',
-          oversLimit: 5,
-          tossWinner: '',
-          tossChoice: 'bat',
-          currentInningsNum: 1,
-          innings1: null,
-          innings2: null,
-          status: 'setup',
-          date: '',
-          freeHitNext: false
-        });
-        if (searchParams.get('matchId') === activeMatchId) {
-          setSearchParams({});
-        }
       }
     }, (error) => {
       console.warn("Failed to subscribe to current match docs:", error);
@@ -3430,6 +3448,10 @@ export const CricketScoreboard: React.FC = () => {
 
           // If this device is the Scoreboard Manager / Scorer, local state is the authoritative source
           if (!isSpectator) {
+            // 0. If local match is live and remote snapshot is still setup or missing innings1, never revert to setup
+            if (prevLocal.status === 'live' && (remoteMatch.status === 'setup' || !remoteMatch.innings1)) {
+              return prevLocal;
+            }
             // 1. If local match is completed, never revert to live/uncompleted
             if (prevLocal.status === 'completed' && remoteMatch.status !== 'completed') {
               return prevLocal;
@@ -3453,6 +3475,9 @@ export const CricketScoreboard: React.FC = () => {
           if (remoteVersion >= localVersion || remoteTime >= localTime || remoteBalls >= localBalls) {
             return remoteMatch;
           }
+          return prevLocal;
+        }
+        if (!isSpectator && prevLocal && prevLocal.status === 'live' && (remoteMatch.status === 'setup' || !remoteMatch.innings1)) {
           return prevLocal;
         }
         return remoteMatch;
@@ -3520,8 +3545,10 @@ export const CricketScoreboard: React.FC = () => {
   const currentActiveGraphic = activeOverlayConfig.activeGraphic || 'none';
 
   const updateOverlayProp = (updates: Partial<typeof activeOverlayConfig>) => {
-    const updated = { ...activeOverlayConfig, ...updates };
-    syncMatch({ ...match, overlayConfig: updated });
+    syncMatch((prev) => ({
+      ...prev,
+      overlayConfig: { ...(prev.overlayConfig || activeOverlayConfig), ...updates } as any
+    }));
 
     // Handle auto-close for Wicket, Milestone, Team VS Team, Squad, Field Position, and Summary alerts after timeout
     if (
@@ -3692,6 +3719,7 @@ export const CricketScoreboard: React.FC = () => {
           tournamentName: 'Gully Match',
           seriesName: 'Bilateral Series',
           groundName: venueName,
+          venue: venueName,
           createdBy: currentManagerId || user?.email || user?.uid || 'anonymous',
           managerId: currentManagerId || undefined,
           managerName: currentManagerName || undefined,
@@ -3925,11 +3953,18 @@ export const CricketScoreboard: React.FC = () => {
     const batsman2Name = setupOpeningBatsman2.trim() || ((batRoster && batRoster.length > 1) ? batRoster[1] : 'Batter 2 State');
     const bowler1Name = setupOpeningBowler.trim() || ((bowlRoster && bowlRoster.length > 0) ? bowlRoster[0] : 'Bowler 1 State');
 
+    const resolvedStartGround = (groundName || match?.groundName || match?.venue || 'Gully Ground').trim();
+    try {
+      if (resolvedStartGround) {
+        localStorage.setItem('gully_last_ground_name', resolvedStartGround);
+      }
+    } catch (_) {}
+
     // Initialize first innings
     const squadAnnounceComm = createSquadAnnouncementCommentary(
       {
         tournamentName: tournamentName || match?.tournamentName || null,
-        groundName: groundName || match?.groundName || 'Gully Ground',
+        groundName: resolvedStartGround,
         teamA,
         teamB,
         tossWinner: coinTossWinTeam,
@@ -3945,7 +3980,7 @@ export const CricketScoreboard: React.FC = () => {
     const startMatchComm = createMatchStartCommentary(
       {
         tournamentName: tournamentName || match?.tournamentName || null,
-        groundName: groundName || match?.groundName || 'Gully Ground',
+        groundName: resolvedStartGround,
         teamA,
         teamB,
         tossWinner: coinTossWinTeam,
@@ -3999,6 +4034,18 @@ export const CricketScoreboard: React.FC = () => {
       ]
     };
 
+    const startTickerText = validStartTourPrizes.length > 0
+      ? formatAllPrizesSponsorTicker(validStartTourPrizes)
+      : '';
+
+    const initialOverlayConfig = startTickerText
+      ? {
+          ...(match?.overlayConfig || activeOverlayConfig),
+          sponsorText: startTickerText,
+          showSponsorBadge: true
+        }
+      : match?.overlayConfig;
+
     const newMatch: MatchState = {
       id: `match-${Date.now()}`,
       teamA,
@@ -4012,6 +4059,7 @@ export const CricketScoreboard: React.FC = () => {
       status: 'live',
       date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       freeHitNext: false,
+      overlayConfig: initialOverlayConfig as any,
       teamALogo: teamALogoUrl || match?.teamALogo || null,
       teamBLogo: teamBLogoUrl || match?.teamBLogo || null,
       matchBannerUrl: matchBannerUrl || match?.matchBannerUrl || undefined,
@@ -4027,7 +4075,8 @@ export const CricketScoreboard: React.FC = () => {
       showYoutubeChannelLogo: !!(youtubeChannelLogo || match?.youtubeChannelLogo),
       youtubeChannelName: youtubeChannelName || match?.youtubeChannelName || undefined,
       seriesName: seriesName || match?.seriesName || 'Bilateral Series',
-      groundName: groundName || match?.groundName || 'Gully Ground',
+      groundName: resolvedStartGround,
+      venue: resolvedStartGround,
       umpire1Name: umpire1Name || match?.umpire1Name || undefined,
       umpire1Photo: umpire1Photo || match?.umpire1Photo || undefined,
       umpire2Name: umpire2Name || match?.umpire2Name || undefined,
@@ -4062,15 +4111,6 @@ export const CricketScoreboard: React.FC = () => {
       } catch (_) {}
     }
 
-    if (validStartTourPrizes.length > 0) {
-      try {
-        const startTicker = formatAllPrizesSponsorTicker(validStartTourPrizes);
-        if (startTicker) {
-          updateOverlayProp({ sponsorText: startTicker, showSponsorBadge: true });
-        }
-      } catch (_) {}
-    }
-
     // Trigger AI Opening Commentary with Tournament and Ground Name
     if (aiCommentaryEnabled && !isSpectator) {
       generateAICommentary(
@@ -4102,6 +4142,9 @@ export const CricketScoreboard: React.FC = () => {
         id: newMatch.id,
         teamA: newMatch.teamA,
         teamB: newMatch.teamB,
+        groundName: newMatch.groundName,
+        venue: newMatch.venue || newMatch.groundName,
+        tournamentName: newMatch.tournamentName,
         oversLimit: newMatch.oversLimit
       },
       updatedAt: Date.now()
@@ -6039,9 +6082,7 @@ export const CricketScoreboard: React.FC = () => {
 
     const localizedEnWithProb = generatedEn;
 
-    const deliveryOverBall = isCalculatedOverBall
-      ? `${currentDeliveryOverIdx}.${(ballsBowledBeforeBall % 6) + 1}`
-      : `${currentDeliveryOverIdx}.${ballsBowledBeforeBall % 6}`;
+    const deliveryOverBall = `${currentDeliveryOverIdx}.${(ballsBowledBeforeBall % 6) + 1}`;
 
     const ballCommEntry = {
       id: `c-${Date.now()}`,
@@ -8151,7 +8192,8 @@ export const CricketScoreboard: React.FC = () => {
       showYoutubeChannelLogo: !!(youtubeChannelLogo || match?.youtubeChannelLogo),
       youtubeChannelName: youtubeChannelName || match?.youtubeChannelName || undefined,
       seriesName: seriesName || match?.seriesName || 'Bilateral Series',
-      groundName: groundName || match?.groundName || 'Gully Ground',
+      groundName: groundName || match?.groundName || match?.venue || 'Gully Ground',
+      venue: groundName || match?.venue || match?.groundName || 'Gully Ground',
       umpire1Name: umpire1Name || match?.umpire1Name || undefined,
       umpire1Photo: umpire1Photo || match?.umpire1Photo || undefined,
       umpire2Name: umpire2Name || match?.umpire2Name || undefined,
@@ -8603,8 +8645,28 @@ export const CricketScoreboard: React.FC = () => {
     }
   };
 
+  // Robust autoTable runner that works in all Vite/ESM/CJS bundling environments
+  const runAutoTable = (targetDoc: any, options: any) => {
+    try {
+      if (typeof autoTable === 'function') {
+        autoTable(targetDoc, options);
+      } else if (typeof (autoTable as any)?.default === 'function') {
+        (autoTable as any).default(targetDoc, options);
+      } else if (typeof (targetDoc as any)?.autoTable === 'function') {
+        (targetDoc as any).autoTable(options);
+      }
+    } catch (e) {
+      console.warn('AutoTable invocation fallback error:', e);
+      if (typeof (targetDoc as any)?.autoTable === 'function') {
+        try {
+          (targetDoc as any).autoTable(options);
+        } catch (_) {}
+      }
+    }
+  };
+
   const handleExportMatchPDF = () => {
-    if (!match || !match.innings1) {
+    if (!match || (!match.innings1 && !match.mainMatchState?.innings1)) {
       showNotification('No match data to export!', 'alert');
       return;
     }
@@ -8613,6 +8675,11 @@ export const CricketScoreboard: React.FC = () => {
       showNotification('Generating PDF Match Report...', 'info');
       const doc = new jsPDF();
       
+      // Determine effective primary match data (handles Super Over state smoothly)
+      const primaryInn1 = match.mainMatchState?.innings1 || match.innings1;
+      const primaryInn2 = match.mainMatchState?.innings2 || match.innings2;
+      const isSuperOverMatch = !!(match.isSuperOver || match.superOversHistory?.length || match.mainMatchState);
+
       // Set PDF properties to make it read-only and secured
       doc.setProperties({
         title: "Official Secure Match Ledger",
@@ -8634,34 +8701,36 @@ export const CricketScoreboard: React.FC = () => {
 
       const processInningsForPotm = (inn: typeof match.innings1) => {
         if (!inn) return;
-        inn.batsmen.forEach(b => {
-          if (!b.name) return;
+        (inn.batsmen || []).forEach(b => {
+          if (!b || !b.name) return;
           const p = getOrCreatePlayer(b.name);
-          p.runs += b.runs;
-          p.balls += b.balls;
-          p.fours += b.fours;
-          p.sixes += b.sixes;
+          p.runs += Number(b.runs) || 0;
+          p.balls += Number(b.balls) || 0;
+          p.fours += Number(b.fours) || 0;
+          p.sixes += Number(b.sixes) || 0;
         });
-        inn.bowlers.forEach(bw => {
-          if (!bw.name) return;
+        (inn.bowlers || []).forEach(bw => {
+          if (!bw || !bw.name) return;
           const p = getOrCreatePlayer(bw.name);
-          p.wickets += bw.wickets;
-          p.runsConceded += bw.runsConceded;
+          p.wickets += Number(bw.wickets) || 0;
+          p.runsConceded += Number(bw.runsConceded) || 0;
         });
       };
 
-      processInningsForPotm(match.innings1);
-      processInningsForPotm(match.innings2);
+      processInningsForPotm(primaryInn1);
+      if (primaryInn2) {
+        processInningsForPotm(primaryInn2);
+      }
 
       let potmPlayer = 'N/A';
       let potmDetails = '';
-      if (playerOfTheMatch) {
+      if (playerOfTheMatch && playerOfTheMatch.name) {
         potmPlayer = playerOfTheMatch.name;
         const p = statsMap[playerOfTheMatch.name.trim().toLowerCase()];
         if (p) {
           potmDetails = `${p.runs} runs (${p.fours || 0}x4, ${p.sixes || 0}x6) | ${p.wickets} wickets conceded ${p.runsConceded} runs`;
         } else {
-          potmDetails = `${playerOfTheMatch.runs} runs (${playerOfTheMatch.fours || 0}x4, ${playerOfTheMatch.sixes || 0}x6) | ${playerOfTheMatch.wickets} wickets conceded ${playerOfTheMatch.runsConceded} runs`;
+          potmDetails = `${playerOfTheMatch.runs || 0} runs (${playerOfTheMatch.fours || 0}x4, ${playerOfTheMatch.sixes || 0}x6) | ${playerOfTheMatch.wickets || 0} wickets conceded ${playerOfTheMatch.runsConceded || 0} runs`;
         }
       } else {
         let maxPoints = -1;
@@ -8685,25 +8754,32 @@ export const CricketScoreboard: React.FC = () => {
       
       const findHighlights = (inn: typeof match.innings1) => {
         if (!inn) return;
-        inn.batsmen.forEach(b => {
-          if (b.runs > topBatterRuns) {
-            topBatterRuns = b.runs;
+        (inn.batsmen || []).forEach(b => {
+          if (!b) return;
+          const r = Number(b.runs) || 0;
+          if (r > topBatterRuns) {
+            topBatterRuns = r;
             topBatterName = b.name;
           }
         });
-        inn.bowlers.forEach(bw => {
-          if (bw.wickets > topBowlerWickets) {
-            topBowlerWickets = bw.wickets;
+        (inn.bowlers || []).forEach(bw => {
+          if (!bw) return;
+          const w = Number(bw.wickets) || 0;
+          const rc = Number(bw.runsConceded) || 0;
+          if (w > topBowlerWickets) {
+            topBowlerWickets = w;
             topBowlerName = bw.name;
-            topBowlerRuns = bw.runsConceded;
-          } else if (bw.wickets === topBowlerWickets && bw.runsConceded < topBowlerRuns) {
+            topBowlerRuns = rc;
+          } else if (w === topBowlerWickets && rc < topBowlerRuns) {
             topBowlerName = bw.name;
-            topBowlerRuns = bw.runsConceded;
+            topBowlerRuns = rc;
           }
         });
       };
-      findHighlights(match.innings1);
-      findHighlights(match.innings2);
+      findHighlights(primaryInn1);
+      if (primaryInn2) {
+        findHighlights(primaryInn2);
+      }
 
       // Page header - CUSTOM DESIGNED footprint
       doc.setFont('Helvetica', 'bold');
@@ -8720,7 +8796,7 @@ export const CricketScoreboard: React.FC = () => {
       doc.setTextColor(120);
       doc.setFont('Helvetica', 'normal');
       doc.text(`Generated on: ${new Date().toLocaleString()} (READ-ONLY SECURED DOCUMENT)`, 14, 28);
-      doc.text(`Match Date: ${match.date || 'N/A'}`, 14, 33);
+      doc.text(`Match Date: ${match.date || new Date().toISOString().split('T')[0]}`, 14, 33);
       
       // Divider
       doc.setDrawColor(220, 220, 220);
@@ -8734,13 +8810,13 @@ export const CricketScoreboard: React.FC = () => {
       
       doc.setFontSize(11);
       doc.setFont('Helvetica', 'normal');
-      doc.text(`Overs Limit: ${match.oversLimit || 'N/A'} Overs`, 14, 51);
-      doc.text(`Toss Winner: ${match.tossWinner} (elected to ${match.tossChoice} first)`, 14, 56);
+      doc.text(`Overs Limit: ${match.oversLimit || 10} Overs`, 14, 51);
+      doc.text(`Toss Winner: ${match.tossWinner || match.teamA} (elected to ${match.tossChoice || 'bat'} first)`, 14, 56);
       
       if (match.status === 'completed') {
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(190, 110, 11);
-        doc.text(`Result: ${match.winner === 'Tie' ? 'Match Tie!' : `${match.winner} ${match.winReason}`}`, 14, 63);
+        doc.text(`Result: ${match.winner === 'Tie' ? 'Match Tie!' : `${match.winner || 'Winner'} ${match.winReason || 'won the match'}`}`, 14, 63);
       } else {
         doc.setTextColor(70);
         doc.text(`Status: Match Currently Live`, 14, 63);
@@ -8765,81 +8841,108 @@ export const CricketScoreboard: React.FC = () => {
       doc.text(`Best Innings Batting: ${batterText}   |   Best Bowling Figures: ${bowlerText}`, 18, 86);
 
       // Innings 1 Card
-      doc.setTextColor(30);
-      doc.setFontSize(13);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(`1st Innings: ${match.innings1.battingTeam} Scorecard`, 14, 102);
+      if (primaryInn1) {
+        doc.setTextColor(30);
+        doc.setFontSize(13);
+        doc.setFont('Helvetica', 'bold');
+        doc.text(`1st Innings: ${primaryInn1.battingTeam || match.teamA} Scorecard`, 14, 102);
+        
+        doc.setFontSize(10);
+        doc.setFont('Helvetica', 'normal');
+        doc.text(`Total Score: ${primaryInn1.runs || 0}/${primaryInn1.wickets || 0} in ${formatOvers(primaryInn1.ballsBowled || 0)} overs`, 14, 107);
+        
+        // Innings 1 Batting table
+        const validInn1Batsmen = (primaryInn1.batsmen || []).filter(b => b && b.name);
+        const inn1BatRows = validInn1Batsmen.length > 0
+          ? validInn1Batsmen.map(b => {
+              const runs = Number(b.runs) || 0;
+              const balls = Number(b.balls) || 0;
+              const fours = Number(b.fours) || 0;
+              const sixes = Number(b.sixes) || 0;
+              return [
+                b.name,
+                b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
+                runs.toString(),
+                balls.toString(),
+                fours.toString(),
+                sixes.toString(),
+                balls > 0 ? ((runs / balls) * 100).toFixed(1) : '0.0'
+              ];
+            })
+          : [
+              ['Scoreboard Total (Innings 1)', 'Completed', (primaryInn1.runs || 0).toString(), (primaryInn1.ballsBowled || 0).toString(), '-', '-', '-']
+            ];
+        
+        runAutoTable(doc, {
+          startY: 111,
+          head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
+          body: inn1BatRows,
+          theme: 'striped',
+          headStyles: { fillColor: [16, 185, 129] },
+          styles: { fontSize: 8.5 }
+        });
+        
+        let lastY1 = (doc as any).lastAutoTable?.finalY || 135;
+        
+        // Extras break-out line
+        const ext1 = (typeof primaryInn1.extras === 'object' && primaryInn1.extras !== null)
+          ? primaryInn1.extras
+          : { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
+        const extTotal1 = (ext1.wides || 0) + (ext1.noBalls || 0) + (ext1.byes || 0) + (ext1.legByes || 0) + (ext1.penalty || 0);
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(60);
+        doc.text(`Extras: ${extTotal1} (wides: ${ext1.wides || 0}, no-balls: ${ext1.noBalls || 0}, byes: ${ext1.byes || 0}, legbyes: ${ext1.legByes || 0}, penalty: ${ext1.penalty || 0})`, 14, lastY1 + 6);
+        
+        // Fall of Wickets line
+        const fowItems1 = primaryInn1.fallOfWickets && primaryInn1.fallOfWickets.length > 0
+          ? primaryInn1.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
+          : 'No wickets fell';
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.text(`Fall of Wickets: ${fowItems1}`, 14, lastY1 + 11);
+        
+        let bowlStartY1 = lastY1 + 16;
+        doc.setFontSize(12);
+        doc.setFont('Helvetica', 'bold');
+        doc.setTextColor(30);
+        const bowlTeam1 = primaryInn1.bowlingTeam || (primaryInn1.battingTeam === match.teamA ? match.teamB : match.teamA);
+        doc.text(`${bowlTeam1} Bowling Figures`, 14, bowlStartY1);
+        
+        const validInn1Bowlers = (primaryInn1.bowlers || []).filter(bw => bw && bw.name);
+        const inn1BowlRows = validInn1Bowlers.length > 0
+          ? validInn1Bowlers.map(bw => {
+              const bb = Number(bw.ballsBowled) || 0;
+              const maidens = Number(bw.maidens) || 0;
+              const rc = Number(bw.runsConceded) || 0;
+              const wkts = Number(bw.wickets) || 0;
+              return [
+                bw.name,
+                formatOvers(bb),
+                maidens.toString(),
+                rc.toString(),
+                wkts.toString(),
+                bb > 0 ? ((rc / bb) * 6).toFixed(2) : '0.00'
+              ];
+            })
+          : [
+              ['Bowling Attack Combined', formatOvers(primaryInn1.ballsBowled || 0), '0', (primaryInn1.runs || 0).toString(), (primaryInn1.wickets || 0).toString(), '-']
+            ];
+        
+        runAutoTable(doc, {
+          startY: bowlStartY1 + 4,
+          head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
+          body: inn1BowlRows,
+          theme: 'striped',
+          headStyles: { fillColor: [15, 23, 42] },
+          styles: { fontSize: 8.5 }
+        });
+      }
       
-      doc.setFontSize(10);
-      doc.setFont('Helvetica', 'normal');
-      doc.text(`Total Score: ${match.innings1.runs}/${match.innings1.wickets} in ${formatOvers(match.innings1.ballsBowled)} overs`, 14, 107);
-      
-      // Innings 1 Batting table
-      const inn1BatRows = match.innings1.batsmen.map(b => [
-        b.name,
-        b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - bowling: ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-        b.runs.toString(),
-        b.balls.toString(),
-        b.fours.toString(),
-        b.sixes.toString(),
-        b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : '0.0'
-      ]);
-      
-      autoTable(doc, {
-        startY: 111,
-        head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
-        body: inn1BatRows,
-        theme: 'striped',
-        headStyles: { fillColor: [16, 185, 129] },
-        styles: { fontSize: 8.5 }
-      });
-      
-      let lastY1 = (doc as any).lastAutoTable.finalY;
-      
-      // Extras break-out line
-      const ext1 = match.innings1.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
-      const extTotal1 = ext1.wides + ext1.noBalls + ext1.byes + ext1.legByes + (ext1.penalty || 0);
-      doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(60);
-      doc.text(`Extras: ${extTotal1} (wides: ${ext1.wides}, no-balls: ${ext1.noBalls}, byes: ${ext1.byes}, legbyes: ${ext1.legByes}, penalty: ${ext1.penalty || 0})`, 14, lastY1 + 6);
-      
-      // Fall of Wickets line
-      const fowItems1 = match.innings1.fallOfWickets && match.innings1.fallOfWickets.length > 0
-        ? match.innings1.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
-        : 'No wickets fell';
-      doc.setFont('Helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text(`Fall of Wickets: ${fowItems1}`, 14, lastY1 + 11);
-      
-      let bowlStartY1 = lastY1 + 16;
-      doc.setFontSize(12);
-      doc.setFont('Helvetica', 'bold');
-      doc.setTextColor(30);
-      doc.text(`${match.innings1.battingTeam} Bowlers Performance`, 14, bowlStartY1);
-      
-      const inn1BowlRows = match.innings1.bowlers.map(bw => [
-        bw.name,
-        formatOvers(bw.ballsBowled),
-        bw.maidens.toString(),
-        bw.runsConceded.toString(),
-        bw.wickets.toString(),
-        bw.ballsBowled > 0 ? ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(2) : '0.00'
-      ]);
-      
-      autoTable(doc, {
-        startY: bowlStartY1 + 4,
-        head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
-        body: inn1BowlRows,
-        theme: 'striped',
-        headStyles: { fillColor: [15, 23, 42] },
-        styles: { fontSize: 8.5 }
-      });
-      
-      let nextY = (doc as any).lastAutoTable.finalY + 15;
+      let nextY = ((doc as any).lastAutoTable?.finalY || 160) + 15;
       
       // Check if we need a new page for Innings 2 Scorecard
-      if (match.innings2) {
+      if (primaryInn2) {
         if (nextY > 200) {
           doc.addPage();
           nextY = 20;
@@ -8848,24 +8951,35 @@ export const CricketScoreboard: React.FC = () => {
         doc.setFontSize(13);
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(30);
-        doc.text(`2nd Innings: ${match.innings2.battingTeam} Scorecard`, 14, nextY);
+        doc.text(`2nd Innings: ${primaryInn2.battingTeam || match.teamB} Scorecard`, 14, nextY);
         
         doc.setFontSize(10);
         doc.setFont('Helvetica', 'normal');
-        doc.text(`Total Score: ${match.innings2.runs}/${match.innings2.wickets} in ${formatOvers(match.innings2.ballsBowled)} overs`, 14, nextY + 6);
+        doc.text(`Total Score: ${primaryInn2.runs || 0}/${primaryInn2.wickets || 0} in ${formatOvers(primaryInn2.ballsBowled || 0)} overs`, 14, nextY + 6);
         
         // Innings 2 Batting table
-        const inn2BatRows = match.innings2.batsmen.map(b => [
-          b.name,
-          b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - bowling: ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
-          b.runs.toString(),
-          b.balls.toString(),
-          b.fours.toString(),
-          b.sixes.toString(),
-          b.balls > 0 ? ((b.runs / b.balls) * 100).toFixed(1) : '0.0'
-        ]);
+        const validInn2Batsmen = (primaryInn2.batsmen || []).filter(b => b && b.name);
+        const inn2BatRows = validInn2Batsmen.length > 0
+          ? validInn2Batsmen.map(b => {
+              const runs = Number(b.runs) || 0;
+              const balls = Number(b.balls) || 0;
+              const fours = Number(b.fours) || 0;
+              const sixes = Number(b.sixes) || 0;
+              return [
+                b.name,
+                b.isOut ? (b.outMode ? `Out (${b.outMode}${b.dismissedBy ? ` - b ${b.dismissedBy}` : ''})` : 'Out') : 'not out',
+                runs.toString(),
+                balls.toString(),
+                fours.toString(),
+                sixes.toString(),
+                balls > 0 ? ((runs / balls) * 100).toFixed(1) : '0.0'
+              ];
+            })
+          : [
+              ['Scoreboard Total (Innings 2)', 'Completed', (primaryInn2.runs || 0).toString(), (primaryInn2.ballsBowled || 0).toString(), '-', '-', '-']
+            ];
         
-        autoTable(doc, {
+        runAutoTable(doc, {
           startY: nextY + 11,
           head: [['Batsman', 'Dismissal Status', 'Runs', 'Balls', '4s', '6s', 'S/R']],
           body: inn2BatRows,
@@ -8874,19 +8988,21 @@ export const CricketScoreboard: React.FC = () => {
           styles: { fontSize: 8.5 }
         });
         
-        let lastY2 = (doc as any).lastAutoTable.finalY;
+        let lastY2 = (doc as any).lastAutoTable?.finalY || (nextY + 45);
         
         // Extras break-out line Innings 2
-        const ext2 = match.innings2.extras || { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
-        const extTotal2 = ext2.wides + ext2.noBalls + ext2.byes + ext2.legByes + (ext2.penalty || 0);
+        const ext2 = (typeof primaryInn2.extras === 'object' && primaryInn2.extras !== null)
+          ? primaryInn2.extras
+          : { wides: 0, noBalls: 0, byes: 0, legByes: 0, penalty: 0 };
+        const extTotal2 = (ext2.wides || 0) + (ext2.noBalls || 0) + (ext2.byes || 0) + (ext2.legByes || 0) + (ext2.penalty || 0);
         doc.setFont('Helvetica', 'bold');
         doc.setFontSize(8.5);
         doc.setTextColor(60);
-        doc.text(`Extras: ${extTotal2} (wides: ${ext2.wides}, no-balls: ${ext2.noBalls}, byes: ${ext2.byes}, legbyes: ${ext2.legByes}, penalty: ${ext2.penalty || 0})`, 14, lastY2 + 6);
+        doc.text(`Extras: ${extTotal2} (wides: ${ext2.wides || 0}, no-balls: ${ext2.noBalls || 0}, byes: ${ext2.byes || 0}, legbyes: ${ext2.legByes || 0}, penalty: ${ext2.penalty || 0})`, 14, lastY2 + 6);
         
         // Fall of Wickets line Innings 2
-        const fowItems2 = match.innings2.fallOfWickets && match.innings2.fallOfWickets.length > 0
-          ? match.innings2.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
+        const fowItems2 = primaryInn2.fallOfWickets && primaryInn2.fallOfWickets.length > 0
+          ? primaryInn2.fallOfWickets.map(fw => `Wkt ${fw.wicketNo}: ${fw.score} (${fw.batsmanName}, Ov ${fw.oversList})`).join(' | ')
           : 'No wickets fell';
         doc.setFont('Helvetica', 'normal');
         doc.setFontSize(8);
@@ -8896,18 +9012,30 @@ export const CricketScoreboard: React.FC = () => {
         doc.setFontSize(12);
         doc.setFont('Helvetica', 'bold');
         doc.setTextColor(30);
-        doc.text(`${match.innings2.battingTeam} Bowlers Performance`, 14, bowlStartY2);
+        const bowlTeam2 = primaryInn2.bowlingTeam || (primaryInn2.battingTeam === match.teamA ? match.teamB : match.teamA);
+        doc.text(`${bowlTeam2} Bowling Figures`, 14, bowlStartY2);
         
-        const inn2BowlRows = match.innings2.bowlers.map(bw => [
-          bw.name,
-          formatOvers(bw.ballsBowled),
-          bw.maidens.toString(),
-          bw.runsConceded.toString(),
-          bw.wickets.toString(),
-          bw.ballsBowled > 0 ? ((bw.runsConceded / bw.ballsBowled) * 6).toFixed(2) : '0.00'
-        ]);
+        const validInn2Bowlers = (primaryInn2.bowlers || []).filter(bw => bw && bw.name);
+        const inn2BowlRows = validInn2Bowlers.length > 0
+          ? validInn2Bowlers.map(bw => {
+              const bb = Number(bw.ballsBowled) || 0;
+              const maidens = Number(bw.maidens) || 0;
+              const rc = Number(bw.runsConceded) || 0;
+              const wkts = Number(bw.wickets) || 0;
+              return [
+                bw.name,
+                formatOvers(bb),
+                maidens.toString(),
+                rc.toString(),
+                wkts.toString(),
+                bb > 0 ? ((rc / bb) * 6).toFixed(2) : '0.00'
+              ];
+            })
+          : [
+              ['Bowling Attack Combined', formatOvers(primaryInn2.ballsBowled || 0), '0', (primaryInn2.runs || 0).toString(), (primaryInn2.wickets || 0).toString(), '-']
+            ];
         
-        autoTable(doc, {
+        runAutoTable(doc, {
           startY: bowlStartY2 + 4,
           head: [['Bowler', 'Overs', 'Maidens', 'Runs Conceded', 'Wickets', 'Economy']],
           body: inn2BowlRows,
@@ -8916,11 +9044,49 @@ export const CricketScoreboard: React.FC = () => {
           styles: { fontSize: 8.5 }
         });
         
-        nextY = (doc as any).lastAutoTable.finalY + 15;
+        nextY = ((doc as any).lastAutoTable?.finalY || (bowlStartY2 + 35)) + 15;
+      }
+
+      // If Super Over was contested, render Super Over Scorecard section
+      if (isSuperOverMatch && match.innings1 && match.innings2) {
+        if (nextY > 200) {
+          doc.addPage();
+          nextY = 20;
+        }
+
+        doc.setFontSize(13);
+        doc.setFont('Helvetica', 'bold');
+        doc.setTextColor(190, 18, 60); // Rose 700
+        doc.text(`⚡ Official Super Over Decider Scorecard`, 14, nextY);
+
+        const soRows = [
+          [
+            `1st Super Over: ${match.innings1.battingTeam}`,
+            `${match.innings1.runs}/${match.innings1.wickets}`,
+            `${formatOvers(match.innings1.ballsBowled)} ov`,
+            match.innings1.batsmen?.filter(b => b.runs > 0).map(b => `${b.name} (${b.runs})`).join(', ') || 'Batting logged'
+          ],
+          [
+            `2nd Super Over: ${match.innings2.battingTeam}`,
+            `${match.innings2.runs}/${match.innings2.wickets}`,
+            `${formatOvers(match.innings2.ballsBowled)} ov`,
+            match.innings2.batsmen?.filter(b => b.runs > 0).map(b => `${b.name} (${b.runs})`).join(', ') || 'Batting logged'
+          ]
+        ];
+
+        runAutoTable(doc, {
+          startY: nextY + 5,
+          head: [['Super Over Innings', 'Score', 'Overs', 'Top Performers']],
+          body: soRows,
+          theme: 'striped',
+          headStyles: { fillColor: [190, 18, 60] },
+          styles: { fontSize: 8.5 }
+        });
+
+        nextY = ((doc as any).lastAutoTable?.finalY || (nextY + 30)) + 15;
       }
 
       // Tournament Sponsors & Given Prize Money Honors Section in PDF Report
-      // Requirement: "also in match scoreboard pdf add this all deatils if score manager not added prize details then dont add anythink."
       const tourPrizesRaw = match.tournamentPrizes || 
         (match.tournamentId ? getTournamentPrizesByTournamentId(match.tournamentId) : null) || 
         getTournamentPrizes(match.id);
@@ -8963,7 +9129,7 @@ export const CricketScoreboard: React.FC = () => {
           ];
         });
 
-        autoTable(doc, {
+        runAutoTable(doc, {
           startY: nextY + 8,
           head: [['#', 'Award / Given Prize', 'Sponsor Name', 'Position / Designation', 'Given Prize Money']],
           body: prizeTableRows,
@@ -8972,7 +9138,7 @@ export const CricketScoreboard: React.FC = () => {
           styles: { fontSize: 8.5 }
         });
 
-        nextY = (doc as any).lastAutoTable.finalY + 15;
+        nextY = ((doc as any).lastAutoTable?.finalY || (nextY + 30)) + 15;
       }
       
       // Add Commentary Log Section
@@ -8988,36 +9154,37 @@ export const CricketScoreboard: React.FC = () => {
       // Collect commentary lines
       const logsCombined: string[][] = [];
       const appendCommentary = (inn: typeof match.innings1) => {
-        if (!inn) return;
+        if (!inn || !Array.isArray(inn.commentaryList)) return;
         inn.commentaryList.slice().reverse().forEach(comm => {
+          if (!comm) return;
           let badgeType = "Ball";
           if (comm.type === 'wicket') badgeType = "WICKET 🔴";
           else if (comm.type === 'boundary') {
             const isFour = comm.ballScore === '4' || (comm as any).runsOffBat === 4 || (comm as any).runs === 4;
-            const isSix = !isFour && (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || comm.description.toLowerCase().includes('six') || comm.description.toLowerCase().includes('6 runs'));
+            const isSix = !isFour && (comm.ballScore === '6' || (comm as any).runsOffBat === 6 || (comm as any).runs === 6 || (comm.description || '').toLowerCase().includes('six') || (comm.description || '').toLowerCase().includes('6 runs'));
             badgeType = isSix ? "SIXER 🚀" : "FOUR 🏏";
           } else if (comm.type === 'milestone') badgeType = "MILESTONE 🎉";
           else if (comm.type === 'extra') badgeType = "EXTRA ⚡";
 
           logsCombined.push([
-            inn.battingTeam,
-            `Over ${comm.overBall}`,
+            inn.battingTeam || 'Batting Team',
+            `Over ${comm.overBall || '-'}`,
             badgeType,
-            comm.description
+            comm.description || 'Ball delivered'
           ]);
         });
       };
       
-      appendCommentary(match.innings1);
-      if (match.innings2) {
-        appendCommentary(match.innings2);
+      appendCommentary(primaryInn1);
+      if (primaryInn2) {
+        appendCommentary(primaryInn2);
       }
       
       if (logsCombined.length === 0) {
         logsCombined.push(['-', '-', '-', 'No deliveries bowled or logged yet.']);
       }
       
-      autoTable(doc, {
+      runAutoTable(doc, {
         startY: nextY + 4,
         head: [['Innings / Batting Team', 'Delivery Info', 'Category', 'Over Summary Log / Incident Notes']],
         body: logsCombined,
@@ -9026,14 +9193,10 @@ export const CricketScoreboard: React.FC = () => {
         styles: { fontSize: 8 }
       });
       
-      // Apply Watermark & Developed By footprint on every page
+      // Apply Footnote branding on every page
       const pageCount = doc.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
-        
-        // Watermarks removed per client request
-        
-        // Footnote branding
         doc.setFont('Helvetica', 'bold');
         doc.setFontSize(7.5);
         doc.setTextColor(140, 140, 140);
@@ -9353,29 +9516,35 @@ export const CricketScoreboard: React.FC = () => {
               onClose={() => setShowFieldPositionModal(false)}
               currentPositions={match.overlayConfig?.fieldPositions}
               onSavePositions={(positions) => {
-                const updated = {
-                  ...(match.overlayConfig || {}),
-                  fieldPositions: positions
-                };
-                syncMatch({ ...match, overlayConfig: updated });
+                syncMatch((prev) => ({
+                  ...prev,
+                  overlayConfig: {
+                    ...(prev.overlayConfig || {}),
+                    fieldPositions: positions
+                  } as any
+                }));
                 showNotification('Field positions saved successfully', 'success');
               }}
               onShowOnBroadcast={(positions) => {
-                const updated = {
-                  ...(match.overlayConfig || {}),
-                  fieldPositions: positions,
-                  activeGraphic: 'field_positions'
-                };
-                syncMatch({ ...match, overlayConfig: updated });
+                syncMatch((prev) => ({
+                  ...prev,
+                  overlayConfig: {
+                    ...(prev.overlayConfig || {}),
+                    fieldPositions: positions,
+                    activeGraphic: 'field_positions'
+                  } as any
+                }));
                 setShowFieldPositionModal(false);
                 showNotification('Field Position Overlay is now LIVE ON AIR!', 'success');
               }}
               onHideFromBroadcast={() => {
-                const updated = {
-                  ...(match.overlayConfig || {}),
-                  activeGraphic: 'none'
-                };
-                syncMatch({ ...match, overlayConfig: updated });
+                syncMatch((prev) => ({
+                  ...prev,
+                  overlayConfig: {
+                    ...(prev.overlayConfig || {}),
+                    activeGraphic: 'none'
+                  } as any
+                }));
                 setShowFieldPositionModal(false);
                 showNotification('Field Position Overlay hidden from TV.', 'info');
               }}
@@ -9412,7 +9581,7 @@ export const CricketScoreboard: React.FC = () => {
     setEditModalTournamentName(match.tournamentName || '');
     setEditModalYoutubeChannelLogo(match.overlayConfig?.youtubeChannelLogo || match.youtubeChannelLogo || youtubeChannelLogo || '');
     setEditModalYoutubeChannelName(match.overlayConfig?.youtubeChannelName || match.youtubeChannelName || youtubeChannelName || '');
-    setEditModalGroundName(match.groundName || '');
+    setEditModalGroundName(match.groundName || match.venue || groundName || '');
     setEditModalUmpire1Name(match.umpire1Name || '');
     setEditModalUmpire1Photo(match.umpire1Photo || '');
     setEditModalUmpire2Name(match.umpire2Name || '');
@@ -10086,8 +10255,10 @@ export const CricketScoreboard: React.FC = () => {
                 const currentActiveGraphic = activeOverlayConfig.activeGraphic || 'none';
 
                 const updateOverlayProp = (updates: Partial<typeof activeOverlayConfig>) => {
-                  const updated = { ...activeOverlayConfig, ...updates };
-                  syncMatch({ ...match, overlayConfig: updated });
+                  syncMatch((prev) => ({
+                    ...prev,
+                    overlayConfig: { ...(prev.overlayConfig || activeOverlayConfig), ...updates } as any
+                  }));
 
                   // Handle auto-close for Wicket, Milestone, Team VS Team, Squad, Field Position, and Summary alerts after timeout
                   if (
@@ -11644,7 +11815,7 @@ export const CricketScoreboard: React.FC = () => {
                       );
                     })}
                     <span className="text-[8px] font-mono text-slate-400 ml-0.5">
-                      <strong className="text-amber-300">{(currentInnings.ballsBowled % 6) || (currentInnings.ballsBowled > 0 ? 6 : 0)}</strong>/6
+                      <strong className="text-amber-300">{currentInnings.ballsBowled % 6 === 0 ? (match.status === 'completed' && currentInnings.ballsBowled > 0 ? 6 : 0) : (currentInnings.ballsBowled % 6)}</strong>/6
                     </span>
                   </div>
                 </div>
@@ -12412,7 +12583,7 @@ export const CricketScoreboard: React.FC = () => {
                       return (
                         <span
                           key={c.id || idx}
-                          className={`min-w-4.5 h-4.5 px-1 rounded-full border flex items-center justify-center text-[8px] font-mono shrink-0 select-none ${pill.pillStyle}`}
+                          className={`min-w-5 h-5 px-1 rounded-full border flex items-center justify-center text-[8px] font-mono shrink-0 select-none ${pill.pillStyle}`}
                           title={c.description || `${c.overBall}: ${pill.label}`}
                         >
                           {pill.label}
@@ -13184,7 +13355,7 @@ export const CricketScoreboard: React.FC = () => {
               </div>
 
               {/* Scrollable grid container inside 100vh bounds */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 text-xs">
+              <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar min-h-0 text-xs">
                 {activeScorecardTab === 'bat' ? (
                   <table className="w-full text-left text-slate-400 font-sans">
                     <thead>
@@ -13451,7 +13622,7 @@ export const CricketScoreboard: React.FC = () => {
 
                       if (commentaryDeskSubTab === 'podium') {
                         return (
-                          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin min-h-0">
+                          <div className="flex-1 max-h-[380px] lg:max-h-[440px] overflow-y-auto space-y-2 pr-1.5 custom-scrollbar scrollbar-thin min-h-[200px]">
                             {/* Header Summary */}
                             <div className="p-2.5 rounded-xl bg-slate-900 border border-amber-500/30 flex items-center justify-between">
                               <div className="flex items-center gap-1.5">
@@ -13647,7 +13818,7 @@ export const CricketScoreboard: React.FC = () => {
                     })()}
 
                     {commentaryDeskSubTab === 'feed' && (
-                    <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin min-h-0">
+                    <div className="flex-1 max-h-[380px] lg:max-h-[440px] overflow-y-auto space-y-1.5 pr-1.5 custom-scrollbar scrollbar-thin min-h-[200px]">
                       {combinedCommentaryList.length === 0 ? (
                         <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-center space-y-2">
                           <span className="text-[8px] font-black uppercase tracking-widest text-emerald-400 block flex items-center justify-center gap-1">
@@ -15745,6 +15916,7 @@ export const CricketScoreboard: React.FC = () => {
                 tournamentLogo: tourLogo || undefined,
                 tournamentPrizes: tourPrizes.length > 0 ? tourPrizes : undefined,
                 groundName: ground,
+                venue: ground,
                 seriesName: tourName,
                 umpire1Name: u1Name || undefined,
                 umpire1Photo: u1Photo || undefined,
@@ -15960,6 +16132,7 @@ export const CricketScoreboard: React.FC = () => {
                 matchBannerUrl: config.matchBannerUrl || undefined,
                 tournamentPrizes: (config as any).tournamentPrizes,
                 groundName: config.groundName,
+                venue: config.groundName,
                 seriesName: config.seriesName || config.tournamentName,
                 umpire1Name: config.umpire1Name || undefined,
                 umpire1Photo: config.umpire1Photo || undefined,
@@ -18256,13 +18429,13 @@ export const CricketScoreboard: React.FC = () => {
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
-                        {approvedPlayers.map((p) => {
+                        {approvedPlayers.map((p, pIdx) => {
                           const name = p.fullName;
                           const role = p.role;
                           const inA = selectedTeamARoster.includes(name);
                           const inB = selectedTeamBRoster.includes(name);
                           return (
-                            <div key={p.id} className="flex justify-between items-center p-2 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-emerald-500/30 transition-all text-xs">
+                            <div key={`approved-player-${p.id || name}-${pIdx}`} className="flex justify-between items-center p-2 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/70 dark:border-slate-800 hover:border-emerald-500/30 transition-all text-xs">
                               <div className="flex items-center gap-2 min-w-0">
                                 <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-500 font-bold flex items-center justify-center text-[10px] overflow-hidden shrink-0 shadow-inner">
                                   {p.photo ? (
@@ -18728,7 +18901,22 @@ export const CricketScoreboard: React.FC = () => {
                       id="setup-ground-name"
                       type="text"
                       value={groundName}
-                      onChange={(e) => setGroundName(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setGroundName(val);
+                        try {
+                          if (val.trim()) {
+                            localStorage.setItem('gully_last_ground_name', val.trim());
+                          }
+                        } catch (_) {}
+                        if (match && match.status === 'setup') {
+                          setMatch(prev => ({
+                            ...prev,
+                            groundName: val,
+                            venue: val
+                          }));
+                        }
+                      }}
                       placeholder="E.g. Gully Ground / National Stadium"
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none hover:border-emerald-500/30 transition-all text-slate-800 dark:text-white placeholder-slate-400"
                     />
@@ -20940,7 +21128,7 @@ export const CricketScoreboard: React.FC = () => {
                         setEditModalTournamentName(match.tournamentName || '');
                         setEditModalYoutubeChannelLogo(match.overlayConfig?.youtubeChannelLogo || match.youtubeChannelLogo || youtubeChannelLogo || '');
                         setEditModalYoutubeChannelName(match.overlayConfig?.youtubeChannelName || match.youtubeChannelName || youtubeChannelName || '');
-                        setEditModalGroundName(match.groundName || '');
+                        setEditModalGroundName(match.groundName || match.venue || groundName || '');
                         setEditModalUmpire1Name(match.umpire1Name || '');
                         setEditModalUmpire1Photo(match.umpire1Photo || '');
                         setEditModalUmpire2Name(match.umpire2Name || '');
@@ -22626,7 +22814,7 @@ export const CricketScoreboard: React.FC = () => {
                           📊 Innings & Over Telemetry
                         </span>
                         <span className="text-[9px] font-mono font-bold text-slate-400">
-                          Ball <strong className="text-white">{(currentInnings.ballsBowled % 6) || (currentInnings.ballsBowled > 0 ? 6 : 0)}</strong>/6
+                          Ball <strong className="text-white">{currentInnings.ballsBowled % 6 === 0 ? (match.status === 'completed' && currentInnings.ballsBowled > 0 ? 6 : 0) : (currentInnings.ballsBowled % 6)}</strong>/6
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-center">
@@ -22657,23 +22845,55 @@ export const CricketScoreboard: React.FC = () => {
 
                   {/* Over, Target & Last result card indicators */}
                   <div className="space-y-3 pt-3 border-t border-white/5">
-                    {/* Last Ball & Free Hit */}
-                    <div className="flex justify-between items-center bg-slate-900 p-3 rounded-xl border border-white/5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Last Ball:</span>
-                        <span className={`px-2.5 py-0.5 bg-slate-950 font-mono font-black text-xs rounded border border-white/10 ${
-                          match.lastBallResult === 'W' ? 'text-rose-500 border-rose-500/20' :
-                          ['4', '6'].includes(match.lastBallResult || '') ? 'text-amber-400 border-amber-500/20 animate-pulse' : 'text-emerald-400'
-                        }`}>
-                          {match.lastBallResult || '-'}
-                        </span>
-                      </div>
+                    {/* This Over & Free Hit Strip */}
+                    <div className="bg-slate-900 p-3 rounded-xl border border-white/5 space-y-2">
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="text-[9px] font-black text-amber-400 uppercase tracking-wider shrink-0">
+                            This Over:
+                          </span>
+                          <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar py-0.5">
+                            {(() => {
+                              const currentOverNo = calculateActiveOverNumber(
+                                currentInnings?.ballsBowled,
+                                match?.status,
+                                match?.oversLimit,
+                                currentInnings?.wickets,
+                                match?.isSuperOver,
+                                match?.superOverWicketLimit
+                              );
+                              const comms = (currentInnings.commentaryList || [])
+                                .filter((c: any) => isDeliveryInTargetOver(c, currentOverNo));
+                              const recent = comms.slice(0, 16).reverse();
+                              if (recent.length === 0) {
+                                return (
+                                  <span className="text-[9px] text-slate-400 font-mono italic">
+                                    New Over Ready (0/6 balls)
+                                  </span>
+                                );
+                              }
+                              return recent.map((c: any, idx: number) => {
+                                const pill = getDeliveryPillDetails(c);
+                                return (
+                                  <span
+                                    key={c.id || idx}
+                                    className={`min-w-5 h-5 px-1.5 rounded-full border flex items-center justify-center text-[9px] font-mono shrink-0 select-none ${pill.pillStyle}`}
+                                    title={c.description || `${c.overBall}: ${pill.label}`}
+                                  >
+                                    {pill.label}
+                                  </span>
+                                );
+                              });
+                            })()}
+                          </div>
+                        </div>
 
-                      {match.freeHitNext && (
-                        <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[8px] font-black uppercase tracking-widest rounded animate-pulse shadow">
-                          FREE HIT
-                        </span>
-                      )}
+                        {match.freeHitNext && (
+                          <span className="px-2 py-0.5 bg-amber-500 text-slate-950 text-[8px] font-black uppercase tracking-widest rounded animate-pulse shadow shrink-0">
+                            FREE HIT
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* CRR Indicator */}
@@ -22691,12 +22911,12 @@ export const CricketScoreboard: React.FC = () => {
                       )}
                     </div>
 
-                    {/* AI Commentary real-time log badge stream */}
-                    <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 space-y-1.5 relative overflow-hidden min-h-[50px]">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                    {/* AI Commentary real-time scrollable log stream */}
+                    <div className="p-3 bg-slate-950/60 rounded-xl border border-white/5 space-y-2 relative overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-1.5 border-b border-slate-800/80">
                         <div className="flex items-center gap-2">
                           <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1">
-                            <Radio size={10} className="animate-pulse" /> Live Feed
+                            <Radio size={10} className="animate-pulse" /> Live Commentary ({combinedCommentaryList.length})
                           </span>
                           {(() => {
                             const matchTone = getMatchContextualTone(match, currentInnings);
@@ -22709,7 +22929,7 @@ export const CricketScoreboard: React.FC = () => {
                               key={l}
                               type="button"
                               onClick={() => setUserCommentaryLang(l)}
-                              className={`px-1.5 py-0.2 rounded text-[7.5px] font-black uppercase transition-all border-none cursor-pointer ${
+                              className={`px-1.5 py-0.5 rounded text-[7.5px] font-black uppercase transition-all border-none cursor-pointer ${
                                 userCommentaryLang === l
                                   ? 'bg-emerald-600 text-white shadow-xs'
                                   : 'text-slate-400 hover:text-slate-200 bg-transparent'
@@ -22720,16 +22940,65 @@ export const CricketScoreboard: React.FC = () => {
                           ))}
                         </div>
                       </div>
-                      {isAiCommentaryLoading ? (
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                      {isAiCommentaryLoading && (
+                        <div className="flex items-center gap-2 text-[10px] text-emerald-400 py-0.5">
                           <span className="inline-block w-2.5 h-2.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
                           AI Scorer is crafting commentary...
                         </div>
+                      )}
+                      {combinedCommentaryList.length === 0 ? (
+                        <div className="text-[10px] text-slate-400 italic font-bold leading-relaxed py-2">
+                          Scorer cockpit fully calibrated. Ready for next ball delivery.
+                        </div>
                       ) : (
-                        <div className="text-[10px] text-slate-300 italic truncate font-bold leading-relaxed scroll-smooth">
-                          {combinedCommentaryList[0] 
-                            ? getCommentaryText(combinedCommentaryList[0], userCommentaryLang)
-                            : "Scorer cockpit fully calibrated. Ready for next ball delivery."}
+                        <div className="max-h-48 overflow-y-auto custom-scrollbar scrollbar-thin space-y-1.5 pr-1.5">
+                          {combinedCommentaryList.map((comm, cIdx) => {
+                            const displayText = getCommentaryText(comm, userCommentaryLang);
+                            const isWkt = comm.type === 'wicket';
+                            const isBnd = comm.type === 'boundary';
+                            const isExt = comm.type === 'extra';
+                            const isLatest = cIdx === 0;
+                            return (
+                              <div
+                                key={comm.id || `${comm.overBall}-${cIdx}`}
+                                className={`p-2 rounded-lg text-[10px] border transition-all ${
+                                  isWkt
+                                    ? 'bg-rose-500/10 border-rose-500/25 text-rose-200'
+                                    : isBnd
+                                    ? 'bg-amber-500/10 border-amber-500/25 text-amber-200'
+                                    : isExt
+                                    ? 'bg-sky-500/10 border-sky-500/25 text-sky-200'
+                                    : isLatest
+                                    ? 'bg-slate-900 border-emerald-500/30 text-slate-100'
+                                    : 'bg-slate-900/60 border-slate-800/80 text-slate-300'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-1.5 mb-0.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-mono text-[8.5px] font-black text-emerald-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                                      Over {comm.overBall}
+                                    </span>
+                                    {isLatest && (
+                                      <span className="text-[7px] font-black uppercase px-1.5 py-0.2 rounded bg-emerald-500 text-slate-950">
+                                        Latest
+                                      </span>
+                                    )}
+                                    {(comm as any)._inningsNum && (
+                                      <span className="text-[7px] font-black uppercase px-1 py-0.2 rounded bg-slate-800 text-slate-300">
+                                        {(comm as any)._inningsNum === 2 ? '2nd Inn' : '1st Inn'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {comm.ballScore && (
+                                    <span className="font-mono text-[8px] font-black px-1.5 py-0.2 rounded bg-white/10 text-white">
+                                      {comm.ballScore}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="leading-snug font-sans font-medium">{displayText}</p>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -26026,12 +26295,12 @@ export const CricketScoreboard: React.FC = () => {
                           Approved Players Quick Picker ({approvedPlayers.length})
                         </span>
                         <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1 py-1">
-                          {approvedPlayers.map(p => {
+                          {approvedPlayers.map((p, pIdx) => {
                             const currentNames = newTeamPlayersText.split('\n').map(x => x.trim().toLowerCase());
                             const isSelected = currentNames.includes(p.fullName.trim().toLowerCase());
                             return (
                               <button
-                                key={p.id}
+                                key={`appr-pick-${p.id || p.fullName}-${pIdx}`}
                                 type="button"
                                 onClick={() => {
                                   const trimName = p.fullName.trim();

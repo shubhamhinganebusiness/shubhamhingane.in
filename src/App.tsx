@@ -16,53 +16,101 @@ import { AuthProvider, useAuth } from './components/AuthContext';
 import { CMSProvider } from './components/CMSContext';
 import { useSiteSettings } from './hooks/useCMS';
 import ScrollToTop from './components/ScrollToTop';
+import { FeatureSection } from './components/FeatureSection';
+import { NewsLaunchpad } from './components/NewsLaunchpad';
+import { Testimonials as TestimonialsSection } from './components/TestimonialsSection';
+import LogoCloudSection from './components/LogoCloudSection';
+
+// Resilient dynamic import with automatic retry on network drops or dev server restarts
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T } | any>,
+  retries = 3,
+  delayMs = 1000
+): React.LazyExoticComponent<T> {
+  return lazy(() =>
+    new Promise<{ default: T }>((resolve, reject) => {
+      const attempt = (remaining: number) => {
+        factory()
+          .then((module: any) => {
+            if (module && module.default) {
+              resolve(module);
+            } else if (module && typeof module === 'object') {
+              const keys = Object.keys(module);
+              const comp = module.default || (keys.length > 0 ? module[keys[0]] : null);
+              resolve({ default: comp });
+            } else {
+              resolve({ default: module });
+            }
+          })
+          .catch((error: any) => {
+            console.warn(`[lazyWithRetry] Module chunk fetch failed, ${remaining} retries remaining:`, error);
+            if (remaining > 0) {
+              setTimeout(() => attempt(remaining - 1), delayMs);
+            } else {
+              const isDynamicImportErr =
+                error?.message?.includes('dynamically imported module') ||
+                error?.message?.includes('Failed to fetch') ||
+                error?.message?.includes('Importing a module script failed');
+              if (isDynamicImportErr && typeof window !== 'undefined') {
+                const reloadKey = 'chunk_reload_' + (window.location.hash || window.location.pathname);
+                const hasRetried = sessionStorage.getItem(reloadKey);
+                if (!hasRetried) {
+                  sessionStorage.setItem(reloadKey, 'true');
+                  window.location.reload();
+                  return;
+                }
+              }
+              reject(error);
+            }
+          });
+      };
+      attempt(retries);
+    })
+  );
+}
 
 // Lazy load non-critical components
-const FeatureSection = lazy(() => import('./components/FeatureSection').then(m => ({ default: m.FeatureSection })));
-const AIChatSection = lazy(() => import('./components/AIChatSection').then(m => ({ default: m.AIChatSection })));
-const Courses = lazy(() => import('./components/Courses').then(m => ({ default: m.Courses })));
-const Portfolio = lazy(() => import('./components/Portfolio'));
-const NewsLaunchpad = lazy(() => import('./components/NewsLaunchpad').then(m => ({ default: m.NewsLaunchpad })));
-const Resume = lazy(() => import('./components/Resume').then(m => ({ default: m.Resume })));
-const TestimonialsSection = lazy(() => import('./components/TestimonialsSection').then(m => ({ default: m.Testimonials })));
-const LogoCloudSection = lazy(() => import('./components/LogoCloudSection'));
-const Blog = lazy(() => import('./components/Blog').then(m => ({ default: m.Blog })));
-const Contact = lazy(() => import('./components/Contact').then(m => ({ default: m.Contact })));
+const AIChatSection = lazyWithRetry(() => import('./components/AIChatSection').then(m => ({ default: m.AIChatSection })));
+const Courses = lazyWithRetry(() => import('./components/Courses').then(m => ({ default: m.Courses })));
+const Portfolio = lazyWithRetry(() => import('./components/Portfolio'));
+const Resume = lazyWithRetry(() => import('./components/Resume').then(m => ({ default: m.Resume })));
+const Blog = lazyWithRetry(() => import('./components/Blog').then(m => ({ default: m.Blog })));
+const Contact = lazyWithRetry(() => import('./components/Contact').then(m => ({ default: m.Contact })));
 
 
 // Lazy load pages
-const BlogDetail = lazy(() => import('./pages/BlogDetail').then(m => ({ default: m.BlogDetail })));
-const ServiceDetail = lazy(() => import('./pages/ServiceDetail').then(m => ({ default: m.ServiceDetail })));
-const CourseDetail = lazy(() => import('./pages/CourseDetail').then(m => ({ default: m.CourseDetail })));
-const ProjectDetail = lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
-const Projects = lazy(() => import('./pages/Projects'));
-const DairyDashboard = lazy(() => import('./components/dairy/DairyDashboard').then(m => ({ default: m.DairyDashboard })));
-const DairyLogin = lazy(() => import('./components/dairy/DairyLogin').then(m => ({ default: m.DairyLogin })));
-const DairyDemo = lazy(() => import('./components/dairy/DairyDemo').then(m => ({ default: m.DairyDemo })));
-const AgroDashboard = lazy(() => import('./components/agro/AgroDashboard').then(m => ({ default: m.AgroDashboard })));
-const AgroLogin = lazy(() => import('./components/agro/AgroLogin').then(m => ({ default: m.AgroLogin })));
-const AgroLanding = lazy(() => import('./components/agro/AgroLanding').then(m => ({ default: m.AgroLanding })));
-const MedLanding = lazy(() => import('./components/med/MedLanding').then(m => ({ default: m.MedLanding })));
-const MedNews = lazy(() => import('./components/med/MedNews').then(m => ({ default: m.MedNews })));
-const MedDoctorDashboard = lazy(() => import('./components/med/MedDoctorDashboard').then(m => ({ default: m.MedDoctorDashboard })));
-const MedPharmacyDashboard = lazy(() => import('./components/med/MedPharmacyDashboard').then(m => ({ default: m.MedPharmacyDashboard })));
-const MedLogin = lazy(() => import('./components/med/MedLogin').then(m => ({ default: m.MedLogin })));
-const MessLanding = lazy(() => import('./components/mess/MessLanding').then(m => ({ default: m.MessLanding })));
-const MessLogin = lazy(() => import('./components/mess/MessLogin').then(m => ({ default: m.MessLogin })));
-const MessOwnerDashboard = lazy(() => import('./components/mess/MessOwnerDashboard').then(m => ({ default: m.MessOwnerDashboard })));
-const FurnitureDashboard = lazy(() => import('./components/furniture/FurnitureDashboard').then(m => ({ default: m.FurnitureDashboard })));
-const FurnitureLogin = lazy(() => import('./components/furniture/FurnitureLogin').then(m => ({ default: m.FurnitureLogin })));
-const PortfolioAdmin = lazy(() => import('./components/agro/PortfolioAdmin').then(m => ({ default: m.PortfolioAdmin })));
-const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Login })));
-const SuperAdmin = lazy(() => import('./components/SuperAdmin').then(m => ({ default: m.SuperAdmin })));
-const SchoolERPApp = lazy(() => import('./components/school-erp/SchoolERPApp').then(m => ({ default: m.SchoolERPApp })));
-const CricketScoreboard = lazy(() => import('./components/cricket/CricketScoreboard').then(m => ({ default: m.CricketScoreboard })));
-const CompletedMatchesPage = lazy(() => import('./pages/CompletedMatchesPage').then(m => ({ default: m.CompletedMatchesPage })));
-const SpectatorScoreboardSection = lazy(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.SpectatorScoreboardSection })));
-const LiveMatchGlobalBanner = lazy(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.LiveMatchGlobalBanner })));
-const CricketAuction = lazy(() => import('./components/cricket/CricketAuction').then(m => ({ default: m.CricketAuction })));
-const CricketOverlay = lazy(() => import('./components/cricket/CricketOverlay').then(m => ({ default: m.CricketOverlay })));
-const GullyScoreLogin = lazy(() => import('./components/cricket/GullyScoreLogin').then(m => ({ default: m.GullyScoreLogin })));
+const BlogDetail = lazyWithRetry(() => import('./pages/BlogDetail').then(m => ({ default: m.BlogDetail })));
+const ServiceDetail = lazyWithRetry(() => import('./pages/ServiceDetail').then(m => ({ default: m.ServiceDetail })));
+const CourseDetail = lazyWithRetry(() => import('./pages/CourseDetail').then(m => ({ default: m.CourseDetail })));
+const ProjectDetail = lazyWithRetry(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
+const Projects = lazyWithRetry(() => import('./pages/Projects'));
+const DairyDashboard = lazyWithRetry(() => import('./components/dairy/DairyDashboard').then(m => ({ default: m.DairyDashboard })));
+const DairyLogin = lazyWithRetry(() => import('./components/dairy/DairyLogin').then(m => ({ default: m.DairyLogin })));
+const DairyDemo = lazyWithRetry(() => import('./components/dairy/DairyDemo').then(m => ({ default: m.DairyDemo })));
+const AgroDashboard = lazyWithRetry(() => import('./components/agro/AgroDashboard').then(m => ({ default: m.AgroDashboard })));
+const AgroLogin = lazyWithRetry(() => import('./components/agro/AgroLogin').then(m => ({ default: m.AgroLogin })));
+const AgroLanding = lazyWithRetry(() => import('./components/agro/AgroLanding').then(m => ({ default: m.AgroLanding })));
+const MedLanding = lazyWithRetry(() => import('./components/med/MedLanding').then(m => ({ default: m.MedLanding })));
+const MedNews = lazyWithRetry(() => import('./components/med/MedNews').then(m => ({ default: m.MedNews })));
+const MedDoctorDashboard = lazyWithRetry(() => import('./components/med/MedDoctorDashboard').then(m => ({ default: m.MedDoctorDashboard })));
+const MedPharmacyDashboard = lazyWithRetry(() => import('./components/med/MedPharmacyDashboard').then(m => ({ default: m.MedPharmacyDashboard })));
+const MedLogin = lazyWithRetry(() => import('./components/med/MedLogin').then(m => ({ default: m.MedLogin })));
+const MessLanding = lazyWithRetry(() => import('./components/mess/MessLanding').then(m => ({ default: m.MessLanding })));
+const MessLogin = lazyWithRetry(() => import('./components/mess/MessLogin').then(m => ({ default: m.MessLogin })));
+const MessOwnerDashboard = lazyWithRetry(() => import('./components/mess/MessOwnerDashboard').then(m => ({ default: m.MessOwnerDashboard })));
+const FurnitureDashboard = lazyWithRetry(() => import('./components/furniture/FurnitureDashboard').then(m => ({ default: m.FurnitureDashboard })));
+const FurnitureLogin = lazyWithRetry(() => import('./components/furniture/FurnitureLogin').then(m => ({ default: m.FurnitureLogin })));
+const PortfolioAdmin = lazyWithRetry(() => import('./components/agro/PortfolioAdmin').then(m => ({ default: m.PortfolioAdmin })));
+const Login = lazyWithRetry(() => import('./components/Login').then(m => ({ default: m.Login })));
+const SuperAdmin = lazyWithRetry(() => import('./components/SuperAdmin').then(m => ({ default: m.SuperAdmin })));
+const SchoolERPApp = lazyWithRetry(() => import('./components/school-erp/SchoolERPApp').then(m => ({ default: m.SchoolERPApp })));
+const CricketScoreboard = lazyWithRetry(() => import('./components/cricket/CricketScoreboard').then(m => ({ default: m.CricketScoreboard })));
+const CompletedMatchesPage = lazyWithRetry(() => import('./pages/CompletedMatchesPage').then(m => ({ default: m.CompletedMatchesPage })));
+const SpectatorScoreboardSection = lazyWithRetry(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.SpectatorScoreboardSection })));
+const LiveMatchGlobalBanner = lazyWithRetry(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.LiveMatchGlobalBanner })));
+const CricketAuction = lazyWithRetry(() => import('./components/cricket/CricketAuction').then(m => ({ default: m.CricketAuction })));
+const CricketOverlay = lazyWithRetry(() => import('./components/cricket/CricketOverlay').then(m => ({ default: m.CricketOverlay })));
+const GullyScoreLogin = lazyWithRetry(() => import('./components/cricket/GullyScoreLogin').then(m => ({ default: m.GullyScoreLogin })));
 const VideoRecorderApp = lazy(() => import('./components/video-recorder/VideoRecorderApp').then(m => ({ default: m.VideoRecorderApp })));
 const IDCardGenerator = lazy(() => import('./pages/IDCardGenerator').then(m => ({ default: m.IDCardGenerator })));
 const InstantIDCardBuilderPage = lazy(() => import('./pages/InstantIDCardBuilderPage').then(m => ({ default: m.InstantIDCardBuilderPage })));
@@ -299,11 +347,7 @@ const HomePage = () => {
         </Suspense>
       </DeferredSection>
 
-      {isVisible('features') && (
-        <Suspense fallback={<SectionSkeleton height="320px" />}>
-          <FeatureSection />
-        </Suspense>
-      )}
+      {isVisible('features') && <FeatureSection />}
 
       {isVisible('courses') && (
         <Suspense fallback={<SectionSkeleton height="380px" />}>
@@ -317,11 +361,7 @@ const HomePage = () => {
         </Suspense>
       )}
 
-      {isVisible('newsLaunchpad') && (
-        <Suspense fallback={null}>
-          <NewsLaunchpad />
-        </Suspense>
-      )}
+      {isVisible('newsLaunchpad') && <NewsLaunchpad />}
 
       {isVisible('resume') && (
         <Suspense fallback={<SectionSkeleton height="400px" />}>
@@ -329,17 +369,9 @@ const HomePage = () => {
         </Suspense>
       )}
 
-      {isVisible('testimonial') && (
-        <Suspense fallback={null}>
-          <TestimonialsSection />
-        </Suspense>
-      )}
+      {isVisible('testimonial') && <TestimonialsSection />}
 
-      {isVisible('clients') && (
-        <Suspense fallback={null}>
-          <LogoCloudSection />
-        </Suspense>
-      )}
+      {isVisible('clients') && <LogoCloudSection />}
 
       {isVisible('blog') && (
         <Suspense fallback={<SectionSkeleton height="320px" />}>

@@ -48,6 +48,7 @@ export type CertificateThemeId = 'classic_ivory';
 
 export interface AwardPlayer {
   name: string;
+  team?: string;
   runs: number;
   balls?: number;
   fours?: number;
@@ -55,9 +56,6 @@ export interface AwardPlayer {
   wickets: number;
   runsConceded?: number;
   points: number;
-  team?: string;
-  photo?: string;
-  role?: string;
 }
 
 export interface MatchCertificateData {
@@ -2242,14 +2240,14 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
   // WhatsApp share message with certificate summary
   const handleShareWhatsApp = () => {
     const text = `🏆 *GULLY CRICKET CERTIFICATE OF EXCELLENCE* 🏆\n\n` +
-      `🌟 *Award:* ${activeAwardConfig.en}\n` +
-      `👤 *Recipient:* ${currentRecipient.name}\n` +
+      `🌟 *Award:* ${effectiveAwardConfig.en}\n` +
+      `👤 *Recipient:* ${effectiveRecipient.name}\n` +
       `🏏 *Match:* ${data.teamA} vs ${data.teamB}\n` +
       `🥇 *Winner:* ${data.winner} (${data.winReason || 'Won'})\n` +
       `📊 *Performance Highlights:*\n` +
-      `  • Runs: ${currentRecipient.runs} ${currentRecipient.balls ? `(${currentRecipient.balls}b, ${currentRecipient.fours || 0}x4, ${currentRecipient.sixes || 0}x6)` : ''}\n` +
-      `  • Wickets: ${currentRecipient.wickets} ${currentRecipient.runsConceded !== undefined ? `(${currentRecipient.runsConceded} runs)` : ''}\n` +
-      `  • MVP Rating: ${currentRecipient.points} pts\n` +
+      `  • Runs: ${effectiveRecipient.runs} ${effectiveRecipient.balls ? `(${effectiveRecipient.balls}b, ${effectiveRecipient.fours || 0}x4, ${effectiveRecipient.sixes || 0}x6)` : ''}\n` +
+      `  • Wickets: ${effectiveRecipient.wickets} ${effectiveRecipient.runsConceded !== undefined ? `(${effectiveRecipient.runsConceded} runs)` : ''}\n` +
+      `  • MVP Rating: ${effectiveRecipient.points} pts\n` +
       `📅 *Date:* ${data.matchDate}\n` +
       `✨ *Tournament:* ${autoTournamentName}\n` +
       `🛡️ *Verification Serial:* ${serialNumber}\n` +
@@ -2468,7 +2466,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                   const isSelected = selectedWinningPlayerIdx === idx;
                   return (
                     <button
-                      key={player.id || idx}
+                      key={`winning-squad-${player.id || player.name || 'player'}-${idx}`}
                       type="button"
                       onClick={() => setSelectedWinningPlayerIdx(idx)}
                       className={`px-2 py-0.5 rounded-lg text-[10px] font-bold shrink-0 transition-all flex items-center gap-1 cursor-pointer ${
@@ -2497,7 +2495,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                   const isSelected = selectedRunnerUpPlayerIdx === idx;
                   return (
                     <button
-                      key={player.id || idx}
+                      key={`runner-up-squad-${player.id || player.name || 'player'}-${idx}`}
                       type="button"
                       onClick={() => setSelectedRunnerUpPlayerIdx(idx)}
                       className={`px-2 py-0.5 rounded-lg text-[10px] font-bold shrink-0 transition-all flex items-center gap-1 cursor-pointer ${
@@ -2673,7 +2671,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
                 const isSelected = selectedSquadPlayerIndex === idx;
                 return (
                   <div
-                    key={player.id || idx}
+                    key={`editable-squad-${player.id || player.name || 'player'}-${idx}`}
                     onClick={() => setSelectedSquadPlayerIndex(idx)}
                     className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1.5 shrink-0 cursor-pointer transition-all ${
                       isSelected

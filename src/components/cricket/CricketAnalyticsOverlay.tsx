@@ -166,8 +166,13 @@ export const CricketAnalyticsOverlay: React.FC<CricketAnalyticsOverlayProps> = (
       if (overIdx >= oversCount) return;
 
       let runs = 0;
+      const bScore = String((c as any).ballScore || '').trim().toUpperCase();
       if (c.runs !== undefined) {
         runs = c.runs;
+      } else if (typeof (c as any).runsOffBat === 'number') {
+        runs = (c as any).runsOffBat + (c.type === 'extra' && ((c as any).extraType === 'wide' || (c as any).extraType === 'noball') ? 1 : 0);
+      } else if (/^[0-6]$/.test(bScore)) {
+        runs = parseInt(bScore, 10);
       } else if (c.type === 'boundary') {
         runs = (c.description || '').toLowerCase().includes('six') ? 6 : 4;
       } else {
@@ -175,7 +180,8 @@ export const CricketAnalyticsOverlay: React.FC<CricketAnalyticsOverlayProps> = (
         runs = matchDigits ? parseInt(matchDigits[0], 10) : 0;
       }
 
-      const isWicket = c.type === 'wicket' || (c.description || '').toLowerCase().includes('out') || (c.description || '').toLowerCase().includes('wicket');
+      const cleanedDesc = (c.description || '').toLowerCase().replace(/mid[- ]?wicket/gi, '').replace(/\b\d+\s*wickets?\b/gi, '');
+      const isWicket = c.type === 'wicket' || bScore === 'W' || (!c.type && (/\bout!/i.test(cleanedDesc) || /\bclean bowled\b/i.test(cleanedDesc)));
 
       if (!overMap[overIdx]) {
         overMap[overIdx] = { runs: 0, wickets: 0, balls: 0 };

@@ -474,7 +474,7 @@ export const TeamSquadImageOverlay: React.FC<TeamSquadImageOverlayProps> = ({
               <div className="w-full flex items-center justify-center gap-2 sm:gap-3 md:gap-4 lg:gap-6 flex-wrap mb-3 sm:mb-4">
                 {squadPlayers.slice(0, 6).map((player, idx) => (
                   <motion.div
-                    key={player.id || idx}
+                    key={`squad-r1-${player.id || player.name || 'player'}-${idx}`}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.04, duration: 0.25 }}
@@ -532,7 +532,7 @@ export const TeamSquadImageOverlay: React.FC<TeamSquadImageOverlayProps> = ({
                   const globalIdx = idx + 6;
                   return (
                     <motion.div
-                      key={player.id || globalIdx}
+                      key={`squad-r2-${player.id || player.name || 'player'}-${globalIdx}`}
                       initial={{ opacity: 0, y: 12 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: globalIdx * 0.04, duration: 0.25 }}

@@ -42,9 +42,19 @@ export function calculateActiveOverNumber(
 export function isDeliveryInTargetOver(commentary: any, targetOverNo: number): boolean {
   if (!commentary) return false;
 
+  const hasExplicitDeliveryScore =
+    Boolean(commentary.ballScore) ||
+    typeof commentary.runsOffBat === 'number' ||
+    typeof commentary.runs === 'number' ||
+    commentary.type === 'dot' ||
+    commentary.type === 'runs' ||
+    commentary.type === 'boundary' ||
+    commentary.type === 'wicket' ||
+    commentary.type === 'extra';
+
   // Reject non-delivery commentary entries
   if (
-    commentary.overBall === '0.0' ||
+    (commentary.overBall === '0.0' && !hasExplicitDeliveryScore) ||
     commentary.type === 'milestone' ||
     commentary.type === 'announcement' ||
     commentary.type === 'break' ||
@@ -52,18 +62,19 @@ export function isDeliveryInTargetOver(commentary: any, targetOverNo: number): b
     commentary.specialEvent === 'retire_hurt' ||
     commentary.announcementType === 'new_batsman' ||
     commentary.announcementType === 'new_bowler' ||
+    commentary.announcementType === 'over_summary' ||
     commentary.id?.startsWith('comm-bat-upd-') ||
     commentary.id?.startsWith('comm-bowl-upd-') ||
-    commentary.id?.startsWith('comm-over-finish-')
+    commentary.id?.startsWith('comm-over-finish-') ||
+    commentary.id?.startsWith('comm-dls-') ||
+    commentary.id?.startsWith('c-news-') ||
+    commentary.id?.startsWith('comment-')
   ) {
     return false;
   }
 
   const desc = (commentary.description || '').toLowerCase();
   if (
-    desc.includes('started') ||
-    desc.includes('created') ||
-    desc.includes('toss') ||
     desc.includes('innings declared') ||
     desc.includes('bulletin') ||
     desc.includes('match launched') ||
@@ -72,9 +83,14 @@ export function isDeliveryInTargetOver(commentary: any, targetOverNo: number): b
     desc.includes('new batsman') ||
     desc.includes('come on crease') ||
     desc.includes('will bowl the') ||
-    desc.includes('bowler into the attack')
+    desc.includes('bowler into the attack') ||
+    (!hasExplicitDeliveryScore && (desc.includes('started') || desc.includes('created') || desc.includes('toss')))
   ) {
     return false;
+  }
+
+  if (typeof commentary.overIndex === 'number' && !isNaN(commentary.overIndex)) {
+    return commentary.overIndex === targetOverNo;
   }
 
   if (commentary.overBall && typeof commentary.overBall === 'string') {
@@ -83,18 +99,38 @@ export function isDeliveryInTargetOver(commentary: any, targetOverNo: number): b
       const overPart = parseInt(parts[0], 10);
       const ballPart = parseInt(parts[1], 10);
       if (!isNaN(overPart) && !isNaN(ballPart)) {
-        if (overPart === 0 && ballPart === 0) return false;
-        const overIndex = ballPart === 0 ? overPart - 1 : overPart;
-        return overIndex === targetOverNo;
+        if (overPart === 0 && ballPart === 0 && !hasExplicitDeliveryScore) return false;
+        if (overPart > 0 && ballPart === 0 && commentary.extraType !== 'penalty') {
+          return (overPart - 1) === targetOverNo;
+        }
+        return overPart === targetOverNo;
       }
     }
   }
 
-  if (typeof commentary.overIndex === 'number') {
-    return commentary.overIndex === targetOverNo;
-  }
-
   return false;
+}
+
+/**
+ * Helper to check if a commentary description genuinely describes a wicket dismissal
+ * without false positives on "mid-wicket", "outfield", or "2 wickets in 2 balls".
+ */
+function isDescriptionWicketDismissal(desc: string): boolean {
+  if (!desc) return false;
+  const cleaned = desc.replace(/mid[- ]?wicket/gi, '').replace(/\b\d+\s*wickets?\b/gi, '');
+  return (
+    /\bout!/i.test(cleaned) ||
+    /\bclean bowled\b/i.test(cleaned) ||
+    /\bbowled him\b/i.test(cleaned) ||
+    /\bcaught\b/i.test(cleaned) ||
+    /\blbw\b/i.test(cleaned) ||
+    /\brun out\b/i.test(cleaned) ||
+    /\bstumped\b/i.test(cleaned) ||
+    /\bhas to walk back\b/i.test(cleaned) ||
+    /\bwickets?\s*fell\b/i.test(cleaned) ||
+    /\bgiven out\b/i.test(cleaned) ||
+    /\btakes a wicket\b/i.test(cleaned)
+  );
 }
 
 /**
@@ -103,9 +139,15 @@ export function isDeliveryInTargetOver(commentary: any, targetOverNo: number): b
 export function getDeliveryPillDetails(comm: any): DeliveryPillDetails {
   if (!comm) return { label: '', pillStyle: 'hidden', color: 'hidden' };
 
+  const hasExplicitScore =
+    Boolean(comm.ballScore) ||
+    typeof comm.runsOffBat === 'number' ||
+    typeof comm.runs === 'number' ||
+    comm.type === 'extra';
+
   // Explicitly reject non-delivery commentary
   if (
-    comm.overBall === '0.0' ||
+    (comm.overBall === '0.0' && !hasExplicitScore) ||
     comm.type === 'milestone' ||
     comm.type === 'announcement' ||
     comm.type === 'break' ||
@@ -113,9 +155,13 @@ export function getDeliveryPillDetails(comm: any): DeliveryPillDetails {
     comm.specialEvent === 'retire_hurt' ||
     comm.announcementType === 'new_batsman' ||
     comm.announcementType === 'new_bowler' ||
+    comm.announcementType === 'over_summary' ||
     comm.id?.startsWith('comm-bat-upd-') ||
     comm.id?.startsWith('comm-bowl-upd-') ||
-    comm.id?.startsWith('comm-over-finish-')
+    comm.id?.startsWith('comm-over-finish-') ||
+    comm.id?.startsWith('comm-dls-') ||
+    comm.id?.startsWith('c-news-') ||
+    comm.id?.startsWith('comment-')
   ) {
     return { label: '', pillStyle: 'hidden', color: 'hidden' };
   }
@@ -127,40 +173,45 @@ export function getDeliveryPillDetails(comm: any): DeliveryPillDetails {
   const hasDirectRuns = typeof comm.runs === 'number' && !isNaN(comm.runs);
   const directRuns = hasDirectRuns ? Number(comm.runs) : null;
 
-  // Wicket
-  if (
-    comm.type === 'wicket' ||
-    bScore === 'W' ||
-    bScore.startsWith('W+') ||
-    desc.includes('wicket') ||
-    desc.includes('out!') ||
-    desc.includes('bowled') ||
-    desc.includes('caught') ||
-    desc.includes('lbw') ||
-    desc.includes('run out') ||
-    desc.includes('stumped')
-  ) {
-    const style = 'bg-rose-600 text-white border-rose-500 font-extrabold shadow-inner';
-    return { label: 'W', pillStyle: style, color: style };
-  }
-
-  // Check for No Ball (including taken runs)
+  // Check for No Ball (including taken runs) FIRST so No Ball deliveries always display NB / NB+runs symbol
   const isNoBallDelivery =
-    comm.isNoBall ||
-    comm.extraType === 'noball' ||
-    (comm.type === 'extra' && (desc.includes('no ball') || desc.includes('no-ball') || (desc.includes('no') && desc.includes('ball')) || desc.includes('nb'))) ||
-    /nb/i.test(bScore);
+    Boolean(comm.isNoBall) ||
+    String(comm.extraType || '').toLowerCase() === 'noball' ||
+    String(comm.type || '').toLowerCase() === 'noball' ||
+    /nb|no[- ]?ball/i.test(bScore) ||
+    desc.includes('no ball') ||
+    desc.includes('no-ball') ||
+    desc.includes('नो बॉल') ||
+    desc.includes('नो-बॉल') ||
+    /\bnb\b/i.test(desc);
 
   if (isNoBallDelivery) {
-    let batRuns = runsOffBat !== null ? runsOffBat : 0;
-    if (!batRuns && bScore) {
-      const m = bScore.match(/(\d+)/);
+    let batRuns = 0;
+    if (bScore === 'NB' || bScore === 'NO BALL' || bScore === 'NO-BALL') {
+      batRuns = runsOffBat !== null && runsOffBat > 0 ? runsOffBat : 0;
+    } else if (bScore.includes('+')) {
+      const m = bScore.match(/\+(\d+)/);
+      if (m) batRuns = parseInt(m[1], 10);
+    } else if (/^(\d+)\s*NB$/i.test(bScore)) {
+      const m = bScore.match(/^(\d+)\s*NB$/i);
+      if (m) {
+        const parsed = parseInt(m[1], 10);
+        batRuns = parsed > 1 ? parsed - 1 : parsed;
+      }
+    } else if (runsOffBat !== null) {
+      batRuns = runsOffBat;
+    } else {
+      const m =
+        desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) ||
+        desc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken|off\s*the\s*bat)/i);
       if (m) batRuns = parseInt(m[1], 10);
     }
-    if (!batRuns) {
-      const m = desc.match(/(?:plus|\+)\s*(\d+)\s*runs?/i) || desc.match(/(\d+)\s*runs?\s*(?:scored|to\s*batsman|taken)/i) || desc.match(/(\d+)\s*(?:runs?|धावा|रन)/i);
-      if (m) batRuns = parseInt(m[1], 10);
+
+    if (comm.type === 'wicket' || bScore.includes('W')) {
+      const style = 'bg-rose-600 text-white border-rose-400 font-black shadow-sm';
+      return { label: batRuns > 0 ? `NB+W` : 'NB+W', pillStyle: style, color: style };
     }
+
     if (batRuns > 0) {
       const isSix = batRuns >= 6;
       const isFour = batRuns >= 4 && batRuns < 6;
@@ -171,8 +222,26 @@ export function getDeliveryPillDetails(comm: any): DeliveryPillDetails {
         : 'bg-pink-600 text-white border-pink-400 dark:bg-pink-700 font-extrabold shadow-sm';
       return { label: `NB+${batRuns}`, pillStyle: style, color: style };
     }
-    const style = 'bg-pink-900/80 text-pink-200 border-pink-500/50 font-bold';
+    const style = 'bg-pink-600 text-white border-pink-400 font-black shadow-sm';
     return { label: 'NB', pillStyle: style, color: style };
+  }
+
+  // Determine if this delivery has an explicit non-wicket run/extra score
+  const hasExplicitNonWicketScore =
+    (comm.type && comm.type !== 'wicket') ||
+    /^[0-6]$|^1D$|^4S$|^6S$|^(?:FOUR|SIX)$|^(?:WD|NB|LB|B)/i.test(bScore) ||
+    (runsOffBat !== null && comm.type !== 'wicket') ||
+    (directRuns !== null && comm.type !== 'wicket');
+
+  // Wicket
+  if (
+    comm.type === 'wicket' ||
+    bScore === 'W' ||
+    bScore.startsWith('W+') ||
+    (!hasExplicitNonWicketScore && isDescriptionWicketDismissal(desc))
+  ) {
+    const style = 'bg-rose-600 text-white border-rose-500 font-extrabold shadow-inner';
+    return { label: 'W', pillStyle: style, color: style };
   }
 
   // Check for Wide (including extra runs taken)
@@ -220,7 +289,7 @@ export function getDeliveryPillDetails(comm: any): DeliveryPillDetails {
   }
 
   // Extras (Leg Bye / Bye)
-  if (comm.type === 'extra' || /lb|b/i.test(bScore)) {
+  if (comm.type === 'extra' || /lb|(?:^|\d+)b$/i.test(bScore)) {
     if (desc.includes('leg bye') || desc.includes('leg-bye') || desc.includes('legbye') || /lb/i.test(bScore) || (comm as any).extraType === 'legbye') {
       let lbRuns = 1;
       const mScore = bScore.match(/(\d+)\s*LB/i) || bScore.match(/^LB\s*(\d+)$/i) || bScore.match(/^(\d+)$/);
@@ -241,32 +310,69 @@ export function getDeliveryPillDetails(comm: any): DeliveryPillDetails {
     return { label: 'Ex', pillStyle: style, color: style };
   }
 
-  // Runs off bat
-  if (bScore === '6' || runsOffBat === 6 || directRuns === 6 || desc.includes('6 runs') || desc.includes('six') || desc.includes('maximum') || desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)) {
-    const style = 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow shadow-amber-500/50';
-    return { label: '6', pillStyle: style, color: style };
-  }
-  if (bScore === '4' || runsOffBat === 4 || directRuns === 4 || desc.includes('4 runs') || desc.includes('four') || desc.includes('boundary') || desc.includes('चौकार') || desc.includes('चौका') || desc.includes('४') || /\b4\s*runs?\b/i.test(desc)) {
-    const style = 'bg-emerald-600 text-white border-emerald-500 font-extrabold shadow-sm';
-    return { label: '4', pillStyle: style, color: style };
-  }
-  if (bScore === '1D' || desc.includes('declared run') || desc.includes('1d')) {
+  // 1. Check structured delivery score fields FIRST (ballScore, runsOffBat, runs)
+  // This guarantees that a 2-run delivery with tactical/AI text never gets misclassified by description substrings
+  if (bScore === '1D' || (comm as any).isDeclaredOne) {
     const style = 'bg-cyan-900 text-cyan-200 border-cyan-400 font-black';
     return { label: '1D', pillStyle: style, color: style };
   }
-  if (bScore === '3' || runsOffBat === 3 || directRuns === 3 || desc.includes('3 run') || desc.includes('three') || desc.includes('triple')) {
+
+  const explicitRunVal =
+    /^[0-6]$/.test(bScore)
+      ? parseInt(bScore, 10)
+      : bScore === '4S' || bScore === 'FOUR'
+      ? 4
+      : bScore === '6S' || bScore === 'SIX'
+      ? 6
+      : runsOffBat !== null
+      ? runsOffBat
+      : directRuns !== null
+      ? directRuns
+      : null;
+
+  if (explicitRunVal !== null) {
+    if (explicitRunVal === 6) {
+      const style = 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow shadow-amber-500/50';
+      return { label: '6', pillStyle: style, color: style };
+    }
+    if (explicitRunVal === 4) {
+      const style = 'bg-emerald-600 text-white border-emerald-500 font-extrabold shadow-sm';
+      return { label: '4', pillStyle: style, color: style };
+    }
+    if (explicitRunVal === 0) {
+      const style = 'bg-slate-800 text-slate-300 border-slate-700 font-bold';
+      return { label: '0', pillStyle: style, color: style };
+    }
+    const style = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
+    return { label: String(explicitRunVal), pillStyle: style, color: style };
+  }
+
+  // 2. Fallback to description text matching for legacy commentary entries without structured scores
+  if (desc.includes('6 runs') || desc.includes('six') || desc.includes('maximum') || desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)) {
+    const style = 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow shadow-amber-500/50';
+    return { label: '6', pillStyle: style, color: style };
+  }
+  if (desc.includes('4 runs') || desc.includes('four') || desc.includes('boundary') || desc.includes('चौकार') || desc.includes('चौका') || desc.includes('४') || /\b4\s*runs?\b/i.test(desc)) {
+    const style = 'bg-emerald-600 text-white border-emerald-500 font-extrabold shadow-sm';
+    return { label: '4', pillStyle: style, color: style };
+  }
+  if (desc.includes('declared run') || desc.includes('1d')) {
+    const style = 'bg-cyan-900 text-cyan-200 border-cyan-400 font-black';
+    return { label: '1D', pillStyle: style, color: style };
+  }
+  if (desc.includes('3 run') || desc.includes('three') || desc.includes('triple')) {
     const style = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
     return { label: '3', pillStyle: style, color: style };
   }
-  if (bScore === '2' || runsOffBat === 2 || directRuns === 2 || desc.includes('2 run') || desc.includes('two') || desc.includes('couple') || desc.includes('double')) {
+  if (desc.includes('2 run') || desc.includes('two') || desc.includes('couple') || desc.includes('double')) {
     const style = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
     return { label: '2', pillStyle: style, color: style };
   }
-  if (bScore === '1' || runsOffBat === 1 || directRuns === 1 || desc.includes('1 run') || desc.includes('single') || desc.includes('one run')) {
+  if (desc.includes('1 run') || desc.includes('single') || desc.includes('one run') || desc.includes('rotates strike')) {
     const style = 'bg-slate-800 text-cyan-300 border-slate-600 font-black';
     return { label: '1', pillStyle: style, color: style };
   }
-  if (bScore === '0' || runsOffBat === 0 || directRuns === 0 || comm.type === 'dot' || desc.includes('dot') || desc.includes('no run') || desc.includes('0 run')) {
+  if (comm.type === 'dot' || desc.includes('dot') || desc.includes('no run') || desc.includes('0 run')) {
     const style = 'bg-slate-800 text-slate-300 border-slate-700 font-bold';
     return { label: '0', pillStyle: style, color: style };
   }

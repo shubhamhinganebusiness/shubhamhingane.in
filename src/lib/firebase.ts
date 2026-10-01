@@ -16,6 +16,7 @@ import {
   terminate,
   setLogLevel
 } from 'firebase/firestore';
+import { notifyFirestoreMutation } from './firestoreSafeSdk';
 import { 
   getDatabase, 
   ref as rtdbRef, 
@@ -66,7 +67,6 @@ if (typeof window !== 'undefined') {
 
     if (isInternalFirestoreAssertionError(raw)) {
       markFirestoreAssertionFailed();
-      console.warn('[Firestore SDK Guard] Suppressed internal assertion log:', raw.slice(0, 180));
       return;
     }
 
@@ -303,6 +303,9 @@ function ensureCricketRealtimeStream() {
             }
           } else if (payload.type === 'doc_update') {
             const { collectionName, docId, data } = payload;
+            if (collectionName) {
+              notifyFirestoreMutation(docId ? `${collectionName}/${docId}` : String(collectionName));
+            }
             if (collectionName === 'cricket_matches' && docId && data) {
               const fullMatch = { id: docId, ...data };
               clientMatchesRealtimeCache.set(String(docId), fullMatch);
@@ -341,6 +344,9 @@ function ensureCricketRealtimeStream() {
             }
           } else if (payload.type === 'doc_delete') {
             const { collectionName, docId } = payload;
+            if (collectionName) {
+              notifyFirestoreMutation(docId ? `${collectionName}/${docId}` : String(collectionName));
+            }
             if (collectionName === 'cricket_matches' && docId) {
               clientMatchesRealtimeCache.delete(String(docId));
               const list = Array.from(clientMatchesRealtimeCache.values());
@@ -1166,11 +1172,11 @@ function pruneDocSize(obj: any): any {
         return p;
       });
     }
-    if (clone.innings1?.commentaryList && clone.innings1.commentaryList.length > 50) {
-      clone.innings1 = { ...clone.innings1, commentaryList: clone.innings1.commentaryList.slice(-50) };
+    if (clone.innings1?.commentaryList && clone.innings1.commentaryList.length > 80) {
+      clone.innings1 = { ...clone.innings1, commentaryList: clone.innings1.commentaryList.slice(0, 80) };
     }
-    if (clone.innings2?.commentaryList && clone.innings2.commentaryList.length > 50) {
-      clone.innings2 = { ...clone.innings2, commentaryList: clone.innings2.commentaryList.slice(-50) };
+    if (clone.innings2?.commentaryList && clone.innings2.commentaryList.length > 80) {
+      clone.innings2 = { ...clone.innings2, commentaryList: clone.innings2.commentaryList.slice(0, 80) };
     }
     return cleanUndefined(clone);
   } catch {
@@ -1290,14 +1296,26 @@ export async function safeSetDoc(docRef: any, data: any, options?: any) {
     } catch {}
   }
 
-  // Primary path: Route through server proxy so client Firestore Write stream is never saturated
+  // Sync to Firestore REST in background when quota is available
+  if (!isFirestoreQuotaExhausted() && docRef) {
+    try {
+      const p = options !== undefined ? setDoc(docRef, payloadToWrite, options) : setDoc(docRef, payloadToWrite);
+      Promise.resolve(p).catch((err) => {
+        if (isQuotaError(err)) recordFirestoreQuotaExhaustion(60);
+      });
+    } catch {}
+  }
+
+  // Also route through server proxy for instant SSE fanout & local persistence
   if (isTopLevelCricketMatch && docId) {
-    const ok = await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => false);
-    if (ok) return;
+    await saveMatchViaServerProxy(docId, payloadToWrite).catch(() => false);
+    notifyFirestoreMutation(docPath || `${collectionName}/${docId}`);
+    return;
   }
   if (collectionName && docId) {
-    const ok = await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => false);
-    if (ok) return;
+    await saveDocViaServerProxy(collectionName, docId, payloadToWrite, options).catch(() => false);
+    notifyFirestoreMutation(docPath || `${collectionName}/${docId}`);
+    return;
   }
 }
 
@@ -1394,8 +1412,15 @@ export async function safeDeleteDoc(docRef: any) {
     } catch {}
   }
 
+  if (!isFirestoreQuotaExhausted() && docRef) {
+    try {
+      Promise.resolve(deleteDoc(docRef)).catch(() => {});
+    } catch {}
+  }
+
   if (collectionName && docId) {
     await deleteDocViaServerProxy(collectionName, docId).catch(() => false);
+    notifyFirestoreMutation(docPath || `${collectionName}/${docId}`);
   }
 }
 

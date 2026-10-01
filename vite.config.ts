@@ -35,10 +35,53 @@ export default defineConfig(({mode}) => {
         }
       }
     },
+    optimizeDeps: {
+      entries: ['index.html', 'src/**/*.{ts,tsx}'],
+      exclude: ['firebase/firestore'],
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-router-dom',
+        'clsx',
+        'tailwind-merge',
+        'lucide-react',
+        'framer-motion',
+        'motion/react',
+        'firebase/app',
+        'firebase/auth',
+        'firebase/database',
+        'firebase/storage',
+        'firebase/firestore/lite',
+        'recharts',
+        'html2canvas',
+        'html2pdf.js',
+        'html5-qrcode',
+        'idb',
+        'jspdf',
+        'jspdf-autotable',
+        'jszip',
+        'papaparse',
+        'pdfjs-dist',
+        'qrcode.react',
+        'react-use-measure',
+        'xlsx',
+      ],
+    },
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
+      dedupe: ['react', 'react-dom', 'react-router-dom'],
+      alias: [
+        {
+          find: /^firebase\/firestore$/,
+          replacement: path.resolve(__dirname, 'src/lib/firestoreSafeSdk.ts'),
+        },
+        {
+          find: '@',
+          replacement: path.resolve(__dirname, '.'),
+        },
+      ],
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

@@ -392,7 +392,7 @@ export function generateLocalizedCricketCommentary(
     return text;
   };
 
-  if (type === 'dot' || val === 0) {
+  if (type === 'dot' || (val === 0 && type !== 'extra' && type !== 'wicket' && !options?.extraType)) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.dots[targetLang]);
     return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
@@ -625,22 +625,22 @@ export function translateCommentaryText(text: string, lang: CommentaryLanguage):
     } else if (/four|4 runs|boundary/i.test(outcome)) {
       eventType = 'boundary';
       val = 4;
-    } else if (/three runs|3 runs/i.test(outcome)) {
+    } else if (/\bthree\b|3 runs|\btriple\b/i.test(outcome)) {
       eventType = 'runs';
       val = 3;
-    } else if (/two runs|2 runs/i.test(outcome)) {
+    } else if (/\btwo\b|2 runs|\bcouple\b|\bdouble\b/i.test(outcome)) {
       eventType = 'runs';
       val = 2;
-    } else if (/single|1 run/i.test(outcome)) {
+    } else if (/\bsingle\b|1 run|\bone run\b|rotates strike/i.test(outcome)) {
       eventType = 'runs';
       val = 1;
-    } else if (/wide/i.test(outcome)) {
+    } else if (/\bwide\b/i.test(outcome) && !/wide\s+long/i.test(outcome)) {
       eventType = 'extra';
       extraType = 'wide';
     } else if (/no[- ]?ball/i.test(outcome)) {
       eventType = 'extra';
       extraType = 'noball';
-    } else if (/wicket|out|bowled|caught/i.test(outcome)) {
+    } else if (/out!|clean bowled|caught|lbw|stumped|run out/i.test(outcome.replace(/mid[- ]?wicket/gi, ''))) {
       eventType = 'wicket';
     }
 

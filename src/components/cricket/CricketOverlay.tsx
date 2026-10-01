@@ -22,6 +22,7 @@ import {
   isDemoOrAIMatch
 } from './cricketStorage';
 import { liveFanOutClient } from './modules/LiveFanOutClient';
+import { calculateActiveOverNumber, isDeliveryInTargetOver } from './modules/overDeliveryUtils';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 import { getThemeBackground } from './BroadcastThemeStudio';
 import { StarTVScorebug } from './StarTVScorebug';
@@ -998,7 +999,14 @@ export const CricketOverlay: React.FC = () => {
             const parsed = JSON.parse(activeStr) as MatchState;
             if (parsed && !isMatchDeleted(parsed.id) && parsed.status !== 'deleted' && !(parsed as any).isDeleted && (parsed.id === matchId || !matchId)) {
               setMatch((prev) => {
-                if (!prev || prev.updatedAt !== parsed.updatedAt || prev.version !== parsed.version) {
+                if (
+                  !prev ||
+                  prev.updatedAt !== parsed.updatedAt ||
+                  prev.version !== parsed.version ||
+                  prev.groundName !== parsed.groundName ||
+                  prev.venue !== parsed.venue ||
+                  prev.tournamentName !== parsed.tournamentName
+                ) {
                   console.log('[Overlay Sync] LocalStorage initial/checked sync:', parsed.id, parsed.version);
                   return parsed;
                 }
@@ -1433,46 +1441,28 @@ export const CricketOverlay: React.FC = () => {
   // Derived Match info variables safely loaded
   const currentOverNo = useMemo(() => {
     if (!currentInnings) return 0;
-    return currentInnings.ballsBowled > 0 ? Math.floor((currentInnings.ballsBowled - 1) / 6) : 0;
-  }, [currentInnings?.ballsBowled]);
+    return calculateActiveOverNumber(
+      currentInnings.ballsBowled,
+      match?.status,
+      match?.oversLimit,
+      currentInnings.wickets,
+      match?.isSuperOver,
+      (match as any)?.superOverWicketLimit
+    );
+  }, [
+    currentInnings?.ballsBowled,
+    currentInnings?.wickets,
+    match?.status,
+    match?.oversLimit,
+    match?.isSuperOver,
+    (match as any)?.superOverWicketLimit
+  ]);
 
   const currentOverBalls = useMemo(() => {
     if (!currentInnings) return [];
-    
-    // Helper to get matching over index
-    const getOverIndex = (overBallStr: string) => {
-      const num = parseFloat(overBallStr);
-      if (isNaN(num)) return -1;
-      return overBallStr.endsWith('.0') ? Math.floor(num) - 1 : Math.floor(num);
-    };
 
     const raw = (currentInnings.commentaryList || [])
-      .filter((c: any) => {
-        if (!c || !c.overBall || c.overBall === '0.0') return false;
-        if (
-          c.type === 'milestone' || 
-          c.type === 'announcement' || 
-          c.type === 'break' || 
-          c.type === 'info' || 
-          c.specialEvent === 'retire_hurt' ||
-          c.announcementType === 'new_batsman' ||
-          c.announcementType === 'new_bowler' ||
-          c.id?.startsWith('comm-bat-upd-') ||
-          c.id?.startsWith('comm-bowl-upd-') ||
-          c.id?.startsWith('comm-over-finish-')
-        ) return false;
-        const desc = (c.description || '').toLowerCase();
-        if (
-          desc.includes('retired hurt') ||
-          desc.includes('new batsman') ||
-          desc.includes('come on crease') ||
-          desc.includes('will bowl the') ||
-          desc.includes('bowler into the attack') ||
-          desc.includes('started') ||
-          desc.includes('toss')
-        ) return false;
-        return getOverIndex(c.overBall) === currentOverNo;
-      });
+      .filter((c: any) => isDeliveryInTargetOver(c, currentOverNo));
 
     // Deduplicate deliveries so only ONE pill is shown per ball delivery (no multiple W pills)
     const deduped: any[] = [];
@@ -1488,8 +1478,35 @@ export const CricketOverlay: React.FC = () => {
       deduped.push(item);
     }
 
-    return deduped.slice(0, 12).reverse(); // oldest to newest
-  }, [currentInnings?.commentaryList, currentOverNo]);
+    if (deduped.length > 0) {
+      return deduped.slice(0, 16).reverse(); // oldest to newest
+    }
+    const balls = currentInnings.ballsBowled ?? 0;
+    if (Array.isArray((currentInnings as any).recentBalls) && (currentInnings as any).recentBalls.length > 0) {
+      const legalInOver = balls % 6;
+      if (legalInOver === 0 && match?.status !== 'completed') {
+        const trailingExtras: string[] = [];
+        const rb = (currentInnings as any).recentBalls as string[];
+        for (let i = rb.length - 1; i >= 0; i--) {
+          const item = String(rb[i] || '').toUpperCase();
+          if (item.includes('NB') || item.includes('WD')) {
+            trailingExtras.unshift(rb[i]);
+          } else {
+            break;
+          }
+        }
+        return trailingExtras.map((lbl, i) => ({
+          id: `rb-fallback-${i}`,
+          overBall: `${currentOverNo}.1`,
+          ballScore: lbl,
+          type: 'extra',
+          isNoBall: String(lbl).toUpperCase().includes('NB'),
+          description: lbl
+        })) as any[];
+      }
+    }
+    return [];
+  }, [currentInnings?.commentaryList, (currentInnings as any)?.recentBalls, currentInnings?.ballsBowled, match?.status, currentOverNo]);
 
   // Mini summary of last 3 overs
   const recentOversPills = useMemo(() => {
@@ -1497,7 +1514,8 @@ export const CricketOverlay: React.FC = () => {
     
     // Group commentary list by integer overs, filtering out non-deliveries and deduplicating
     const overGroups: Record<number, CommentaryItem[]> = {};
-    const seenDeliveries = new Set<string>();
+    const seenIds = new Set<string>();
+    const seenWickets = new Set<string>();
 
     (currentInnings.commentaryList || []).forEach(c => {
       if (!c.overBall || c.overBall === '0.0') return;
@@ -1507,15 +1525,21 @@ export const CricketOverlay: React.FC = () => {
         c.type === 'break' || 
         c.type === 'info' || 
         c.specialEvent === 'retire_hurt' ||
-        c.announcementType === 'new_batsman'
+        c.announcementType === 'new_batsman' ||
+        c.announcementType === 'new_bowler' ||
+        c.announcementType === 'over_summary'
       ) return;
       const desc = (c.description || '').toLowerCase();
       if (desc.includes('retired hurt') || desc.includes('new batsman on crease')) return;
 
-      if (seenDeliveries.has(c.overBall)) return;
-      seenDeliveries.add(c.overBall);
+      if (c.id && seenIds.has(c.id)) return;
+      if (c.id) seenIds.add(c.id);
+      if (c.type === 'wicket') {
+        if (seenWickets.has(c.overBall)) return;
+        seenWickets.add(c.overBall);
+      }
 
-      const overInt = Math.floor(parseFloat(c.overBall));
+      const overInt = typeof (c as any).overIndex === 'number' ? (c as any).overIndex : Math.floor(parseFloat(c.overBall));
       if (isNaN(overInt)) return;
       if (!overGroups[overInt]) overGroups[overInt] = [];
       overGroups[overInt].push(c);
@@ -1533,34 +1557,18 @@ export const CricketOverlay: React.FC = () => {
       const bLabels: string[] = [];
 
       comms.reverse().forEach(c => {
-        const desc = (c?.description || '').toLowerCase();
-        if (c?.type === 'wicket') {
+        const pill = getDeliveryPillDetails(c);
+        if (!pill.label || pill.pillStyle === 'hidden') return;
+        bLabels.push(pill.label);
+        if (c?.type === 'wicket' || pill.label === 'W' || pill.label.includes('W')) {
           wktsSum++;
-          bLabels.push('W');
-        } else if (c?.type === 'boundary') {
-          const directScore = String((c as any).ballScore || '').trim();
-          const runsOffBat = Number((c as any).runsOffBat);
-          const runs = Number((c as any).runs);
-          const isExplicit4 = directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
-          const isExplicit6 = directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6;
-          let is6 = false;
-          if (isExplicit4) {
-            is6 = false;
-          } else if (isExplicit6) {
-            is6 = true;
-          } else if (
-            desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
-            desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
-          ) {
-            is6 = true;
-          }
-          runsSum += is6 ? 6 : 4;
-          bLabels.push(is6 ? '6' : '4');
+          if (pill.label.startsWith('NB')) runsSum += 1;
+        } else if (pill.label.startsWith('NB') || pill.label.startsWith('WD')) {
+          const plusMatch = pill.label.match(/\+(\d+)/);
+          runsSum += 1 + (plusMatch ? parseInt(plusMatch[1], 10) : 0);
         } else {
-          const numMatch = desc.match(/\d+/);
-          const runs = numMatch ? parseInt(numMatch[0]) : 0;
-          runsSum += runs;
-          bLabels.push(runs.toString());
+          const numMatch = pill.label.match(/\d+/);
+          if (numMatch) runsSum += parseInt(numMatch[0], 10);
         }
       });
 
@@ -1821,8 +1829,25 @@ export const CricketOverlay: React.FC = () => {
     };
   }, [currentInnings, match]);
 
-  // Global Tournament Name & Match Stage (accessible across all scorebugs, previews, and full-screen overlays)
+  // Global Tournament Name, Ground Name & Match Stage (accessible across all scorebugs, previews, and full-screen overlays)
   const matchTournamentName = match?.tournamentName || (match as any)?.seriesName || (match as any)?.tournament || (match as any)?.cupName || 'STAR TV PREMIER LEAGUE 2026';
+  const matchGroundName = useMemo(() => {
+    const direct = (match?.groundName || match?.venue || (match as any)?.ground || (activeConfig as any)?.groundName || (activeConfig as any)?.venue || '').trim();
+    if (direct) return direct;
+    try {
+      const actStr = localStorage.getItem('cricket_active_match');
+      if (actStr) {
+        const parsed = JSON.parse(actStr);
+        if (parsed && (!match?.id || parsed.id === match.id)) {
+          const g = (parsed.groundName || parsed.venue || parsed.ground || '').trim();
+          if (g) return g;
+        }
+      }
+      const savedGround = localStorage.getItem('gully_last_ground_name');
+      if (savedGround && savedGround.trim()) return savedGround.trim();
+    } catch (_) {}
+    return '';
+  }, [match?.groundName, match?.venue, (match as any)?.ground, (activeConfig as any)?.groundName, (activeConfig as any)?.venue, match?.id]);
   const matchStageText = match?.status === 'completed' 
     ? 'FINAL RESULT' 
     : inningsNum === 1 
@@ -1996,6 +2021,7 @@ export const CricketOverlay: React.FC = () => {
       return { label: '', style: 'hidden' };
     }
 
+    const hasExplicitDeliveryScore = Boolean((b as any).ballScore) || typeof (b as any).runsOffBat === 'number' || typeof (b as any).runs === 'number' || ['dot', 'runs', 'boundary', 'wicket', 'extra'].includes(b.type);
     const desc = (b.description || '').toLowerCase();
     if (
       desc.includes('retired hurt') ||
@@ -2003,8 +2029,7 @@ export const CricketOverlay: React.FC = () => {
       desc.includes('come on crease') ||
       desc.includes('will bowl the') ||
       desc.includes('bowler into the attack') ||
-      desc.includes('started') ||
-      desc.includes('toss')
+      (!hasExplicitDeliveryScore && (desc.includes('started') || desc.includes('toss')))
     ) {
       return { label: '', style: 'hidden' };
     }
@@ -2012,37 +2037,29 @@ export const CricketOverlay: React.FC = () => {
     let label = '0';
     let style = '';
 
-    if (b.type === 'wicket') {
+    const bScoreCheck = String((b as any).ballScore || '').trim().toUpperCase();
+    const extraTypeCheck = String((b as any).extraType || '').toLowerCase();
+    const isNoBallOrExtra =
+      b.type === 'extra' ||
+      Boolean((b as any).isNoBall) ||
+      extraTypeCheck === 'noball' ||
+      extraTypeCheck === 'wide' ||
+      extraTypeCheck === 'legbye' ||
+      extraTypeCheck === 'bye' ||
+      /nb|wd|lb|(?:^|\d+)b$|ex/i.test(bScoreCheck) ||
+      desc.includes('no ball') ||
+      desc.includes('no-ball') ||
+      desc.includes('नो बॉल') ||
+      desc.includes('नो-बॉल') ||
+      /\bnb\b/i.test(desc);
+
+    if (b.type === 'wicket' && !isNoBallOrExtra) {
       label = 'W';
       style = 'bg-rose-600 border-rose-600 shadow-[0_0_15px_rgba(225,29,72,0.6)] animate-pulse-fast';
-    } else if (b.type === 'boundary') {
-      const directScore = String((b as any).ballScore || '').trim();
-      const runsOffBat = Number((b as any).runsOffBat);
-      const runs = Number((b as any).runs);
-      const isExplicitFour = directScore === '4' || directScore === '4s' || directScore.toUpperCase() === 'FOUR' || runsOffBat === 4 || runs === 4;
-      const isExplicitSix = directScore === '6' || directScore === '6s' || directScore.toUpperCase() === 'SIX' || runsOffBat === 6 || runs === 6;
-      let isSix = false;
-      if (isExplicitFour) {
-        isSix = false;
-      } else if (isExplicitSix) {
-        isSix = true;
-      } else if (
-        desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
-        desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
-      ) {
-        isSix = true;
-      }
-      if (isSix) {
-        label = '6';
-        style = 'bg-gradient-to-r from-amber-500 to-yellow-400 border-amber-500 font-extrabold text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-bounce-custom';
-      } else {
-        label = '4';
-        style = 'bg-sky-500 border-sky-500 font-bold text-white shadow-[0_0_10px_rgba(14,165,233,0.5)]';
-      }
-    } else if (b.type === 'extra' || (b as any).isNoBall || ((b as any).ballScore && /nb|wd|lb|b|ex/i.test((b as any).ballScore))) {
-      const bScore = String((b as any).ballScore || '').trim().toUpperCase();
-      const extraType = String((b as any).extraType || '').toLowerCase();
-      const isNoBallDelivery = (b as any).isNoBall || extraType === 'noball' || desc.includes('no ball') || desc.includes('no-ball') || desc.includes('nb') || /nb/i.test(bScore);
+    } else if (isNoBallOrExtra) {
+      const bScore = bScoreCheck;
+      const extraType = extraTypeCheck;
+      const isNoBallDelivery = Boolean((b as any).isNoBall) || extraType === 'noball' || desc.includes('no ball') || desc.includes('no-ball') || desc.includes('नो बॉल') || desc.includes('नो-बॉल') || /\bnb\b/i.test(desc) || /nb/i.test(bScore);
       const isWideDelivery = extraType === 'wide' || desc.includes('wide') || /wd/i.test(bScore);
       const isLegByeDelivery = extraType === 'legbye' || /lb/i.test(bScore) || desc.includes('leg bye') || desc.includes('leg-bye') || desc.includes('legbye');
       const isByeDelivery = extraType === 'bye' || /(?:^|\d+)B$/i.test(bScore) || desc.includes('bye');
@@ -2056,7 +2073,7 @@ export const CricketOverlay: React.FC = () => {
           const m = bScore.match(/^(\d+)NB$/i);
           if (m && parseInt(m[1], 10) > 1) batRuns = parseInt(m[1], 10) - 1;
         } else if (bScore === 'NB') {
-          batRuns = 0;
+          batRuns = typeof (b as any).runsOffBat === 'number' && (b as any).runsOffBat > 0 ? (b as any).runsOffBat : 0;
         } else if (typeof (b as any).runsOffBat === 'number') {
           batRuns = (b as any).runsOffBat;
         } else {
@@ -2140,11 +2157,38 @@ export const CricketOverlay: React.FC = () => {
         label = 'EX';
         style = 'bg-slate-800 border-slate-700 text-slate-400';
       }
+    } else if (b.type === 'boundary') {
+      const directScore = String((b as any).ballScore || '').trim();
+      const runsOffBat = Number((b as any).runsOffBat);
+      const runs = Number((b as any).runs);
+      const isExplicitFour = directScore === '4' || directScore === '4s' || directScore.toUpperCase() === 'FOUR' || runsOffBat === 4 || runs === 4;
+      const isExplicitSix = directScore === '6' || directScore === '6s' || directScore.toUpperCase() === 'SIX' || runsOffBat === 6 || runs === 6;
+      let isSix = false;
+      if (isExplicitFour) {
+        isSix = false;
+      } else if (isExplicitSix) {
+        isSix = true;
+      } else if (
+        desc.includes('six') || desc.includes('6 runs') || desc.includes('6 run') || desc.includes('maximum') ||
+        desc.includes('षटकार') || desc.includes('छक्का') || desc.includes('६') || /\b6\s*runs?\b/i.test(desc)
+      ) {
+        isSix = true;
+      }
+      if (isSix) {
+        label = '6';
+        style = 'bg-gradient-to-r from-amber-500 to-yellow-400 border-amber-500 font-extrabold text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-bounce-custom';
+      } else {
+        label = '4';
+        style = 'bg-sky-500 border-sky-500 font-bold text-white shadow-[0_0_10px_rgba(14,165,233,0.5)]';
+      }
     } else {
       let resolvedRuns: number | null = null;
-      const directBallScore = (b as any).ballScore;
-      if (typeof directBallScore === 'string' && /^[0-6]$/.test(directBallScore.trim())) {
-        resolvedRuns = parseInt(directBallScore.trim(), 10);
+      const directBallScore = String((b as any).ballScore || '').trim().toUpperCase();
+      if (directBallScore === '1D' || (b as any).isDeclaredOne) {
+        return { label: '1D', style: 'bg-cyan-900 border-cyan-400 font-black text-cyan-200' };
+      }
+      if (/^[0-6]$/.test(directBallScore)) {
+        resolvedRuns = parseInt(directBallScore, 10);
       } else if (typeof (b as any).runsOffBat === 'number' && !isNaN((b as any).runsOffBat)) {
         resolvedRuns = (b as any).runsOffBat;
       } else if (typeof (b as any).runs === 'number' && !isNaN((b as any).runs)) {
@@ -3064,23 +3108,32 @@ export const CricketOverlay: React.FC = () => {
                   const directScore = String((b as any).ballScore || '').trim();
                   const runsOffBat = Number((b as any).runsOffBat);
                   const runs = Number((b as any).runs);
+                  const isExtra =
+                    b.type === 'extra' ||
+                    Boolean((b as any).isNoBall) ||
+                    String((b as any).extraType || '').toLowerCase() === 'noball' ||
+                    String((b as any).extraType || '').toLowerCase() === 'wide' ||
+                    /wd|nb|lb|(?:^|\d+)b$|ex/i.test(d.label) ||
+                    /wd|nb|lb|(?:^|\d+)b$/i.test(directScore);
+
+                  if (b.type === 'wicket' || d.label === 'W' || /^W$/i.test(d.label)) {
+                    type = 'wicket';
+                    return { label: d.label || 'W', type };
+                  }
+                  if (isExtra) {
+                    type = 'extra';
+                    return { label: d.label || ((b as any).isNoBall ? 'NB' : 'EX'), type };
+                  }
+
                   const isExplicitFour = d.label === '4' || directScore === '4' || directScore === '4s' || runsOffBat === 4 || runs === 4;
                   const isExplicitSix = !isExplicitFour && (d.label === '6' || directScore === '6' || directScore === '6s' || runsOffBat === 6 || runs === 6);
                   const isSix = isExplicitSix || (!isExplicitFour && b.type === 'boundary' && (directScore === '6' || runsOffBat === 6 || /six|6 runs|maximum|षटकार|छक्का|६|\b6\s*runs?\b/i.test(b.description || '')));
                   const isFour = isExplicitFour || (!isSix && (d.label === '4' || directScore === '4' || runsOffBat === 4 || runs === 4 || b.type === 'boundary'));
 
-                  if (b.type === 'wicket' || d.label === 'W' || /^W$/i.test(d.label)) {
-                    type = 'wicket';
-                  } else if (isFour) {
+                  if (isFour) {
                     type = 'four';
                   } else if (isSix) {
                     type = 'six';
-                  } else if (
-                    b.type === 'extra' ||
-                    /wd|nb|lb|b|ex/i.test(d.label) ||
-                    (b as any).isNoBall
-                  ) {
-                    type = 'extra';
                   } else if (['1', '2', '3', '5'].includes(d.label) || parseInt(d.label, 10) > 0) {
                     type = 'run';
                   }
@@ -3115,8 +3168,8 @@ export const CricketOverlay: React.FC = () => {
                 tournamentName={matchTournamentName || match?.tournamentName}
                 tournamentLogo={matchTournamentLogo || match?.tournamentLogo || (match as any)?.tournament?.logo || (activeConfig as any)?.tournamentLogo}
                 matchStage={matchStageText}
-                matchVenue={match?.venue}
-                groundName={match?.venue}
+                matchVenue={matchGroundName}
+                groundName={matchGroundName}
                 umpire1Name={match?.umpire1Name}
                 umpire1Photo={match?.umpire1Photo}
                 umpire2Name={match?.umpire2Name}
@@ -3334,23 +3387,19 @@ export const CricketOverlay: React.FC = () => {
                 <span>THIS OVER</span>
                 <span className="text-slate-500">{currentOverBalls.length}/6</span>
               </div>
-              <div className="flex items-center gap-1 overflow-hidden">
-                {currentOverBalls.length > 0 ? (
-                  currentOverBalls.slice(0, 6).map((b, idx) => {
-                    const details = getPillDetails(b);
-                    return (
-                      <div
-                        key={b.id || idx}
-                        className={`${details.label.length > 2 ? 'w-auto min-w-[26px] px-1' : 'w-6'} h-6 rounded-full flex items-center justify-center text-[8.5px] font-mono font-black border shrink-0 ${details.style}`}
-                        title={details.label}
-                      >
-                        {details.label}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <span className="text-[9px] text-slate-500 font-mono italic">Start of over...</span>
-                )}
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+                {currentOverBalls.map((b, idx) => {
+                  const details = getPillDetails(b);
+                  return (
+                    <div
+                      key={b.id || idx}
+                      className={`${details.label.length > 2 ? 'w-auto min-w-[26px] px-1' : 'w-6'} h-6 rounded-full flex items-center justify-center text-[8.5px] font-mono font-black border shrink-0 ${details.style}`}
+                      title={details.label}
+                    >
+                      {details.label}
+                    </div>
+                  );
+                })}
                 {currentOverBalls.length < 6 && (
                   Array.from({ length: 6 - currentOverBalls.length }).map((_, padIdx) => (
                     <div 
@@ -3393,9 +3442,9 @@ export const CricketOverlay: React.FC = () => {
               </div>
             )}
 
-            {activeConfig.showSponsorBadge && (
+            {(activeConfig.showSponsorBadge || matchGroundName) && (
               <div className="mt-1 pt-1 border-t border-white/10 text-[7.5px] font-bold text-slate-400 uppercase tracking-widest truncate">
-                🏏 {activeConfig.sponsorText || 'GULLY PREMIER LEAGUE'}
+                {matchGroundName ? `📍 ${matchGroundName}` : `🏏 ${activeConfig.sponsorText || 'GULLY PREMIER LEAGUE'}`}
               </div>
             )}
           </div>
@@ -3485,13 +3534,13 @@ export const CricketOverlay: React.FC = () => {
           {activeConfig.showBallByBallDots && (
             <div className="flex items-center justify-between pt-1 border-t border-white/10">
               <span className="text-[8px] font-mono font-bold text-slate-400 uppercase">THIS OVER:</span>
-              <div className="flex items-center gap-1.5">
-                {currentOverBalls.slice(0, 6).map((b, idx) => {
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
+                {currentOverBalls.map((b, idx) => {
                   const details = getPillDetails(b);
                   return (
                     <div
                       key={b.id || idx}
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-mono font-black border ${details.style}`}
+                      className={`${details.label.length > 2 ? 'w-auto min-w-[26px] px-1' : 'w-6'} h-6 rounded-full flex items-center justify-center text-[9px] font-mono font-black border shrink-0 ${details.style}`}
                     >
                       {details.label}
                     </div>
@@ -3645,7 +3694,7 @@ export const CricketOverlay: React.FC = () => {
             </div>
             
             {/* Innings Target or Toss situation caption */}
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider ${
                 inningsNum === 2 ? 'bg-amber-400 text-slate-950' : 'bg-sky-500/20 text-sky-300 border border-sky-400/30'
               }`}>
@@ -3654,6 +3703,11 @@ export const CricketOverlay: React.FC = () => {
               {inningsNum === 2 && match.targetRuns && (
                 <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[9px] font-mono font-black uppercase tracking-wider border border-rose-400/50 shadow-sm animate-pulse">
                   TARGET: {match.targetRuns}
+                </span>
+              )}
+              {matchGroundName && (
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[9px] font-mono font-bold uppercase tracking-wider border border-emerald-500/30 truncate max-w-[220px]">
+                  📍 {matchGroundName}
                 </span>
               )}
             </div>
@@ -3931,7 +3985,7 @@ export const CricketOverlay: React.FC = () => {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-black uppercase tracking-wider ${
                     inningsNum === 2 ? 'bg-amber-400 text-slate-950' : 'bg-sky-500/20 text-sky-300 border border-sky-400/30'
                   }`}>
@@ -3940,6 +3994,11 @@ export const CricketOverlay: React.FC = () => {
                   {inningsNum === 2 && match.targetRuns && (
                     <span className="px-2 py-0.5 rounded bg-rose-600 text-white text-[9.5px] font-mono font-black uppercase tracking-wider border border-rose-400/50 shadow-sm animate-pulse">
                       TARGET: {match.targetRuns}
+                    </span>
+                  )}
+                  {matchGroundName && (
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[9px] font-mono font-bold uppercase tracking-wider border border-emerald-500/30 truncate max-w-[180px]">
+                      📍 {matchGroundName}
                     </span>
                   )}
                 </div>
@@ -4078,7 +4137,7 @@ export const CricketOverlay: React.FC = () => {
               {/* Delivery progress pills */}
               <div className="flex gap-1.5 py-1.5 overflow-x-auto">
                 {currentOverBalls.length > 0 ? (
-                  currentOverBalls.slice(0, 6).map((b, index) => {
+                  currentOverBalls.map((b, index) => {
                     const details = getPillDetails(b);
                     return (
                       <motion.div
@@ -4086,7 +4145,7 @@ export const CricketOverlay: React.FC = () => {
                         initial={{ scale: 0.2, x: -10, opacity: 0 }}
                         animate={{ scale: 1, x: 0, opacity: 1 }}
                         transition={{ type: 'spring', stiffness: 260, damping: 18, delay: index * 0.05 }}
-                        className={`w-7.5 h-7.5 rounded-full flex items-center justify-center text-[10px] uppercase font-mono font-black border text-center shrink-0 ${details.style}`}
+                        className={`${details.label.length > 2 ? 'w-auto min-w-[30px] px-1.5' : 'w-7'} h-7 rounded-full flex items-center justify-center text-[10px] uppercase font-mono font-black border text-center shrink-0 ${details.style}`}
                         title={`${b.overBall}: ${b.description}`}
                       >
                         {details.label}

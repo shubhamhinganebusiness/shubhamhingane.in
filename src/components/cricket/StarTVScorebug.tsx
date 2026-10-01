@@ -323,7 +323,10 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       if (typeof item === 'string') {
         let type: StarTVBall['type'] = 'dot';
         const lower = item.toLowerCase().trim();
-        if (
+        if (lower.includes('wd') || lower.includes('nb') || lower.includes('no ball') || lower.includes('no-ball') || lower.includes('lb') || /(?:^|\d+)b$/i.test(item) || lower === 'ex') {
+          type = 'extra';
+          return { label: item.toUpperCase(), type };
+        } else if (
           item === '4' || lower === '4s' || lower === 'four' ||
           lower.includes('चौकार') || lower.includes('चौका') || lower.includes('४')
         ) {
@@ -335,8 +338,6 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         ) {
           type = 'six';
           return { label: '6', type };
-        } else if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(item) || lower === 'ex') {
-          type = 'extra';
         } else if (item === 'W' || /^w$/i.test(item) || /^w\+/i.test(item) || item.toUpperCase() === 'OUT') {
           type = 'wicket';
         } else if (['1', '2', '3', '5'].includes(item) || parseInt(item, 10) > 0) {
@@ -350,9 +351,28 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       const directScore = String((item as any).ballScore || '').trim();
       const runsOffBat = Number((item as any).runsOffBat);
       const runs = Number((item as any).runs);
+      const isExtraLabel =
+        type === 'extra' ||
+        (item as any).isNoBall ||
+        String((item as any).extraType || '').toLowerCase() === 'noball' ||
+        String((item as any).extraType || '').toLowerCase() === 'wide' ||
+        lower.includes('nb') ||
+        lower.includes('wd') ||
+        lower.includes('no ball') ||
+        lower.includes('no-ball') ||
+        lower.includes('lb') ||
+        /(?:^|\d+)b$/i.test(label) ||
+        /nb|wd|lb|(?:^|\d+)b$/i.test(directScore);
 
-      // Definitively detect Fours FIRST so boundaries and 4 runs are never misclassified as 6
-      if (
+      // Definitively preserve Extras (NB, NB+4, NB+6, WD, LB, B) FIRST so No Ball symbols are never overwritten by 4 or 6
+      if (isExtraLabel) {
+        type = 'extra';
+        if (!label && ((item as any).isNoBall || String((item as any).extraType || '').toLowerCase() === 'noball')) {
+          label = runsOffBat > 0 ? `NB+${runsOffBat}` : 'NB';
+        }
+      }
+      // Definitively detect Fours FIRST (only when not an extra)
+      else if (
         type === 'four' || label === '4' || lower === '4s' || lower === 'four' ||
         directScore === '4' || runsOffBat === 4 || runs === 4 ||
         lower.includes('चौकार') || lower.includes('चौका') || lower.includes('४')
@@ -360,7 +380,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
         label = '4';
         type = 'four';
       }
-      // Definitively detect Sixes (only when not a four)
+      // Definitively detect Sixes (only when not a four or extra)
       else if (
         type === 'six' || label === '6' || lower === '6s' || lower === 'six' || lower === 'maximum' ||
         directScore === '6' || runsOffBat === 6 || runs === 6 ||
@@ -376,9 +396,7 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       }
       // Resolve other types if unset
       else if (!type) {
-        if (lower.includes('wd') || lower.includes('nb') || lower.includes('lb') || /(?:^|\d+)b$/i.test(label) || lower === 'ex') {
-          type = 'extra';
-        } else if (['1', '2', '3', '5'].includes(label) || parseInt(label, 10) > 0) {
+        if (['1', '2', '3', '5'].includes(label) || parseInt(label, 10) > 0) {
           type = 'run';
         } else {
           type = 'dot';
@@ -400,8 +418,26 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
   const strikerSR = strikerBalls > 0 ? ((strikerRuns / strikerBalls) * 100).toFixed(1) : '0.0';
   const nonStrikerSR = nonStrikerBalls > 0 ? ((nonStrikerRuns / nonStrikerBalls) * 100).toFixed(1) : '0.0';
 
-  // Effective match and official names
-  const effectiveGroundName = groundName || matchVenue || 'Gully Stadium';
+  // Effective match and official names with robust local fallbacks
+  const effectiveGroundName = useMemo(() => {
+    const direct = (groundName || matchVenue || '').trim();
+    if (direct) return direct;
+    if (typeof window !== 'undefined') {
+      try {
+        const actStr = localStorage.getItem('cricket_active_match');
+        if (actStr) {
+          const parsed = JSON.parse(actStr);
+          if (parsed && (!matchId || parsed.id === matchId)) {
+            const g = (parsed.groundName || parsed.venue || parsed.ground || '').trim();
+            if (g) return g;
+          }
+        }
+        const savedGround = localStorage.getItem('gully_last_ground_name');
+        if (savedGround && savedGround.trim()) return savedGround.trim();
+      } catch (_) {}
+    }
+    return 'Gully Stadium';
+  }, [groundName, matchVenue, matchId]);
   const effectiveTournamentName = tournamentName || 'STAR TV PREMIER LEAGUE 2026';
   const effectiveUmpire1 = umpire1Name || 'Official Umpire 1';
   const effectiveUmpire2 = umpire2Name || 'Official Umpire 2';
@@ -548,6 +584,15 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       const directScore = String((b as any).ballScore || '').trim();
       const runsOffBat = Number((b as any).runsOffBat);
 
+      if (lbl.includes('nb') || lbl.includes('wd')) {
+        const plusMatch = lbl.match(/\+(\d+)/);
+        const batOrExtra = plusMatch ? parseInt(plusMatch[1], 10) : 0;
+        runsInOver += 1 + batOrExtra;
+        if (lbl.includes('nb') && batOrExtra === 4) fours += 1;
+        if (lbl.includes('nb') && batOrExtra === 6) sixes += 1;
+        return;
+      }
+
       const isFour = b.type === 'four' || lbl === '4' || directScore === '4' || runsOffBat === 4;
       const isSix = !isFour && (b.type === 'six' || lbl === '6' || directScore === '6' || runsOffBat === 6);
 
@@ -568,9 +613,9 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
       }
     });
 
-    const currOverNum = Math.ceil(totalBallsBowled / 6) || 1;
+    const currOverNum = showRecap ? (Math.ceil(totalBallsBowled / 6) || 1) : (Math.floor(totalBallsBowled / 6) + 1);
     return { currOverNum, runsInOver, dots, fours, sixes, wickets };
-  }, [normalizedBalls, totalBallsBowled]);
+  }, [normalizedBalls, totalBallsBowled, showRecap]);
 
   // ---------------------------------------------------------------------------
   // ENHANCEMENT 6: BATTER WAGON WHEEL MINI-POPUP
@@ -1525,42 +1570,38 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
                     </motion.div>
                   ) : (
                     <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
-                      {normalizedBalls.length > 0 ? (
-                        normalizedBalls.map((ball, idx) => (
-                          <span 
-                            key={idx}
-                            className={`rounded-full flex items-center justify-center font-mono font-black border-2 shadow-sm transition-all ${
-                              ball.label.length > 3
-                                ? 'w-auto min-w-[28px] sm:min-w-[34px] px-1 h-7.5 sm:h-8.5 md:h-9 text-[9px] sm:text-[10px] tracking-tighter'
-                                : ball.label.length > 2
-                                ? 'w-auto min-w-[28px] sm:min-w-[32px] px-1 h-7.5 sm:h-8.5 md:h-9 text-[9.5px] sm:text-[10.5px] tracking-tight'
-                                : 'w-7.5 h-7.5 sm:w-8.5 sm:h-8.5 md:w-9 md:h-9 text-xs sm:text-sm'
-                            } ${
-                              ball.type === 'six' || ball.label === '6'
-                                ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_12px_#f59e0b]'
-                                : ball.type === 'four' || ball.label === '4'
-                                ? 'bg-sky-500 text-white border-sky-300 shadow-[0_0_10px_#0284c7]'
-                                : ball.type === 'wicket' || ball.label === 'W'
-                                ? 'bg-rose-600 text-white border-rose-300 shadow-[0_0_12px_#e11d48]'
-                                : ball.label.toLowerCase().includes('wd')
-                                ? 'bg-orange-500 text-white border-orange-300 shadow-sm'
-                                : ball.label.toLowerCase().includes('nb')
-                                ? 'bg-pink-600 text-white border-pink-300 shadow-sm'
-                                : ball.label.toLowerCase().includes('lb')
-                                ? 'bg-emerald-600 text-white border-emerald-300 shadow-sm'
-                                : ball.type === 'extra'
-                                ? 'bg-purple-600 text-white border-purple-300'
-                                : ball.type === 'run'
-                                ? 'bg-slate-800 text-white border-slate-300 font-black shadow-sm'
-                                : 'bg-black/80 text-slate-400 border-white/20'
-                            }`}
-                          >
-                            {ball.label === '0' || ball.label === '•' ? '•' : ball.label}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-[10px] text-slate-400 font-mono italic">Start of over</span>
-                      )}
+                      {normalizedBalls.map((ball, idx) => (
+                        <span 
+                          key={idx}
+                          className={`rounded-full flex items-center justify-center font-mono font-black border-2 shadow-sm transition-all ${
+                            ball.label.length > 3
+                              ? 'w-auto min-w-[28px] sm:min-w-[34px] px-1 h-7.5 sm:h-8.5 md:h-9 text-[9px] sm:text-[10px] tracking-tighter'
+                              : ball.label.length > 2
+                              ? 'w-auto min-w-[28px] sm:min-w-[32px] px-1 h-7.5 sm:h-8.5 md:h-9 text-[9.5px] sm:text-[10.5px] tracking-tight'
+                              : 'w-7.5 h-7.5 sm:w-8.5 sm:h-8.5 md:w-9 md:h-9 text-xs sm:text-sm'
+                          } ${
+                            ball.type === 'six' || ball.label === '6'
+                              ? 'bg-amber-400 text-slate-950 border-amber-200 shadow-[0_0_12px_#f59e0b]'
+                              : ball.type === 'four' || ball.label === '4'
+                              ? 'bg-sky-500 text-white border-sky-300 shadow-[0_0_10px_#0284c7]'
+                              : ball.type === 'wicket' || ball.label === 'W'
+                              ? 'bg-rose-600 text-white border-rose-300 shadow-[0_0_12px_#e11d48]'
+                              : ball.label.toLowerCase().includes('wd')
+                              ? 'bg-orange-500 text-white border-orange-300 shadow-sm'
+                              : ball.label.toLowerCase().includes('nb')
+                              ? 'bg-pink-600 text-white border-pink-300 shadow-sm'
+                              : ball.label.toLowerCase().includes('lb')
+                              ? 'bg-emerald-600 text-white border-emerald-300 shadow-sm'
+                              : ball.type === 'extra'
+                              ? 'bg-purple-600 text-white border-purple-300'
+                              : ball.type === 'run'
+                              ? 'bg-slate-800 text-white border-slate-300 font-black shadow-sm'
+                              : 'bg-black/80 text-slate-400 border-white/20'
+                          }`}
+                        >
+                          {ball.label === '0' || ball.label === '•' ? '•' : ball.label}
+                        </span>
+                      ))}
                       {normalizedBalls.length < 6 && (
                         Array.from({ length: 6 - normalizedBalls.length }).map((_, padIdx) => (
                           <span 
@@ -1703,8 +1744,14 @@ export const StarTVScorebug: React.FC<StarTVScorebugProps> = ({
           </AnimatePresence>
         </div>
 
-        {/* Right Navigation Controls */}
+        {/* Right Navigation Controls & Persistent Ground Badge */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {effectiveGroundName && currentSlide?.id !== 'tournament_venue' && (
+            <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-500/15 border border-sky-400/30 text-[9.5px] font-mono font-bold text-sky-300 mr-1 max-w-[200px] truncate" title={`Ground: ${effectiveGroundName}`}>
+              <MapPin size={10} className="text-sky-400 shrink-0" />
+              <span className="truncate">{effectiveGroundName}</span>
+            </span>
+          )}
           <div className="hidden sm:flex items-center gap-1 mr-1">
             {tickerSlides.map((slide, i) => (
               <button

@@ -396,7 +396,7 @@ export function generateLocalizedCricketCommentary(
     return text;
   };
 
-  if (type === 'dot' || val === 0) {
+  if (type === 'dot' || (val === 0 && type !== 'extra' && type !== 'wicket' && !options?.extraType)) {
     const raw = pickRandom(GULLY_COMMENTARY_POOLS.dots[targetLang]);
     return appendWinProb(raw.replace(/\{bat\}/g, bat).replace(/\{bwl\}/g, bwl));
   }
@@ -629,22 +629,22 @@ export function translateCommentaryText(text: string, lang: CommentaryLanguage):
     } else if (/four|4 runs|boundary/i.test(outcome)) {
       eventType = 'boundary';
       val = 4;
-    } else if (/three runs|3 runs/i.test(outcome)) {
+    } else if (/\bthree\b|3 runs|\btriple\b/i.test(outcome)) {
       eventType = 'runs';
       val = 3;
-    } else if (/two runs|2 runs/i.test(outcome)) {
+    } else if (/\btwo\b|2 runs|\bcouple\b|\bdouble\b/i.test(outcome)) {
       eventType = 'runs';
       val = 2;
-    } else if (/single|1 run/i.test(outcome)) {
+    } else if (/\bsingle\b|1 run|\bone run\b|rotates strike/i.test(outcome)) {
       eventType = 'runs';
       val = 1;
-    } else if (/wide/i.test(outcome)) {
+    } else if (/\bwide\b/i.test(outcome) && !/wide\s+long/i.test(outcome)) {
       eventType = 'extra';
       extraType = 'wide';
     } else if (/no[- ]?ball/i.test(outcome)) {
       eventType = 'extra';
       extraType = 'noball';
-    } else if (/wicket|out|bowled|caught/i.test(outcome)) {
+    } else if (/out!|clean bowled|caught|lbw|stumped|run out/i.test(outcome.replace(/mid[- ]?wicket/gi, ''))) {
       eventType = 'wicket';
     }
 
@@ -2992,9 +2992,26 @@ export function buildTacticalMatchupContext(
 
   // Current over tempo
   const totalBallsBowled = Number(innings?.ballsBowled) || 0;
-  const ballsInCurrentOver = totalBallsBowled % 6 === 0 && totalBallsBowled > 0 ? 6 : totalBallsBowled % 6;
-  const recentOverSlice = parsedChronological.slice(-Math.max(1, ballsInCurrentOver));
-  const runsInCurrentOver = recentOverSlice.reduce((sum, d) => sum + d.runs, 0);
+  const isLegalCurrent = currentDeliveryOverride?.isWicket || !currentDeliveryOverride?.extraType || currentDeliveryOverride?.extraType === 'bye' || currentDeliveryOverride?.extraType === 'legbye';
+  const ballsBeforeCurrent = !currentDeliveryOverride?.alreadyInCommentaryList && isLegalCurrent ? Math.max(0, totalBallsBowled - 1) : totalBallsBowled;
+  const activeOverIdx = Math.floor(ballsBeforeCurrent / 6);
+  const currentOverDeliveries = parsedChronological.filter(d => {
+    const parts = String(d.overBall || '').trim().split('.');
+    if (parts.length === 2) {
+      const op = parseInt(parts[0], 10);
+      const bp = parseInt(parts[1], 10);
+      if (!isNaN(op) && !isNaN(bp)) {
+        if (op > 0 && bp === 0) return (op - 1) === activeOverIdx;
+        return op === activeOverIdx;
+      }
+    }
+    return false;
+  });
+  const ballsInCurrentOver =
+    !currentDeliveryOverride?.alreadyInCommentaryList && totalBallsBowled % 6 === 0 && totalBallsBowled > 0 && isLegalCurrent
+      ? 6
+      : totalBallsBowled % 6;
+  const runsInCurrentOver = currentOverDeliveries.reduce((sum, d) => sum + d.runs, 0);
 
   // Partnership since last fall of wicket
   const fowList = Array.isArray(innings?.fallOfWickets) ? innings.fallOfWickets : [];
