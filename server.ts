@@ -11,7 +11,8 @@ let sharpInstance: any = null;
 async function getSharp() {
   if (sharpInstance) return sharpInstance;
   try {
-    const mod = await import("sharp");
+    const sharpPkg = "sharp";
+    const mod: any = await (import(/* @vite-ignore */ sharpPkg as any) as Promise<any>);
     sharpInstance = mod.default || mod;
     return sharpInstance;
   } catch (err) {

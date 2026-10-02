@@ -137,14 +137,7 @@ interface Innings {
   wickets?: number;
   ballsBowled?: number;
   overs?: number;
-  extras?: {
-    wides?: number;
-    noBalls?: number;
-    byes?: number;
-    legByes?: number;
-    penalty?: number;
-    [key: string]: any;
-  } | number;
+  extras?: any;
   batsmen?: Batsman[];
   bowlers?: Bowler[];
   strikerIndex?: number;

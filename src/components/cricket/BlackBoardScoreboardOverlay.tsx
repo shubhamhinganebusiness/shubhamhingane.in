@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { X, Edit3, Check, RefreshCw } from 'lucide-react';
-import type { MatchState } from './types';
+import type { MatchState } from './CricketScoreboard';
 
 interface BlackBoardScoreboardOverlayProps {
   match: MatchState;

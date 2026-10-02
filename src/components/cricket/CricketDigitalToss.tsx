@@ -1560,7 +1560,7 @@ export const CricketDigitalToss: React.FC = () => {
 
             <div className="flex items-center gap-2.5">
               <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 text-stone-950 flex items-center justify-center font-black shadow-md shadow-amber-500/20 text-lg">
-                {coinType === 'cricket_ball' ? '⚾' : coinType === 'bat_ball' ? '🏏' : '🪙'}
+                {(coinType as string) === 'cricket_ball' ? '⚾' : (coinType as string) === 'bat_ball' ? '🏏' : '🪙'}
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -1655,7 +1655,7 @@ export const CricketDigitalToss: React.FC = () => {
               title="Test Umpire Pea Whistle (Web Audio API)"
             >
               <Megaphone size={13} />
-              <span className="hidden lg:inline">{t.whistle}</span>
+              <span className="hidden lg:inline">{t.umpireWhistle}</span>
             </button>
 
             {/* Stadium Roar Test Button */}

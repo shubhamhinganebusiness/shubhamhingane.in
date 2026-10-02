@@ -468,7 +468,7 @@ export const LocalTeamsAndOneClickSetupModal: React.FC<LocalTeamsAndOneClickSetu
         teamBLogo: teamBObj?.logo || '',
         teamASquad: (teamAObj?.players || []).map((p: any) => typeof p === 'string' ? p : p.name),
         teamBSquad: (teamBObj?.players || []).map((p: any) => typeof p === 'string' ? p : p.name),
-        playerPhotos: { ...(teamAObj?.playerPhotos || {}), ...(teamBObj?.playerPhotos || {}) },
+        playerPhotos: { ...((teamAObj as any)?.playerPhotos || {}), ...((teamBObj as any)?.playerPhotos || {}) },
         onSave: (result: any) => {
           triggerNotification(`Live Match saved! Winner: ${result.winner}`);
         }

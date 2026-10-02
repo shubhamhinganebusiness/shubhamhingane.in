@@ -133,7 +133,7 @@ export const LiveMatchGlobalBanner: React.FC = () => {
         .filter(Boolean);
       if (fromComm.length > 0) return fromComm;
     }
-    const rb = Array.isArray(innings?.recentBalls) ? innings.recentBalls : [];
+    const rb = Array.isArray((innings as any)?.recentBalls) ? (innings as any).recentBalls : [];
     if (rb.length === 0) return [];
     const legalInOver = balls % 6;
     if (legalInOver === 0 && activeMatch.status !== 'completed') {

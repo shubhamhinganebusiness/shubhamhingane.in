@@ -29,17 +29,26 @@ interface RecentMatchItem {
 interface TournamentRecentResultsCarouselProps {
   matches: RecentMatchItem[];
   teams?: { id: string; name: string; logo?: string }[];
-  onOpenScorecard: (match: RecentMatchItem) => void;
+  onOpenScorecard?: (match: RecentMatchItem) => void;
   onOpenAwardsCertificates?: (match: RecentMatchItem) => void;
+  tournamentName?: string;
+  onSelectMatch?: (match: RecentMatchItem) => void;
+  onOpenAwards?: (match: RecentMatchItem, defaultAward?: any) => void;
 }
 
 export const TournamentRecentResultsCarousel: React.FC<TournamentRecentResultsCarouselProps> = ({
   matches,
   teams = [],
   onOpenScorecard,
-  onOpenAwardsCertificates
+  onOpenAwardsCertificates,
+  tournamentName: _tournamentName,
+  onSelectMatch,
+  onOpenAwards
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleScorecardClick = onOpenScorecard || onSelectMatch || (() => {});
+  const handleAwardsClick = onOpenAwardsCertificates || onOpenAwards;
 
   const completedMatches = matches.filter(m => m.status === 'completed');
 
@@ -105,7 +114,7 @@ export const TournamentRecentResultsCarousel: React.FC<TournamentRecentResultsCa
             <motion.div
               key={m.id}
               whileHover={{ y: -2 }}
-              onClick={() => onOpenScorecard(m)}
+              onClick={() => handleScorecardClick(m)}
               className="min-w-[280px] max-w-[280px] sm:min-w-[310px] sm:max-w-[310px] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm hover:shadow-md hover:border-emerald-500/50 transition-all cursor-pointer flex flex-col justify-between shrink-0 snap-start select-none"
             >
               {/* Top metadata */}
@@ -170,12 +179,12 @@ export const TournamentRecentResultsCarousel: React.FC<TournamentRecentResultsCa
                   {m.winReason || 'Completed'}
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {onOpenAwardsCertificates && (
+                  {handleAwardsClick && (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onOpenAwardsCertificates(m);
+                        handleAwardsClick(m);
                       }}
                       className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/20 flex items-center gap-1 cursor-pointer transition-colors"
                       title="Download Award Certificates"

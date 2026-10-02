@@ -109,9 +109,12 @@ export interface MatchState {
   potmTeam?: string;
   matchNumber?: string;
   tournamentMatchId?: string | null;
+  tournamentId?: string | null;
+  tournamentLogo?: string;
   pitchCondition?: string;
   weatherCondition?: string;
   overlayConfig?: any;
+  [key: string]: any;
 }
 
 interface Props {

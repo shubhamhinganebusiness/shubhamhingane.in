@@ -2443,7 +2443,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: 'B+',
           academicYear: '2026-2027',
           principalSignature: DEFAULT_PRINCIPAL_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'newenglishmalthan':
@@ -2459,7 +2461,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: 'B+ Positive',
           academicYear: '12-08-1993',
           principalSignature: DEFAULT_PRINCIPAL_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'chandrabhama':
@@ -2475,7 +2479,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: '9403102571',
           academicYear: 'A/P&TAL - Karjat Dist-Ahilyanagar',
           principalSignature: DEFAULT_PRINCIPAL_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'swanandchincholi':
@@ -2491,7 +2497,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: '9545333277',
           academicYear: 'Chincholi Kaldat Tal-Karjat',
           principalSignature: '',
-          studentSignature: ''
+          studentSignature: '',
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'samyak':
@@ -2507,7 +2515,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: '9370444002',
           academicYear: 'बाबा कॉम्प्लेक्स, कोपरगाव',
           principalSignature: SAMYAK_PRESIDENT_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'zpketur2':
@@ -2523,7 +2533,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: '9373608302',
           academicYear: 'ता.करमाळा जि.सोलापूर',
           principalSignature: KETUR_HM_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'siddheshwar':
@@ -2539,7 +2551,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: '8806543102',
           academicYear: '2026-2027',
           principalSignature: SIDD_HM_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'bharatgas':
@@ -2555,7 +2569,9 @@ export const HeroIDCardForm = () => {
           bloodGroup: '9845331205',
           academicYear: 'Karmala Code-114572',
           principalSignature: LAXMI_DISTRIBUTOR_SIG,
-          studentSignature: DEFAULT_STUDENT_SIG
+          studentSignature: DEFAULT_STUDENT_SIG,
+          presidentName: '',
+          presidentTitle: ''
         });
         break;
       case 'shramikmajdur':

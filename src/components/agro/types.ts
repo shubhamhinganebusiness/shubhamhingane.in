@@ -35,6 +35,8 @@ export interface AgroBatch {
   mfgDate: string;
   expDate: string;
   createdAt: string;
+  gst?: number;
+  [key: string]: any;
 }
 
 export interface AgroProduct {
@@ -51,6 +53,8 @@ export interface AgroProduct {
   usageInstructions?: string;
   reorderLevel?: number;
   batches?: AgroBatch[]; // Optional if we want to keep them nested or separate
+  aiReason?: string;
+  [key: string]: any;
 }
 
 export interface AgroCustomer {
@@ -146,6 +150,8 @@ export interface AgroPurchase {
   date: string;
   totalAmount: number;
   createdAt: string;
+  billNumber?: string;
+  [key: string]: any;
 }
 
 export interface AgroDamage {
@@ -186,6 +192,9 @@ export interface AgroTransaction {
   balanceAfter: number;
   description?: string;
   createdAt: string;
+  partyName?: string;
+  flow?: 'In' | 'Out' | string;
+  [key: string]: any;
 }
 
 export interface AgroReturn {

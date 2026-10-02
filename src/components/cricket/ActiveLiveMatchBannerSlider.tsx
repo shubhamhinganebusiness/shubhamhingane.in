@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, Image as ImageIcon, Megaphone, 
   Sparkles, Radio, Trophy, ExternalLink 
 } from 'lucide-react';
-import { MatchState } from '../../types/cricket';
+import { MatchState } from './CricketScoreboard';
 import { SponsorAdSlide } from './useSpectatorSliderImages';
 import { CricketMatchBanner } from './CricketImageFallback';
 import { LiveMatchMetadataTicker } from './LiveMatchMetadataTicker';
@@ -19,7 +19,7 @@ export interface ActiveLiveBannerSlide {
 }
 
 interface ActiveLiveMatchBannerSliderProps {
-  match: MatchState;
+  match: MatchState | any;
   adminAds?: SponsorAdSlide[];
   mode?: 'hero' | 'card' | 'compact';
   onSelectMatch?: (matchId: string) => void;

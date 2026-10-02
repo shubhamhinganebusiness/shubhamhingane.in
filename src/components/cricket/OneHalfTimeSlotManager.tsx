@@ -847,7 +847,9 @@ interface MatchScheduleTimelineViewProps {
   onEditSlot: (match: OneHalfMatch) => void;
   onQuickStatusChange: (matchId: string, status: OneHalfMatch['status']) => void;
   onLaunchLive: (match: OneHalfMatch) => void;
-  onQuickScore: (match: OneHalfMatch) => void;
+  onQuickScore?: (match: OneHalfMatch) => void;
+  onOpenAutoSchedule?: () => void;
+  onOpenBatchDelay?: () => void;
 }
 
 export const MatchScheduleTimelineView: React.FC<MatchScheduleTimelineViewProps> = ({
@@ -1135,8 +1137,9 @@ export const MatchScheduleTimelineView: React.FC<MatchScheduleTimelineViewProps>
 interface Master5DayScheduleViewProps {
   tournament: OneHalfTournamentState;
   onEditSlot: (match: OneHalfMatch) => void;
-  onLaunchLive: (match: OneHalfMatch) => void;
-  onQuickScore: (match: OneHalfMatch) => void;
+  onLaunchLive?: (match: OneHalfMatch) => void;
+  onQuickScore?: (match: OneHalfMatch) => void;
+  onSelectDay?: (d: any) => void;
 }
 
 export const Master5DayScheduleView: React.FC<Master5DayScheduleViewProps> = ({

@@ -1913,7 +1913,7 @@ export const MatchAwardsCertificateModal: React.FC<MatchAwardsCertificateModalPr
 
   const effectiveAward: AwardType = activeTab === 'squad_batch' ? selectedSquadAwardType : selectedAward;
 
-  const awardTitleMap: Record<AwardType, { en: string; mr: string; badge: string; icon: any; color: string }> = {
+  const awardTitleMap: Partial<Record<AwardType, { en: string; mr: string; badge: string; icon: any; color: string }>> = {
     potm: {
       en: 'PLAYER OF THE MATCH',
       mr: 'सामनावीर मानकरी (Man of the Match)',

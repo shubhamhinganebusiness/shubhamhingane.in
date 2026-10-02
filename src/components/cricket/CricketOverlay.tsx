@@ -22,7 +22,7 @@ import {
   isDemoOrAIMatch
 } from './cricketStorage';
 import { liveFanOutClient } from './modules/LiveFanOutClient';
-import { calculateActiveOverNumber, isDeliveryInTargetOver } from './modules/overDeliveryUtils';
+import { calculateActiveOverNumber, isDeliveryInTargetOver, getDeliveryPillDetails } from './modules/overDeliveryUtils';
 import { CricketFullScreenTransitions } from './CricketFullScreenTransitions';
 import { getThemeBackground } from './BroadcastThemeStudio';
 import { StarTVScorebug } from './StarTVScorebug';
@@ -42,10 +42,12 @@ interface Batsman {
   balls: number;
   fours: number;
   sixes: number;
-  isOut: boolean;
+  isOut?: boolean;
+  out?: boolean;
   outMode?: string;
   dismissedBy?: string;
   fielderName?: string;
+  [key: string]: any;
 }
 
 interface Bowler {
@@ -54,16 +56,28 @@ interface Bowler {
   maidens: number;
   runsConceded: number;
   wickets: number;
-  isCurrent: boolean;
+  isCurrent?: boolean;
   consecutiveWickets?: number;
+  [key: string]: any;
 }
 
 interface CommentaryItem {
   id: string;
   overBall: string;
   description: string;
-  type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone';
+  type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone' | 'announcement' | string;
   soundWave?: boolean;
+  announcementType?: string;
+  specialEvent?: string;
+  playerName?: string;
+  overSummary?: any;
+  ballScore?: string;
+  runsOffBat?: number;
+  extraType?: string;
+  batterName?: string;
+  bowlerName?: string;
+  translations?: any;
+  [key: string]: any;
 }
 
 interface BallProgress {
@@ -71,6 +85,7 @@ interface BallProgress {
   overStr: string;
   cumulativeRuns: number;
   cumulativeWickets: number;
+  [key: string]: any;
 }
 
 interface Innings {
@@ -85,6 +100,7 @@ interface Innings {
     byes: number;
     legByes: number;
     penalty: number;
+    [key: string]: any;
   };
   batsmen: Batsman[];
   bowlers: Bowler[];
@@ -96,9 +112,11 @@ interface Innings {
     score: number;
     batsmanName: string;
     oversList: string;
+    [key: string]: any;
   }[];
-  commentaryList: CommentaryItem[];
+  commentaryList: (CommentaryItem | any)[];
   history?: BallProgress[];
+  [key: string]: any;
 }
 
 export type BroadcastTheme =
@@ -147,8 +165,9 @@ interface OverlayConfig {
   customBanner?: 'none' | 'four' | 'six' | 'fifty' | 'hundred' | 'drinks' | 'rain' | 'free_hit' | 'out';
   customBannerText?: string;
   manualAlertTrigger?: {
-    type: 'six' | 'four' | 'wicket';
+    type: 'six' | 'four' | 'wicket' | 'boundary_counter_four' | 'boundary_counter_six' | string;
     timestamp: number;
+    meta?: any;
   };
   activeGraphic?: string;
   lowerThirdMode?: 'intro' | 'equation' | 'umpires';
@@ -179,10 +198,15 @@ interface OverlayConfig {
   youtubeChannelName?: string;
   youtubeChannelLogoScale?: number;
   youtubeChannelLogoOpacity?: number;
+  commentaryLanguage?: string;
+  fieldPositions?: any;
+  [key: string]: any;
 }
 
 interface MatchState {
   id: string;
+  date?: string;
+  venue?: string;
   tournamentName?: string;
   seriesName?: string;
   tournamentId?: string | null;
@@ -224,6 +248,21 @@ interface MatchState {
   managerId?: string;
   managerName?: string;
   streamKey?: string;
+  tournamentPrizes?: any[];
+  umpire1Name?: string;
+  umpire1Photo?: string;
+  umpire2Name?: string;
+  umpire2Photo?: string;
+  scoreboardManagerName?: string;
+  scoreboardManagerPhoto?: string;
+  commentatorName?: string;
+  commentatorPhoto?: string;
+  teamASquad?: any[];
+  teamBSquad?: any[];
+  currentInnings?: any;
+  target?: any;
+  innings?: any;
+  [key: string]: any;
 }
 
 export const CricketOverlay: React.FC = () => {
@@ -1184,7 +1223,7 @@ export const CricketOverlay: React.FC = () => {
       now - alertTime < 4500
     ) {
       lastProcessedAlertRef.current = alertTime;
-      const alertType = activeConfig.manualAlertTrigger.type;
+      const alertType = activeConfig.manualAlertTrigger.type as string;
       if (alertType === 'four' || alertType === 'six' || alertType === 'boundary_counter_four' || alertType === 'boundary_counter_six') {
         const bType: 'four' | 'six' = (alertType === 'six' || alertType === 'boundary_counter_six') ? 'six' : 'four';
         const currStriker = currentInnings?.batsmen?.[currentInnings.strikerIndex];
@@ -4439,7 +4478,7 @@ export const CricketOverlay: React.FC = () => {
             match={match}
             currentInnings={currentInnings}
             battingStats={battingStats}
-            bowlingStats={bowlingStats}
+            bowlingStats={bowlingStats as any}
             activeTeamColor={activeTeamColor}
             activeConfig={activeConfig}
             isStarTVTheme={isStarTVTheme}
@@ -4991,7 +5030,7 @@ export const CricketOverlay: React.FC = () => {
         {(activeGraphic === 'tournament_logo' || activeGraphic === 'tournament_brand' || activeGraphic === 'tournament_logo_alert') && match && (
           <div className="absolute inset-0 flex items-center justify-center z-55 pointer-events-auto bg-black/40 backdrop-blur-xs p-4">
             <TournamentLogoOverlay
-              match={match}
+              match={match as any}
               onClose={() => {
                 setActiveGraphic('none');
                 setActiveAlert(null);
@@ -5019,7 +5058,7 @@ export const CricketOverlay: React.FC = () => {
         {/* BLACK BOARD SCOREBOARD OVERLAY (1:1 REFERENCE NEED [runs] RUNS FROM [balls] BALLS - Only during 2nd innings run chase) */}
         {(activeGraphic === 'black_board_scoreboard' || activeGraphic === 'black_board' || activeGraphic === 'need_board') && match && match.currentInnings === 2 && (match.target ? match.target > 0 : (match.innings?.[0]?.runs !== undefined && match.innings[0].runs > 0)) && (
           <BlackBoardScoreboardOverlay
-            match={match}
+            match={match as any}
             onClose={() => {
               setActiveGraphic('none');
             }}
@@ -5098,7 +5137,7 @@ export const CricketOverlay: React.FC = () => {
                   {isStarTVTheme ? 'STAR TV BROADCAST CELEBRATION' : 'BROADCAST CELEBRATION'}
                 </span>
               </div>
-              <h1 className="text-4xl font-black text-white uppercase">{customMilestone?.type === '100' ? '👑 MAJESTIC CENTURY' : customMilestone?.type === '5wkt' ? '⚡ FIVE WICKET SPELL' : '⭐ CRUCIAL HALF-CENTURY'}</h1>
+              <h1 className="text-4xl font-black text-white uppercase">{((customMilestone?.type as string) === '100' || customMilestone?.type === 'hundred') ? '👑 MAJESTIC CENTURY' : customMilestone?.type === '5wkt' ? '⚡ FIVE WICKET SPELL' : '⭐ CRUCIAL HALF-CENTURY'}</h1>
               <p className="mt-2 text-xs font-mono font-bold text-slate-300 uppercase">{customMilestone ? `${customMilestone.name || 'Batter'} reached milestone ${customMilestone.value}` : `${battingStats?.striker?.name || 'Batter'} plays an amazing inning of 50 runs!`}</p>
             </motion.div>
           </div>

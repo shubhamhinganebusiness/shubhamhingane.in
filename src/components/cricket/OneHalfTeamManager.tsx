@@ -1009,12 +1009,16 @@ export const TeamDedicatedPageView: React.FC<TeamDedicatedPageViewProps> = ({
 // -------------------------------------------------------------
 interface LocalTeamsDirectoryModalProps {
   onClose: () => void;
-  onSelectTeam: (team: LocalCricketTeamDef) => void;
+  onSelectTeam?: (team: LocalCricketTeamDef) => void;
+  tournament?: OneHalfTournamentState;
+  onImportTeam?: (targetTeamId: any, importedTeam: any) => void;
 }
 
 export const LocalTeamsDirectoryModal: React.FC<LocalTeamsDirectoryModalProps> = ({
   onClose,
-  onSelectTeam
+  onSelectTeam,
+  tournament,
+  onImportTeam
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCity, setSelectedCity] = useState('all');
@@ -1144,7 +1148,10 @@ export const LocalTeamsDirectoryModal: React.FC<LocalTeamsDirectoryModalProps> =
               {/* 1-Click Import Button */}
               <button
                 type="button"
-                onClick={() => onSelectTeam(teamDef)}
+                onClick={() => {
+                  if (onSelectTeam) onSelectTeam(teamDef);
+                  if (onImportTeam) onImportTeam(tournament?.teams?.[0]?.id || 'team-1', teamDef);
+                }}
                 className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition active:scale-95 border-none cursor-pointer shrink-0 shadow-md"
               >
                 <Zap size={14} className="text-amber-300" />
@@ -1211,16 +1218,20 @@ const ONE_HALF_ROLES: Array<{ key: OneHalfPlayer['role']; label: string; icon: s
 // -------------------------------------------------------------
 interface CaptainSquadSubmissionModalProps {
   team: OneHalfTeam;
-  tournament: OneHalfTournamentState;
+  tournament?: OneHalfTournamentState;
+  tournamentName?: string;
   onClose: () => void;
-  onSaveSquad: (updatedTeam: OneHalfTeam) => void;
+  onSaveSquad?: (updatedTeam: OneHalfTeam) => void;
+  onSubmitSquad?: (updatedTeam: any) => void;
 }
 
 export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalProps> = ({
   team,
   tournament,
+  tournamentName,
   onClose,
-  onSaveSquad
+  onSaveSquad,
+  onSubmitSquad
 }) => {
   const [teamName, setTeamName] = useState<string>(team.name);
   const [teamLogo, setTeamLogo] = useState<string>(team.logo || '');
@@ -1565,7 +1576,7 @@ export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalPr
           players: validPlayers.map(p => `${p.name}${p.isCaptain ? ' (C)' : ''}${p.isViceCaptain ? ' (VC)' : ''}${p.isWicketKeeper ? ' (WK)' : ''}`),
           squadDetails: validPlayers,
           status: 'squad_submitted',
-          tournamentId: tournament.id,
+          tournamentId: tournament?.id || '',
           group: team.group,
           updatedAt: Date.now()
         };
@@ -1576,7 +1587,8 @@ export const CaptainSquadSubmissionModal: React.FC<CaptainSquadSubmissionModalPr
     }
 
     // Pass to parent tournament state
-    onSaveSquad(updatedTeam);
+    if (onSaveSquad) onSaveSquad(updatedTeam);
+    if (onSubmitSquad) onSubmitSquad(updatedTeam);
     setSubmitting(false);
     setSubmitted(true);
     setFeedbackMsg({ text: '✓ 15-Player Squad submitted successfully to the Score Manager!', type: 'success' });

@@ -22,6 +22,7 @@ import {
 interface SponsorBannerManagementModalProps {
   isOpen: boolean;
   onClose: () => void;
+  matchId?: string;
 }
 
 export const SponsorBannerManagementModal: React.FC<SponsorBannerManagementModalProps> = ({

@@ -506,7 +506,7 @@ export const HeroCricketLiveScore: React.FC = () => {
               <span className="font-mono font-bold text-white text-xs">
                 {currentBowler?.wickets ?? 0}/{currentBowler?.runsConceded ?? 0}
                 <span className="text-[10px] text-slate-400 font-normal ml-1">
-                  ({currentBowler?.overs ?? '0.0'} ov)
+                  ({(currentBowler as any)?.overs ?? (currentBowler as any)?.oversBowled ?? '0.0'} ov)
                 </span>
               </span>
             </div>

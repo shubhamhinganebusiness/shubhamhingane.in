@@ -117,7 +117,7 @@ export const SuperAdmin: React.FC = () => {
   const [newSMPassword, setNewSMPassword] = useState('');
   const [creatingSM, setCreatingSM] = useState(false);
   const [showSMPass, setShowSMPass] = useState<Record<string, boolean>>({});
-  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'completed_matches' | 'managers' | 'slider' | 'themestudio' | 'certificate_design'>('players');
+  const [cricketSubTab, setCricketSubTab] = useState<'players' | 'completed_matches' | 'managers' | 'slider' | 'themestudio' | 'certificate_design' | 'cricbuzz_storage'>('players');
 
   // Account Security Tab States
   const [newAdminPassword, setNewAdminPassword] = useState('');

@@ -840,7 +840,7 @@ export const BroadcastThemeStudio: React.FC = () => {
                   bowlingTeamName={theme.teamBName || 'TEAM B'}
                   bowlingTeamSubtext={theme.teamBSubtext || 'BOWLING'}
                   bowlingTeamColor={theme.teamBColor || '#c8102e'}
-                  activeStinger={activeStinger}
+                  activeStinger={activeStinger ? activeStinger.type : null}
                   showWinPredictor={false}
                   winProbabilityA={68}
                   winProbabilityB={32}

@@ -171,15 +171,16 @@ export const BothSquadsImageOverlay: React.FC<BothSquadsImageOverlayProps> = ({ 
     const names: { name: string; isC?: boolean; isWk?: boolean; photo?: string }[] = [];
 
     if (explicitSquad) {
-      explicitSquad.forEach((p, idx) => {
-        const rawName = typeof p === 'string' ? p : p.name;
-        const isC = typeof p === 'object' && p.isCaptain !== undefined 
+      explicitSquad.forEach((p: any, idx: number) => {
+        if (!p) return;
+        const rawName = typeof p === 'string' ? p : (p?.name || `Player ${idx + 1}`);
+        const isC = typeof p === 'object' && p?.isCaptain !== undefined 
           ? p.isCaptain 
           : (match.teamACaptain ? rawName.toLowerCase().includes(match.teamACaptain.toLowerCase()) : idx === 0 && /\(c\)/i.test(rawName));
-        const isWk = typeof p === 'object' && p.isWicketkeeper !== undefined
+        const isWk = typeof p === 'object' && p?.isWicketkeeper !== undefined
           ? p.isWicketkeeper
           : (match.teamAWicketKeeper ? rawName.toLowerCase().includes(match.teamAWicketKeeper.toLowerCase()) : /\(wk\)/i.test(rawName));
-        const photo = typeof p === 'object' && p.photo ? p.photo : match.playerPhotos?.[rawName.toLowerCase()];
+        const photo = typeof p === 'object' && p?.photo ? p.photo : match.playerPhotos?.[rawName.toLowerCase()];
         names.push({ name: rawName, isC, isWk, photo });
       });
     } else if (match.innings1?.battingTeam === match.teamA && match.innings1?.batsmen) {
@@ -223,15 +224,16 @@ export const BothSquadsImageOverlay: React.FC<BothSquadsImageOverlayProps> = ({ 
     const names: { name: string; isC?: boolean; isWk?: boolean; photo?: string }[] = [];
 
     if (explicitSquad) {
-      explicitSquad.forEach((p, idx) => {
-        const rawName = typeof p === 'string' ? p : p.name;
-        const isC = typeof p === 'object' && p.isCaptain !== undefined 
+      explicitSquad.forEach((p: any, idx: number) => {
+        if (!p) return;
+        const rawName = typeof p === 'string' ? p : (p?.name || `Player ${idx + 1}`);
+        const isC = typeof p === 'object' && p?.isCaptain !== undefined 
           ? p.isCaptain 
           : (match.teamBCaptain ? rawName.toLowerCase().includes(match.teamBCaptain.toLowerCase()) : idx === 0 && /\(c\)/i.test(rawName));
-        const isWk = typeof p === 'object' && p.isWicketkeeper !== undefined
+        const isWk = typeof p === 'object' && p?.isWicketkeeper !== undefined
           ? p.isWicketkeeper
           : (match.teamBWicketKeeper ? rawName.toLowerCase().includes(match.teamBWicketKeeper.toLowerCase()) : /\(wk\)/i.test(rawName));
-        const photo = typeof p === 'object' && p.photo ? p.photo : match.playerPhotos?.[rawName.toLowerCase()];
+        const photo = typeof p === 'object' && p?.photo ? p.photo : match.playerPhotos?.[rawName.toLowerCase()];
         names.push({ name: rawName, isC, isWk, photo });
       });
     } else if (match.innings2?.battingTeam === match.teamB && match.innings2?.batsmen) {

@@ -1978,7 +1978,7 @@ export const CricketAuction: React.FC = () => {
                 <select
                   value={tournamentCurrency}
                   onChange={(e) => {
-                    const nextCurr = e.target.value;
+                    const nextCurr = e.target.value as '$' | '₹' | 'Credits';
                     setTournamentCurrency(nextCurr);
                   }}
                   className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-amber-500 transition-all font-black text-amber-500 uppercase"

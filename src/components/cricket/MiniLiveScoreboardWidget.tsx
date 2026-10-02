@@ -202,7 +202,7 @@ export const MiniLiveScoreboardWidget: React.FC<MiniLiveScoreboardWidgetProps> =
 
   // Recent balls in current over (including any No Balls / Wides bowled before the first legal ball of the over)
   const recentBalls = (() => {
-    const rb = Array.isArray(currInnings?.recentBalls) ? currInnings.recentBalls : [];
+    const rb = Array.isArray((currInnings as any)?.recentBalls) ? (currInnings as any).recentBalls : [];
     if (rb.length === 0) return [];
     const legalInOver = ballsBowled % 6;
     if (legalInOver === 0 && activeMatch.status !== 'completed') {

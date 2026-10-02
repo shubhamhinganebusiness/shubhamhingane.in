@@ -880,7 +880,7 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             time: newTime,
             reportingTime: newReporting,
             delayMins: (m.delayMins || 0) + delayMins,
-            status: m.status === 'in_progress' ? 'in_progress' : 'delayed'
+            status: (m.status === 'in_progress' ? 'in_progress' : 'delayed') as OneHalfMatch['status']
           };
         }
         return m;
@@ -1524,16 +1524,24 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
     const teamAObj = tournament.teams.find(t => t.name === m.teamA);
     const teamBObj = tournament.teams.find(t => t.name === m.teamB);
 
-    const squadPlayersA = (teamAObj?.squad || []).map(p => ({
+    const squadPlayersA = (teamAObj?.squad || []).map((p, idx) => ({
+      id: p.id || `squad-a-${idx}`,
       name: p.name,
       team: m.teamA,
       role: p.role || 'Player',
+      runs: (p as any).runs || 0,
+      wickets: (p as any).wickets || 0,
+      points: (p as any).points || 0,
       isWinner: winner === m.teamA
     }));
-    const squadPlayersB = (teamBObj?.squad || []).map(p => ({
+    const squadPlayersB = (teamBObj?.squad || []).map((p, idx) => ({
+      id: p.id || `squad-b-${idx}`,
       name: p.name,
       team: m.teamB,
       role: p.role || 'Player',
+      runs: (p as any).runs || 0,
+      wickets: (p as any).wickets || 0,
+      points: (p as any).points || 0,
       isWinner: winner === m.teamB
     }));
 
@@ -3293,8 +3301,8 @@ export const OneHalfTournamentSuite: React.FC<OneHalfTournamentSuiteProps> = ({
             qualifyingSpots={standingsGroupFilter === 'all' ? 4 : 1}
             standardOversQuota={tournament.overs}
             tournamentName={tournament.name}
-            activeTabMode={standingsTabMode}
-            onTabModeChange={setStandingsTabMode}
+            activeTabMode={standingsTabMode as any}
+            onTabModeChange={setStandingsTabMode as any}
             onExportCSV={handleExportStandingsCSV}
             onOpenMatchScorecard={(matchId) => {
               const found = tournament.matches.find(x => x.id === matchId);

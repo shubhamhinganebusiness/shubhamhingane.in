@@ -43,6 +43,8 @@ export interface CricketPlayer {
   isVerified?: boolean;
   approvalStatus?: "pending" | "approved" | "rejected";
   createdAt?: string;
+  performanceRating?: number;
+  [key: string]: any;
 }
 
 interface PlayerRegistrationFormProps {

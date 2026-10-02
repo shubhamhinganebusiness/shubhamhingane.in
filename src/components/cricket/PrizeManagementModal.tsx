@@ -804,7 +804,9 @@ export const PrizeManagementModal: React.FC<PrizeManagementModalProps> = ({
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            ref={(el) => (fileInputRefs.current[prize.id] = el)}
+                            ref={(el) => {
+                              fileInputRefs.current[prize.id] = el;
+                            }}
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) handlePhotoUpload(prize.id, file);

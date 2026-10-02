@@ -304,7 +304,7 @@ export const Login: React.FC = () => {
   useEffect(() => {
     if (role === 'super_admin') {
       navigate(from, { replace: true });
-    } else if (role === 'user') {
+    } else if ((role as string) === 'user') {
       navigate('/', { replace: true });
     }
   }, [role, navigate, from]);

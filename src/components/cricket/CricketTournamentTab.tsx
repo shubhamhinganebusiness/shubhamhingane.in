@@ -51,7 +51,9 @@ interface TournamentTeam {
   captain: string;
   players: string[];
   logo?: string;
+  city?: string;
   playerPhotos?: Record<string, string>;
+  [key: string]: any;
 }
 
 interface TournamentMatch {
@@ -69,14 +71,17 @@ interface TournamentMatch {
   oversA: string; // e.g. "10"
   oversB: string; // e.g. "10"
   winnerId: string | null;
+  winner?: string | null;
   winReason: string;
   manOfTheMatch: string;
+  playerOfTheMatch?: any;
   stage: string;
   pitchType?: string;
   umpire1?: string;
   umpire2?: string;
   scorer?: string;
   matchBannerUrl?: string;
+  [key: string]: any;
 }
 
 export interface TournamentLiveScoreConfig {
@@ -108,7 +113,8 @@ export interface TournamentLiveScoreConfig {
   playerPhotos?: Record<string, string>;
   matchBannerUrl?: string;
   prizes?: TournamentPrize[];
-  onSave: (result: { runsA: number; wicketsA: number; runsB: number; wicketsB: number; winner: string; winReason: string }) => void;
+  onSave: (result: { runsA: number; wicketsA: number; runsB: number; wicketsB: number; winner: string; winReason: string; [key: string]: any; }) => void;
+  [key: string]: any;
 }
 
 interface Tournament {
@@ -139,6 +145,7 @@ interface Tournament {
   youtubeChannelLogo?: string;
   youtubeChannelName?: string;
   prizes?: TournamentPrize[];
+  updatedAt?: number;
   pointsConfig?: {
     winPoints: number;
     tiePoints: number;
@@ -146,6 +153,7 @@ interface Tournament {
     qualificationSpots?: number;
     enableNRR?: boolean;
   };
+  [key: string]: any;
 }
 
 // Helper to normalize tournament records and filter out One-Half 32-team internal pointer docs
@@ -402,16 +410,24 @@ export const CricketTournamentTab: React.FC<{
     } catch (_) {}
 
     // Squad players for squad batch certification (winning team squad + participant squad)
-    const squadPlayersA = (teamAObj?.players || []).map(p => ({
+    const squadPlayersA = (teamAObj?.players || []).map((p, idx) => ({
+      id: `squad-a-${idx}`,
       name: p,
       team: m.teamAName,
       role: 'Player',
+      runs: 0,
+      wickets: 0,
+      points: 0,
       isWinner: winner === m.teamAName
     }));
-    const squadPlayersB = (teamBObj?.players || []).map(p => ({
+    const squadPlayersB = (teamBObj?.players || []).map((p, idx) => ({
+      id: `squad-b-${idx}`,
       name: p,
       team: m.teamBName,
       role: 'Player',
+      runs: 0,
+      wickets: 0,
+      points: 0,
       isWinner: winner === m.teamBName
     }));
 
@@ -934,8 +950,8 @@ export const CricketTournamentTab: React.FC<{
 
     const teamALogo = normalizeImageUrl(teamAObj?.logo || '');
     const teamBLogo = normalizeImageUrl(teamBObj?.logo || '');
-    const teamASquad = (teamAObj?.players || []).map(p => typeof p === 'string' ? p : p.name);
-    const teamBSquad = (teamBObj?.players || []).map(p => typeof p === 'string' ? p : p.name);
+    const teamASquad = (teamAObj?.players || []).map(p => typeof p === 'string' ? p : (p as any).name);
+    const teamBSquad = (teamBObj?.players || []).map(p => typeof p === 'string' ? p : (p as any).name);
     const mergedPlayerPhotos = { ...(teamAObj?.playerPhotos || {}), ...(teamBObj?.playerPhotos || {}) };
 
     const overs = activeTournament.customOvers || (activeTournament.format === 'T20' ? 20 : activeTournament.format === 'Box Cricket' ? 8 : 10);
@@ -2188,7 +2204,7 @@ export const CricketTournamentTab: React.FC<{
     const winnerTeamObj = activeTournament.teams.find(t => t.id === matchWinnerId || t.name === winnerTeamName);
     const effectiveMoM = (matchMoM && matchMoM.trim() !== '')
       ? matchMoM.trim()
-      : (winnerTeamObj?.players?.[0]?.name || winnerTeamObj?.captain || `${winnerTeamName || updatingMatch.teamAName} Captain`);
+      : ((typeof winnerTeamObj?.players?.[0] === 'object' ? (winnerTeamObj.players[0] as any)?.name : winnerTeamObj?.players?.[0]) || winnerTeamObj?.captain || `${winnerTeamName || updatingMatch.teamAName} Captain`);
 
     const nextMatches = activeTournament.matches.map(m => {
       if (m.id !== updatingMatch.id) return m;
@@ -2758,7 +2774,7 @@ export const CricketTournamentTab: React.FC<{
                   setEditTourCustomOvers(activeTournament.customOvers || 10);
                   setEditTourCustomRules(activeTournament.customRules || '');
                   setEditTourTeamCount(activeTournament.teamCount);
-                  setEditTourType(activeTournament.type);
+                  setEditTourType(activeTournament.type as any);
                   setEditTourDate(activeTournament.startDate);
                   setEditTourLogo(activeTournament.logo || '');
                   setEditTourGroundVenue(activeTournament.groundName || activeTournament.venue || 'Shivaji Maharaj Ground (Turf)');
@@ -3932,7 +3948,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
               ) : (
                 <TournamentHierarchyPointsTable
-                  tournament={activeTournament}
+                  tournament={activeTournament as any}
                   qualifyingThreshold={activeTournament.pointsConfig?.qualificationSpots ?? 4}
                   onOpenScorecard={(m) => {
                     setSelectedScorecardMatch(m as any);
@@ -4236,8 +4252,8 @@ export const CricketTournamentTab: React.FC<{
             <div className="space-y-6">
               <TournamentVenueScheduler
                 tournamentId={activeTournament.id}
-                format={activeTournament.format}
-                roundsType={activeTournament.type}
+                format={activeTournament.format as any}
+                roundsType={activeTournament.type as any}
                 matches={activeTournament.matches}
                 teams={activeTournament.teams.map(t => ({
                   id: t.id,
@@ -4291,7 +4307,7 @@ export const CricketTournamentTab: React.FC<{
                     if (t.id !== activeTournamentId) return t;
                     return {
                       ...t,
-                      status: nextMatches.length === 0 ? 'setup' : 'active',
+                      status: (nextMatches.length === 0 ? 'setup' : 'active') as 'setup' | 'active',
                       matches: nextMatches
                     };
                   });
@@ -4329,7 +4345,7 @@ export const CricketTournamentTab: React.FC<{
                 </div>
 
                 <TournamentHierarchyPointsTable
-                  tournament={activeTournament}
+                  tournament={activeTournament as any}
                   qualifyingThreshold={activeTournament.pointsConfig?.qualificationSpots ?? 4}
                 />
               </div>

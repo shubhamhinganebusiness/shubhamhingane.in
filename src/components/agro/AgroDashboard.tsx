@@ -58,6 +58,7 @@ export const AgroDashboard: React.FC = () => {
     batches: [],
     returns: [],
     orders: [],
+    employees: [],
     salaries: [],
     transactions: [],
     loading: true

@@ -30,19 +30,24 @@ export interface LeaderboardPlayerStat {
 
 interface LiveTournamentLeaderboardWidgetProps {
   currentMatch?: MatchState | null;
+  activeMatch?: MatchState | null;
   pastMatches?: MatchState[];
   tournamentName?: string;
+  tournamentId?: string | null;
   onSelectPlayer?: (playerStat: LeaderboardPlayerStat) => void;
   className?: string;
 }
 
 export const LiveTournamentLeaderboardWidget: React.FC<LiveTournamentLeaderboardWidgetProps> = ({
   currentMatch,
+  activeMatch,
   pastMatches = [],
   tournamentName,
+  tournamentId: _tournamentId,
   onSelectPlayer,
   className = '',
 }) => {
+  const effectiveCurrentMatch = currentMatch || activeMatch;
   const [activeTab, setActiveTab] = useState<'orange' | 'purple' | 'sixes' | 'economy'>('orange');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -125,8 +130,8 @@ export const LiveTournamentLeaderboardWidget: React.FC<LiveTournamentLeaderboard
     pastMatches.forEach(processMatch);
 
     // Process current live match for ball-by-ball updates!
-    if (currentMatch) {
-      processMatch(currentMatch);
+    if (effectiveCurrentMatch) {
+      processMatch(effectiveCurrentMatch);
     }
 
     // Compute derived rates

@@ -140,9 +140,12 @@ export interface Batsman {
   fours: number;
   sixes: number;
   isOut: boolean;
-  outMode?: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW' | 'Retired Hurt';
+  outMode?: 'Bowled' | 'Caught' | 'Run Out' | 'Stumped' | 'LBW' | 'Retired Hurt' | string;
   dismissedBy?: string;
   fielderName?: string;
+  out?: boolean;
+  howOut?: string;
+  [key: string]: any;
 }
 
 export interface Bowler {
@@ -236,17 +239,18 @@ export interface Innings {
 }
 
 interface OverlayConfig {
-  template: 'broadcast-pro' | 'neon-sport' | 'clean-white' | 'ipl-style' | 'score-bug-1900-200' | 'slanted-pro-design';
-  showStatsPanel: boolean;
-  showTicker: boolean;
-  tickerMessage: string;
-  forceInningsLayout?: 1 | 2;
-  manualWicketTrigger: boolean;
-  manualOutsDisplay: 'none' | 'corner' | 'fullscreen';
-  manualFreeHitTrigger: boolean;
-  teamAColor: string;
-  teamBColor: string;
+  template?: 'broadcast-pro' | 'neon-sport' | 'clean-white' | 'ipl-style' | 'score-bug-1900-200' | 'slanted-pro-design' | 'star-tv-broadcast' | string;
+  showStatsPanel?: boolean;
+  showTicker?: boolean;
+  tickerMessage?: string;
+  forceInningsLayout?: 0 | 1 | 2;
+  manualWicketTrigger?: boolean;
+  manualOutsDisplay?: 'none' | 'corner' | 'fullscreen';
+  manualFreeHitTrigger?: boolean;
+  teamAColor?: string;
+  teamBColor?: string;
   showScoreBug?: boolean;
+  showWinProbability?: boolean;
   customBanner?: 'none' | 'four' | 'six' | 'fifty' | 'hundred' | 'drinks' | 'rain' | 'free_hit' | 'out';
   customBannerText?: string;
   manualAlertTrigger?: {
@@ -274,6 +278,7 @@ interface OverlayConfig {
   activePowerPlay?: 'PP1' | 'PP2' | 'PP3' | null;
   commentatorName?: string;
   autoLoopPanels?: boolean;
+  [key: string]: any;
 }
 
 export interface MatchState {
@@ -317,7 +322,7 @@ export interface MatchState {
   }[];
   updatedAt?: number;
   version?: number;
-  overlayConfig?: OverlayConfig;
+  overlayConfig?: OverlayConfig | any;
   teamALogo?: string;
   teamBLogo?: string;
   matchBannerUrl?: string;
@@ -364,6 +369,8 @@ export interface MatchState {
     runsConceded: number;
     points: number;
   };
+  venue?: string;
+  [key: string]: any;
 }
 
 const copyToClipboard = (text: string): Promise<void> => {
@@ -4999,7 +5006,8 @@ export const CricketScoreboard: React.FC = () => {
           balls: 0,
           fours: 0,
           sixes: 0,
-          out: false
+          out: false,
+          isOut: false
         };
         const newBatsmen = [...(inn.batsmen || []), newB];
         const newIdx = newBatsmen.length - 1;
@@ -5246,9 +5254,9 @@ export const CricketScoreboard: React.FC = () => {
       if (!prev.innings2) return prev;
       const updatedBatsmen = [...(prev.innings2.batsmen || [])];
       if (updatedBatsmen[0]) updatedBatsmen[0] = { ...updatedBatsmen[0], name: stName };
-      else updatedBatsmen.push({ name: stName, runs: 0, balls: 0, fours: 0, sixes: 0, out: false });
+      else updatedBatsmen.push({ name: stName, runs: 0, balls: 0, fours: 0, sixes: 0, out: false, isOut: false });
       if (updatedBatsmen[1]) updatedBatsmen[1] = { ...updatedBatsmen[1], name: nstName };
-      else updatedBatsmen.push({ name: nstName, runs: 0, balls: 0, fours: 0, sixes: 0, out: false });
+      else updatedBatsmen.push({ name: nstName, runs: 0, balls: 0, fours: 0, sixes: 0, out: false, isOut: false });
 
       const updatedBowlers = [...(prev.innings2.bowlers || [])];
       if (updatedBowlers[0]) updatedBowlers[0] = { ...updatedBowlers[0], name: bwName };
@@ -9647,7 +9655,7 @@ export const CricketScoreboard: React.FC = () => {
                     activeMatch={match}
                     tournamentId={match.tournamentId}
                     onSelectPlayer={(player) => {
-                      setSelectedCareerPlayer(player);
+                      setSelectedCareerPlayer(player as any);
                     }}
                   />
                 </div>
@@ -9935,7 +9943,7 @@ export const CricketScoreboard: React.FC = () => {
               </button>
             )}
 
-            {match.id && match.status !== 'setup' && (
+            {match.id && (match.status as string) !== 'setup' && (
               <>
                 {/* Offline-First Background Sync Status Badge */}
                 <OfflineSyncStatusBadge className="shrink-0" />
@@ -10025,7 +10033,7 @@ export const CricketScoreboard: React.FC = () => {
 
         {/* MOBILE DEDICATED SCOREBOARD MANAGEMENT ACTION BAR (< sm / Phones) */}
         {/* Guarantees End Inning, Save Draft, Edit Setup, DLS, and Reset buttons are ALWAYS 100% visible on all mobile devices */}
-        {match.id && match.status !== 'setup' && (
+        {match.id && (match.status as string) !== 'setup' && (
           <div className="flex sm:hidden bg-slate-900/95 backdrop-blur-xs border-b border-slate-800 px-1.5 py-1 items-center justify-between gap-1 shrink-0 z-30 shadow-xs select-none">
             {/* 1. End Inning */}
             {declareInningsConfirm ? (
@@ -10789,7 +10797,7 @@ export const CricketScoreboard: React.FC = () => {
                                     type="button"
                                     onClick={() => {
                                       if (!isChasing && !isActive) {
-                                        showNotification('Chase Board is available during 2nd innings run chase.', 'warning');
+                                        showNotification('Chase Board is available during 2nd innings run chase.', 'alert');
                                         return;
                                       }
                                       updateOverlayProp({ activeGraphic: isActive ? 'none' : 'black_board_scoreboard' });
@@ -15921,7 +15929,7 @@ export const CricketScoreboard: React.FC = () => {
                   playSoundEffect('click');
                 }}
                 className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                  activeSection === 'scorer'
+                  (activeSection as string) === 'scorer'
                     ? 'bg-emerald-600 text-white shadow-md'
                     : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
@@ -15949,7 +15957,7 @@ export const CricketScoreboard: React.FC = () => {
                   playSoundEffect('click');
                 }}
                 className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
-                  activeSection === 'one-half'
+                  (activeSection as string) === 'one-half'
                     ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
                     : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
@@ -16212,7 +16220,7 @@ export const CricketScoreboard: React.FC = () => {
                   playSoundEffect('click');
                 }}
                 className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                  activeSection === 'scorer'
+                  (activeSection as string) === 'scorer'
                     ? 'bg-emerald-600 text-white shadow-md'
                     : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
@@ -16227,7 +16235,7 @@ export const CricketScoreboard: React.FC = () => {
                   playSoundEffect('click');
                 }}
                 className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                  activeSection === 'tournaments'
+                  (activeSection as string) === 'tournaments'
                     ? 'bg-emerald-600 text-white shadow-md'
                     : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
@@ -16562,7 +16570,7 @@ export const CricketScoreboard: React.FC = () => {
                 playSoundEffect('click');
               }}
               className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                activeSection === 'tournaments'
+                (activeSection as string) === 'tournaments'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
@@ -16576,7 +16584,7 @@ export const CricketScoreboard: React.FC = () => {
                 playSoundEffect('click');
               }}
               className={`py-2.5 px-2 sm:px-4 rounded-xl font-black uppercase text-[10px] sm:text-xs tracking-wider transition-all border-none cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
-                activeSection === 'one-half'
+                (activeSection as string) === 'one-half'
                   ? 'bg-gradient-to-r from-amber-500 to-rose-600 text-white shadow-md'
                   : 'bg-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
@@ -29822,10 +29830,10 @@ export const CricketScoreboard: React.FC = () => {
 };
 
 // Simple Fallback Icon wrapper
-const HistoryIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+const HistoryIcon: React.FC<React.SVGProps<SVGSVGElement> & { size?: number | string }> = ({ size = 18, ...props }) => (
   <svg 
     xmlns="http://www.w3.org/2000/svg" 
-    width="18" height="18" 
+    width={size} height={size} 
     viewBox="0 0 24 24" 
     fill="none" 
     stroke="currentColor" 
