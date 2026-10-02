@@ -131,42 +131,51 @@ interface BallProgress {
 }
 
 interface Innings {
-  battingTeam: string;
-  bowlingTeam: string;
-  runs: number;
-  wickets: number;
-  ballsBowled: number;
-  extras: {
-    wides: number;
-    noBalls: number;
-    byes: number;
-    legByes: number;
-    penalty: number;
-  };
-  batsmen: Batsman[];
-  bowlers: Bowler[];
-  strikerIndex: number;
-  nonStrikerIndex: number;
-  currentBowlerIndex: number;
-  fallOfWickets: {
-    wicketNo: number;
-    score: number;
-    batsmanName: string;
-    oversList: string;
+  battingTeam?: string;
+  bowlingTeam?: string;
+  runs?: number;
+  wickets?: number;
+  ballsBowled?: number;
+  overs?: number;
+  extras?: {
+    wides?: number;
+    noBalls?: number;
+    byes?: number;
+    legByes?: number;
+    penalty?: number;
+    [key: string]: any;
+  } | number;
+  batsmen?: Batsman[];
+  bowlers?: Bowler[];
+  strikerIndex?: number;
+  nonStrikerIndex?: number;
+  currentBowlerIndex?: number;
+  recentBalls?: any[];
+  fallOfWickets?: {
+    wicketNo?: number;
+    score?: number;
+    batsmanName?: string;
+    oversList?: string;
+    [key: string]: any;
   }[];
-  commentaryList: {
+  commentaryList?: {
     id: string;
     overBall: string;
     description: string;
-    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone';
+    type: 'normal' | 'boundary' | 'wicket' | 'extra' | 'milestone' | 'announcement' | 'break' | 'info' | string;
     soundWave?: boolean;
+    announcementType?: string;
+    specialEvent?: string;
     translations?: {
       en?: string;
       hi?: string;
       mr?: string;
+      [key: string]: string | undefined;
     };
+    [key: string]: any;
   }[];
   history?: BallProgress[];
+  [key: string]: any;
 }
 
 interface MatchState {
@@ -174,15 +183,15 @@ interface MatchState {
   teamA: string;
   teamB: string;
   oversLimit: number;
-  tossWinner: string;
-  tossChoice: 'bat' | 'bowl';
-  currentInningsNum: 1 | 2;
-  innings1: Innings | null;
-  innings2: Innings | null;
-  status: 'setup' | 'live' | 'completed' | 'draft' | 'deleted';
+  tossWinner?: string;
+  tossChoice?: 'bat' | 'bowl' | string;
+  currentInningsNum?: 1 | 2 | number;
+  innings1?: Innings | null;
+  innings2?: Innings | null;
+  status: 'setup' | 'live' | 'completed' | 'draft' | 'deleted' | string;
   isDeleted?: boolean;
-  date: string;
-  freeHitNext: boolean;
+  date?: string;
+  freeHitNext?: boolean;
   winner?: string;
   winReason?: string;
   targetRuns?: number;
@@ -224,6 +233,8 @@ interface MatchState {
     runsConceded: number;
     points: number;
   };
+  squadPlayers?: any[];
+  [key: string]: any;
 }
 
 const copyToClipboard = (text: string): Promise<void> => {
@@ -507,315 +518,7 @@ const computePointsTable = (teams: any[], matches: any[]) => {
 /**
  * Global Site-Wide Banner displayed across pages whenever a live cricket match flag is active in Firestore
  */
-export const LiveMatchGlobalBanner = () => {
-  const [liveMatches, setLiveMatches] = useState<MatchState[]>([]);
-  const [currentIndex, setCurrentIndex] = useState<number>(0);
-  const [isDismissed, setIsDismissed] = useState<boolean>(false);
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { adminAds } = useSpectatorSliderImages();
-
-  // Hide on dedicated cricket arena / scoring pages and homepage / hero section to prevent clutter
-  const isDedicatedCricketScreen = useMemo(() => {
-    const p = location.pathname;
-    return (
-      p === '/' ||
-      p === '' ||
-      p.startsWith('/live/cricket-') ||
-      p.startsWith('/cricket-') ||
-      p.startsWith('/completed-matches') ||
-      p.startsWith('/live/completed-matches')
-    );
-  }, [location.pathname]);
-
-  // Real-time listener for any match flagged as 'live' in Firestore
-  useEffect(() => {
-    // Initial local cache population
-    try {
-      const local = getLocalMatches().filter(m => m.status === 'live' && !isMatchDeleted(m.id) && !m.isHidden && !m.isBlocked && !(m as any).isDeleted && !isDemoOrAIMatch(m));
-      if (local.length > 0) {
-        setLiveMatches(local);
-      }
-    } catch (_) {}
-
-    const unsub = subscribeToCricketMatchesCollection((snapshot) => {
-      const active: MatchState[] = [];
-      const remoteIds = new Set<string>();
-      snapshot.forEach((docSnap: any) => {
-        const data = docSnap.data() as MatchState;
-        const m = { ...data, id: data.id || docSnap.id };
-        if (m.status === 'deleted' || (m as any).isDeleted === true) {
-          markMatchDeleted(m.id);
-          return;
-        }
-        if (isMatchDeleted(m.id) || isDemoOrAIMatch(m)) {
-          return;
-        }
-        if (m.status === 'live' && !m.isHidden && !m.isBlocked) {
-          active.push(m);
-        }
-        remoteIds.add(m.id);
-      });
-      // Sort most recently updated first
-      active.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-      setLiveMatches(active);
-    }, (err) => {
-      console.warn('[LiveMatchGlobalBanner] Snapshot error:', err);
-    });
-
-    const handleDeletedEvent = (e: any) => {
-      const id = e?.detail?.id;
-      if (id) {
-        queueMicrotask(() => {
-          setLiveMatches(prev => {
-            if (!prev.some(m => m.id === id)) return prev;
-            return prev.filter(m => m.id !== id);
-          });
-        });
-      }
-    };
-    window.addEventListener('cricket_match_deleted', handleDeletedEvent);
-
-    return () => {
-      unsub();
-      window.removeEventListener('cricket_match_deleted', handleDeletedEvent);
-    };
-  }, []);
-
-  if (isDedicatedCricketScreen || isDismissed || liveMatches.length === 0) {
-    return null;
-  }
-
-  const activeMatch = liveMatches[currentIndex] || liveMatches[0];
-  if (!activeMatch) return null;
-
-  const innings = activeMatch.currentInningsNum === 1 ? activeMatch.innings1 : activeMatch.innings2;
-  const battingTeam = innings?.battingTeam || activeMatch.teamA;
-  const bowlingTeam = innings?.bowlingTeam || activeMatch.teamB;
-  const runs = innings?.runs ?? 0;
-  const wickets = innings?.wickets ?? 0;
-  const balls = innings?.ballsBowled ?? 0;
-  const oversStr = `${Math.floor(balls / 6)}.${balls % 6}`;
-  const maxOvers = activeMatch.oversLimit || 5;
-  const crr = balls > 0 ? ((runs / balls) * 6).toFixed(2) : '0.00';
-
-  const isSecondInnings = activeMatch.currentInningsNum === 2;
-  const target = isSecondInnings ? (activeMatch.innings1?.runs ?? 0) + 1 : 0;
-  const runsNeeded = target - runs;
-  const totalBalls = maxOvers * 6;
-  const ballsRemaining = Math.max(0, totalBalls - balls);
-  const rrr = isSecondInnings && ballsRemaining > 0 ? ((Math.max(0, runsNeeded) / ballsRemaining) * 6).toFixed(2) : null;
-
-  const striker = innings?.batsmen && innings.strikerIndex !== undefined ? innings.batsmen[innings.strikerIndex] : null;
-  const nonStriker = innings?.batsmen && innings.nonStrikerIndex !== undefined ? innings.batsmen[innings.nonStrikerIndex] : null;
-  const currentBowler = innings?.bowlers && innings.currentBowlerIndex !== undefined ? innings.bowlers[innings.currentBowlerIndex] : null;
-  const activeOverIdx = calculateActiveOverNumber(
-    balls,
-    activeMatch.status,
-    maxOvers,
-    wickets,
-    activeMatch.isSuperOver,
-    (activeMatch as any).superOverWicketLimit
-  );
-  const recentBalls = (() => {
-    if (Array.isArray(innings?.commentaryList) && innings.commentaryList.length > 0) {
-      const fromComm = innings.commentaryList
-        .filter((c: any) => isDeliveryInTargetOver(c, activeOverIdx))
-        .slice(0, 16)
-        .reverse()
-        .map((c: any) => getDeliveryPillDetails(c).label)
-        .filter(Boolean);
-      if (fromComm.length > 0) return fromComm;
-    }
-    const rb = Array.isArray(innings?.recentBalls) ? innings.recentBalls : [];
-    if (rb.length === 0) return [];
-    const legalInOver = balls % 6;
-    if (legalInOver === 0 && activeMatch.status !== 'completed') {
-      const trailingExtras: string[] = [];
-      for (let i = rb.length - 1; i >= 0; i--) {
-        const item = String(rb[i] || '').toUpperCase();
-        if (item.includes('NB') || item.includes('WD')) {
-          trailingExtras.unshift(rb[i]);
-        } else {
-          break;
-        }
-      }
-      return trailingExtras;
-    }
-    const targetLegal = legalInOver === 0 ? 6 : legalInOver;
-    let legalSeen = 0;
-    const result: string[] = [];
-    for (let i = rb.length - 1; i >= 0; i--) {
-      const item = String(rb[i] || '').toUpperCase();
-      const isExtra = item.includes('NB') || item.includes('WD');
-      if (!isExtra) {
-        legalSeen++;
-      }
-      result.unshift(rb[i]);
-      if (legalSeen >= targetLegal) {
-        while (i - 1 >= 0) {
-          const prevItem = String(rb[i - 1] || '').toUpperCase();
-          if (prevItem.includes('NB') || prevItem.includes('WD')) {
-            i--;
-            result.unshift(rb[i]);
-          } else {
-            break;
-          }
-        }
-        break;
-      }
-    }
-    return result;
-  })();
-
-  return (
-    <div id="live-match-global-banner" className="sticky top-0 z-50 w-full bg-slate-950/95 backdrop-blur-md border-b border-emerald-500/30 text-white shadow-2xl transition-all">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5">
-        {/* Left: Live indicator and Match Info */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          {activeMatch.isSuperOver ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black text-[10px] tracking-widest uppercase">
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block" />
-              ⚡ SUPER OVER {activeMatch.superOverNumber || 1}
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 font-black text-[10px] tracking-widest uppercase">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block" />
-              LIVE MATCH
-            </div>
-          )}
-
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-100">
-              <span className="text-white">{activeMatch.teamA}</span>
-              <span className="text-slate-400 text-[11px]">vs</span>
-              <span className="text-white">{activeMatch.teamB}</span>
-            </div>
-            {activeMatch.tournamentName && (
-              <span className="text-[10px] font-semibold text-amber-400/90 truncate max-w-[160px] sm:max-w-[240px] flex items-center gap-1">
-                {activeMatch.tournamentLogo && (
-                  <img
-                    src={activeMatch.tournamentLogo}
-                    alt="Logo"
-                    className="w-3.5 h-3.5 object-cover rounded-full border border-amber-400/40 shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-                <span>🏆 {activeMatch.tournamentName}</span>
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Center: Live Score, Overs, and Equations */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
-          <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-2 shadow-inner">
-            <span>{battingTeam}:</span>
-            <span className="text-white text-sm sm:text-base font-black tracking-tight">{runs}/{wickets}</span>
-            <span className="text-emerald-400 text-[11px] font-medium">({oversStr}/{maxOvers} ov)</span>
-            <span className="hidden sm:inline text-slate-400 text-[10px] pl-1.5 border-l border-emerald-500/30">CRR {crr}</span>
-          </div>
-
-          {/* Equation if chase */}
-          {isSecondInnings && (
-            <div className="hidden md:flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-bold">
-              <span>Target {target}</span>
-              <span className="text-slate-300">•</span>
-              <span>Need {runsNeeded} from {ballsRemaining}b</span>
-              {rrr && <span className="text-amber-200">({rrr} rpo)</span>}
-            </div>
-          )}
-
-          {/* Striker & Bowler summary */}
-          <div className="hidden lg:flex items-center gap-3 text-slate-300 text-[11px]">
-            {striker && (
-              <span className="flex items-center gap-1">
-                🏏 <strong className="text-white font-semibold">{striker.name}</strong> {striker.runs}*({striker.balls})
-              </span>
-            )}
-            {currentBowler && (
-              <span className="flex items-center gap-1">
-                🥎 <strong className="text-white font-semibold">{currentBowler.name}</strong> {currentBowler.wickets}/{currentBowler.runsConceded}
-              </span>
-            )}
-          </div>
-
-          {/* Recent balls pill */}
-          {recentBalls.length > 0 && (
-            <div className="hidden xl:flex items-center gap-1">
-              <span className="text-[10px] text-slate-400 uppercase font-medium mr-1">Over:</span>
-              {recentBalls.map((b: any, idx: number) => {
-                const isW = typeof b === 'string' ? b.includes('W') : b?.isWicket;
-                const isSix = b === '6' || b?.runs === 6;
-                const isFour = b === '4' || b?.runs === 4;
-                return (
-                  <span
-                    key={idx}
-                    className={`w-5 h-5 flex items-center justify-center rounded-full text-[10px] font-black ${
-                      isW
-                        ? 'bg-rose-600 text-white'
-                        : isSix
-                        ? 'bg-purple-600 text-white'
-                        : isFour
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-800 text-slate-200'
-                    }`}
-                  >
-                    {typeof b === 'string' ? b : (b.text || b.runs || 0)}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Right: Actions (Drawer toggle, Switcher, Full Arena, Dismiss) */}
-        <div className="flex items-center gap-2 shrink-0">
-          {liveMatches.length > 1 && (
-            <div className="flex items-center gap-1 bg-slate-900 border border-slate-700/60 rounded-lg p-0.5 text-[11px]">
-              <button
-                onClick={() => setCurrentIndex((prev) => (prev > 0 ? prev - 1 : liveMatches.length - 1))}
-                className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
-                title="Previous Live Match"
-              >
-                ◀
-              </button>
-              <span className="px-1 font-bold text-amber-300">
-                {currentIndex + 1}/{liveMatches.length}
-              </span>
-              <button
-                onClick={() => setCurrentIndex((prev) => (prev < liveMatches.length - 1 ? prev + 1 : 0))}
-                className="px-1.5 py-0.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
-                title="Next Live Match"
-              >
-                ▶
-              </button>
-            </div>
-          )}
-
-          {adminAds.length > 0 && (
-            <button
-              onClick={() => setShowDrawer(true)}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold transition-all cursor-pointer"
-              title="View Sponsor Advertisements & Match Banner"
-            >
-              <Megaphone size={12} className="text-amber-400 animate-pulse" />
-              <span>Ads ({adminAds.length})</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setIsDismissed(true)}
-            className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            title="Hide live banner for now"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+export { LiveMatchGlobalBanner } from './LiveMatchGlobalBanner';
 
 export const SpectatorScoreboardSection = ({ 
   homepageMode = false
@@ -951,7 +654,7 @@ export const SpectatorScoreboardSection = ({
   const [showMatchResultModal, setShowMatchResultModal] = useState(false);
   const [showCertificateModal, setShowCertificateModal] = useState(false);
   const [certificateAwardType, setCertificateAwardType] = useState<AwardType>('potm');
-  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | null>(null);
+  const [certificateDownloadFormat, setCertificateDownloadFormat] = useState<'png' | 'pdf' | 'squad_pdf' | null>(null);
   const [hasDismissedResultModal, setHasDismissedResultModal] = useState<string | null>(() => {
     try {
       return sessionStorage.getItem('last_dismissed_result_modal_id');
@@ -2242,7 +1945,7 @@ export const SpectatorScoreboardSection = ({
   const liveMatches = useMemo(() => {
     // 1. Gather all genuine live matches created by score manager from allMatches
     const list = allMatches.filter(m => {
-      if (!m || m.status !== 'live' || m.isHidden || m.isBlocked || isMatchDeleted(m.id) || (m as any).isDeleted === true || m.status === 'deleted' || isDemoOrAIMatch(m)) return false;
+      if (!m || m.status !== 'live' || m.isHidden || m.isBlocked || isMatchDeleted(m.id) || (m as any).isDeleted === true || (m as any).status === 'deleted' || isDemoOrAIMatch(m)) return false;
       return true;
     });
 
@@ -2344,7 +2047,7 @@ export const SpectatorScoreboardSection = ({
   const completedMatches = useMemo(() => allMatches.filter(m => {
     if (!m || m.status !== 'completed' || m.isHidden || m.isBlocked) return false;
     if ((m as any).hideResultCard === true) return false;
-    if ((m as any).isDeleted === true || m.status === 'deleted' || isMatchDeleted(m.id)) return false;
+    if ((m as any).isDeleted === true || (m as any).status === 'deleted' || isMatchDeleted(m.id)) return false;
     // Authoritative check: Once remote Firestore matches collection has synced,
     // completed records MUST exist in the remote database (unless it's a tournament match).
     const isTour = !!m.tournamentId || m.id.startsWith('tour_') || (m as any).isTournamentMatch;
@@ -3015,7 +2718,7 @@ export const SpectatorScoreboardSection = ({
 
     // If ball-by-ball wasn't present, derive distinct top performers from squad rosters or team labels
     if (!bestBatter || !bestBowler) {
-      const squadPlayers: any[] = selectedMatch.squadPlayers || [];
+      const squadPlayers: any[] = (selectedMatch as any)?.squadPlayers || [];
       const teamAPlayers = squadPlayers.filter((p: any) => (p.team || p.teamName || '').toLowerCase().includes(tA.toLowerCase()));
       const teamBPlayers = squadPlayers.filter((p: any) => (p.team || p.teamName || '').toLowerCase().includes(tB.toLowerCase()));
 
@@ -4234,9 +3937,9 @@ export const SpectatorScoreboardSection = ({
                             } else if (isTeamABatting2 && m.innings2) {
                               teamAScoreStr = `${m.innings2.runs}/${m.innings2.wickets}`;
                               teamAOversStr = `${formatOvers(m.innings2.ballsBowled)}`;
-                            } else if (m.scoreA) {
-                              teamAScoreStr = m.scoreA;
-                              teamAOversStr = m.oversA || '';
+                            } else if ((m as any).scoreA) {
+                              teamAScoreStr = (m as any).scoreA;
+                              teamAOversStr = (m as any).oversA || '';
                             }
 
                             const isTeamBBatting1 = m.innings1 && m.innings1.battingTeam && m.innings1.battingTeam.toLowerCase().trim() === (m.teamB || '').toLowerCase().trim();
@@ -4251,9 +3954,9 @@ export const SpectatorScoreboardSection = ({
                             } else if (isTeamBBatting2 && m.innings2) {
                               teamBScoreStr = `${m.innings2.runs}/${m.innings2.wickets}`;
                               teamBOversStr = `${formatOvers(m.innings2.ballsBowled)}`;
-                            } else if (m.scoreB) {
-                              teamBScoreStr = m.scoreB;
-                              teamBOversStr = m.oversB || '';
+                            } else if ((m as any).scoreB) {
+                              teamBScoreStr = (m as any).scoreB;
+                              teamBOversStr = (m as any).oversB || '';
                             }
                             
                             // Extract active players dynamically for high-fidelity live feel!
@@ -7705,7 +7408,7 @@ export const SpectatorScoreboardSection = ({
                           const ovNum = parseInt(parts[0]);
                           if (isNaN(ovNum)) return;
                           
-                          if (!comm || comm.overBall === '0.0' || comm.type === 'milestone' || comm.type === 'announcement' || comm.type === 'break' || comm.type === 'info' || comm.id?.startsWith('comm-bat-upd-') || comm.id?.startsWith('comm-bowl-upd-') || comm.id?.startsWith('comm-over-finish-')) return;
+                          if (!comm || comm.overBall === '0.0' || (comm as any).type === 'milestone' || (comm as any).type === 'announcement' || (comm as any).type === 'break' || (comm as any).type === 'info' || comm.id?.startsWith('comm-bat-upd-') || comm.id?.startsWith('comm-bowl-upd-') || comm.id?.startsWith('comm-over-finish-')) return;
                           const hasExplicitDeliveryScore = Boolean((comm as any).ballScore) || typeof (comm as any).runsOffBat === 'number' || typeof (comm as any).runs === 'number' || ['dot', 'runs', 'boundary', 'wicket', 'extra'].includes(comm.type);
                           const desc = (comm.description || '').toLowerCase();
                           if (desc.includes('new batsman') || desc.includes('come on crease') || desc.includes('will bowl the') || desc.includes('bowler into the attack') || (!hasExplicitDeliveryScore && (desc.includes('started') || desc.includes('toss')))) return;
@@ -9901,3 +9604,5 @@ export const SpectatorScoreboardSection = ({
     </section>
   );
 };
+
+export default SpectatorScoreboardSection;

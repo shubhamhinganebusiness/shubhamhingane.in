@@ -759,6 +759,11 @@ export interface CanvasRenderOptions {
     mr: string;
     badge: string;
   };
+  customAssets?: {
+    playerPhotoUrl?: string;
+    teamLogoUrl?: string;
+    signatureImageUrl?: string;
+  };
 }
 
 export async function generateCertificateCanvas(opts: CanvasRenderOptions): Promise<HTMLCanvasElement> {

@@ -183,6 +183,7 @@ export function extractLiveSummary(match: MatchState): MatchLiveSummary | null {
   if (!match || !match.id) return null;
   const currentInn = match.currentInningsNum === 1 ? match.innings1 : match.innings2;
   const balls = currentInn?.ballsBowled || 0;
+  const wickets = currentInn?.wickets || 0;
   const oversFormatted = `${Math.floor(balls / 6)}.${balls % 6}`;
   const crr = balls > 0 ? parseFloat(((currentInn?.runs || 0) / (balls / 6)).toFixed(2)) : 0;
   
@@ -274,7 +275,7 @@ export function extractLiveSummary(match: MatchState): MatchLiveSummary | null {
     }
   }
 
-  const resolvedGround = match.groundName || match.venue || (match as any).ground || undefined;
+  const resolvedGround = match.groundName || (match as any).venue || (match as any).ground || undefined;
 
   return {
     matchId: match.id,

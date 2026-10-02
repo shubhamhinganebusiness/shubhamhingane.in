@@ -20,6 +20,7 @@ import { FeatureSection } from './components/FeatureSection';
 import { NewsLaunchpad } from './components/NewsLaunchpad';
 import { Testimonials as TestimonialsSection } from './components/TestimonialsSection';
 import LogoCloudSection from './components/LogoCloudSection';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Resilient dynamic import with automatic retry on network drops or dev server restarts
 function lazyWithRetry<T extends React.ComponentType<any>>(
@@ -106,8 +107,8 @@ const SuperAdmin = lazyWithRetry(() => import('./components/SuperAdmin').then(m 
 const SchoolERPApp = lazyWithRetry(() => import('./components/school-erp/SchoolERPApp').then(m => ({ default: m.SchoolERPApp })));
 const CricketScoreboard = lazyWithRetry(() => import('./components/cricket/CricketScoreboard').then(m => ({ default: m.CricketScoreboard })));
 const CompletedMatchesPage = lazyWithRetry(() => import('./pages/CompletedMatchesPage').then(m => ({ default: m.CompletedMatchesPage })));
-const SpectatorScoreboardSection = lazyWithRetry(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.SpectatorScoreboardSection })));
-const LiveMatchGlobalBanner = lazyWithRetry(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.LiveMatchGlobalBanner })));
+const SpectatorScoreboardSection = lazyWithRetry(() => import('./components/cricket/SpectatorScoreboardSection').then(m => ({ default: m.default || m.SpectatorScoreboardSection })));
+const LiveMatchGlobalBanner = lazyWithRetry(() => import('./components/cricket/LiveMatchGlobalBanner').then(m => ({ default: m.LiveMatchGlobalBanner || m.default })));
 const CricketAuction = lazyWithRetry(() => import('./components/cricket/CricketAuction').then(m => ({ default: m.CricketAuction })));
 const CricketOverlay = lazyWithRetry(() => import('./components/cricket/CricketOverlay').then(m => ({ default: m.CricketOverlay })));
 const GullyScoreLogin = lazyWithRetry(() => import('./components/cricket/GullyScoreLogin').then(m => ({ default: m.GullyScoreLogin })));
@@ -342,9 +343,11 @@ const HomePage = () => {
       <Hero />
       
       <DeferredSection minHeight="200px">
-        <Suspense fallback={null}>
-          <SpectatorScoreboardSection homepageMode={true} />
-        </Suspense>
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <SpectatorScoreboardSection homepageMode={true} />
+          </Suspense>
+        </ErrorBoundary>
       </DeferredSection>
 
       {isVisible('features') && <FeatureSection />}
@@ -393,9 +396,11 @@ export default function App() {
         <Router>
           <ScrollToTop />
           <div className="min-h-screen flex flex-col w-full max-w-[100vw] overflow-x-clip">
-            <Suspense fallback={null}>
-              <LiveMatchGlobalBanner />
-            </Suspense>
+            <ErrorBoundary fallback={null}>
+              <Suspense fallback={null}>
+                <LiveMatchGlobalBanner />
+              </Suspense>
+            </ErrorBoundary>
             <ConditionalNavbar />
             <AppContent />
             <ConditionalFooter />
